@@ -51,16 +51,27 @@ npm run config:link
 npm run dev
 ```
 
-`config:link` offers to write a second config file named after the app handle.
-Decline it, or fold anything it adds back into `shopify.app.toml` and delete it:
-two configs means the settings you edited may not be the ones Shopify has.
+When `config:link` asks for a configuration file name, answer
+**`shopify.app.toml`**. Accepting the default creates a second file named after
+the app handle, and that file then takes precedence, silently dropping the
+compliance webhooks, token exchange and pinned API version from the config
+Shopify actually receives. Keep exactly one config file.
 
-To run a process outside `shopify app dev` (the worker, a script), the Shopify
-values have to be in `.env` instead. Pull them once:
+Avoid `shopify app dev --reset` unless you mean it: it re-runs app selection and
+will happily create a second Partner app, leaving you with two apps and two
+config files that disagree about which one the store has installed.
+
+To run a process outside `shopify app dev` (the worker, the Compose stack, a
+script), the Shopify values have to be in `.env` instead. Pull them after
+linking, and again any time you link to a different app:
 
 ```bash
 npm run env -- pull
 ```
+
+Stale values here are worth watching for: a `SHOPIFY_API_SECRET` belonging to a
+deleted or different app makes every webhook fail HMAC verification with a 401,
+which looks like a code fault and is not.
 
 The worker is a second process and does not start with `npm run dev`:
 

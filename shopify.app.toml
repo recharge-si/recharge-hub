@@ -1,23 +1,26 @@
 # Shopify app configuration.
 #
-# This is the single active config. `shopify app config link` writes a second
-# file named after the app handle if you let it; keep one file so there is no
-# question which settings are live.
+# This project is currently unlinked. Run `npm run config:link` to attach it to a
+# Partner app.
+#
+# When the CLI asks for a configuration file name, answer `shopify.app.toml`.
+# Accepting the default creates a second file named after the app handle, and
+# that file then takes precedence over this one, silently dropping every setting
+# below: the compliance webhooks, token exchange, and the pinned API version.
+# Keep exactly one config file.
+#
+# Creating a new app seeds it from this file, so the scopes and webhooks here are
+# what the new app is registered with.
 #
 # `application_url` and `[auth] redirect_urls` are rewritten by the CLI on every
-# `npm run dev` (see `automatically_update_urls_on_dev`), so the values below are
-# placeholders. Everything else is a deliberate choice from CLAUDE.md.
+# `npm run dev` (see `automatically_update_urls_on_dev`), so they are placeholders.
 
-client_id = "b876b198fc12be312a91c6269b3694c8"
+client_id = ""
 
-# This is the display name in the admin, and it is pushed on deploy. It matches
-# what is currently registered in the Partner dashboard; changing it renames the
-# app for the merchant (CLAUDE.md section 2.6 also requires it not to truncate
-# when pinned in the admin nav).
-name = "fulfilment-orchestrator"
+name = "Fulfilment orchestrator"
 handle = "fulfilment-orchestrator"
 
-application_url = "https://shopify.dev/apps/default-app-home"
+application_url = "https://example.com"
 embedded = true
 
 [access_scopes]
@@ -35,7 +38,9 @@ scopes = "read_products,write_products,read_inventory,write_inventory,read_locat
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = ["https://shopify.dev/apps/default-app-home/api/auth"]
+# Unused by token exchange, but the CLI requires at least one. Matches
+# `authPathPrefix` in src/adapters/shopify/shopify.server.ts.
+redirect_urls = ["https://example.com/auth/callback"]
 
 [webhooks]
 # Keep in step with API_VERSION in src/adapters/shopify/shopify.server.ts.
