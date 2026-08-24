@@ -9,6 +9,7 @@
     "postinstall": "prisma generate",
     "dev": "shopify app dev",
     "dev:worker": "tsx watch src/jobs/worker.ts",
+    "dev:web": "react-router dev",
     "build": "react-router build && npm run build:worker",
     "build:worker": "esbuild src/jobs/worker.ts --bundle --platform=node --format=esm --target=node22 --packages=external --outfile=build/worker/worker.js",
     "start": "react-router-serve ./build/server/index.js",

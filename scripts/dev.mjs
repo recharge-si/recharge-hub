@@ -5,82 +5,55 @@
  * to be up or nothing works: every sync button queues a job, and with no worker
  * the jobs pile up in Postgres looking like a broken button.
  *
- * Two things this has to get right, both learned the hard way:
+ * Both are launched through `npm exec`, which is how the Shopify template ran
+ * the web server before this script existed and is the only invocation proven
+ * to work under the CLI. Two other approaches were tried and failed:
  *
- *  1. The Shopify CLI runs this with `node scripts/dev.mjs`, not through npm, so
- *     `node_modules/.bin` is **not** on PATH. Spawning `react-router` by name
- *     fails with ENOENT, the script tears everything down, and the CLI proxy
- *     reports ECONNREFUSED against a server that never started. Each tool is
- *     therefore launched by its JS entry point with the current Node binary,
- *     which also sidesteps Windows `.cmd` shims.
+ *   - spawning `react-router` by name: the CLI runs this file with
+ *     `node scripts/dev.mjs` rather than through npm, so node_modules/.bin is
+ *     not on PATH and the spawn fails with ENOENT.
+ *   - spawning the package's JS entry point with the current Node binary: works
+ *     when run by hand, but under the CLI the dev server started silently and
+ *     never bound its port, so the proxy reported ECONNREFUSED.
  *
- *  2. A dead worker must not take the web server with it. Losing background
- *     jobs is a degraded app; losing the server is an app the merchant cannot
- *     open at all.
+ * If the web server ever goes quiet again, the startup lines below say exactly
+ * what was launched, and a child that dies is reported rather than swallowed.
  *
  * No dependency for this on purpose: the Docker image runs the two processes as
  * separate containers and has no use for a process runner.
  */
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const require = createRequire(import.meta.url);
-const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+const projectRoot = path.resolve(
+  path.dirname(fileURLToPath(import.meta.url)),
+  "..",
+);
 
-/** Resolves a package's bin script to an absolute path we can run with node. */
-function resolveBin(packageName, binName) {
-  const manifestPath = require.resolve(`${packageName}/package.json`, {
-    paths: [projectRoot],
-  });
-  const manifest = require(manifestPath);
-  const bin =
-    typeof manifest.bin === "string" ? manifest.bin : manifest.bin?.[binName];
+const targets = [
+  {
+    name: "web",
+    args: ["exec", "--", "react-router", "dev"],
+    // The CLI proxies to this one. Without it there is no app at all.
+    required: true,
+  },
+  {
+    name: "worker",
+    args: ["exec", "--", "tsx", "watch", "src/jobs/worker.ts"],
+    required: false,
+  },
+];
 
-  if (!bin) {
-    throw new Error(`${packageName} does not declare a "${binName}" bin`);
-  }
-
-  const resolved = path.resolve(path.dirname(manifestPath), bin);
-  if (!existsSync(resolved)) {
-    throw new Error(`${packageName} bin not found at ${resolved}`);
-  }
-  return resolved;
-}
-
-let targets;
-try {
-  targets = [
-    {
-      name: "web",
-      script: resolveBin("@react-router/dev", "react-router"),
-      args: ["dev"],
-      required: true,
-    },
-    {
-      name: "worker",
-      script: resolveBin("tsx", "tsx"),
-      args: ["watch", "src/jobs/worker.ts"],
-      required: false,
-    },
-  ];
-} catch (error) {
-  console.error(`[dev] ${error.message}`);
-  console.error("[dev] run `npm install` and try again");
-  process.exit(1);
-}
-
-const children = new Map();
+const children = [];
 let shuttingDown = false;
 
 function shutdown(reason, code = 0) {
   if (shuttingDown) return;
   shuttingDown = true;
-  console.log(`\n[dev] stopping: ${reason}`);
+  console.log(`[dev] stopping: ${reason}`);
 
-  for (const child of children.values()) {
+  for (const child of children) {
     if (child.exitCode === null) child.kill("SIGTERM");
   }
 
@@ -88,10 +61,14 @@ function shutdown(reason, code = 0) {
 }
 
 for (const target of targets) {
-  const child = spawn(process.execPath, [target.script, ...target.args], {
+  console.log(`[dev] starting ${target.name}: npm ${target.args.join(" ")}`);
+
+  const child = spawn("npm", target.args, {
     stdio: "inherit",
     cwd: projectRoot,
     env: process.env,
+    // npm is a .cmd shim on Windows, which cannot be spawned without a shell.
+    shell: process.platform === "win32",
   });
 
   child.on("error", (error) => {
@@ -115,7 +92,7 @@ for (const target of targets) {
     );
   });
 
-  children.set(target.name, child);
+  children.push(child);
 }
 
 for (const signal of ["SIGINT", "SIGTERM"]) {

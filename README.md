@@ -77,11 +77,22 @@ which looks like a code fault and is not.
 (`scripts/dev.mjs`). Both have to be running: every sync button queues a job,
 and with no worker the jobs pile up in Postgres looking like a broken button.
 
-To run the worker on its own:
+The script prints a `[dev] starting web: ...` line for each process. If you ever
+see the worker start but not the web server, and the CLI reports
+`ECONNREFUSED` against `localhost:<port>`, the runner is the problem, not the
+app. Fall back to two terminals:
+
+```toml
+# shopify.web.toml
+dev = "npm exec prisma migrate deploy && npm exec react-router dev"
+```
 
 ```bash
-npm run dev:worker
+npm run dev          # terminal 1
+npm run dev:worker   # terminal 2
 ```
+
+To run either on its own: `npm run dev:web`, `npm run dev:worker`.
 
 ## When the Prisma client needs regenerating
 
