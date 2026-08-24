@@ -25,10 +25,23 @@ export type FailureKind = RetryableFailure | BusinessException;
 export const MK_SUCCESS = "0";
 
 /**
- * Deliberately empty. Populate it from CLAUDE.md section 14, with codes observed
- * against a real test company, never from memory.
+ * Populated only from codes observed against a real company, never from memory.
+ *
+ * "2" is what MetaKocka returns for a request it will not accept as written.
+ * Observed for both "Partner data are missing" and "Cannot find document type
+ * sales_order with id = null", so it is a general validation failure: retrying
+ * an identical payload will fail identically, and a human has to change
+ * something.
  */
-const KNOWN_CODES: Record<string, FailureKind> = {};
+const KNOWN_CODES: Record<string, FailureKind> = {
+  // "Partner data are missing", "Cannot find document type sales_order with
+  // id = null". A request MetaKocka will not accept as written: retrying the
+  // same payload fails identically, so a human has to change something.
+  "2": "exception",
+  // "Profit center 'X' doesn't exist." A named entity that must pre-exist in
+  // the MetaKocka UI (CLAUDE.md section 3) and does not.
+  "6": "exception",
+};
 
 export interface MetakockaErrorOptions {
   endpoint: string;

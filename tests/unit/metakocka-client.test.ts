@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { z } from "zod";
 
 import { MetakockaClient } from "~/adapters/metakocka/client";
+import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
 import { MetakockaError } from "~/adapters/metakocka/errors";
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
 
@@ -36,7 +37,7 @@ describe("MetaKocka client", () => {
   it("posts the credentials in the body of every call", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ opr_code: "0" }));
     await clientWith(fetchImpl as unknown as typeof fetch).call(
-      "warehouse_list",
+      ENDPOINTS.warehouseList,
       {},
       passthrough,
     );
@@ -57,6 +58,43 @@ describe("MetaKocka client", () => {
     });
   });
 
+  it("uses the json/ path for listing endpoints and the bare path for documents", async () => {
+    // These two families are mutually exclusive: the wrong one returns an HTML
+    // 404. Probed against a live company, see endpoints.ts.
+    const fetchImpl = vi.fn(async () => jsonResponse({ opr_code: "0" }));
+    const client = clientWith(fetchImpl as unknown as typeof fetch);
+
+    await client.call(ENDPOINTS.warehouseList, {}, passthrough);
+    await client.call(ENDPOINTS.putDocument, {}, passthrough);
+
+    const urls = fetchImpl.mock.calls.map((call) =>
+      String((call as unknown as unknown[])[0]),
+    );
+    expect(urls[0]).toBe(
+      "https://main.metakocka.si/rest/eshop/v1/json/warehouse_list",
+    );
+    expect(urls[1]).toBe("https://main.metakocka.si/rest/eshop/v1/put_document");
+  });
+
+  it("classifies the observed opr_code 2 as a validation exception", async () => {
+    // Real response: "Partner data are missing". Retrying the same payload
+    // fails identically, so it needs a human, not the queue.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({ opr_code: "2", opr_desc: "Partner data are missing" }),
+    );
+
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.putDocument,
+        {},
+        passthrough,
+      ),
+    );
+
+    expect(error.kind).toBe("exception");
+    expect(error.oprDesc).toBe("Partner data are missing");
+  });
+
   it("treats a non-zero opr_code as a business exception, not a retry", async () => {
     // No list of codes is documented, so an unknown failure must reach a human
     // rather than loop in the queue forever (CLAUDE.md section 11).
@@ -68,7 +106,7 @@ describe("MetaKocka client", () => {
     );
 
     const error = await clientWith(fetchImpl as unknown as typeof fetch)
-      .call("put_document", {}, passthrough)
+      .call(ENDPOINTS.putDocument, {}, passthrough)
       .catch((e: unknown) => e);
 
     expect(error).toBeInstanceOf(MetakockaError);
@@ -83,7 +121,7 @@ describe("MetaKocka client", () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
-        .call("warehouse_list", {}, passthrough),
+        .call(ENDPOINTS.warehouseList, {}, passthrough),
     );
 
     expect(error.kind).toBe("retryable");
@@ -94,7 +132,7 @@ describe("MetaKocka client", () => {
     const fetchImpl = vi.fn(async () => new Response("slow down", { status: 429 }));
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
-        .call("warehouse_list", {}, passthrough),
+        .call(ENDPOINTS.warehouseList, {}, passthrough),
     );
 
     expect(error.kind).toBe("retryable");
@@ -104,7 +142,7 @@ describe("MetaKocka client", () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 403 }));
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
-        .call("warehouse_list", {}, passthrough),
+        .call(ENDPOINTS.warehouseList, {}, passthrough),
     );
 
     expect(error.kind).toBe("exception");
@@ -116,7 +154,7 @@ describe("MetaKocka client", () => {
     });
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
-        .call("warehouse_list", {}, passthrough),
+        .call(ENDPOINTS.warehouseList, {}, passthrough),
     );
 
     expect(error.kind).toBe("retryable");
@@ -128,7 +166,7 @@ describe("MetaKocka client", () => {
     );
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
-        .call("warehouse_list", {}, passthrough),
+        .call(ENDPOINTS.warehouseList, {}, passthrough),
     );
 
     expect(error.kind).toBe("exception");
@@ -143,7 +181,7 @@ describe("MetaKocka client", () => {
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
         .call(
-        "warehouse_list",
+        ENDPOINTS.warehouseList,
         {},
         z.object({ warehouse_list: z.array(z.object({})) }),
       ),
@@ -157,7 +195,7 @@ describe("MetaKocka client", () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
     const error = await expectFailure(
       clientWith(fetchImpl as unknown as typeof fetch)
-        .call("warehouse_list", {}, passthrough),
+        .call(ENDPOINTS.warehouseList, {}, passthrough),
     );
 
     expect(JSON.stringify({ m: error.message, d: error.oprDesc })).not.toContain(

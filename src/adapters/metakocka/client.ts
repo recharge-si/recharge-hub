@@ -1,5 +1,6 @@
 import { z } from "zod";
 
+import type { EndpointPath } from "~/adapters/metakocka/endpoints";
 import { getLogger } from "~/adapters/observability/logger.server";
 import {
   MK_SUCCESS,
@@ -12,17 +13,15 @@ import {
 /**
  * The MetaKocka REST client.
  *
- * Verified against
- * https://github.com/metakocka/metakocka_api_base/blob/master/docs/warehouse_list.md :
- * calls are POSTed to `{BASE_URL}{endpoint}` with a JSON body that always carries
+ * Calls are POSTed to `{BASE_URL}{path}` with a JSON body that always carries
  * `secret_key` and `company_id`, and every response carries `opr_code`, where
  * "0" means success (CLAUDE.md section 3).
  *
- * Note the `json/` segment in the path. CLAUDE.md section 3 gives the base as
- * `https://main.metakocka.si/rest/eshop/v1/`; the documented endpoint URL is
- * `https://main.metakocka.si/rest/eshop/v1/json/warehouse_list`.
+ * `path` comes from ENDPOINTS rather than being the bare endpoint name: some
+ * endpoints live under a `json/` segment and some do not, and asking for the
+ * wrong one returns an HTML 404. See endpoints.ts.
  */
-export const METAKOCKA_BASE_URL = "https://main.metakocka.si/rest/eshop/v1/json/";
+export const METAKOCKA_BASE_URL = "https://main.metakocka.si/rest/eshop/v1/";
 
 /**
  * MetaKocka is slow. The documented `put_document` example with
@@ -75,7 +74,7 @@ export class MetakockaClient {
    * (CLAUDE.md section 10).
    */
   async call<T>(
-    endpoint: string,
+    path: EndpointPath,
     body: Record<string, unknown>,
     schema: z.ZodType<T>,
   ): Promise<T> {
@@ -90,7 +89,7 @@ export class MetakockaClient {
 
     let response: Response;
     try {
-      response = await this.fetchImpl(`${this.baseUrl}${endpoint}`, {
+      response = await this.fetchImpl(`${this.baseUrl}${path}`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -100,8 +99,8 @@ export class MetakockaClient {
         signal: AbortSignal.timeout(this.timeoutMs),
       });
     } catch (cause) {
-      throw new MetakockaError(`MetaKocka ${endpoint} could not be reached`, {
-        endpoint,
+      throw new MetakockaError(`MetaKocka ${path} could not be reached`, {
+        endpoint: path,
         kind: classifyTransportError(),
         cause,
       });
@@ -109,9 +108,9 @@ export class MetakockaClient {
 
     if (!response.ok) {
       throw new MetakockaError(
-        `MetaKocka ${endpoint} returned HTTP ${response.status}`,
+        `MetaKocka ${path} returned HTTP ${response.status}`,
         {
-          endpoint,
+          endpoint: path,
           kind: classifyHttpStatus(response.status),
           httpStatus: response.status,
         },
@@ -124,16 +123,16 @@ export class MetakockaClient {
     } catch (cause) {
       // A 200 that is not JSON is not something a retry will fix.
       throw new MetakockaError(
-        `MetaKocka ${endpoint} returned a response that is not JSON`,
-        { endpoint, kind: "exception", httpStatus: response.status, cause },
+        `MetaKocka ${path} returned a response that is not JSON`,
+        { endpoint: path, kind: "exception", httpStatus: response.status, cause },
       );
     }
 
     const envelope = mkEnvelopeSchema.safeParse(raw);
     if (!envelope.success) {
       throw new MetakockaError(
-        `MetaKocka ${endpoint} returned an unrecognised response envelope`,
-        { endpoint, kind: "exception", cause: envelope.error },
+        `MetaKocka ${path} returned an unrecognised response envelope`,
+        { endpoint: path, kind: "exception", cause: envelope.error },
       );
     }
 
@@ -141,9 +140,9 @@ export class MetakockaClient {
 
     if (oprCode !== MK_SUCCESS) {
       throw new MetakockaError(
-        `MetaKocka ${endpoint} failed with opr_code ${oprCode}`,
+        `MetaKocka ${path} failed with opr_code ${oprCode}`,
         {
-          endpoint,
+          endpoint: path,
           kind: classifyOprCode(oprCode),
           oprCode,
           oprDesc,
@@ -156,13 +155,13 @@ export class MetakockaClient {
       // Section 3: never let a raw MetaKocka value reach domain code. A shape we
       // do not recognise is a bug or an API change, and a human needs to see it.
       throw new MetakockaError(
-        `MetaKocka ${endpoint} returned a payload that did not match its schema`,
-        { endpoint, kind: "exception", oprCode, cause: parsed.error },
+        `MetaKocka ${path} returned a payload that did not match its schema`,
+        { endpoint: path, kind: "exception", oprCode, cause: parsed.error },
       );
     }
 
     log.info(
-      { endpoint, durationMs: Math.round(performance.now() - startedAt) },
+      { endpoint: path, durationMs: Math.round(performance.now() - startedAt) },
       "MetaKocka call succeeded",
     );
 

@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { MetakockaClient } from "~/adapters/metakocka/client";
+import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
 import { mkBoolean } from "~/adapters/metakocka/values";
 
 /**
@@ -60,7 +61,7 @@ export async function listWarehouses(
   client: MetakockaClient,
 ): Promise<Warehouse[]> {
   const response = await client.call(
-    "warehouse_list",
+    ENDPOINTS.warehouseList,
     {},
     warehouseListResponseSchema,
   );
