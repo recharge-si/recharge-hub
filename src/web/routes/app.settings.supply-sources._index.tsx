@@ -74,7 +74,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         isActive: warehouse.isActive,
         sourceId: source?.id ?? null,
         locationId: source?.shopifyLocationId ?? "",
-        writer: String(source?.inventoryWriter ?? "external"),
+        direction: String(source?.stockDirection ?? "none"),
         profitCenter: source?.metakockaProfitCenter ?? null,
       };
     }),
@@ -148,7 +148,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   for (const mark of marks) {
     const locationId = String(formData.get(`location:${mark}`) ?? "").trim();
-    const writer = String(formData.get(`writer:${mark}`) ?? "external");
+    const direction = String(formData.get(`direction:${mark}`) ?? "none");
     const sourceId = String(formData.get(`sourceId:${mark}`) ?? "").trim();
 
     // Nothing chosen and nothing stored: leave it alone rather than creating an
@@ -157,7 +157,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
     // §7: one writer per location. Two warehouses writing the same Shopify
     // location would fight over the same numbers.
-    if (locationId && writer === "metakocka") {
+    if (locationId && direction === "mk_to_shopify") {
       const already = owners.get(locationId);
       if (already) {
         return {
@@ -171,15 +171,24 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await upsertSupplySource(principal, sourceId || null, {
       code: codeForMark(mark),
       name: String(formData.get(`name:${mark}`) ?? mark),
-      // §7 again: only a warehouse we own may have its stock written by us.
-      // Deriving this from the writer choice means the merchant cannot trip
-      // that rule and be shown a validation error for it.
-      kind: writer === "metakocka" ? "own" : "partner",
+      // Everything in this list is a warehouse of the merchant's own company.
+      // A partner source is added by hand on the advanced screen.
+      kind: "own",
       shopifyLocationId: locationId || null,
+      stockDirection:
+        direction === "mk_to_shopify"
+          ? "mk_to_shopify"
+          : direction === "shopify_to_mk"
+            ? "shopify_to_mk"
+            : "none",
+      // §7 guards our writes into Shopify, so it follows from the direction:
+      // only "copy MetaKocka into Shopify" gives this app the pen. Deriving it
+      // means the merchant cannot trip that rule and be shown a validation
+      // error for a choice they were never offered.
       inventoryWriter:
-        writer === "metakocka"
+        direction === "mk_to_shopify"
           ? "metakocka"
-          : writer === "manual"
+          : direction === "shopify_to_mk"
             ? "manual"
             : "external",
       metakockaWarehouse: mark,
@@ -213,22 +222,37 @@ function formatDateTime(iso: string): string {
   });
 }
 
+/** Plain-language explanation of each direction, shown under the choice. */
+const DIRECTION_HELP: Record<string, string> = {
+  mk_to_shopify:
+    "Stock is counted in MetaKocka. Shopify is updated to match it.",
+  shopify_to_mk:
+    "Stock is counted in Shopify. MetaKocka is updated to match it.",
+  none: "Neither side is updated from the other.",
+};
+
+const DIRECTION_BADGE: Record<string, string> = {
+  mk_to_shopify: "MetaKocka to Shopify",
+  shopify_to_mk: "Shopify to MetaKocka",
+  none: "No stock sync",
+};
+
 interface BlockState {
   locationId: string;
-  writer: string;
+  direction: string;
 }
 
 type LoadedWarehouse = {
   mark: string;
   locationId: string;
-  writer: string;
+  direction: string;
 };
 
 function toState(warehouses: LoadedWarehouse[]): Record<string, BlockState> {
   return Object.fromEntries(
     warehouses.map((w) => [
       w.mark,
-      { locationId: w.locationId, writer: w.writer },
+      { locationId: w.locationId, direction: w.direction },
     ]),
   );
 }
@@ -258,7 +282,7 @@ export default function Warehouses() {
       ...current,
       [mark]: {
         locationId: current[mark]?.locationId ?? "",
-        writer: current[mark]?.writer ?? "external",
+        direction: current[mark]?.direction ?? "none",
         ...patch,
       },
     }));
@@ -316,7 +340,7 @@ export default function Warehouses() {
               {warehouses.map((warehouse) => {
                 const current = state[warehouse.mark] ?? {
                   locationId: "",
-                  writer: "external",
+                  direction: "none",
                 };
                 const connected = current.locationId !== "";
 
@@ -344,8 +368,17 @@ export default function Warehouses() {
 
                     <s-stack direction="block" gap="base">
                       <s-stack direction="inline" gap="base" alignItems="center">
-                        <s-badge tone={connected ? "success" : "neutral"}>
-                          {connected ? "Connected" : "Not connected"}
+                        <s-badge
+                          tone={
+                            connected && current.direction !== "none"
+                              ? "success"
+                              : "neutral"
+                          }
+                        >
+                          {!connected
+                            ? "Not connected"
+                            : (DIRECTION_BADGE[current.direction] ??
+                              DIRECTION_BADGE.none)}
                         </s-badge>
                         {warehouse.isMain ? (
                           <s-badge tone="info">Main warehouse</s-badge>
@@ -380,22 +413,25 @@ export default function Warehouses() {
                           </s-select>
 
                           <s-select
-                            name={`writer:${warehouse.mark}`}
-                            label="Who updates stock in Shopify"
-                            details="Only one app or person can own a location's stock. Choose this app only if nothing else already writes it."
-                            value={current.writer}
+                            name={`direction:${warehouse.mark}`}
+                            label="Where are the stock numbers counted?"
+                            details="Whichever side is counted gets copied to the other. Stock is never copied both ways."
+                            value={current.direction}
                             onChange={(e) =>
                               set(warehouse.mark, {
-                                writer: e.currentTarget.value,
+                                direction: e.currentTarget.value,
                               })
                             }
                           >
-                            <s-option value="metakocka">
-                              This app, from MetaKocka
+                            <s-option value="none">Do not sync stock</s-option>
+                            <s-option value="mk_to_shopify">
+                              MetaKocka to Shopify
                             </s-option>
-                            <s-option value="external">Another app</s-option>
-                            <s-option value="manual">A person, by hand</s-option>
+                            <s-option value="shopify_to_mk">
+                              Shopify to MetaKocka
+                            </s-option>
                           </s-select>
+                          <s-text>{DIRECTION_HELP[current.direction] ?? DIRECTION_HELP.none}</s-text>
                         </s-stack>
                       </s-box>
 

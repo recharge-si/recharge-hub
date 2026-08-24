@@ -10,6 +10,10 @@ import {
 } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { listWarehouseStock } from "~/adapters/metakocka/stock";
+import {
+  buildCompleteStockList,
+  syncStockToMetakocka,
+} from "~/adapters/metakocka/sync-stock";
 import { getLogger } from "~/adapters/observability/logger.server";
 import {
   readOnHandAtLocation,
@@ -57,13 +61,13 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
   const writable = sources.filter(
     (source) =>
       source.enabled &&
-      source.inventoryWriter === "metakocka" &&
+      source.stockDirection !== "none" &&
       source.metakockaWarehouse !== null &&
       source.shopifyLocationId !== null,
   );
 
   if (writable.length === 0) {
-    log.info({ shop: shopDomain }, "Inventory sync: no writable supply sources");
+    log.info({ shop: shopDomain }, "Inventory sync: nothing configured to sync");
     return;
   }
 
@@ -93,6 +97,19 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
 
     const stock = await listWarehouseStock(client, warehouseMkId);
     const amountByCode = new Map(stock.map((row) => [row.code, row]));
+
+    if (source.stockDirection === "shopify_to_mk") {
+      await pushShopifyStockIntoMetakocka({
+        shopDomain,
+        principal,
+        source,
+        warehouseMkId,
+        metakockaStock: stock,
+        credential,
+        admin,
+      });
+      continue;
+    }
 
     const skus = await prisma.sku.findMany({
       where: {
@@ -204,4 +221,116 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
       "Inventory synced",
     );
   }
+}
+
+interface ReverseSyncInput {
+  shopDomain: string;
+  principal: ReturnType<typeof serviceToken>;
+  source: {
+    id: string;
+    code: string;
+    shopifyLocationId: string | null;
+    metakockaWarehouse: string | null;
+  };
+  warehouseMkId: string;
+  metakockaStock: Array<{ code: string; amount: number }>;
+  credential: { companyId: string; secretKey: string; apiUserEmail: string | null };
+  admin: Parameters<typeof readOnHandAtLocation>[0];
+}
+
+/**
+ * Shopify is the truth for this warehouse: copy its on-hand into MetaKocka.
+ *
+ * `sync_stock` removes anything omitted from the list, so the payload always
+ * describes the whole warehouse. Products this app does not manage are sent
+ * back at the value MetaKocka already holds, which makes the write incapable of
+ * dropping stock it was never asked to touch.
+ */
+async function pushShopifyStockIntoMetakocka(
+  input: ReverseSyncInput,
+): Promise<void> {
+  const log = getLogger();
+
+  if (!input.credential.apiUserEmail) {
+    log.error(
+      { shop: input.shopDomain, source: input.source.code },
+      "Cannot write stock to MetaKocka: no API user email configured",
+    );
+    await appendEvent(input.principal, {
+      entityType: "supply_source",
+      entityId: input.source.id,
+      event: "inventory.sync_skipped",
+      detail: { reason: "missing_api_user_email", source: input.source.code },
+    });
+    return;
+  }
+
+  const skus = await prisma.sku.findMany({
+    where: {
+      shop: { domain: input.shopDomain },
+      status: "matched",
+      shopifyInventoryItemId: { not: null },
+    },
+  });
+
+  const onHand = await readOnHandAtLocation(
+    input.admin,
+    input.source.shopifyLocationId!,
+  );
+
+  const managed = new Map<string, number>();
+  for (const sku of skus) {
+    const quantity = onHand.get(sku.shopifyInventoryItemId!);
+    if (quantity === undefined) continue;
+    managed.set(sku.metakockaCode ?? sku.sku, quantity);
+  }
+
+  const lines = buildCompleteStockList({
+    managed,
+    current: new Map(input.metakockaStock.map((row) => [row.code, row.amount])),
+    warehouseId: input.warehouseMkId,
+  });
+
+  if (lines.length === 0) {
+    // The adapter refuses an empty list anyway; stopping here keeps the reason
+    // in the audit trail rather than as a thrown error.
+    await appendEvent(input.principal, {
+      entityType: "supply_source",
+      entityId: input.source.id,
+      event: "inventory.sync_skipped",
+      detail: { reason: "nothing_to_sync", source: input.source.code },
+    });
+    return;
+  }
+
+  const result = await syncStockToMetakocka(
+    {
+      companyId: input.credential.companyId,
+      secretKey: input.credential.secretKey,
+      apiUserEmail: input.credential.apiUserEmail,
+    },
+    lines,
+  );
+
+  await appendEvent(input.principal, {
+    entityType: "supply_source",
+    entityId: input.source.id,
+    event: "inventory.written_to_metakocka",
+    detail: {
+      source: input.source.code,
+      lines: result.sent,
+      fromShopify: managed.size,
+      preserved: result.sent - managed.size,
+    },
+  });
+
+  log.info(
+    {
+      shop: input.shopDomain,
+      source: input.source.code,
+      lines: result.sent,
+      fromShopify: managed.size,
+    },
+    "Stock written to MetaKocka from Shopify",
+  );
 }

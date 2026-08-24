@@ -122,6 +122,9 @@ model MetakockaCredential {
   /// Used to verify the HMAC-SHA1 signature on the stock webhook. Optional
   /// because a merchant can connect before registering the webhook.
   webhookClientSecretEncrypted String?   @map("webhook_client_secret_encrypted")
+  /// Required by `sync_stock`, which is how stock is written back into
+  /// MetaKocka. Not a secret, but it is part of the connection.
+  apiUserEmail                 String?   @map("api_user_email")
   /// Last time a call to MetaKocka actually succeeded with these credentials.
   lastVerifiedAt               DateTime? @map("last_verified_at")
   createdAt                    DateTime  @default(now()) @map("created_at")
@@ -130,6 +133,20 @@ model MetakockaCredential {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("metakocka_credential")
+}
+
+/// Which system holds the correct stock for a warehouse, and therefore which
+/// way stock is copied. CLAUDE.md §7 only modelled MetaKocka to Shopify; some
+/// warehouses are counted in Shopify instead, and those write back to the ERP.
+enum StockDirection {
+  /// MetaKocka is the truth. Its `amount` becomes Shopify on hand.
+  mk_to_shopify
+  /// Shopify is the truth. Its on hand is written into the MetaKocka warehouse.
+  shopify_to_mk
+  /// Neither. Something or someone else keeps both sides right.
+  none
+
+  @@map("stock_direction")
 }
 
 enum SupplySourceKind {
@@ -163,6 +180,7 @@ model SupplySource {
 
   shopifyLocationId String?         @map("shopify_location_id")
   inventoryWriter   InventoryWriter @default(external) @map("inventory_writer")
+  stockDirection    StockDirection  @default(none) @map("stock_direction")
 
   /// The `mark` of a MetaKocka warehouse. MetaKocka accepts an unknown value
   /// silently (§3), so this is validated against warehouse_list on save.

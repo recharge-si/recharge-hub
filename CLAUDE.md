@@ -451,6 +451,36 @@ pg-boss creates its own schema. Leave it alone.
 
 ## 7. Shopify inventory — one writer per location
 
+**[verified] Stock moves in one of two directions per warehouse, chosen by the
+merchant.** This section originally modelled only MetaKocka → Shopify. Some
+warehouses are counted in Shopify instead, and those write back to the ERP:
+
+| Direction | Meaning | Mechanism |
+|---|---|---|
+| `mk_to_shopify` | MetaKocka is counted | `warehouse_stock.amount` → Shopify `on_hand` |
+| `shopify_to_mk` | Shopify is counted | Shopify `on_hand` → MetaKocka `sync_stock` |
+| `none` | neither is copied | nothing is written |
+
+`supply_source.stock_direction` holds the choice, and `inventory_writer` follows
+from it: only `mk_to_shopify` gives this app the pen for a Shopify location.
+Stock is never copied both ways for one warehouse.
+
+**Writing back is destructive by design. Two verified hazards:**
+
+- **Omission removes.** `sync_stock` deletes anything absent from `stock_list`,
+  so the payload must describe the *whole* warehouse. Products this app does not
+  manage are sent back at the value MetaKocka already holds
+  (`buildCompleteStockList`), which makes removal-by-omission impossible.
+- **A no-op reports success.** Posting without `stock_list` returns
+  `opr_code 0, "Sync successful"` having changed nothing. Never trust the code
+  alone; check that the returned `stock_list` matches what was sent.
+
+`sync_stock` also sits on its own base path — `/rest/eshop/sync_stock`, no `v1`,
+no `json` — and needs an `api_user_email` that the secret key does not carry.
+Writing stock creates an inventory document in MetaKocka: it is an accounting
+action, not a cache update.
+
+
 The merchant also runs a separate app that writes **partner** stock into Shopify. Two
 apps writing one location is a write loop. The rule is ownership, not silence.
 

@@ -47,6 +47,7 @@ const formSchema = z.object({
     .min(1, "Enter the company ID shown in MetaKocka under company settings."),
   secretKey: z.string().trim(),
   webhookClientSecret: z.string().trim(),
+  apiUserEmail: z.string().trim(),
 });
 
 type FieldErrors = Partial<Record<"companyId" | "secretKey", string>>;
@@ -138,6 +139,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       companyId: formData.get("companyId") ?? "",
       secretKey: formData.get("secretKey") ?? "",
       webhookClientSecret: formData.get("webhookClientSecret") ?? "",
+      apiUserEmail: formData.get("apiUserEmail") ?? "",
     });
 
     if (!parsed.success) {
@@ -169,6 +171,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ...(parsed.data.webhookClientSecret
         ? { webhookClientSecret: parsed.data.webhookClientSecret }
         : {}),
+      apiUserEmail: parsed.data.apiUserEmail,
     });
 
     await appendEvent(principal, {
@@ -212,6 +215,7 @@ export default function MetakockaSettings() {
   const [companyId, setCompanyId] = useState(summary?.companyId ?? "");
   const [secretKey, setSecretKey] = useState("");
   const [webhookSecret, setWebhookSecret] = useState("");
+  const [apiUserEmail, setApiUserEmail] = useState(summary?.apiUserEmail ?? "");
   const formRef = useRef<HTMLFormElement>(null);
 
   // The contextual save bar fires `reset` on Discard. Put the fields back to
@@ -224,11 +228,12 @@ export default function MetakockaSettings() {
       setCompanyId(summary?.companyId ?? "");
       setSecretKey("");
       setWebhookSecret("");
+      setApiUserEmail(summary?.apiUserEmail ?? "");
     };
 
     form.addEventListener("reset", handleReset);
     return () => form.removeEventListener("reset", handleReset);
-  }, [summary?.companyId]);
+  }, [summary?.companyId, summary?.apiUserEmail]);
 
   if (!allowed) {
     return (
@@ -315,7 +320,21 @@ export default function MetakockaSettings() {
               </s-stack>
             </s-section>
 
-            <s-section heading="Stock webhook">
+            <s-section heading="Writing stock back to MetaKocka">
+          <s-box maxInlineSize="520px">
+            <s-stack direction="block" gap="base">
+              <s-email-field
+                name="apiUserEmail"
+                label="MetaKocka API user email"
+                value={apiUserEmail}
+                onChange={(event) => setApiUserEmail(event.currentTarget.value)}
+                details="Only needed for warehouses counted in Shopify. MetaKocka requires it before it will accept a stock update."
+              />
+            </s-stack>
+          </s-box>
+        </s-section>
+
+        <s-section heading="Stock webhook">
               <s-box maxInlineSize="520px">
                 <s-password-field
                   name="webhookClientSecret"

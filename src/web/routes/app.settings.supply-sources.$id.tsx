@@ -133,6 +133,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   }
 
   const data = parsed.data;
+  const existing = id === NEW ? null : await findSupplySource(principal, id);
 
   if (await codeIsTaken(principal, data.code, id === NEW ? null : id)) {
     fieldErrors.code = `A supply source with the code "${data.code}" already exists. Codes must be unique because they identify the MetaKocka document.`;
@@ -166,6 +167,9 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     kind: data.kind,
     shopifyLocationId: data.shopifyLocationId || null,
     inventoryWriter: data.inventoryWriter,
+    // The direction is chosen on the warehouses page, which is the screen built
+    // around it. Keep whatever is stored rather than resetting it from here.
+    stockDirection: existing?.stockDirection ?? "none",
     metakockaWarehouse: data.metakockaWarehouse || null,
     metakockaProfitCenter: data.metakockaProfitCenter || null,
     priority: data.priority,

@@ -40,6 +40,7 @@ export interface CredentialSummary {
   companyId: string | null;
   secretKeyMask: string | null;
   webhookSecretSet: boolean;
+  apiUserEmail: string | null;
   lastVerifiedAt: Date | null;
 }
 
@@ -48,6 +49,8 @@ export interface DecryptedCredential {
   companyId: string;
   secretKey: string;
   webhookClientSecret: string | null;
+  /** Required by `sync_stock` when writing stock back into MetaKocka. */
+  apiUserEmail: string | null;
   lastVerifiedAt: Date | null;
 }
 
@@ -64,6 +67,7 @@ export async function getCredentialSummary(
       companyId: null,
       secretKeyMask: null,
       webhookSecretSet: false,
+      apiUserEmail: null,
       lastVerifiedAt: null,
     };
   }
@@ -85,6 +89,7 @@ export async function getCredentialSummary(
     companyId: row.companyId,
     secretKeyMask: mask,
     webhookSecretSet: row.webhookClientSecretEncrypted !== null,
+    apiUserEmail: row.apiUserEmail,
     lastVerifiedAt: row.lastVerifiedAt,
   };
 }
@@ -105,6 +110,7 @@ export async function getCredential(
     webhookClientSecret: row.webhookClientSecretEncrypted
       ? decryptSecret(row.webhookClientSecretEncrypted)
       : null,
+    apiUserEmail: row.apiUserEmail,
     lastVerifiedAt: row.lastVerifiedAt,
   };
 }
@@ -114,6 +120,8 @@ export interface SaveCredentialInput {
   /** Omit to keep the stored key: the form shows a mask, not the real value. */
   secretKey?: string;
   webhookClientSecret?: string;
+  /** Empty string clears it. */
+  apiUserEmail?: string;
 }
 
 export async function saveCredential(
@@ -152,11 +160,15 @@ export async function saveCredential(
       companyId: input.companyId,
       secretKeyEncrypted,
       webhookClientSecretEncrypted,
+      apiUserEmail: input.apiUserEmail || null,
     },
     update: {
       companyId: input.companyId,
       secretKeyEncrypted,
       webhookClientSecretEncrypted,
+      ...(input.apiUserEmail === undefined
+        ? {}
+        : { apiUserEmail: input.apiUserEmail || null }),
       // Credentials changed, so the previous verification no longer proves
       // anything about the ones now stored.
       ...(input.secretKey || existing?.companyId !== input.companyId

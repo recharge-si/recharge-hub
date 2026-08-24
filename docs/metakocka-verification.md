@@ -149,6 +149,65 @@ Single-line sales order, no `create_invoice`: **73–141 ms** server time,
 
 ---
 
+## Item 7 — the payment types this company accepts. **ANSWERED**
+
+`payment_type` takes the **Vrednost** column of Nastavitve → Šifranti → Vrsta
+plačila, not the Opis column. `debit_card` (an Opis) was rejected; `Kartica BA`
+(its Vrednost) was recognised.
+
+Better: an invalid value returns the whole valid set, and creates nothing.
+
+```
+opr_code 2
+"Paramether 'payment_type' has invalid value : X.
+ Valid values : Transakcijski račun,Gotovina,Prenos preplačila,Kartica BA"
+```
+
+So the list is discoverable. Confirmed it reaches that validation with a partner
+and no product list, and with an empty product list, both rejected before any
+document exists.
+
+**Two of the four are currently unusable in this company:**
+
+```
+"Gotovina"    -> opr_code 6
+"Kartica BA"  -> opr_code 6
+  "Plačilni inštrument X, je potrebno davčno potrditi, vendar nimate
+   vklopljenih davčnih blagajn."
+```
+
+Cash and card need fiscal registers (davčne blagajne) enabled. Only
+`Transakcijski račun` succeeded. This blocks mapping a cash-on-delivery gateway
+until fiscal registers are switched on, and §8.7 needs to surface it as an
+actionable exception rather than a generic failure.
+
+`opr_code 6` therefore covers more than "does not exist": it is a business rule
+refusal.
+
+---
+
+## Finding F — `sync_stock` is destructive and reports success when idle
+
+Writing stock back into MetaKocka, for warehouses counted in Shopify.
+
+- Endpoint is `/rest/eshop/sync_stock`. Not under `v1`, not under `json`; both
+  of those return an HTML 404.
+- Requires `api_user_email` on top of the secret key. An unknown address returns
+  `opr_code 6, "Cannot find email '...' for paramether api_user_email"`.
+- Documented behaviour: "items previously in stock but omitted from request get
+  removed". A partial list wipes the rest of the warehouse.
+- **Posting with no `stock_list` at all returned `opr_code 0, "Sync
+  successful"`.** Stock was checked immediately afterwards and was untouched, so
+  it was a genuine no-op — but a malformed payload is indistinguishable from a
+  real sync by the response code alone.
+
+Both hazards are handled in `adapters/metakocka/sync-stock.ts`: the payload
+always describes the whole warehouse, an empty list is refused outright, and the
+returned `stock_list` is compared against what was sent.
+
+
+---
+
 ## Still outstanding
 
 | item | status |
@@ -158,7 +217,7 @@ Single-line sales order, no `create_invoice`: **73–141 ms** server time,
 | 4 — register the stock webhook, confirm our response is accepted | not started; needs a public URL |
 | 5 — push a product with a full pricelist incl. `lowest_price_30_days` | not started |
 | 6 — `mark_paid`, then `update_document` without it, confirm survival | not started |
-| 7 — list the payment types and exact `payment_type` strings | not started |
+| 7 — list the payment types and exact `payment_type` strings | **done**, see above |
 
 ## Test data left in company 6789
 

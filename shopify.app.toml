@@ -1,23 +1,40 @@
 # Shopify app configuration. This is the single active config.
 #
-# If `shopify app config link` ever asks for a configuration file name, answer
-# `shopify.app.toml`. Accepting the default creates a second file that then takes
-# precedence over this one, silently dropping the settings below.
-#
-# There is deliberately no `handle` key. Asserting a handle makes Shopify
-# validate it for uniqueness, and a handle stays reserved by an app after that
-# app is deleted, so a repeated name fails with "App handle must be unique".
-# Leaving it out means the handle Shopify already assigned is left alone.
-#
-# `application_url` and `[auth] redirect_urls` are rewritten by the CLI on every
-# `npm run dev` (see `automatically_update_urls_on_dev`), so they are placeholders.
+# The Shopify CLI rewrites parts of this file on `dev`. If `scopes` comes back
+# empty or the webhook api_version changes, it pulled the remote app's config
+# over the top: restore the values below and run `npm run deploy`.
 
 client_id = "77a669bae44e293ff5b59dc85783bc71"
-
 name = "mk-sync"
-
 application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
+
+[webhooks]
+api_version = "2026-10"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
 
 [access_scopes]
 # CLAUDE.md section 2.3: minimum necessary, every scope justified.
@@ -28,45 +45,14 @@ embedded = true
 #   read/write_merchant_managed_fulfillment_orders    move and split fulfilment orders
 #
 # read_all_orders is deliberately absent: nothing needs orders older than 60 days.
+#
+# The CLI has cleared this twice by pulling the remote app's config, which was
+# created empty. Run `npm run deploy` once so the remote app carries these too,
+# otherwise the next `dev` can wipe them again.
 scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
 
 # Token exchange, not the legacy OAuth redirect flow (CLAUDE.md section 2.2).
 use_legacy_install_flow = false
 
 [auth]
-# Unused by token exchange, but the CLI requires at least one. Matches
-# `authPathPrefix` in src/adapters/shopify/shopify.server.ts.
-redirect_urls = ["https://shopify.dev/apps/default-app-home/auth/callback"]
-
-[webhooks]
-# Keep in step with API_VERSION in src/adapters/shopify/shopify.server.ts.
-# The current Shopify CLI defaults this to 2026-10; this app is pinned one
-# version behind because @shopify/shopify-api 13 does not know that version yet.
-api_version = "2026-07"
-
-  # Handled by src/web/routes/webhooks.app.uninstalled.tsx
-  [[webhooks.subscriptions]]
-  topics = ["app/uninstalled"]
-  uri = "/webhooks/app/uninstalled"
-
-  # Handled by src/web/routes/webhooks.app.scopes_update.tsx
-  [[webhooks.subscriptions]]
-  topics = ["app/scopes_update"]
-  uri = "/webhooks/app/scopes_update"
-
-  # Mandatory compliance webhooks (CLAUDE.md section 2.1.6).
-  [[webhooks.subscriptions]]
-  compliance_topics = ["customers/data_request"]
-  uri = "/webhooks/customers/data_request"
-
-  [[webhooks.subscriptions]]
-  compliance_topics = ["customers/redact"]
-  uri = "/webhooks/customers/redact"
-
-  [[webhooks.subscriptions]]
-  compliance_topics = ["shop/redact"]
-  uri = "/webhooks/shop/redact"
-
-[build]
-automatically_update_urls_on_dev = true
-include_config_on_deploy = true
+redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]

@@ -1,4 +1,9 @@
-import type { InventoryWriter, SupplySource, SupplySourceKind } from "@prisma/client";
+import type {
+  InventoryWriter,
+  StockDirection,
+  SupplySource,
+  SupplySourceKind,
+} from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
 import { shopDomainOf, type Principal } from "~/domain/types";
@@ -44,6 +49,8 @@ export interface SupplySourceInput {
   kind: SupplySourceKind;
   shopifyLocationId: string | null;
   inventoryWriter: InventoryWriter;
+  /** Which side holds the true stock, and therefore which way it is copied. */
+  stockDirection: StockDirection;
   metakockaWarehouse: string | null;
   metakockaProfitCenter: string | null;
   priority: number;
