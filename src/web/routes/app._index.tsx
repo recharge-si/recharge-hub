@@ -117,7 +117,7 @@ export default function Home() {
                 ? `${supplySources.ready} ready`
                 : "None ready"}
             </s-badge>
-            <s-link href="/app/settings/supply-sources">Supply sources</s-link>
+            <s-link href="/app/settings/supply-sources">Warehouses</s-link>
           </s-stack>
           <s-stack direction="inline" gap="base" alignItems="center">
             <s-badge tone={paymentMappings > 0 ? "success" : "caution"}>

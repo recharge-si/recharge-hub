@@ -54,11 +54,13 @@ model Shop {
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 
-  eventLogs           EventLog[]
-  metakockaCredential MetakockaCredential?
-  supplySources       SupplySource[]
-  metakockaWarehouses MetakockaWarehouse[]
-  paymentTypeMaps     PaymentTypeMap[]
+  eventLogs             EventLog[]
+  metakockaCredential   MetakockaCredential?
+  supplySources         SupplySource[]
+  metakockaWarehouses   MetakockaWarehouse[]
+  metakockaPaymentTypes MetakockaPaymentType[]
+  skus                  Sku[]
+  paymentTypeMaps       PaymentTypeMap[]
 
   @@map("shop")
 }
@@ -177,7 +179,8 @@ model SupplySource {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplyLevels SupplyLevel[]
 
   @@unique([shopId, code])
   @@index([shopId, priority])
@@ -231,4 +234,94 @@ model MetakockaWarehouse {
 
   @@unique([shopId, mark])
   @@map("metakocka_warehouse")
+}
+
+/// Payment types this company accepts, discovered from MetaKocka.
+///
+/// CLAUDE.md §8.7 says no endpoint lists them. Verified: sending an invalid
+/// `payment_type` returns the whole valid set in the error description, and the
+/// request is rejected before a document is created. That list is cached here so
+/// the settings screen can offer a choice instead of a free text field, without
+/// a page load ever awaiting MetaKocka (§2.5).
+model MetakockaPaymentType {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  value String
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, value])
+  @@map("metakocka_payment_type")
+}
+
+enum SkuStatus {
+  /// Present in Shopify, matched to a MetaKocka article by code.
+  matched
+  /// Present in Shopify, no MetaKocka article with that code.
+  unmatched
+  /// Deliberately excluded from sync by the merchant.
+  ignored
+
+  @@map("sku_status")
+}
+
+/// The SKU registry (CLAUDE.md §6): one row per Shopify variant, carrying the
+/// identifiers both systems need. Matching is by code, Shopify `sku` against
+/// MetaKocka `count_code`/`code`.
+model Sku {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  sku                    String
+  shopifyVariantId       String? @map("shopify_variant_id")
+  shopifyInventoryItemId String? @map("shopify_inventory_item_id")
+  title                  String?
+
+  metakockaCode String?   @map("metakocka_code")
+  metakockaMkId String?   @map("metakocka_mk_id")
+  status        SkuStatus @default(unmatched)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  supplyLevels SupplyLevel[]
+
+  @@unique([shopId, sku])
+  @@index([shopId, status])
+  @@map("sku")
+}
+
+/// Stock for one SKU at one supply source (CLAUDE.md §6).
+///
+/// `quantity` is MetaKocka's `amount`, which §7 (verified) publishes as Shopify
+/// on hand. `lastPushedQuantity` is what we last wrote to Shopify, so a no-op
+/// write can be skipped and so an inventory_levels/update webhook caused by our
+/// own write can be recognised and dropped (§7, loop prevention).
+model SupplyLevel {
+  id             String @id @default(cuid())
+  supplySourceId String @map("supply_source_id")
+  skuId          String @map("sku_id")
+
+  quantity Int
+  reserved Int @default(0)
+
+  observedAt DateTime @default(now()) @map("observed_at")
+
+  lastPushedQuantity Int?      @map("last_pushed_quantity")
+  lastPushedAt       DateTime? @map("last_pushed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  supplySource SupplySource @relation(fields: [supplySourceId], references: [id], onDelete: Cascade)
+  sku          Sku          @relation(fields: [skuId], references: [id], onDelete: Cascade)
+
+  @@unique([supplySourceId, skuId])
+  @@map("supply_level")
 }

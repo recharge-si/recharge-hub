@@ -13,6 +13,7 @@
  *   json/product_list      200      product_list      404 HTML
  *   json/put_document      404 HTML put_document      200
  *   json/get_document      404 HTML get_document      200
+ *   json/delete_document   404 HTML delete_document   200
  *
  * The documentation reflects this split too: `warehouse_list.md` gives the URL
  * with `json/`, `documents_put_document_sales_order.md` gives it without.
@@ -25,6 +26,7 @@ export const ENDPOINTS = {
   productList: "json/product_list",
   putDocument: "put_document",
   getDocument: "get_document",
+  deleteDocument: "delete_document",
 } as const;
 
 export type EndpointName = keyof typeof ENDPOINTS;

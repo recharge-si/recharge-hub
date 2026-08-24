@@ -62,3 +62,51 @@ export async function replacePaymentTypeMaps(
     ),
   ]);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Payment types discovered from MetaKocka                                    */
+/* -------------------------------------------------------------------------- */
+
+export interface CachedPaymentType {
+  value: string;
+  syncedAt: Date;
+}
+
+export async function listCachedPaymentTypes(
+  principal: Principal,
+): Promise<CachedPaymentType[]> {
+  const rows = await prisma.metakockaPaymentType.findMany({
+    where: { shop: { domain: shopDomainOf(principal) } },
+    orderBy: { value: "asc" },
+  });
+
+  return rows.map((row) => ({ value: row.value, syncedAt: row.syncedAt }));
+}
+
+/** Replaces the cached set with what MetaKocka just reported. */
+export async function replaceCachedPaymentTypes(
+  principal: Principal,
+  values: string[],
+): Promise<void> {
+  const domain = shopDomainOf(principal);
+  const shop = await prisma.shop.findUnique({
+    where: { domain },
+    select: { id: true },
+  });
+  if (!shop) throw new Error(`No shop record for ${domain}`);
+
+  const now = new Date();
+
+  await prisma.$transaction([
+    prisma.metakockaPaymentType.deleteMany({
+      where: { shopId: shop.id, value: { notIn: values } },
+    }),
+    ...values.map((value) =>
+      prisma.metakockaPaymentType.upsert({
+        where: { shopId_value: { shopId: shop.id, value } },
+        create: { shopId: shop.id, value, syncedAt: now },
+        update: { syncedAt: now },
+      }),
+    ),
+  ]);
+}

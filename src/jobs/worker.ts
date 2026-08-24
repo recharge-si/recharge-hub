@@ -11,6 +11,8 @@ import { makeAppUninstalledHandler } from "~/jobs/handlers/app-uninstalled";
 import { handleCustomersDataRequest } from "~/jobs/handlers/customers-data-request";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
 import { handleShopRedact } from "~/jobs/handlers/shop-redact";
+import { handleSyncCatalogue } from "~/jobs/handlers/sync-catalogue";
+import { handleSyncInventory } from "~/jobs/handlers/sync-inventory";
 import { withIdempotency } from "~/jobs/with-idempotency";
 
 /**
@@ -50,6 +52,16 @@ async function main(): Promise<void> {
     QUEUES.shopRedact,
     withIdempotency(QUEUES.shopRedact, handleShopRedact),
   );
+
+  // Sync jobs are triggered by the merchant or by a schedule, not by a webhook,
+  // so they carry no webhook id and are not wrapped in the idempotency guard.
+  // Re-running one is harmless: it writes only what differs.
+  await boss.work(QUEUES.syncCatalogue, async (jobs) => {
+    for (const job of jobs) await handleSyncCatalogue(job);
+  });
+  await boss.work(QUEUES.syncInventory, async (jobs) => {
+    for (const job of jobs) await handleSyncInventory(job);
+  });
 
   log.info({ queues: Object.values(QUEUES) }, "Worker started");
 

@@ -11,6 +11,8 @@ export const QUEUES = {
   customersDataRequest: "customers-data-request",
   customersRedact: "customers-redact",
   shopRedact: "shop-redact",
+  syncCatalogue: "sync-catalogue",
+  syncInventory: "sync-inventory",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -37,6 +39,20 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 300,
+  },
+  // Sync work is safe to retry: it reads both sides and writes only what
+  // differs, so a repeat run is a no-op rather than a duplicate.
+  [QUEUES.syncCatalogue]: {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+  },
+  [QUEUES.syncInventory]: {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
   },
   [QUEUES.customersDataRequest]: COMPLIANCE_POLICY,
   [QUEUES.customersRedact]: COMPLIANCE_POLICY,

@@ -34,7 +34,7 @@ const inputSchema = z.object({
       /^[A-Za-z0-9_-]+$/,
       "Use letters, numbers, hyphens and underscores only. The code becomes part of the MetaKocka document reference.",
     ),
-  name: z.string().trim().min(1, "Enter a name the team will recognise."),
+  name: z.string().trim().min(1, "Enter a name the team will recognise, for example Main warehouse."),
   kind: z.enum(["own", "partner"]),
   shopifyLocationId: z.string().trim(),
   inventoryWriter: z.enum(["metakocka", "external", "manual"]),
@@ -232,9 +232,9 @@ export default function EditSupplySource() {
   }, [source]);
 
   return (
-    <s-page heading={isNew ? "Add supply source" : `Edit ${initial.code}`}>
+    <s-page heading={isNew ? "Add warehouse mapping" : `Edit ${initial.code}`}>
       <s-link slot="breadcrumb-actions" href="/app/settings/supply-sources">
-        Supply sources
+        Warehouses
       </s-link>
 
       <s-stack direction="block" gap="large">
