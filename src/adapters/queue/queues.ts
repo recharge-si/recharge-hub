@@ -42,6 +42,10 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   },
   // Sync work is safe to retry: it reads both sides and writes only what
   // differs, so a repeat run is a no-op rather than a duplicate.
+  // No `policy` here on purpose. pg-boss refuses to change a queue's policy
+  // after creation, so setting one would behave differently on a fresh database
+  // than on an existing one. Stacking is prevented at send time instead, with
+  // `enqueueThrottled`.
   [QUEUES.syncCatalogue]: {
     retryLimit: 3,
     retryDelay: 60,

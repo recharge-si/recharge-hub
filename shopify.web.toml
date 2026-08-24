@@ -4,8 +4,10 @@
 # server, never rewrites `application_url`, and the admin shows Shopify's
 # "Find this app in the pages where you work" placeholder instead of the app.
 #
-# The worker is deliberately not started here. It is a second process
-# (CLAUDE.md section 4) and runs separately with `npm run dev:worker`.
+# The worker starts alongside the web server. They stay two processes
+# (CLAUDE.md section 4) and Docker runs them as two containers, but in
+# development both have to be up or every sync button silently queues a job
+# that nothing ever picks up. scripts/dev.mjs runs the pair.
 #
 # There is no `predev = "prisma generate"` on purpose. Generating rewrites
 # query_engine-windows.dll.node, and on Windows that fails with EPERM whenever
@@ -17,4 +19,4 @@ name = "web"
 roles = ["frontend", "backend"]
 
 [commands]
-dev = "npm exec prisma migrate deploy && npm exec react-router dev"
+dev = "npm exec prisma migrate deploy && node scripts/dev.mjs"

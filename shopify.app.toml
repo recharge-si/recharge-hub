@@ -1,8 +1,4 @@
-# Shopify app configuration. This is the single active config.
-#
-# The Shopify CLI rewrites parts of this file on `dev`. If `scopes` comes back
-# empty or the webhook api_version changes, it pulled the remote app's config
-# over the top: restore the values below and run `npm run deploy`.
+# Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "77a669bae44e293ff5b59dc85783bc71"
 name = "mk-sync"
@@ -37,21 +33,8 @@ api_version = "2026-10"
   uri = "/webhooks/app/uninstalled"
 
 [access_scopes]
-# CLAUDE.md section 2.3: minimum necessary, every scope justified.
-#   read_products, write_products                     product sync, MetaKocka to Shopify
-#   read_inventory, write_inventory                   read levels everywhere, write on-hand for own locations only
-#   read_locations                                    map Shopify locations to supply sources
-#   read_orders                                       order intake
-#   read/write_merchant_managed_fulfillment_orders    move and split fulfilment orders
-#
-# read_all_orders is deliberately absent: nothing needs orders older than 60 days.
-#
-# The CLI has cleared this twice by pulling the remote app's config, which was
-# created empty. Run `npm run deploy` once so the remote app carries these too,
-# otherwise the next `dev` can wipe them again.
+# Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
-
-# Token exchange, not the legacy OAuth redirect flow (CLAUDE.md section 2.2).
 use_legacy_install_flow = false
 
 [auth]

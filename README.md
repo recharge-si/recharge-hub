@@ -73,7 +73,11 @@ Stale values here are worth watching for: a `SHOPIFY_API_SECRET` belonging to a
 deleted or different app makes every webhook fail HMAC verification with a 401,
 which looks like a code fault and is not.
 
-The worker is a second process and does not start with `npm run dev`:
+`npm run dev` starts the web server **and** the job worker together
+(`scripts/dev.mjs`). Both have to be running: every sync button queues a job,
+and with no worker the jobs pile up in Postgres looking like a broken button.
+
+To run the worker on its own:
 
 ```bash
 npm run dev:worker

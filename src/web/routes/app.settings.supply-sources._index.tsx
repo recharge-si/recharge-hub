@@ -31,9 +31,11 @@ import { principalFromSession } from "~/web/lib/principal.server";
 /**
  * Connect each MetaKocka warehouse to a Shopify location.
  *
- * One block per warehouse rather than a form full of fields. The merchant's
- * question is "where does this warehouse go in Shopify, and who owns the
- * numbers"; everything else has a sensible default and lives behind Advanced.
+ * One block per warehouse rather than a form full of fields, and no second
+ * screen behind it. The merchant answers three things: which Shopify location
+ * this warehouse fulfils, which side holds the true stock, and the profit
+ * centre orders should carry. Priority, lead time and splitting keep their
+ * defaults until allocation exists to use them.
  *
  * The warehouse list comes from our cache, never from MetaKocka during a page
  * load (CLAUDE.md §2.5).
@@ -85,13 +87,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       fulfillmentServiceName: location.fulfillmentServiceName,
     })),
     syncedAt: warehouses[0]?.syncedAt.toISOString() ?? null,
-    otherSources: sources
-      .filter((source) => !source.metakockaWarehouse)
-      .map((source) => ({
-        id: source.id,
-        code: source.code,
-        name: source.name,
-      })),
   };
 };
 
@@ -240,26 +235,31 @@ const DIRECTION_BADGE: Record<string, string> = {
 interface BlockState {
   locationId: string;
   direction: string;
+  profitCenter: string;
 }
 
 type LoadedWarehouse = {
   mark: string;
   locationId: string;
   direction: string;
+  profitCenter: string | null;
 };
 
 function toState(warehouses: LoadedWarehouse[]): Record<string, BlockState> {
   return Object.fromEntries(
     warehouses.map((w) => [
       w.mark,
-      { locationId: w.locationId, direction: w.direction },
+      {
+        locationId: w.locationId,
+        direction: w.direction,
+        profitCenter: w.profitCenter ?? "",
+      },
     ]),
   );
 }
 
 export default function Warehouses() {
-  const { warehouses, locations, syncedAt, otherSources } =
-    useLoaderData<typeof loader>();
+  const { warehouses, locations, syncedAt } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
@@ -283,6 +283,7 @@ export default function Warehouses() {
       [mark]: {
         locationId: current[mark]?.locationId ?? "",
         direction: current[mark]?.direction ?? "none",
+        profitCenter: current[mark]?.profitCenter ?? "",
         ...patch,
       },
     }));
@@ -341,6 +342,7 @@ export default function Warehouses() {
                 const current = state[warehouse.mark] ?? {
                   locationId: "",
                   direction: "none",
+                  profitCenter: "",
                 };
                 const connected = current.locationId !== "";
 
@@ -359,11 +361,6 @@ export default function Warehouses() {
                       type="hidden"
                       name={`name:${warehouse.mark}`}
                       value={warehouse.name}
-                    />
-                    <input
-                      type="hidden"
-                      name={`profitCenter:${warehouse.mark}`}
-                      value={warehouse.profitCenter ?? ""}
                     />
 
                     <s-stack direction="block" gap="base">
@@ -432,20 +429,19 @@ export default function Warehouses() {
                             </s-option>
                           </s-select>
                           <s-text>{DIRECTION_HELP[current.direction] ?? DIRECTION_HELP.none}</s-text>
+                          <s-text-field
+                            name={`profitCenter:${warehouse.mark}`}
+                            label="Profit centre (optional)"
+                            details="Used when orders are sent to MetaKocka. Type it exactly as it appears there; MetaKocka rejects one that does not exist."
+                            value={current.profitCenter}
+                            onChange={(e) =>
+                              set(warehouse.mark, {
+                                profitCenter: e.currentTarget.value,
+                              })
+                            }
+                          />
                         </s-stack>
                       </s-box>
-
-                      {warehouse.sourceId ? (
-                        <s-link
-                          href={`/app/settings/supply-sources/${warehouse.sourceId}`}
-                        >
-                          Advanced settings
-                        </s-link>
-                      ) : (
-                        <s-text>
-                          Advanced settings appear once this warehouse is saved.
-                        </s-text>
-                      )}
                     </s-stack>
                   </s-section>
                 );
@@ -454,24 +450,6 @@ export default function Warehouses() {
           </Form>
         )}
 
-        {otherSources.length > 0 ? (
-          <s-section heading="Set up by hand">
-            <s-stack direction="block" gap="base">
-              <s-paragraph>
-                These are not tied to a warehouse in the list above.
-              </s-paragraph>
-              <s-unordered-list>
-                {otherSources.map((source) => (
-                  <s-list-item key={source.id}>
-                    <s-link href={`/app/settings/supply-sources/${source.id}`}>
-                      {source.code} — {source.name}
-                    </s-link>
-                  </s-list-item>
-                ))}
-              </s-unordered-list>
-            </s-stack>
-          </s-section>
-        ) : null}
       </s-stack>
     </s-page>
   );

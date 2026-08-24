@@ -12,7 +12,7 @@ import {
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
 import { countByStatus, listSkus } from "~/adapters/db/repositories/sku.server";
 import { listSupplySources } from "~/adapters/db/repositories/supply-source.server";
-import { enqueue } from "~/adapters/queue/boss.server";
+import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -36,9 +36,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const syncEvents = events.filter((event) =>
-    ["catalogue.synced", "inventory.synced", "inventory.sync_skipped"].includes(
-      event.event,
-    ),
+    [
+      "catalogue.synced",
+      "inventory.synced",
+      "inventory.written_to_metakocka",
+      "inventory.sync_skipped",
+    ].includes(event.event),
   );
 
   return {
@@ -48,10 +51,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       sku: row.sku,
       title: row.title,
     })),
-    writableSources: sources.filter(
+    syncing: sources.filter(
       (source) =>
         source.enabled &&
-        source.inventoryWriter === "metakocka" &&
+        source.stockDirection !== "none" &&
         source.metakockaWarehouse !== null &&
         source.shopifyLocationId !== null,
     ).length,
@@ -73,29 +76,32 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = String(formData.get("intent") ?? "");
 
   if (intent === "sync-catalogue") {
-    await enqueue(
+    const jobId = await enqueueThrottled(
       QUEUES.syncCatalogue,
       { shopDomain: principal.shopDomain },
-      { singletonKey: `catalogue:${principal.shopDomain}` },
+      `catalogue:${principal.shopDomain}`,
+      30,
     );
-    return {
-      ok: true,
-      message:
-        "Reading the catalogue in the background. Refresh in a moment to see the result.",
-    };
+
+    return jobId
+      ? { ok: true, message: "Reading the catalogue. This page updates when it finishes." }
+      : {
+          ok: true,
+          message: "A catalogue read is already running. Waiting for it to finish.",
+        };
   }
 
   if (intent === "sync-inventory") {
-    await enqueue(
+    const jobId = await enqueueThrottled(
       QUEUES.syncInventory,
       { shopDomain: principal.shopDomain },
-      { singletonKey: `inventory:${principal.shopDomain}` },
+      `inventory:${principal.shopDomain}`,
+      30,
     );
-    return {
-      ok: true,
-      message:
-        "Pushing stock to Shopify in the background. Refresh in a moment to see the result.",
-    };
+
+    return jobId
+      ? { ok: true, message: "Syncing stock. This page updates when it finishes." }
+      : { ok: true, message: "A stock sync is already running. Waiting for it to finish." };
   }
 
   return { ok: false, message: "Unknown action." };
@@ -115,13 +121,27 @@ function describe(event: { event: string; detail: Record<string, unknown> | null
     return `Catalogue read: ${String(d.variants ?? 0)} variants, ${String(d.matched ?? 0)} matched to MetaKocka, ${String(d.unmatched ?? 0)} not matched.`;
   }
   if (event.event === "inventory.synced") {
-    return `Stock pushed for ${String(d.source ?? "")}: ${String(d.written ?? 0)} updated, ${String(d.unchanged ?? 0)} already correct.`;
+    return `${String(d.source ?? "")}: MetaKocka to Shopify, ${String(d.written ?? 0)} updated, ${String(d.unchanged ?? 0)} already correct, ${String(d.stockRows ?? 0)} products with stock in MetaKocka.`;
   }
-  return `Stock sync skipped for a source: ${String(d.reason ?? "unknown reason")}.`;
+  if (event.event === "inventory.written_to_metakocka") {
+    return `${String(d.source ?? "")}: Shopify to MetaKocka, ${String(d.fromShopify ?? 0)} products from Shopify, ${String(d.preserved ?? 0)} left untouched.`;
+  }
+
+  const reason = String(d.reason ?? "unknown reason");
+  const explained =
+    reason === "missing_api_user_email"
+      ? "the MetaKocka API user email is not set on the Connection page"
+      : reason === "warehouse_not_found"
+        ? "the warehouse is no longer in MetaKocka"
+        : reason === "nothing_to_sync"
+          ? "there was nothing to send"
+          : reason;
+
+  return `${String(d.source ?? "A warehouse")}: skipped, ${explained}.`;
 }
 
 export default function Products() {
-  const { counts, unmatched, writableSources, totalSources, recent } =
+  const { counts, unmatched, syncing, totalSources, recent } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
@@ -169,26 +189,23 @@ export default function Products() {
         <s-section heading="Stock sync">
           <s-stack direction="block" gap="base">
             <s-paragraph>
-              MetaKocka stock on hand is written to Shopify on hand, for
-              warehouses this app owns. Shopify works out what is available
-              itself, so available is never written.
+              Each warehouse is copied in the direction you chose on the
+              Warehouses page. Shopify works out what is available itself, so
+              only on hand is ever written.
             </s-paragraph>
             <s-stack direction="inline" gap="base" alignItems="center">
-              <s-badge tone={writableSources > 0 ? "success" : "caution"}>
-                {writableSources} of {totalSources} ready
+              <s-badge tone={syncing > 0 ? "success" : "caution"}>
+                {syncing} of {totalSources} set to sync
               </s-badge>
-              <s-text>
-                A warehouse is synced only when it has a Shopify location and
-                this app is set as its stock owner.
-              </s-text>
+              <s-link href="/app/settings/supply-sources">Warehouses</s-link>
             </s-stack>
             <Form method="post">
               <input type="hidden" name="intent" value="sync-inventory" />
               <s-button
                 type="submit"
-                {...(busy || writableSources === 0 ? { disabled: true } : {})}
+                {...(busy || syncing === 0 ? { disabled: true } : {})}
               >
-                Push stock to Shopify now
+                Sync stock now
               </s-button>
             </Form>
           </s-stack>

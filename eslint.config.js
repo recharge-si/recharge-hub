@@ -86,6 +86,17 @@ export default tseslint.config(
     },
   },
   {
+    // Node scripts run outside the bundler and have the Node globals.
+    files: ["scripts/**/*.mjs", "*.config.js"],
+    languageOptions: {
+      globals: {
+        console: "readonly",
+        process: "readonly",
+        setTimeout: "readonly",
+      },
+    },
+  },
+  {
     // CLAUDE.md section 15: no Date.now() in domain code; inject the clock.
     files: ["src/domain/**/*.ts"],
     rules: {

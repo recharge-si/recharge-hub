@@ -37,10 +37,22 @@ export function createBoss(role: "producer" | "worker"): PgBoss {
   });
 }
 
-/** Declares every queue this app uses. Idempotent, safe from either process. */
+/**
+ * Declares every queue this app uses. Idempotent, safe from either process.
+ *
+ * `createQueue` does nothing when the queue already exists, so the retry and
+ * retention settings are pushed again with `updateQueue`. Otherwise changing
+ * them in code would never reach a database that already had the queue.
+ *
+ * `policy` is deliberately absent from the definitions: pg-boss throws
+ * "queue policy cannot be changed after creation", which would take the worker
+ * down on start against any existing database.
+ */
 export async function ensureQueues(boss: PgBoss): Promise<void> {
   for (const name of ALL_QUEUES) {
-    await boss.createQueue(name, QUEUE_DEFINITIONS[name]);
+    const options = QUEUE_DEFINITIONS[name];
+    await boss.createQueue(name, options);
+    await boss.updateQueue(name, options);
   }
 }
 
@@ -100,6 +112,27 @@ export async function enqueue(
 ): Promise<string | null> {
   const boss = await getQueueClient();
   return boss.send(name, data, toSendOptions(options));
+}
+
+/**
+ * Sends at most one job per key per window, and returns null when one was
+ * already sent inside it.
+ *
+ * This is how the sync buttons avoid stacking work. Doing it with a queue
+ * policy is not an option: a policy cannot be changed once the queue exists, so
+ * it would behave differently on a fresh database than on an existing one.
+ *
+ * The caller is expected to tell the merchant when the result is null. Silently
+ * swallowing a button press looks exactly like a broken button.
+ */
+export async function enqueueThrottled(
+  name: QueueName,
+  data: object,
+  key: string,
+  windowSeconds: number,
+): Promise<string | null> {
+  const boss = await getQueueClient();
+  return boss.sendThrottled(name, data, null, windowSeconds, key);
 }
 
 /**
