@@ -1,0 +1,103 @@
+// Fulfilment Orchestrator. See CLAUDE.md section 6 for the target data model.
+// M1 creates only what the skeleton needs: the Shopify session store, the shop
+// record, and the append-only event log. Later milestones add their own tables
+// in their own migrations (CLAUDE.md section 15: one migration per logical change).
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/// Shopify offline session. The shape is dictated by PrismaSessionStorage, so the
+/// field names cannot be changed. `accessToken` and `refreshToken` are written
+/// encrypted by adapters/db/encrypted-session-storage.ts (CLAUDE.md section 2.2).
+model Session {
+  id                  String    @id
+  shop                String
+  state               String
+  isOnline            Boolean   @default(false)
+  scope               String?
+  expires             DateTime?
+  accessToken         String
+  userId              BigInt?
+  firstName           String?
+  lastName            String?
+  email               String?
+  accountOwner        Boolean   @default(false)
+  locale              String?
+  collaborator        Boolean?  @default(false)
+  emailVerified       Boolean?  @default(false)
+  refreshToken        String?
+  refreshTokenExpires DateTime?
+
+  @@index([shop])
+  @@map("session")
+}
+
+enum ShopInstallState {
+  installed
+  uninstalled
+
+  @@map("shop_install_state")
+}
+
+model Shop {
+  id            String           @id @default(cuid())
+  domain        String           @unique
+  installState  ShopInstallState @default(installed) @map("install_state")
+  installedAt   DateTime         @default(now()) @map("installed_at")
+  uninstalledAt DateTime?        @map("uninstalled_at")
+  createdAt     DateTime         @default(now()) @map("created_at")
+  updatedAt     DateTime         @updatedAt @map("updated_at")
+
+  eventLogs EventLog[]
+
+  @@map("shop")
+}
+
+/// Append-only audit trail. CLAUDE.md section 6: the audit trail is a product
+/// feature, not debug output. Never updated, never deleted outside the section 2.4
+/// retention job.
+model EventLog {
+  id         String   @id @default(cuid())
+  shopId     String   @map("shop_id")
+  entityType String   @map("entity_type")
+  entityId   String?  @map("entity_id")
+  event      String
+  detail     Json?
+  at         DateTime @default(now())
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, at])
+  @@index([shopId, entityType, entityId])
+  @@map("event_log")
+}
+
+/// Exactly-once guard for work triggered by an at-least-once source
+/// (CLAUDE.md section 6). Shopify redelivers webhooks and MetaKocka offers no
+/// idempotency keys of its own, so duplicate prevention is entirely ours.
+///
+/// Deviation from section 6, deliberate: the tenant is held as a domain string
+/// rather than a foreign key to `shop`. Compliance webhooks arrive for shops
+/// whose row has already been deleted, and the guard has to keep working then.
+model IdempotencyKey {
+  id          String   @id @default(cuid())
+  shopDomain  String   @map("shop_domain")
+  scope       String
+  key         String
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  result      Json?
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  @@unique([shopDomain, scope, key])
+  @@index([firstSeenAt])
+  @@map("idempotency_key")
+}

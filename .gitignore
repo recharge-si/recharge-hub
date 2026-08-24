@@ -1,0 +1,20 @@
+node_modules
+
+/build
+/.cache
+/public/build
+
+.env
+.env.*
+!.env.example
+
+# Shopify CLI
+.shopify/*
+.shopify.lock
+
+# React Router generated types
+/.react-router/
+
+/extensions/*/dist
+
+.DS_Store

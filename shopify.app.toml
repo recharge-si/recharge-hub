@@ -1,0 +1,59 @@
+# Shopify app configuration.
+#
+# `client_id`, `application_url` and the dev store are filled in by
+# `npm run config:link`. Everything else here is a deliberate choice from CLAUDE.md
+# and should not be changed by the CLI.
+
+client_id = ""
+name = "Fulfilment orchestrator"
+handle = "fulfilment-orchestrator"
+application_url = "https://example.com"
+embedded = true
+
+[access_scopes]
+# CLAUDE.md section 2.3: minimum necessary, every scope justified.
+#   read_products, write_products                     product sync, MetaKocka to Shopify
+#   read_inventory, write_inventory                   read levels everywhere, write on-hand for own locations only
+#   read_locations                                    map Shopify locations to supply sources
+#   read_orders                                       order intake
+#   read/write_merchant_managed_fulfillment_orders    move and split fulfilment orders
+#
+# read_all_orders is deliberately absent: nothing needs orders older than 60 days.
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
+
+# Token exchange, not the legacy OAuth redirect flow (CLAUDE.md section 2.2).
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = ["https://example.com/auth/callback"]
+
+[webhooks]
+# Keep in step with API_VERSION in src/adapters/shopify/shopify.server.ts.
+api_version = "2026-07"
+
+  # Handled by src/web/routes/webhooks.app.uninstalled.tsx
+  [[webhooks.subscriptions]]
+  topics = ["app/uninstalled"]
+  uri = "/webhooks/app/uninstalled"
+
+  # Handled by src/web/routes/webhooks.app.scopes_update.tsx
+  [[webhooks.subscriptions]]
+  topics = ["app/scopes_update"]
+  uri = "/webhooks/app/scopes_update"
+
+  # Mandatory compliance webhooks (CLAUDE.md section 2.1.6).
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/data_request"]
+  uri = "/webhooks/customers/data_request"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["customers/redact"]
+  uri = "/webhooks/customers/redact"
+
+  [[webhooks.subscriptions]]
+  compliance_topics = ["shop/redact"]
+  uri = "/webhooks/shop/redact"
+
+[build]
+automatically_update_urls_on_dev = true
+include_config_on_deploy = true
