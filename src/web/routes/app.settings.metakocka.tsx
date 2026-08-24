@@ -251,105 +251,128 @@ export default function MetakockaSettings() {
 
   return (
     <s-page heading="MetaKocka connection">
-      {banner ? (
-        <s-banner tone={banner.ok ? "success" : "critical"}>
-          <s-paragraph>{banner.message}</s-paragraph>
-        </s-banner>
-      ) : null}
+      {/*
+        One stack owns every vertical gap on this page.
 
-      <Form method="post" data-save-bar ref={formRef}>
-        <input type="hidden" name="intent" value="save" />
+        `s-page` spaces its own direct children, but the form sections are
+        nested inside a `form` element and never receive that spacing, so they
+        would sit flush against each other while the status card below kept its
+        gap. Rather than mix the two, the page has a single child and all
+        spacing comes from Polaris tokens here (CLAUDE.md section 2.6: Polaris
+        spacing tokens, no custom styling).
+      */}
+      <s-stack direction="block" gap="large">
+        {banner ? (
+          <s-banner tone={banner.ok ? "success" : "critical"}>
+            <s-paragraph>{banner.message}</s-paragraph>
+          </s-banner>
+        ) : null}
 
-        <s-section heading="MetaKocka connection">
-          <s-stack direction="block" gap="base">
-            <s-box maxInlineSize="520px">
+        <Form method="post" data-save-bar ref={formRef}>
+          <input type="hidden" name="intent" value="save" />
+          <s-stack direction="block" gap="large">
+            <s-section heading="Credentials">
               <s-stack direction="block" gap="base">
-                <s-text-field
-                  name="companyId"
-                  label="Company ID"
-                  details="Shown in MetaKocka under company settings."
-                  value={companyId}
-                  onChange={(event) => setCompanyId(event.currentTarget.value)}
-                  error={saveErrors?.companyId}
-                />
-                <s-password-field
-                  name="secretKey"
-                  label="Secret key"
-                  value={secretKey}
-                  onChange={(event) => setSecretKey(event.currentTarget.value)}
-                  details={
-                    summary?.secretKeyMask
-                      ? `A key ending ${summary.secretKeyMask} is saved. Leave blank to keep it.`
-                      : "Paste the key generated in MetaKocka."
-                  }
-                  error={saveErrors?.secretKey}
-                />
-              </s-stack>
-            </s-box>
-            <s-paragraph>
-              The secret key grants full read and write access to this MetaKocka
-              company. It is encrypted before it is stored and never shown again.
-            </s-paragraph>
-            <s-link href="https://metakocka.freshdesk.com/" target="_blank">
-              How to generate a secret key in MetaKocka
-            </s-link>
-          </s-stack>
-        </s-section>
-
-        <s-section heading="Stock webhook">
-          <s-box maxInlineSize="520px">
-            <s-password-field
-              name="webhookClientSecret"
-              label="Webhook client secret (optional)"
-              value={webhookSecret}
-              onChange={(event) => setWebhookSecret(event.currentTarget.value)}
-              details={
-                summary?.webhookSecretSet
-                  ? "A secret is saved. Leave blank to keep it."
-                  : "Verifies that stock updates really came from MetaKocka. Add it after registering the webhook."
-              }
-            />
-          </s-box>
-        </s-section>
-      </Form>
-
-      <s-section heading="Connection status">
-        <s-stack direction="block" gap="base">
-          <s-stack direction="inline" gap="base" alignItems="center">
-            <s-badge tone={summary?.lastVerifiedAt ? "success" : "caution"}>
-              {summary?.lastVerifiedAt ? "Verified" : "Not verified"}
-            </s-badge>
-            <s-text>
-              {summary?.lastVerifiedAt
-                ? `Last successful call ${new Date(summary.lastVerifiedAt).toLocaleString()}`
-                : "The credentials have not been used successfully yet."}
-            </s-text>
-          </s-stack>
-
-          <s-stack direction="inline" gap="base">
-            <Form method="post">
-              <input type="hidden" name="intent" value="test" />
-              <s-button type="submit" {...(busy ? { disabled: true } : {})}>
-                Test connection
-              </s-button>
-            </Form>
-
-            {summary?.connected ? (
-              <Form method="post">
-                <input type="hidden" name="intent" value="disconnect" />
-                <s-button
-                  type="submit"
-                  variant="secondary"
-                  tone="critical"
-                  {...(busy ? { disabled: true } : {})}
+                <s-box maxInlineSize="520px">
+                  <s-stack direction="block" gap="base">
+                    <s-text-field
+                      name="companyId"
+                      label="Company ID"
+                      details="Shown in MetaKocka under company settings."
+                      value={companyId}
+                      onChange={(event) =>
+                        setCompanyId(event.currentTarget.value)
+                      }
+                      error={saveErrors?.companyId}
+                    />
+                    <s-password-field
+                      name="secretKey"
+                      label="Secret key"
+                      value={secretKey}
+                      onChange={(event) =>
+                        setSecretKey(event.currentTarget.value)
+                      }
+                      details={
+                        summary?.secretKeyMask
+                          ? `A key ending ${summary.secretKeyMask} is saved. Leave blank to keep it.`
+                          : "Paste the key generated in MetaKocka."
+                      }
+                      error={saveErrors?.secretKey}
+                    />
+                  </s-stack>
+                </s-box>
+                <s-paragraph>
+                  The secret key grants full read and write access to this
+                  MetaKocka company. It is encrypted before it is stored and
+                  never shown again.
+                </s-paragraph>
+                <s-link
+                  href="https://metakocka.freshdesk.com/en/support/solutions/articles/3000106126-obtaining-api-key-and-company-id"
+                  target="_blank"
                 >
-                  Disconnect
+                  How to find your API key and company ID in MetaKocka
+                </s-link>
+              </s-stack>
+            </s-section>
+
+            <s-section heading="Stock webhook">
+              <s-box maxInlineSize="520px">
+                <s-password-field
+                  name="webhookClientSecret"
+                  label="Webhook client secret (optional)"
+                  value={webhookSecret}
+                  onChange={(event) =>
+                    setWebhookSecret(event.currentTarget.value)
+                  }
+                  details={
+                    summary?.webhookSecretSet
+                      ? "A secret is saved. Leave blank to keep it."
+                      : "Verifies that stock updates really came from MetaKocka. Add it after registering the webhook."
+                  }
+                />
+              </s-box>
+            </s-section>
+          </s-stack>
+        </Form>
+
+        <s-section heading="Connection status">
+          <s-stack direction="block" gap="base">
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-badge tone={summary?.lastVerifiedAt ? "success" : "caution"}>
+                {summary?.lastVerifiedAt ? "Verified" : "Not verified"}
+              </s-badge>
+              <s-text>
+                {summary?.lastVerifiedAt
+                  ? `Last successful call ${new Date(summary.lastVerifiedAt).toLocaleString()}`
+                  : "The credentials have not been used successfully yet."}
+              </s-text>
+            </s-stack>
+
+            <s-stack direction="inline" gap="base">
+              <Form method="post">
+                <input type="hidden" name="intent" value="test" />
+                <s-button type="submit" {...(busy ? { disabled: true } : {})}>
+                  Test connection
                 </s-button>
               </Form>
-            ) : null}
+
+              {summary?.connected ? (
+                <Form method="post">
+                  <input type="hidden" name="intent" value="disconnect" />
+                  <s-button
+                    type="submit"
+                    variant="secondary"
+                    tone="critical"
+                    {...(busy ? { disabled: true } : {})}
+                  >
+                    Disconnect
+                  </s-button>
+                </Form>
+              ) : null}
+            </s-stack>
           </s-stack>
-        </s-stack>
-      </s-section>
+        </s-section>
+      </s-stack>
     </s-page>
   );
 }
