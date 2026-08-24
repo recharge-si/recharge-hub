@@ -7,8 +7,9 @@ import {
 
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
 import { ensureShop, findShop } from "~/adapters/db/repositories/shop.server";
+import { getCredentialSummary } from "~/adapters/db/repositories/metakocka-credential.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
-import type { ShopSession } from "~/domain/types";
+import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
  * The home page. CLAUDE.md section 2.7 requires it to be dynamic and diagnostic
@@ -24,18 +25,12 @@ import type { ShopSession } from "~/domain/types";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
 
-  const principal: ShopSession = {
-    kind: "shop",
-    shopDomain: session.shop,
-    // Offline sessions carry no user identity. M2 needs the real answer before
-    // it can gate the MetaKocka credentials screen to the shop owner
-    // (CLAUDE.md section 9); until then, deny.
-    isShopOwner: false,
-  };
+  const principal = principalFromSession(session);
 
-  const [existing, events] = await Promise.all([
+  const [existing, events, metakocka] = await Promise.all([
     findShop(principal),
     recentEvents(principal, 5),
+    getCredentialSummary(principal),
   ]);
 
   // The install hook creates this row. The fallback covers a shop whose row was
@@ -45,6 +40,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   return {
     shopDomain: session.shop,
     installedAt: shop.installedAt.toISOString(),
+    metakocka: {
+      connected: metakocka.connected,
+      verified: metakocka.lastVerifiedAt !== null,
+    },
     events: events.map((event) => ({
       id: event.id,
       event: event.event,
@@ -61,7 +60,22 @@ function formatDateTime(iso: string): string {
 }
 
 export default function Home() {
-  const { shopDomain, installedAt, events } = useLoaderData<typeof loader>();
+  const { shopDomain, installedAt, events, metakocka } =
+    useLoaderData<typeof loader>();
+
+  const erp = metakocka.verified
+    ? { tone: "success" as const, label: "Connected", note: null }
+    : metakocka.connected
+      ? {
+          tone: "caution" as const,
+          label: "Not verified",
+          note: "Credentials are saved but have not been used successfully yet. Test the connection in settings.",
+        }
+      : {
+          tone: "caution" as const,
+          label: "Not configured",
+          note: "Connecting MetaKocka is the next step. Until it is connected, no orders are sent to the ERP and no stock is published.",
+        };
 
   return (
     <s-page heading="Fulfilment orchestrator">
@@ -72,13 +86,10 @@ export default function Home() {
             <s-text>Shopify store {shopDomain}</s-text>
           </s-stack>
           <s-stack direction="inline" gap="base" alignItems="center">
-            <s-badge tone="caution">Not configured</s-badge>
+            <s-badge tone={erp.tone}>{erp.label}</s-badge>
             <s-text>MetaKocka ERP</s-text>
           </s-stack>
-          <s-paragraph>
-            Connecting MetaKocka is the next step. Until it is connected, no
-            orders are sent to the ERP and no stock is published.
-          </s-paragraph>
+          {erp.note ? <s-paragraph>{erp.note}</s-paragraph> : null}
         </s-stack>
       </s-section>
 

@@ -31,6 +31,11 @@ const shopify = shopifyApp({
   authPathPrefix: "/auth",
   sessionStorage: new EncryptedSessionStorage(prisma),
   distribution: AppDistribution.AppStore,
+  // CLAUDE.md section 9 gates the MetaKocka credentials screen to the shop
+  // owner, and `associated_user.account_owner` is the only place Shopify
+  // reports that. It arrives on an online session, so embedded requests ask for
+  // one in addition to the offline token that background jobs use.
+  useOnlineTokens: true,
   future: {
     // Token exchange with App Bridge ID tokens (CLAUDE.md section 2.2). There is
     // deliberately no legacy OAuth redirect flow in this app.

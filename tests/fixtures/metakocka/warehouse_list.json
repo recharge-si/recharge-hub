@@ -1,0 +1,35 @@
+{
+  "opr_code": "0",
+  "opr_time_ms": "58",
+  "offset": "0",
+  "limit": "1000",
+  "warehouse_list_count": "2",
+  "warehouse_list": [
+    {
+      "mk_id": "1600000042",
+      "mark": "oznaka1",
+      "name": "moje skladisce",
+      "same_address_as_company": "false",
+      "main_warehouse": "true",
+      "street": "cebuljeva 19",
+      "post": "1000",
+      "place": "Komenda",
+      "country": "Slovenija",
+      "default_microloc_id": "1600128800",
+      "include_in_stock_info": "true",
+      "active": "true",
+      "warehouse_type": "normal",
+      "show_product_free_stock": "false"
+    },
+    {
+      "mk_id": "1600000043",
+      "mark": "partner1",
+      "name": "partnersko skladisce",
+      "main_warehouse": "false",
+      "include_in_stock_info": "false",
+      "active": "true",
+      "warehouse_type": "normal",
+      "show_product_free_stock": "false"
+    }
+  ]
+}

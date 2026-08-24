@@ -13,10 +13,9 @@ import { AppBridgeNavigation } from "~/web/components/app-bridge-navigation";
  * Everything under /app is embedded in the Shopify admin and authenticated by
  * token exchange (CLAUDE.md section 2.2).
  *
- * There is no `s-app-nav` here yet, deliberately. The app has one page in M1, and
- * BFS rejects a separate navigation item, in addition to the app name, that
- * points at the app home page. The nav arrives in M2 with the settings screens,
- * which are the first real sub-pages.
+ * The nav deliberately has no item pointing at the app home. BFS rejects "a
+ * separate navigation item in addition to the app name that redirects to the
+ * app's homepage": the app name in the admin nav is that link.
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -27,6 +26,9 @@ export default function AppLayout() {
   return (
     <>
       <AppBridgeNavigation />
+      <s-app-nav>
+        <s-link href="/app/settings/metakocka">Settings</s-link>
+      </s-app-nav>
       <Outlet />
     </>
   );

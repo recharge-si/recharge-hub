@@ -54,7 +54,8 @@ model Shop {
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 
-  eventLogs EventLog[]
+  eventLogs           EventLog[]
+  metakockaCredential MetakockaCredential?
 
   @@map("shop")
 }
@@ -100,4 +101,28 @@ model IdempotencyKey {
   @@unique([shopDomain, scope, key])
   @@index([firstSeenAt])
   @@map("idempotency_key")
+}
+
+/// MetaKocka connection for one shop (CLAUDE.md section 6).
+///
+/// The secret key grants full write access to the merchant's ERP and there is no
+/// read-only mode and no rotation (section 3), so it is treated as a production
+/// database password: encrypted at rest, never returned to the browser, never
+/// logged (section 10).
+model MetakockaCredential {
+  id                           String    @id @default(cuid())
+  shopId                       String    @unique @map("shop_id")
+  companyId                    String    @map("company_id")
+  secretKeyEncrypted           String    @map("secret_key_encrypted")
+  /// Used to verify the HMAC-SHA1 signature on the stock webhook. Optional
+  /// because a merchant can connect before registering the webhook.
+  webhookClientSecretEncrypted String?   @map("webhook_client_secret_encrypted")
+  /// Last time a call to MetaKocka actually succeeded with these credentials.
+  lastVerifiedAt               DateTime? @map("last_verified_at")
+  createdAt                    DateTime  @default(now()) @map("created_at")
+  updatedAt                    DateTime  @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("metakocka_credential")
 }
