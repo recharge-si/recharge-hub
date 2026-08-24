@@ -1,26 +1,22 @@
-# Shopify app configuration.
+# Shopify app configuration. This is the single active config.
 #
-# This project is currently unlinked. Run `npm run config:link` to attach it to a
-# Partner app.
+# If `shopify app config link` ever asks for a configuration file name, answer
+# `shopify.app.toml`. Accepting the default creates a second file that then takes
+# precedence over this one, silently dropping the settings below.
 #
-# When the CLI asks for a configuration file name, answer `shopify.app.toml`.
-# Accepting the default creates a second file named after the app handle, and
-# that file then takes precedence over this one, silently dropping every setting
-# below: the compliance webhooks, token exchange, and the pinned API version.
-# Keep exactly one config file.
-#
-# Creating a new app seeds it from this file, so the scopes and webhooks here are
-# what the new app is registered with.
+# There is deliberately no `handle` key. Asserting a handle makes Shopify
+# validate it for uniqueness, and a handle stays reserved by an app after that
+# app is deleted, so a repeated name fails with "App handle must be unique".
+# Leaving it out means the handle Shopify already assigned is left alone.
 #
 # `application_url` and `[auth] redirect_urls` are rewritten by the CLI on every
 # `npm run dev` (see `automatically_update_urls_on_dev`), so they are placeholders.
 
-client_id = ""
+client_id = "77a669bae44e293ff5b59dc85783bc71"
 
-name = "Fulfilment orchestrator"
-handle = "fulfilment-orchestrator"
+name = "mk-sync"
 
-application_url = "https://example.com"
+application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
 
 [access_scopes]
@@ -40,7 +36,7 @@ use_legacy_install_flow = false
 [auth]
 # Unused by token exchange, but the CLI requires at least one. Matches
 # `authPathPrefix` in src/adapters/shopify/shopify.server.ts.
-redirect_urls = ["https://example.com/auth/callback"]
+redirect_urls = ["https://shopify.dev/apps/default-app-home/auth/callback"]
 
 [webhooks]
 # Keep in step with API_VERSION in src/adapters/shopify/shopify.server.ts.
