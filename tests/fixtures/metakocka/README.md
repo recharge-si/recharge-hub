@@ -1,14 +1,19 @@
 # MetaKocka fixtures
 
-CLAUDE.md section 12 asks for **recorded** responses: real payloads captured once
-from a live call. These are not that yet.
+`warehouse_list.json` is a **recorded** response from a real MetaKocka company
+(CLAUDE.md section 12), captured once through `warehouse_list`, which is
+read-only. Street, post, place and country are replaced with `REDACTED`: they are
+company address data and no parser depends on them.
 
-`warehouse_list.json` is derived from the documented example in
-https://github.com/metakocka/metakocka_api_base/blob/master/docs/warehouse_list.md
-with a second warehouse added so list handling is exercised. It is good enough to
-pin the parsing and mapping, and it is **not** evidence about how a real company
-responds.
+What the recording confirmed, against the documented example:
 
-Replace every file here with recorded responses during the section 14
-verification against a MetaKocka test company, and delete this note when they are
-real.
+- every value is a string, including booleans (`"true"`) and `opr_code` (`"0"`)
+- the response carries `opr_time_no_lock_ms` and `doc_type`, which the docs do
+  not show, so response schemas stay `passthrough`
+- `show_product_free_stock` and `default_microloc_id` are absent entirely, and
+  `country` appears on some warehouses and not others, so field presence varies
+  per record and optional fields must stay optional
+
+Still to record during the section 14 verification: `put_document`,
+`product_add`, `warehouse_stock`, and the exact error payload for a
+profit_center that does not exist.

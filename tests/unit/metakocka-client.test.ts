@@ -22,6 +22,16 @@ function clientWith(fetchImpl: typeof fetch) {
 
 const passthrough = z.object({}).passthrough();
 
+/** Runs a call that is expected to fail and returns the MetakockaError. */
+async function expectFailure(promise: Promise<unknown>): Promise<MetakockaError> {
+  const error = await promise.then(
+    () => new Error("expected the call to fail"),
+    (e: unknown) => e,
+  );
+  expect(error).toBeInstanceOf(MetakockaError);
+  return error as MetakockaError;
+}
+
 describe("MetaKocka client", () => {
   it("posts the credentials in the body of every call", async () => {
     const fetchImpl = vi.fn(async () => jsonResponse({ opr_code: "0" }));
@@ -71,11 +81,10 @@ describe("MetaKocka client", () => {
 
   it("treats a 500 as retryable", async () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call("warehouse_list", {}, passthrough)
-      .catch((e: MetakockaError) => e);
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call("warehouse_list", {}, passthrough),
+    );
 
     expect(error.kind).toBe("retryable");
     expect(error.httpStatus).toBe(500);
@@ -83,22 +92,20 @@ describe("MetaKocka client", () => {
 
   it("treats a 429 as retryable", async () => {
     const fetchImpl = vi.fn(async () => new Response("slow down", { status: 429 }));
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call("warehouse_list", {}, passthrough)
-      .catch((e: MetakockaError) => e);
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call("warehouse_list", {}, passthrough),
+    );
 
     expect(error.kind).toBe("retryable");
   });
 
   it("treats a 403 as an exception", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 403 }));
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call("warehouse_list", {}, passthrough)
-      .catch((e: MetakockaError) => e);
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call("warehouse_list", {}, passthrough),
+    );
 
     expect(error.kind).toBe("exception");
   });
@@ -107,11 +114,10 @@ describe("MetaKocka client", () => {
     const fetchImpl = vi.fn(async () => {
       throw new TypeError("network down");
     });
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call("warehouse_list", {}, passthrough)
-      .catch((e: MetakockaError) => e);
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call("warehouse_list", {}, passthrough),
+    );
 
     expect(error.kind).toBe("retryable");
   });
@@ -120,11 +126,10 @@ describe("MetaKocka client", () => {
     const fetchImpl = vi.fn(
       async () => new Response("<html>maintenance</html>", { status: 200 }),
     );
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call("warehouse_list", {}, passthrough)
-      .catch((e: MetakockaError) => e);
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call("warehouse_list", {}, passthrough),
+    );
 
     expect(error.kind).toBe("exception");
   });
@@ -135,15 +140,14 @@ describe("MetaKocka client", () => {
       jsonResponse({ opr_code: "0", warehouse_list: "not an array" }),
     );
 
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call(
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call(
         "warehouse_list",
         {},
         z.object({ warehouse_list: z.array(z.object({})) }),
-      )
-      .catch((e: MetakockaError) => e);
+      ),
+    );
 
     expect(error.kind).toBe("exception");
     expect(error.message).toContain("did not match its schema");
@@ -151,11 +155,10 @@ describe("MetaKocka client", () => {
 
   it("never puts the secret key in the error it throws", async () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
-    const error: MetakockaError = await clientWith(
-      fetchImpl as unknown as typeof fetch,
-    )
-      .call("warehouse_list", {}, passthrough)
-      .catch((e: MetakockaError) => e);
+    const error = await expectFailure(
+      clientWith(fetchImpl as unknown as typeof fetch)
+        .call("warehouse_list", {}, passthrough),
+    );
 
     expect(JSON.stringify({ m: error.message, d: error.oprDesc })).not.toContain(
       "super-secret-key",
@@ -172,9 +175,9 @@ describe("warehouse_list", () => {
 
     expect(warehouses).toHaveLength(2);
     expect(warehouses[0]).toEqual({
-      mkId: "1600000042",
-      mark: "oznaka1",
-      name: "moje skladisce",
+      mkId: "678900000004",
+      mark: "glavno",
+      name: "Glavno skladišče",
       isMain: true,
       isActive: true,
       includeInStockInfo: true,
@@ -182,7 +185,10 @@ describe("warehouse_list", () => {
     });
     // Every string boolean is a real boolean by the time it leaves the adapter.
     expect(warehouses[1]!.isMain).toBe(false);
-    expect(warehouses[1]!.includeInStockInfo).toBe(false);
+    expect(warehouses[1]!.isActive).toBe(true);
+    // The live response omits show_product_free_stock and default_microloc_id
+    // entirely, and country only on some rows: field presence varies per record.
+    expect(warehouses[1]!.mark).toBe("Shopify");
   });
 
   it("returns an empty list rather than throwing when there are no warehouses", async () => {

@@ -1,35 +1,36 @@
 {
   "opr_code": "0",
-  "opr_time_ms": "58",
-  "offset": "0",
-  "limit": "1000",
+  "opr_time_ms": "62",
+  "opr_time_no_lock_ms": "0",
+  "doc_type": "warehouse",
   "warehouse_list_count": "2",
   "warehouse_list": [
     {
-      "mk_id": "1600000042",
-      "mark": "oznaka1",
-      "name": "moje skladisce",
-      "same_address_as_company": "false",
+      "mk_id": "678900000004",
+      "mark": "glavno",
+      "name": "Glavno skladišče",
+      "same_address_as_company": "true",
       "main_warehouse": "true",
-      "street": "cebuljeva 19",
-      "post": "1000",
-      "place": "Komenda",
-      "country": "Slovenija",
-      "default_microloc_id": "1600128800",
+      "street": "REDACTED",
+      "post": "REDACTED",
+      "place": "REDACTED",
       "include_in_stock_info": "true",
       "active": "true",
-      "warehouse_type": "normal",
-      "show_product_free_stock": "false"
+      "warehouse_type": "normal"
     },
     {
-      "mk_id": "1600000043",
-      "mark": "partner1",
-      "name": "partnersko skladisce",
+      "mk_id": "678900000069",
+      "mark": "Shopify",
+      "name": "Shopify",
+      "same_address_as_company": "false",
       "main_warehouse": "false",
-      "include_in_stock_info": "false",
+      "street": "REDACTED",
+      "post": "REDACTED",
+      "place": "REDACTED",
+      "country": "REDACTED",
+      "include_in_stock_info": "true",
       "active": "true",
-      "warehouse_type": "normal",
-      "show_product_free_stock": "false"
+      "warehouse_type": "normal"
     }
   ]
 }

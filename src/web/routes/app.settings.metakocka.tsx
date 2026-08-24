@@ -260,71 +260,56 @@ export default function MetakockaSettings() {
       <Form method="post" data-save-bar ref={formRef}>
         <input type="hidden" name="intent" value="save" />
 
-        <s-section heading="Company">
+        <s-section heading="MetaKocka connection">
           <s-stack direction="block" gap="base">
+            <s-box maxInlineSize="520px">
+              <s-stack direction="block" gap="base">
+                <s-text-field
+                  name="companyId"
+                  label="Company ID"
+                  details="Shown in MetaKocka under company settings."
+                  value={companyId}
+                  onChange={(event) => setCompanyId(event.currentTarget.value)}
+                  error={saveErrors?.companyId}
+                />
+                <s-password-field
+                  name="secretKey"
+                  label="Secret key"
+                  value={secretKey}
+                  onChange={(event) => setSecretKey(event.currentTarget.value)}
+                  details={
+                    summary?.secretKeyMask
+                      ? `A key ending ${summary.secretKeyMask} is saved. Leave blank to keep it.`
+                      : "Paste the key generated in MetaKocka."
+                  }
+                  error={saveErrors?.secretKey}
+                />
+              </s-stack>
+            </s-box>
             <s-paragraph>
-              Your MetaKocka company ID identifies which company this store
-              writes to. You can find it in MetaKocka under company settings.
+              The secret key grants full read and write access to this MetaKocka
+              company. It is encrypted before it is stored and never shown again.
             </s-paragraph>
-            <s-text-field
-              name="companyId"
-              label="Company ID"
-              value={companyId}
-              onChange={(event) => setCompanyId(event.currentTarget.value)}
-              error={saveErrors?.companyId}
-            />
-          </s-stack>
-        </s-section>
-
-        <s-section heading="Secret key">
-          <s-stack direction="block" gap="base">
-            <s-paragraph>
-              The secret key lets this app create sales orders and read stock in
-              your MetaKocka company. MetaKocka issues one key per company with
-              full read and write access, so treat it like a password. It is
-              encrypted before it is stored and is never shown again.
-            </s-paragraph>
-            <s-password-field
-              name="secretKey"
-              label="Secret key"
-              value={secretKey}
-              onChange={(event) => setSecretKey(event.currentTarget.value)}
-              details={
-                summary?.secretKeyMask
-                  ? `A key ending ${summary.secretKeyMask} is saved. Leave this blank to keep it.`
-                  : "Generate a key in MetaKocka, then paste it here."
-              }
-              error={saveErrors?.secretKey}
-            />
-            <s-link
-              href="https://metakocka.freshdesk.com/"
-              target="_blank"
-            >
+            <s-link href="https://metakocka.freshdesk.com/" target="_blank">
               How to generate a secret key in MetaKocka
             </s-link>
           </s-stack>
         </s-section>
 
         <s-section heading="Stock webhook">
-          <s-stack direction="block" gap="base">
-            <s-paragraph>
-              Optional. MetaKocka signs its stock update webhook with a separate
-              client secret. Add it once you have registered the webhook, so this
-              app can verify that incoming stock updates really came from
-              MetaKocka.
-            </s-paragraph>
+          <s-box maxInlineSize="520px">
             <s-password-field
               name="webhookClientSecret"
-              label="Webhook client secret"
+              label="Webhook client secret (optional)"
               value={webhookSecret}
               onChange={(event) => setWebhookSecret(event.currentTarget.value)}
               details={
                 summary?.webhookSecretSet
-                  ? "A secret is saved. Leave this blank to keep it."
-                  : "Leave blank if you have not registered the webhook yet."
+                  ? "A secret is saved. Leave blank to keep it."
+                  : "Verifies that stock updates really came from MetaKocka. Add it after registering the webhook."
               }
             />
-          </s-stack>
+          </s-box>
         </s-section>
       </Form>
 
