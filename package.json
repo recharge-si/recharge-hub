@@ -6,6 +6,7 @@
     "node": ">=22.12"
   },
   "scripts": {
+    "postinstall": "prisma generate",
     "dev": "shopify app dev",
     "dev:worker": "tsx watch src/jobs/worker.ts",
     "build": "react-router build && npm run build:worker",

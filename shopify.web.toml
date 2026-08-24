@@ -6,10 +6,15 @@
 #
 # The worker is deliberately not started here. It is a second process
 # (CLAUDE.md section 4) and runs separately with `npm run dev:worker`.
+#
+# There is no `predev = "prisma generate"` on purpose. Generating rewrites
+# query_engine-windows.dll.node, and on Windows that fails with EPERM whenever
+# any other process still has the engine loaded, which takes the whole dev
+# session down. Generation belongs to `postinstall` in package.json, and to
+# `npm run setup` after a schema change.
 
 name = "web"
 roles = ["frontend", "backend"]
 
 [commands]
-predev = "npm exec prisma generate"
 dev = "npm exec prisma migrate deploy && npm exec react-router dev"

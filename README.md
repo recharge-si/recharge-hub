@@ -68,6 +68,19 @@ The worker is a second process and does not start with `npm run dev`:
 npm run dev:worker
 ```
 
+## When the Prisma client needs regenerating
+
+`npm install` generates it. After changing `prisma/schema.prisma`:
+
+```bash
+npm run setup
+```
+
+Generation rewrites the query engine binary, and on Windows that fails with
+`EPERM ... rename query_engine-windows.dll.node` if any other Node process still
+has the engine loaded. Stop the worker and any stray dev server first. This is
+why `prisma generate` is deliberately not part of `shopify app dev`.
+
 ## Checks
 
 ```bash
