@@ -1,0 +1,15 @@
+# Tells the Shopify CLI that this app has a web process to run and tunnel.
+#
+# Without this file the CLI treats the project as extension-only: it starts no
+# server, never rewrites `application_url`, and the admin shows Shopify's
+# "Find this app in the pages where you work" placeholder instead of the app.
+#
+# The worker is deliberately not started here. It is a second process
+# (CLAUDE.md section 4) and runs separately with `npm run dev:worker`.
+
+name = "web"
+roles = ["frontend", "backend"]
+
+[commands]
+predev = "npm exec prisma generate"
+dev = "npm exec prisma migrate deploy && npm exec react-router dev"

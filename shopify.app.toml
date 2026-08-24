@@ -1,13 +1,23 @@
 # Shopify app configuration.
 #
-# `client_id`, `application_url` and the dev store are filled in by
-# `npm run config:link`. Everything else here is a deliberate choice from CLAUDE.md
-# and should not be changed by the CLI.
+# This is the single active config. `shopify app config link` writes a second
+# file named after the app handle if you let it; keep one file so there is no
+# question which settings are live.
+#
+# `application_url` and `[auth] redirect_urls` are rewritten by the CLI on every
+# `npm run dev` (see `automatically_update_urls_on_dev`), so the values below are
+# placeholders. Everything else is a deliberate choice from CLAUDE.md.
 
-client_id = ""
-name = "Fulfilment orchestrator"
+client_id = "b876b198fc12be312a91c6269b3694c8"
+
+# This is the display name in the admin, and it is pushed on deploy. It matches
+# what is currently registered in the Partner dashboard; changing it renames the
+# app for the merchant (CLAUDE.md section 2.6 also requires it not to truncate
+# when pinned in the admin nav).
+name = "fulfilment-orchestrator"
 handle = "fulfilment-orchestrator"
-application_url = "https://example.com"
+
+application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
 
 [access_scopes]
@@ -25,10 +35,12 @@ scopes = "read_products,write_products,read_inventory,write_inventory,read_locat
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = ["https://example.com/auth/callback"]
+redirect_urls = ["https://shopify.dev/apps/default-app-home/api/auth"]
 
 [webhooks]
 # Keep in step with API_VERSION in src/adapters/shopify/shopify.server.ts.
+# The current Shopify CLI defaults this to 2026-10; this app is pinned one
+# version behind because @shopify/shopify-api 13 does not know that version yet.
 api_version = "2026-07"
 
   # Handled by src/web/routes/webhooks.app.uninstalled.tsx

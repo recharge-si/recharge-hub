@@ -19,6 +19,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "config:link": "shopify app config link",
+    "env": "shopify app env",
     "deploy": "shopify app deploy",
     "shopify": "shopify",
     "prisma": "prisma"

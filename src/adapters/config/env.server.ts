@@ -38,7 +38,32 @@ const envSchema = z.object({
 
 export type Env = z.infer<typeof envSchema>;
 
+/**
+ * Outside production, fill in anything the parent process did not supply from
+ * `.env`.
+ *
+ * The Shopify CLI injects SHOPIFY_API_KEY, SHOPIFY_API_SECRET and
+ * SHOPIFY_APP_URL into the dev server itself, but nothing injects DATABASE_URL
+ * or ENCRYPTION_KEY. `process.loadEnvFile` does not overwrite variables that
+ * already exist, so the CLI's values always win over the placeholders in `.env`.
+ *
+ * In production the environment comes from Compose, and `.env` is not shipped
+ * in the image.
+ */
+function loadDotEnv(): void {
+  if (process.env.NODE_ENV === "production") return;
+
+  try {
+    process.loadEnvFile();
+  } catch {
+    // No .env file. Fine: everything may already be in the environment, and if
+    // it is not, the schema below reports exactly what is missing.
+  }
+}
+
 function loadEnv(): Env {
+  loadDotEnv();
+
   const parsed = envSchema.safeParse(process.env);
 
   if (!parsed.success) {

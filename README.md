@@ -41,12 +41,25 @@ docker compose up -d postgres
 npx prisma migrate deploy
 ```
 
-Link the app to your Partner account, then run it. The Shopify CLI supplies
-`SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET` and `SHOPIFY_APP_URL` itself:
+Link the app to your Partner account, then run it. The CLI injects
+`SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET` and `SHOPIFY_APP_URL` into the dev
+server itself, and rewrites `application_url` in `shopify.app.toml` to the
+tunnel URL on every run:
 
 ```bash
 npm run config:link
 npm run dev
+```
+
+`config:link` offers to write a second config file named after the app handle.
+Decline it, or fold anything it adds back into `shopify.app.toml` and delete it:
+two configs means the settings you edited may not be the ones Shopify has.
+
+To run a process outside `shopify app dev` (the worker, a script), the Shopify
+values have to be in `.env` instead. Pull them once:
+
+```bash
+npm run env -- pull
 ```
 
 The worker is a second process and does not start with `npm run dev`:
