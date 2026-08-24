@@ -27,7 +27,9 @@ export default function AppLayout() {
     <>
       <AppBridgeNavigation />
       <s-app-nav>
-        <s-link href="/app/settings/metakocka">Settings</s-link>
+        <s-link href="/app/settings/supply-sources">Supply sources</s-link>
+        <s-link href="/app/settings/payments">Payment types</s-link>
+        <s-link href="/app/settings/metakocka">Connection</s-link>
       </s-app-nav>
       <Outlet />
     </>

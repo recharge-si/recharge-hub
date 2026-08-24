@@ -56,6 +56,9 @@ model Shop {
 
   eventLogs           EventLog[]
   metakockaCredential MetakockaCredential?
+  supplySources       SupplySource[]
+  metakockaWarehouses MetakockaWarehouse[]
+  paymentTypeMaps     PaymentTypeMap[]
 
   @@map("shop")
 }
@@ -125,4 +128,107 @@ model MetakockaCredential {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("metakocka_credential")
+}
+
+enum SupplySourceKind {
+  own
+  partner
+
+  @@map("supply_source_kind")
+}
+
+/// Who is allowed to write inventory into the Shopify location (CLAUDE.md §7).
+/// Enforced as a throw in the inventory adapter, not as a convention.
+enum InventoryWriter {
+  /// This app writes it, from MetaKocka stock. Own warehouses only.
+  metakocka
+  /// Another app owns it. Never write these.
+  external
+  /// A human owns it. Never write.
+  manual
+
+  @@map("inventory_writer")
+}
+
+/// One place stock can come from: an own warehouse or a partner (CLAUDE.md §6).
+model SupplySource {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  code String
+  name String
+  kind SupplySourceKind @default(own)
+
+  shopifyLocationId String?         @map("shopify_location_id")
+  inventoryWriter   InventoryWriter @default(external) @map("inventory_writer")
+
+  /// The `mark` of a MetaKocka warehouse. MetaKocka accepts an unknown value
+  /// silently (§3), so this is validated against warehouse_list on save.
+  metakockaWarehouse    String? @map("metakocka_warehouse")
+  metakockaProfitCenter String? @map("metakocka_profit_center")
+
+  /// Lower runs first in allocation.
+  priority            Int     @default(100)
+  leadTimeDays        Int     @default(0) @map("lead_time_days")
+  defaultDeliveryType String? @map("default_delivery_type")
+  canSplit            Boolean @default(true) @map("can_split")
+  enabled             Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, code])
+  @@index([shopId, priority])
+  @@map("supply_source")
+}
+
+/// Shopify payment gateway to MetaKocka payment type (CLAUDE.md §6, §8.7).
+/// No MetaKocka endpoint lists the accepted strings, so this is merchant-entered
+/// and an unmapped gateway raises an exception rather than being guessed.
+model PaymentTypeMap {
+  id                   String @id @default(cuid())
+  shopId               String @map("shop_id")
+  shopifyGateway       String @map("shopify_gateway")
+  metakockaPaymentType String @map("metakocka_payment_type")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, shopifyGateway])
+  @@map("payment_type_map")
+}
+
+/// Local copy of the MetaKocka warehouse list.
+///
+/// Two reasons this is cached rather than fetched when a screen renders:
+/// CLAUDE.md §2.5 forbids any page load awaiting MetaKocka, and §3 (verified)
+/// says MetaKocka silently accepts a warehouse mark that does not exist. Holding
+/// the list locally lets the supply source form offer a choice instead of a free
+/// text field, so an invalid mark cannot be saved in the first place.
+///
+/// Refreshed explicitly by the merchant, and by the nightly reconciliation once
+/// that exists.
+model MetakockaWarehouse {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  mkId               String  @map("mk_id")
+  mark               String
+  name               String
+  isMain             Boolean @default(false) @map("is_main")
+  isActive           Boolean @default(true) @map("is_active")
+  includeInStockInfo Boolean @default(false) @map("include_in_stock_info")
+
+  syncedAt  DateTime @default(now()) @map("synced_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, mark])
+  @@map("metakocka_warehouse")
 }

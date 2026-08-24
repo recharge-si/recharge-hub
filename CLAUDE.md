@@ -217,8 +217,19 @@ paid. Shopify Plus-only features are hidden entirely from non-Plus merchants.
 
 ## 3. Hard facts about MetaKocka
 
-Verified from https://github.com/metakocka/metakocka_api_base
+Verified from https://github.com/metakocka/metakocka_api_base and, where marked
+**[verified]**, against test company 6789 on 2026-08-24. Full results in
+`docs/metakocka-verification.md`. Where the two disagree, the observed behaviour
+wins.
+
 Base URL: `https://main.metakocka.si/rest/eshop/v1/`
+
+**[verified] Endpoint paths split into two families and the wrong one returns an
+HTML 404, not a JSON error.** `warehouse_list`, `warehouse_stock` and
+`product_list` answer on `{base}json/{endpoint}`; `put_document`,
+`get_document` and `delete_document` answer on `{base}{endpoint}`. There is no
+rule to derive this from. Probe a new endpoint before using it and record it in
+`adapters/metakocka/endpoints.ts`.
 
 ### Authentication
 Every request body carries `secret_key` and `company_id`. That is the entire model — no
@@ -233,7 +244,21 @@ merchant's ERP. Treat it as a production database password (§10).
 - A split order therefore becomes **N sales orders, one per supply source** (decided).
 - `count_code` is the external reference. Derive deterministically:
   `SH-{shopifyOrderNumber}-{sourceCode}`.
-- `customer_order` links sibling documents. All documents from one Shopify order share it.
+- **[verified] `count_code` is not unique on MetaKocka's side.** Re-sending an
+  existing `count_code` does not fail and does not return the existing document:
+  it creates a second document under MetaKocka's own numbering (`1/2026`), which
+  can no longer be found by the `count_code` we sent. The duplicate guard in §8.4
+  is therefore the only thing preventing duplicate sales orders, and an ambiguous
+  timeout must be resolved by lookup, never by blind retry.
+- **[verified] `buyer_order` links sibling documents**, not `customer_order`.
+  A `customer_order` field sent on `put_document` is silently discarded; only
+  `buyer_order` persists and only `buyer_order` is searchable. All documents from
+  one Shopify order share it.
+- **[verified] An invalid `warehouse` is silently accepted.** Sending a warehouse
+  mark that does not exist returns `opr_code 0` and files the document against the
+  company default instead. MetaKocka validates `profit_center` and does not
+  validate `warehouse`, so `supply_source.metakocka_warehouse` must be validated
+  against `warehouse_list` by us, on save and before use.
 - `get_document` / `search` support `show_split_orders` — investigate before finalising
   reconciliation queries.
 - Lines in `product_list` with `code`, `amount`, and `price` or `price_with_tax`.
@@ -260,7 +285,9 @@ merchant's ERP. Treat it as a production database password (§10).
 ### Stock
 `warehouse_list`, `warehouse_stock`, `source_stock`, `import_inventory`.
 `warehouse_stock` returns `amount`, `reserved_amount`, `free_amount`. See §7 for which
-number is correct.
+number is correct. **[verified]** all three are returned by default with no flag, the
+response list is `stock_list`, and `product_code_list` matches the product's `code`,
+not its `count_code`.
 
 ### Webhooks (MetaKocka → us)
 - **Only one event exists: `warehouse_product_stock_update`.** No order webhook, no
@@ -289,7 +316,10 @@ splitting. Our allocation engine sits above this ceiling — that is the product
 - Push notification of anything except stock.
 - Provide idempotency keys. Duplicate prevention is entirely ours.
 - Return machine-readable errors. Failures are `opr_code` plus a human-readable
-  `opr_desc`. Build our own classifier.
+  `opr_desc`. Build our own classifier. **[verified]** codes so far: `0` success,
+  `2` request not accepted as written, `6` named entity does not exist
+  ("Profit center 'X' doesn't exist."). Anything unrecognised is an exception, not
+  a retry.
 
 ### Data format
 Numbers come back as **strings**. Dates are inconsistent: ISO-with-offset
@@ -453,8 +483,10 @@ only pairing that does not double-count.
 persistent gap is an exception, not a number to write. `order_in_delivery` is never
 published as sellable in v1.
 
-**This depends on `amount` not dropping at sales-order creation. Verify it (§14.8) before
-relying on it.** If it does drop, the correct source becomes `amount + reserved_amount`.
+**[verified] `amount` does not drop at sales-order creation.** An order for 2 units
+left `amount` at 10 and moved 2 into `reserved_amount`, with `free_amount` the
+difference. `amount` → on hand is confirmed correct; no fallback to
+`amount + reserved_amount` is needed.
 
 ### Mechanics
 
@@ -509,9 +541,12 @@ One job per supply source. Each job:
 
 - builds `count_code` = `SH-{orderNumber}-{sourceCode}`
 - checks `metakocka_document` for that `count_code`; if a successful row exists, **return
-  without calling MetaKocka**
+  without calling MetaKocka**. This is not an optimisation: MetaKocka happily creates a
+  duplicate document under its own numbering (§3), so this check is the duplicate guard
+- validates the source's `metakocka_warehouse` against `warehouse_list` before sending,
+  because MetaKocka accepts an unknown warehouse silently (§3)
 - sets document-level `warehouse`, `profit_center`, `delivery_type` from the source
-- sets `customer_order` to the shared reference
+- sets `buyer_order` to the shared reference (not `customer_order`, §3)
 - maps partner (buyer) and receiver (shipping address) separately — they differ for gift
   and B2B orders
 - sends `price_with_tax` on lines
@@ -713,6 +748,10 @@ bundles via `compound`, Omnibus `lowest_price_30_days`, App Store submission and
 
 Separate test `company_id`. Never point development at production — there is no sandbox
 flag, only a different company. Record every response in `tests/fixtures/`.
+
+**Results so far are in `docs/metakocka-verification.md`.** Items 2 and 8 are answered;
+items 1 and 3 are partial; 4, 5, 6 and 7 are open. The findings that changed this
+document are marked **[verified]** in §3 and §7.
 
 1. Create two sales orders sharing one `customer_order` with different warehouses. Check
    `show_split_orders` and whether it looks acceptable in the MetaKocka UI.

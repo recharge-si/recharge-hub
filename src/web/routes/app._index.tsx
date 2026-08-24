@@ -8,6 +8,8 @@ import {
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
 import { ensureShop, findShop } from "~/adapters/db/repositories/shop.server";
 import { getCredentialSummary } from "~/adapters/db/repositories/metakocka-credential.server";
+import { listPaymentTypeMaps } from "~/adapters/db/repositories/payment-type-map.server";
+import { listSupplySources } from "~/adapters/db/repositories/supply-source.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { principalFromSession } from "~/web/lib/principal.server";
 
@@ -27,11 +29,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const principal = principalFromSession(session);
 
-  const [existing, events, metakocka] = await Promise.all([
-    findShop(principal),
-    recentEvents(principal, 5),
-    getCredentialSummary(principal),
-  ]);
+  const [existing, events, metakocka, sources, paymentMaps] = await Promise.all(
+    [
+      findShop(principal),
+      recentEvents(principal, 5),
+      getCredentialSummary(principal),
+      listSupplySources(principal),
+      listPaymentTypeMaps(principal),
+    ],
+  );
 
   // The install hook creates this row. The fallback covers a shop whose row was
   // lost, and keeps the page load a pure read in the normal case.
@@ -44,6 +50,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       connected: metakocka.connected,
       verified: metakocka.lastVerifiedAt !== null,
     },
+    supplySources: {
+      total: sources.length,
+      ready: sources.filter(
+        (source) =>
+          source.enabled &&
+          source.metakockaWarehouse !== null &&
+          source.shopifyLocationId !== null,
+      ).length,
+    },
+    paymentMappings: paymentMaps.length,
     events: events.map((event) => ({
       id: event.id,
       event: event.event,
@@ -60,8 +76,14 @@ function formatDateTime(iso: string): string {
 }
 
 export default function Home() {
-  const { shopDomain, installedAt, events, metakocka } =
-    useLoaderData<typeof loader>();
+  const {
+    shopDomain,
+    installedAt,
+    events,
+    metakocka,
+    supplySources,
+    paymentMappings,
+  } = useLoaderData<typeof loader>();
 
   const erp = metakocka.verified
     ? { tone: "success" as const, label: "Connected", note: null }
@@ -89,14 +111,34 @@ export default function Home() {
             <s-badge tone={erp.tone}>{erp.label}</s-badge>
             <s-text>MetaKocka ERP</s-text>
           </s-stack>
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-badge tone={supplySources.ready > 0 ? "success" : "caution"}>
+              {supplySources.ready > 0
+                ? `${supplySources.ready} ready`
+                : "None ready"}
+            </s-badge>
+            <s-link href="/app/settings/supply-sources">Supply sources</s-link>
+          </s-stack>
+          <s-stack direction="inline" gap="base" alignItems="center">
+            <s-badge tone={paymentMappings > 0 ? "success" : "caution"}>
+              {paymentMappings > 0
+                ? `${paymentMappings} mapped`
+                : "None mapped"}
+            </s-badge>
+            <s-link href="/app/settings/payments">Payment types</s-link>
+          </s-stack>
           {erp.note ? <s-paragraph>{erp.note}</s-paragraph> : null}
+          {supplySources.total > 0 && supplySources.ready === 0 ? (
+            <s-paragraph>
+              A supply source is only usable once it has both a MetaKocka
+              warehouse and a Shopify location.
+            </s-paragraph>
+          ) : null}
         </s-stack>
       </s-section>
 
       <s-section heading="Installation">
-        <s-paragraph>
-          {`Installed ${formatDateTime(installedAt)}.`}
-        </s-paragraph>
+        <s-paragraph>{`Installed ${formatDateTime(installedAt)}.`}</s-paragraph>
       </s-section>
 
       <s-section heading="Recent activity">
