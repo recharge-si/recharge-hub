@@ -59,7 +59,7 @@ import { Dropdown } from "~/web/components/dropdown";
 import { NamePatternField } from "~/web/components/name-pattern-field";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
 import { OverwriteWarning } from "~/web/components/overwrite-warning";
-import { formatDateTime } from "~/web/components/sync-status";
+import { formatDateTime } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -718,227 +718,257 @@ export default function ProductSyncSettings() {
               checked={state.enabled}
               onChange={(e) => set({ enabled: e.currentTarget.checked })}
             />
-            <Dropdown
-              name="namePolicy"
-              label="When MetaKocka already has a name"
-              value={state.namePolicy}
-              onChange={(next) => set({ namePolicy: next })}
-              options={[
-                { value: "always", label: "Replace it with the Shopify name" },
-                {
-                  value: "when_empty",
-                  label: "Only fill it in when it is empty",
-                },
-                { value: "never", label: "Leave it alone" },
-              ]}
-            />
-            {/* Part 1 of the overwrite pattern: always present, names what is
+
+            {/*
+             * Everything below the switch depends on it. The sync job returns
+             * immediately when it is off, so a name policy, a pattern, a
+             * creation rule and a price rule are all inert -- and a screen full
+             * of settings that do nothing is a screen that has to be read
+             * before it can be dismissed. Only what is still true stays: the
+             * switch, and the pricelist and VAT below, which every sales order
+             * carries whether or not products are synced.
+             */}
+            {!state.enabled ? null : (
+              <>
+                <Dropdown
+                  name="namePolicy"
+                  label="When MetaKocka already has a name"
+                  value={state.namePolicy}
+                  onChange={(next) => set({ namePolicy: next })}
+                  options={[
+                    {
+                      value: "always",
+                      label: "Replace it with the Shopify name",
+                    },
+                    {
+                      value: "when_empty",
+                      label: "Only fill it in when it is empty",
+                    },
+                    { value: "never", label: "Leave it alone" },
+                  ]}
+                />
+                {/* Part 1 of the overwrite pattern: always present, names what is
                 overwritten and how often. */}
-            <s-text color="subdued">
-              {state.namePolicy === "always"
-                ? "Every sync replaces the name in MetaKocka. A name edited there is overwritten on the next run."
-                : state.namePolicy === "when_empty"
-                  ? "A MetaKocka product that already has a name keeps it."
-                  : "Existing MetaKocka products are never renamed."}
-            </s-text>
-            {/* Part 2: only in the unsaved state, only newly on. */}
-            <OverwriteWarning
-              saved={settings.namePolicy === "always"}
-              current={state.namePolicy === "always"}
-              heading="Shopify becomes the name master"
-            >
-              Save this and the next sync replaces the name of every matched
-              MetaKocka product, including names edited in MetaKocka.
-            </OverwriteWarning>
-          </s-stack>
-        </s-section>
-
-        <s-section heading="How the name is built">
-          <s-stack direction="block" gap="base">
-            <NamePatternField
-              name="nameTemplate"
-              label="Product name in MetaKocka"
-              value={state.nameTemplate}
-              onChange={(next) => {
-                setTouched(true);
-                set({ nameTemplate: next });
-              }}
-              registry={registry}
-              sample={patternSample ?? null}
-              {...(fieldError ? { error: fieldError } : {})}
-            />
-
-            {/*
-             * One banner, never two next to each other (§2.8). Errors sort
-             * first and set the tone; warnings ride along in the same block.
-             */}
-            {touched && diagnostics.length > 0 ? (
-              <s-banner
-                tone={blocked ? "critical" : "warning"}
-                heading={
-                  blocked
-                    ? "This name cannot be saved yet"
-                    : "Worth checking before you save"
-                }
-              >
-                <s-unordered-list>
-                  {diagnostics.map((diagnostic) => (
-                    <s-list-item
-                      key={`${diagnostic.code}-${diagnostic.message}`}
-                    >
-                      {diagnostic.message}
-                      {diagnostic.sampleIds.length > 0
-                        ? ` For example: ${diagnostic.sampleIds.join(", ")}.`
-                        : ""}
-                    </s-list-item>
-                  ))}
-                </s-unordered-list>
-              </s-banner>
-            ) : null}
-
-            <s-stack direction="block" gap="small-300">
-              <s-text type="strong">Or start from a ready pattern</s-text>
-              <s-grid
-                gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))"
-                gap="small-300"
-              >
-                {NAME_PATTERNS.map((option) => {
-                  const inUse = option.pattern === state.nameTemplate;
-                  const produced = patternSample
-                    ? nameFor(
-                        settingsFromTemplate(option.pattern),
-                        patternSample as VariantFacts,
-                      ).name
-                    : null;
-
-                  return (
-                    <s-clickable
-                      key={option.id}
-                      accessibilityLabel={
-                        produced
-                          ? `${option.label}. Would produce ${produced}.`
-                          : option.label
-                      }
-                      onClick={() => {
-                        setTouched(true);
-                        set({ nameTemplate: option.pattern });
-                      }}
-                    >
-                      <s-box
-                        background="subdued"
-                        borderRadius="base"
-                        padding="small-200"
-                      >
-                        <s-stack direction="block" gap="small-500">
-                          <s-text type="strong">{option.label}</s-text>
-                          {/*
-                           * The name this pattern gives one of the merchant's
-                           * own products. A shop with an empty catalogue gets
-                           * the pattern's name and no invented example.
-                           */}
-                          {produced ? (
-                            <s-text color="subdued">{produced}</s-text>
-                          ) : null}
-                          {inUse ? (
-                            <s-text color="subdued">In use</s-text>
-                          ) : null}
-                        </s-stack>
-                      </s-box>
-                    </s-clickable>
-                  );
-                })}
-              </s-grid>
-            </s-stack>
-
-            {/*
-             * The detail is behind a button, like the locations page puts a
-             * location behind one. On the page it is a single line of counts
-             * by outcome, which is the thing being decided.
-             */}
-            <s-stack direction="block" gap="small-300">
-              <s-text color="subdued">{previewSummary(preview.totals)}</s-text>
-              <s-button
-                type="button"
-                variant="secondary"
-                command="--show"
-                commandFor={PREVIEW_MODAL_ID}
-              >
-                See what changes
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
-
-        <s-section heading="Creating products MetaKocka does not have">
-          <s-stack direction="block" gap="base">
-            <s-checkbox
-              name="createMissing"
-              value="on"
-              label="Create missing products in MetaKocka"
-              details="Uses the SKU as the code, the name above, and the barcode."
-              checked={state.createMissing}
-              onChange={(e) => set({ createMissing: e.currentTarget.checked })}
-            />
-
-            <s-checkbox
-              name="sendPricing"
-              value="on"
-              label="Give a new product its Shopify price"
-              details="Applies only as a product is created."
-              checked={state.sendPricing}
-              onChange={(e) => set({ sendPricing: e.currentTarget.checked })}
-            />
-
-            <Dropdown
-              name="unit"
-              label="Unit of measure for new products"
-              details="MetaKocka only accepts a unit from its own register."
-              value={state.unit}
-              onChange={(next) => set({ unit: next })}
-              options={METAKOCKA_UNITS.map((unit) => ({
-                value: unit,
-                label: unit,
-              }))}
-              {...(errorFor("unit") ? { error: errorFor("unit") } : {})}
-            />
-          </s-stack>
-        </s-section>
-
-        {/*
-         * Its own section, because it is not about products MetaKocka is
-         * missing — it is about every product it already has.
-         */}
-        <s-section heading="Replacing prices on products MetaKocka already has">
-          <s-stack direction="block" gap="base">
-            <s-checkbox
-              name="updatePricing"
-              value="on"
-              label="Keep prices up to date from Shopify"
-              details="Every sync writes the Shopify price into the pricelist below, replacing the price MetaKocka holds."
-              checked={state.updatePricing}
-              disabled={!state.sendPricing}
-              onChange={(e) => set({ updatePricing: e.currentTarget.checked })}
-            />
-            {state.sendPricing ? null : (
-              <s-text color="subdued">
-                Turn on &ldquo;Give a new product its Shopify price&rdquo; above
-                to use this.
-              </s-text>
+                <s-text color="subdued">
+                  {state.namePolicy === "always"
+                    ? "Every sync replaces the name in MetaKocka. A name edited there is overwritten on the next run."
+                    : state.namePolicy === "when_empty"
+                      ? "A MetaKocka product that already has a name keeps it."
+                      : "Existing MetaKocka products are never renamed."}
+                </s-text>
+                {/* Part 2: only in the unsaved state, only newly on. */}
+                <OverwriteWarning
+                  saved={settings.namePolicy === "always"}
+                  current={state.namePolicy === "always"}
+                  heading="Shopify becomes the name master"
+                >
+                  Save this and the next sync replaces the name of every matched
+                  MetaKocka product, including names edited in MetaKocka.
+                </OverwriteWarning>
+              </>
             )}
-            {/*
-             * Gated on sending prices as well, because that is what the action
-             * stores: with it off nothing is overwritten.
-             */}
-            <OverwriteWarning
-              saved={settings.updatePricing}
-              current={state.updatePricing && state.sendPricing}
-              heading="Shopify becomes the price master"
-            >
-              Save this and the next sync replaces the price of every matched
-              MetaKocka product, including prices edited in MetaKocka.
-            </OverwriteWarning>
           </s-stack>
         </s-section>
+
+        {state.enabled ? (
+          <>
+            <s-section heading="How the name is built">
+              <s-stack direction="block" gap="base">
+                <NamePatternField
+                  name="nameTemplate"
+                  label="Product name in MetaKocka"
+                  value={state.nameTemplate}
+                  onChange={(next) => {
+                    setTouched(true);
+                    set({ nameTemplate: next });
+                  }}
+                  registry={registry}
+                  sample={patternSample ?? null}
+                  {...(fieldError ? { error: fieldError } : {})}
+                />
+
+                {/*
+                 * One banner, never two next to each other (§2.8). Errors sort
+                 * first and set the tone; warnings ride along in the same block.
+                 */}
+                {touched && diagnostics.length > 0 ? (
+                  <s-banner
+                    tone={blocked ? "critical" : "warning"}
+                    heading={
+                      blocked
+                        ? "This name cannot be saved yet"
+                        : "Worth checking before you save"
+                    }
+                  >
+                    <s-unordered-list>
+                      {diagnostics.map((diagnostic) => (
+                        <s-list-item
+                          key={`${diagnostic.code}-${diagnostic.message}`}
+                        >
+                          {diagnostic.message}
+                          {diagnostic.sampleIds.length > 0
+                            ? ` For example: ${diagnostic.sampleIds.join(", ")}.`
+                            : ""}
+                        </s-list-item>
+                      ))}
+                    </s-unordered-list>
+                  </s-banner>
+                ) : null}
+
+                <s-stack direction="block" gap="small-300">
+                  <s-text type="strong">Or start from a ready pattern</s-text>
+                  <s-grid
+                    gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))"
+                    gap="small-300"
+                  >
+                    {NAME_PATTERNS.map((option) => {
+                      const inUse = option.pattern === state.nameTemplate;
+                      const produced = patternSample
+                        ? nameFor(
+                            settingsFromTemplate(option.pattern),
+                            patternSample as VariantFacts,
+                          ).name
+                        : null;
+
+                      return (
+                        <s-clickable
+                          key={option.id}
+                          accessibilityLabel={
+                            produced
+                              ? `${option.label}. Would produce ${produced}.`
+                              : option.label
+                          }
+                          onClick={() => {
+                            setTouched(true);
+                            set({ nameTemplate: option.pattern });
+                          }}
+                        >
+                          <s-box
+                            background="subdued"
+                            borderRadius="base"
+                            padding="small-200"
+                          >
+                            <s-stack direction="block" gap="small-500">
+                              <s-text type="strong">{option.label}</s-text>
+                              {/*
+                               * The name this pattern gives one of the merchant's
+                               * own products. A shop with an empty catalogue gets
+                               * the pattern's name and no invented example.
+                               */}
+                              {produced ? (
+                                <s-text color="subdued">{produced}</s-text>
+                              ) : null}
+                              {inUse ? (
+                                <s-text color="subdued">In use</s-text>
+                              ) : null}
+                            </s-stack>
+                          </s-box>
+                        </s-clickable>
+                      );
+                    })}
+                  </s-grid>
+                </s-stack>
+
+                {/*
+                 * The detail is behind a button, like the locations page puts a
+                 * location behind one. On the page it is a single line of counts
+                 * by outcome, which is the thing being decided.
+                 */}
+                <s-stack direction="block" gap="small-300">
+                  <s-text color="subdued">
+                    {previewSummary(preview.totals)}
+                  </s-text>
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={PREVIEW_MODAL_ID}
+                  >
+                    See what changes
+                  </s-button>
+                </s-stack>
+              </s-stack>
+            </s-section>
+
+            <s-section heading="Creating products MetaKocka does not have">
+              <s-stack direction="block" gap="base">
+                <s-checkbox
+                  name="createMissing"
+                  value="on"
+                  label="Create missing products in MetaKocka"
+                  details="Uses the SKU as the code, the name above, and the barcode."
+                  checked={state.createMissing}
+                  onChange={(e) =>
+                    set({ createMissing: e.currentTarget.checked })
+                  }
+                />
+
+                <s-checkbox
+                  name="sendPricing"
+                  value="on"
+                  label="Give a new product its Shopify price"
+                  details="Applies only as a product is created."
+                  checked={state.sendPricing}
+                  onChange={(e) =>
+                    set({ sendPricing: e.currentTarget.checked })
+                  }
+                />
+
+                <Dropdown
+                  name="unit"
+                  label="Unit of measure for new products"
+                  details="MetaKocka only accepts a unit from its own register."
+                  value={state.unit}
+                  onChange={(next) => set({ unit: next })}
+                  options={METAKOCKA_UNITS.map((unit) => ({
+                    value: unit,
+                    label: unit,
+                  }))}
+                  {...(errorFor("unit") ? { error: errorFor("unit") } : {})}
+                />
+              </s-stack>
+            </s-section>
+
+            {/*
+             * Its own section, because it is not about products MetaKocka is
+             * missing — it is about every product it already has.
+             */}
+            <s-section heading="Replacing prices on products MetaKocka already has">
+              <s-stack direction="block" gap="base">
+                <s-checkbox
+                  name="updatePricing"
+                  value="on"
+                  label="Keep prices up to date from Shopify"
+                  details="Every sync writes the Shopify price into the pricelist below, replacing the price MetaKocka holds."
+                  checked={state.updatePricing}
+                  disabled={!state.sendPricing}
+                  onChange={(e) =>
+                    set({ updatePricing: e.currentTarget.checked })
+                  }
+                />
+                {state.sendPricing ? null : (
+                  <s-text color="subdued">
+                    Turn on &ldquo;Give a new product its Shopify price&rdquo;
+                    above to use this.
+                  </s-text>
+                )}
+                {/*
+                 * Gated on sending prices as well, because that is what the action
+                 * stores: with it off nothing is overwritten.
+                 */}
+                <OverwriteWarning
+                  saved={settings.updatePricing}
+                  current={state.updatePricing && state.sendPricing}
+                  heading="Shopify becomes the price master"
+                >
+                  Save this and the next sync replaces the price of every
+                  matched MetaKocka product, including prices edited in
+                  MetaKocka.
+                </OverwriteWarning>
+              </s-stack>
+            </s-section>
+          </>
+        ) : null}
 
         <s-section heading="Where prices and tax are filed in MetaKocka">
           <s-stack direction="block" gap="base">
@@ -996,7 +1026,7 @@ export default function ProductSyncSettings() {
               {pricelistOptions.length > 0 ? (
                 <s-button
                   type="button"
-                  variant="tertiary"
+                  variant="secondary"
                   onClick={() => setPricelistByHand((now) => !now)}
                 >
                   {pricelistByHand

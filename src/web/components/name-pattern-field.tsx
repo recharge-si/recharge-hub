@@ -191,7 +191,7 @@ export function NamePatternField({
 
             <s-button
               type="button"
-              variant="tertiary"
+              variant="secondary"
               onClick={() => setDismissed(query.start)}
             >
               Close the field list

@@ -21,8 +21,8 @@ import {
   usesMetafields,
 } from "~/domain/products/template";
 import { RecentActivity } from "~/web/components/recent-activity";
-import { SyncStatus } from "~/web/components/sync-status";
 import { describeEvent } from "~/web/lib/activity";
+import { formatDateTime } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -152,6 +152,7 @@ export default function Products() {
   const syncer = useFetcher<typeof action>();
   const result = syncer.data;
   const busy = syncer.state !== "idle";
+  const lastRunAt = status?.at ?? productSync.lastRunAt;
 
   const total = counts.matched + counts.unmatched + counts.ignored;
 
@@ -215,18 +216,11 @@ export default function Products() {
           </s-banner>
         ) : null}
 
-        <SyncStatus
-          title="Product sync"
-          healthy={status ? status.ok : true}
-          {...(status && !status.ok ? { problem: status.text } : {})}
-          lastRunAt={status?.at ?? productSync.lastRunAt}
-          outcome={status?.text ?? null}
-          cadence="Runs when you press Sync products."
-          action={{
-            label: "Open product sync settings",
-            href: "/app/products/sync",
-          }}
-        />
+        {status && !status.ok ? (
+          <s-banner tone="warning" heading="The last sync had a problem">
+            <s-paragraph>{status.text}</s-paragraph>
+          </s-banner>
+        ) : null}
 
         <s-section heading="Matching">
           <s-stack direction="block" gap="base">
@@ -247,6 +241,12 @@ export default function Products() {
             >
               Sync products
             </s-button>
+
+            <s-text color="subdued">
+              {lastRunAt
+                ? `Last synced ${formatDateTime(lastRunAt)}. Syncing runs when you press the button.`
+                : "Not synced yet. Syncing runs when you press the button."}
+            </s-text>
           </s-stack>
         </s-section>
 
