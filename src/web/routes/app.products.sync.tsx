@@ -60,6 +60,7 @@ import { NamePatternField } from "~/web/components/name-pattern-field";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
 import { OverwriteWarning } from "~/web/components/overwrite-warning";
 import { formatDateTime } from "~/web/lib/datetime";
+import { METAKOCKA_PRICELISTS_URL } from "~/web/lib/metakocka-links";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -624,6 +625,20 @@ export default function ProductSyncSettings() {
         : entry.title,
   }));
 
+  /**
+   * What the price would be written into, in the merchant's own words.
+   *
+   * "The pricelist above" is not an answer to "which one will this overwrite".
+   * MetaKocka's own title for it is, so the destructive switch names it and so
+   * does the warning beside it. Falls back to the bare code when the pricelist
+   * has no title, and says nothing has been chosen when nothing has.
+   */
+  const pricelistName = chosen?.title?.trim()
+    ? `“${chosen.title.trim()}”`
+    : state.pricelistCode
+      ? `pricelist ${state.pricelistCode}`
+      : null;
+
   const save = () =>
     saver.submit(
       {
@@ -693,6 +708,14 @@ export default function ProductSyncSettings() {
             Nothing is written to MetaKocka until you press Sync products on the
             Products page.
           </s-paragraph>
+          <s-paragraph>
+            Pricelists live in MetaKocka under Sales &rsaquo; Pricelists. The
+            code this app asks for is the one shown there as &ldquo;Price list
+            ID&rdquo;.
+          </s-paragraph>
+          <s-link href={METAKOCKA_PRICELISTS_URL} target="_blank">
+            Open pricelists in MetaKocka
+          </s-link>
         </s-stack>
         <s-button
           slot="primary-action"
@@ -972,10 +995,71 @@ export default function ProductSyncSettings() {
          */}
         <s-section heading="Prices and tax in MetaKocka">
           <s-stack direction="block" gap="base">
-            <s-paragraph>
-              Every sales order carries these, whether or not product prices are
-              synced.
-            </s-paragraph>
+            {/*
+             * First in the section and set apart, because it is the only
+             * setting here that destroys something. It was last, under the VAT
+             * rate, which is the least-read spot on the card.
+             *
+             * Set apart with a border rather than a colour: colour marks
+             * exceptions, and this is a choice rather than a problem
+             * (docs/ui-conventions.md). The payment types page frames its
+             * fallback the same way.
+             *
+             * Hidden entirely while names are not being sent, because the sync
+             * job returns before it reaches a price.
+             */}
+            {state.enabled ? (
+              <s-box
+                padding="base"
+                background="subdued"
+                borderRadius="base"
+                borderWidth="base"
+                borderStyle="solid"
+                borderColor="subdued"
+              >
+                <s-stack direction="block" gap="small-300">
+                  <s-checkbox
+                    name="updatePricing"
+                    value="on"
+                    label="Keep prices up to date from Shopify"
+                    details={
+                      pricelistName
+                        ? `Every sync overwrites the price in ${pricelistName} with the Shopify price.`
+                        : "Every sync overwrites the price in the pricelist below with the Shopify price. Choose one first."
+                    }
+                    checked={state.updatePricing}
+                    disabled={!state.sendPricing}
+                    onChange={(e) =>
+                      set({ updatePricing: e.currentTarget.checked })
+                    }
+                  />
+                  {state.sendPricing ? null : (
+                    <s-text color="subdued">
+                      Turn on &ldquo;Give a new product its Shopify price&rdquo;
+                      to use this.
+                    </s-text>
+                  )}
+                  {/*
+                   * Gated on sending prices as well, because that is what the
+                   * action stores: with it off nothing is overwritten.
+                   */}
+                  <OverwriteWarning
+                    saved={settings.updatePricing}
+                    current={state.updatePricing && state.sendPricing}
+                    heading="Shopify becomes the price master"
+                  >
+                    {pricelistName
+                      ? `Save this and the next sync overwrites the price of every matched product in ${pricelistName}, including prices edited in MetaKocka.`
+                      : "Save this and the next sync overwrites the price of every matched product, including prices edited in MetaKocka."}
+                  </OverwriteWarning>
+                </s-stack>
+              </s-box>
+            ) : null}
+
+            <s-text color="subdued">
+              Every sales order carries the pricelist and the rate below,
+              whether or not product prices are synced.
+            </s-text>
 
             {reloadFailed ? (
               <s-banner tone="warning" heading="Could not read your pricelists">
@@ -991,16 +1075,23 @@ export default function ProductSyncSettings() {
             ) : null}
 
             {pricelistByHand || pricelistOptions.length === 0 ? (
-              <s-text-field
-                name="pricelistCode"
-                label="MetaKocka pricelist code"
-                details="The code exactly as it appears in MetaKocka."
-                value={state.pricelistCode}
-                onChange={(e) => set({ pricelistCode: e.currentTarget.value })}
-                {...(errorFor("pricelistCode")
-                  ? { error: errorFor("pricelistCode") }
-                  : {})}
-              />
+              <s-stack direction="block" gap="small-400">
+                <s-text-field
+                  name="pricelistCode"
+                  label="MetaKocka pricelist code"
+                  details="In MetaKocka this is the pricelist's own “Price list ID”."
+                  value={state.pricelistCode}
+                  onChange={(e) =>
+                    set({ pricelistCode: e.currentTarget.value })
+                  }
+                  {...(errorFor("pricelistCode")
+                    ? { error: errorFor("pricelistCode") }
+                    : {})}
+                />
+                <s-link href={METAKOCKA_PRICELISTS_URL} target="_blank">
+                  Open pricelists in MetaKocka
+                </s-link>
+              </s-stack>
             ) : (
               <Dropdown
                 name="pricelistCode"
@@ -1109,48 +1200,6 @@ export default function ProductSyncSettings() {
                   </s-clickable-chip>
                 ))}
               </s-stack>
-            ) : null}
-
-            {/*
-             * Last in the section, after the pricelist it writes into, so
-             * "the pricelist above" points at something the merchant can see.
-             * Hidden entirely while names are not being sent: the sync job
-             * returns before it reaches a price, so the switch would be inert.
-             */}
-            {state.enabled ? (
-              <>
-                <s-divider />
-                <s-checkbox
-                  name="updatePricing"
-                  value="on"
-                  label="Keep prices up to date from Shopify"
-                  details="Every sync writes the Shopify price into the pricelist above, replacing the price MetaKocka holds."
-                  checked={state.updatePricing}
-                  disabled={!state.sendPricing}
-                  onChange={(e) =>
-                    set({ updatePricing: e.currentTarget.checked })
-                  }
-                />
-                {state.sendPricing ? null : (
-                  <s-text color="subdued">
-                    Turn on &ldquo;Give a new product its Shopify price&rdquo;
-                    to use this.
-                  </s-text>
-                )}
-                {/*
-                 * Gated on sending prices as well, because that is what the
-                 * action stores: with it off nothing is overwritten.
-                 */}
-                <OverwriteWarning
-                  saved={settings.updatePricing}
-                  current={state.updatePricing && state.sendPricing}
-                  heading="Shopify becomes the price master"
-                >
-                  Save this and the next sync replaces the price of every
-                  matched MetaKocka product, including prices edited in
-                  MetaKocka.
-                </OverwriteWarning>
-              </>
             ) : null}
           </s-stack>
         </s-section>

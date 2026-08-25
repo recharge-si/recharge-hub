@@ -198,6 +198,10 @@ export default function Products() {
             To fix an unmatched SKU, either add the product in MetaKocka with a
             matching code, or correct the SKU in Shopify.
           </s-paragraph>
+          <s-paragraph>
+            Stock is not set here. Each location decides which side is counted.
+          </s-paragraph>
+          <s-link href="/app/settings/supply-sources">Go to Locations</s-link>
         </s-stack>
         <s-button
           slot="primary-action"
@@ -316,12 +320,6 @@ export default function Products() {
             </s-link>
           </s-stack>
         </s-section>
-
-        {/* A pointer, so a line rather than a card. */}
-        <s-text color="subdued">
-          Stock is set per location, on the{" "}
-          <s-link href="/app/settings/supply-sources">Locations</s-link> page.
-        </s-text>
 
         <s-section heading="Recent activity">
           <RecentActivity
