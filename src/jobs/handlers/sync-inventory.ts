@@ -472,9 +472,40 @@ async function pushShopifyStockIntoMetakocka(
     managed.set(sku.metakockaCode ?? sku.sku, quantity);
   }
 
+  const current = new Map(
+    input.metakockaStock.map((row) => [row.code, row.amount]),
+  );
+
+  /*
+   * Write only on change (§7's own rule for the other direction, and it binds
+   * harder here: every `sync_stock` call files an inventory document in the
+   * merchant's ERP — an accounting action, not a cache refresh. This ran on
+   * the five-minute tick unconditionally, which is 288 stock documents a day
+   * per warehouse for a store where nothing moved.)
+   *
+   * The unmanaged products are echoed back at MetaKocka's own values by
+   * construction, so the only thing that can differ is a managed code —
+   * absence from `warehouse_stock` means zero (the read is fully paginated).
+   */
+  let changed = false;
+  for (const [code, quantity] of managed) {
+    if ((current.get(code) ?? 0) !== quantity) {
+      changed = true;
+      break;
+    }
+  }
+
+  if (!changed) {
+    log.info(
+      { shop: input.shopDomain, source: input.source.code },
+      "MetaKocka stock already matches Shopify, nothing written",
+    );
+    return;
+  }
+
   const lines = buildCompleteStockList({
     managed,
-    current: new Map(input.metakockaStock.map((row) => [row.code, row.amount])),
+    current,
     warehouseId: input.warehouseMkId,
   });
 

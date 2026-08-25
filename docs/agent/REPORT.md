@@ -375,3 +375,18 @@ Proposed patch once T-06 answers:
   so a retry does not wait out the lease.
 - **Verified by:** prisma validate, `tsc`, `eslint`, `vitest run` green;
   concurrent assertion belongs to T-04.
+
+### [P2] Shopify-to-MetaKocka stock wrote the whole warehouse every five minutes, changed or not
+- **Where:** `src/jobs/handlers/sync-inventory.ts` (pushShopifyStockIntoMetakocka)
+- **What:** The reverse direction called `sync_stock` unconditionally on the
+  five-minute tick. Section 7 is explicit that writing stock files an inventory
+  document in the merchant's ERP - an accounting action - so a quiet store
+  still accumulated 288 stock documents a day per warehouse. (In practice the
+  schedule-collision P0 masked this; fixing that would have unmasked this.)
+- **Spec:** CLAUDE.md section 7 ("write only on change" - stated for the other
+  direction and binding harder here).
+- **Status:** fixed - the write is skipped when every managed code already
+  matches MetaKocka's held amount (absence meaning zero, which the fully
+  paginated read makes safe). Unmanaged products are echoes by construction
+  and cannot differ.
+- **Verified by:** `tsc`, `eslint`, sync-stock unit tests green.
