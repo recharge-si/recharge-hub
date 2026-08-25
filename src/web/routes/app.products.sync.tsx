@@ -1061,8 +1061,7 @@ export default function ProductSyncSettings() {
             ) : null}
 
             <s-text color="subdued">
-              Every sales order carries the pricelist and the rate below,
-              whether or not product prices are synced.
+              Every sales order carries these, synced prices or not.
             </s-text>
 
             {reloadFailed ? (
@@ -1100,7 +1099,14 @@ export default function ProductSyncSettings() {
               <Dropdown
                 name="pricelistCode"
                 label="MetaKocka pricelist"
-                details="Found on your own priced products."
+                /* The name is what the merchant picks by; the code is what
+                   MetaKocka is sent. One line, on the field, rather than a
+                   sentence of its own underneath it. */
+                details={
+                  chosen
+                    ? `Sent to MetaKocka as code ${chosen.code}.`
+                    : "Found on your own priced products."
+                }
                 value={state.pricelistCode}
                 onChange={(next) => set({ pricelistCode: next })}
                 options={pricelistOptions}
@@ -1110,16 +1116,12 @@ export default function ProductSyncSettings() {
               />
             )}
 
-            {state.pricelistCode === "" ? null : chosen ? (
-              <s-text color="subdued">
-                {`Sent to MetaKocka as pricelist code ${chosen.code}.`}
-              </s-text>
-            ) : (
+            {state.pricelistCode !== "" && !chosen ? (
               <s-text color="subdued">
                 No priced product uses this code, so it could not be confirmed.
                 That is expected for a pricelist you have just made.
               </s-text>
-            )}
+            ) : null}
 
             <s-stack direction="inline" gap="base" alignItems="center">
               {pricelistOptions.length > 0 ? (
@@ -1141,22 +1143,22 @@ export default function ProductSyncSettings() {
               >
                 Refresh now
               </s-button>
-            </s-stack>
-
-            {loadingPricelists ? (
-              <s-stack direction="inline" gap="small-300" alignItems="center">
-                <s-spinner size="base" accessibilityLabel="Refreshing" />
+              {/* Beside the button rather than under it, so the button and
+                  what it last did read as one thing. The payment types page
+                  states the same fact the same way. */}
+              {loadingPricelists ? (
+                <s-stack direction="inline" gap="small-300" alignItems="center">
+                  <s-spinner size="base" accessibilityLabel="Refreshing" />
+                  <s-text color="subdued">Reading in the background.</s-text>
+                </s-stack>
+              ) : (
                 <s-text color="subdued">
-                  Reading your pricelists in the background.
+                  {pricelistsReadAt
+                    ? `Last read ${formatDateTime(pricelistsReadAt)}.`
+                    : "Not read yet."}
                 </s-text>
-              </s-stack>
-            ) : (
-              <s-text color="subdued">
-                {pricelistsReadAt
-                  ? `Last read ${formatDateTime(pricelistsReadAt)}.`
-                  : "Not read yet."}
-              </s-text>
-            )}
+              )}
+            </s-stack>
 
             {/*
              * A MetaKocka pricelist is created net or gross and cannot be
