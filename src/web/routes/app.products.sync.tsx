@@ -1216,7 +1216,13 @@ export default function ProductSyncSettings() {
              * settable.
              */}
             <Advanced
-              summary={`Prices ${state.pricelistBasis === "gross" ? "include" : "exclude"} tax.`}
+              summary={
+                /* Named, because "Prices include tax." beside the word
+                   Advanced says nothing: whose prices, on what. */
+                pricelistName
+                  ? `Prices on ${pricelistName} ${state.pricelistBasis === "gross" ? "include" : "exclude"} tax.`
+                  : `Pricelist prices ${state.pricelistBasis === "gross" ? "include" : "exclude"} tax.`
+              }
             >
               <Dropdown
                 name="pricelistBasis"
