@@ -47,6 +47,7 @@ import {
   NAME_PATTERNS,
   nameFor,
   parseTemplate,
+  pickerGroups,
   settingsFromTemplate,
   tokensOf,
   type Diagnostic,
@@ -83,6 +84,7 @@ import { principalFromSession } from "~/web/lib/principal.server";
 const HELP_MODAL_ID = "about-product-names";
 const PREVIEW_MODAL_ID = "name-preview";
 const PATTERNS_MODAL_ID = "ready-patterns";
+const FIELDS_MODAL_ID = "fields-you-can-use";
 const SAVE_BAR_ID = "product-sync-save-bar";
 
 /**
@@ -510,6 +512,9 @@ export default function ProductSyncSettings() {
   const saving = saver.state !== "idle";
   const result = saver.data ?? reloader.data;
 
+  /** Overlay methods land on the element only once the browser upgrades it. */
+  const patterns = useRef<{ hideOverlay?: () => void } | null>(null);
+
   const [state, setState] = useState<FormState>(() => toState(settings));
   // §2.8: no error before the merchant has had a chance to answer.
   const [touched, setTouched] = useState(false);
@@ -792,16 +797,22 @@ export default function ProductSyncSettings() {
        * shows the name it would give one of their own products, which is the
        * only reason to show a pattern at all (docs/ui-conventions.md).
        */}
-      <s-modal id={PATTERNS_MODAL_ID} heading="Ready patterns">
+      <s-modal
+        id={PATTERNS_MODAL_ID}
+        heading="Ready patterns"
+        ref={(element) => {
+          patterns.current = (element as { hideOverlay?: () => void }) ?? null;
+        }}
+      >
         {/*
-         * One column of full-width rows, not a grid of tiles. Four boxes of
-         * different heights side by side made a merchant read across as well
-         * as down for something they pick once, and the names they produce —
-         * the only reason to show a pattern at all — were the part that
-         * wrapped. A row is the shape the field list beside it already uses.
+         * Rows, the same shape as the field list that opens under the name.
+         * As filled grey boxes they read as four separate things to consider;
+         * as rows they read as a list to pick from, which is what they are.
+         * The tick marks the one in use, the way `dropdown.tsx` marks a chosen
+         * option — a word saying "In use" was a second idea in the same line.
          */}
-        <s-stack direction="block" gap="small-300">
-          {NAME_PATTERNS.map((option) => {
+        <s-stack direction="block" gap="none">
+          {NAME_PATTERNS.map((option, index) => {
             const inUse = option.pattern === state.nameTemplate;
             const produced = patternSample
               ? nameFor(
@@ -811,53 +822,98 @@ export default function ProductSyncSettings() {
               : null;
 
             return (
-              <s-clickable
-                key={option.id}
-                inlineSize="100%"
-                accessibilityLabel={
-                  produced
-                    ? `${option.label}. Would produce ${produced}.`
-                    : option.label
-                }
-                onClick={() => {
-                  setTouched(true);
-                  set({ nameTemplate: option.pattern });
-                }}
-              >
-                <s-box
-                  background="subdued"
-                  borderRadius="base"
-                  padding="base"
+              <s-stack key={option.id} direction="block" gap="none">
+                {index === 0 ? null : <s-divider />}
+                <s-clickable
                   inlineSize="100%"
+                  borderRadius="base"
+                  paddingInline="small-200"
+                  paddingBlock="small-300"
+                  accessibilityLabel={
+                    produced
+                      ? `${option.label}. Would produce ${produced}.`
+                      : option.label
+                  }
+                  onClick={() => {
+                    setTouched(true);
+                    set({ nameTemplate: option.pattern });
+                    patterns.current?.hideOverlay?.();
+                  }}
                 >
-                  <s-stack direction="block" gap="small-500">
-                    <s-stack
-                      direction="inline"
-                      gap="small-300"
-                      alignItems="center"
-                    >
+                  <s-grid
+                    gridTemplateColumns="1fr auto"
+                    gap="small-200"
+                    alignItems="center"
+                  >
+                    <s-stack direction="block" gap="small-500">
                       <s-text type="strong">{option.label}</s-text>
-                      {inUse ? <s-text color="subdued">In use</s-text> : null}
+                      {/*
+                       * The name this pattern gives one of the merchant's own
+                       * products. A shop with an empty catalogue gets the
+                       * pattern's name and no invented example.
+                       */}
+                      {produced ? (
+                        <s-text color="subdued">{produced}</s-text>
+                      ) : null}
                     </s-stack>
-                    {/*
-                     * The name this pattern gives one of the merchant's own
-                     * products. A shop with an empty catalogue gets the
-                     * pattern's name and no invented example.
-                     */}
-                    {produced ? (
-                      <s-text color="subdued">{produced}</s-text>
-                    ) : null}
-                  </s-stack>
-                </s-box>
-              </s-clickable>
+                    {inUse ? (
+                      <s-icon type="check" />
+                    ) : (
+                      <s-box inlineSize="20px" />
+                    )}
+                  </s-grid>
+                </s-clickable>
+              </s-stack>
             );
           })}
+        </s-stack>
+      </s-modal>
+
+      {/*
+       * What a name can be built from, for a merchant who does not yet know
+       * there is anything to type. The list under the field only appears once
+       * they have started, which is no help at all before they have.
+       */}
+      <s-modal id={FIELDS_MODAL_ID} heading="What you can put in a name">
+        <s-stack direction="block" gap="base">
+          <s-paragraph>
+            Start typing any of these in the name and it will offer itself. Each
+            one shows what it comes to for one of your own products.
+          </s-paragraph>
+
+          {pickerGroups(registry, "", patternSample ?? null).map((group) => (
+            <s-stack key={group.id} direction="block" gap="none">
+              <s-box paddingBlock="small-300">
+                <s-text color="subdued" type="strong">
+                  {group.label}
+                </s-text>
+              </s-box>
+              {group.rows.map((row) => (
+                <s-box key={row.field.id} paddingBlock="small-400">
+                  <s-grid
+                    gridTemplateColumns="1fr auto"
+                    gap="base"
+                    alignItems="center"
+                  >
+                    <s-text>{row.field.label}</s-text>
+                    <s-text color="subdued">
+                      {row.value === null
+                        ? ""
+                        : row.value === ""
+                          ? "empty here"
+                          : row.value}
+                    </s-text>
+                  </s-grid>
+                </s-box>
+              ))}
+            </s-stack>
+          ))}
         </s-stack>
         <s-button
           slot="primary-action"
           variant="primary"
           command="--hide"
-          commandFor={PATTERNS_MODAL_ID}
+          commandFor={FIELDS_MODAL_ID}
         >
           Close
         </s-button>
@@ -898,15 +954,26 @@ export default function ProductSyncSettings() {
          * prices, so a merchant reading the old label could turn on price
          * overwriting believing they had only agreed to names.
          */}
+        {/*
+         * The explanatory line sits under the control, at the card's own left
+         * edge, rather than in the checkbox's `details` — which indents it to
+         * clear the box and leaves a ragged gap down the left of every card.
+         * Every checkbox on this page states its detail this way.
+         */}
         <s-section heading="Product sync">
-          <s-checkbox
-            name="enabled"
-            value="on"
-            label="Sync products to MetaKocka"
-            details="Names, new products and prices. Nothing is written to MetaKocka while this is off."
-            checked={state.enabled}
-            onChange={(e) => set({ enabled: e.currentTarget.checked })}
-          />
+          <s-stack direction="block" gap="small-400">
+            <s-checkbox
+              name="enabled"
+              value="on"
+              label="Sync products to MetaKocka"
+              checked={state.enabled}
+              onChange={(e) => set({ enabled: e.currentTarget.checked })}
+            />
+            <s-text color="subdued">
+              Names, new products and prices. Nothing is written to MetaKocka
+              while this is off.
+            </s-text>
+          </s-stack>
         </s-section>
 
         {state.enabled ? (
@@ -994,7 +1061,15 @@ export default function ProductSyncSettings() {
                  * and sitting on its own between two cards it read as a
                  * heading nobody could press.
                  */}
-                <s-stack direction="inline">
+                <s-stack direction="inline" gap="base" alignItems="center">
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={FIELDS_MODAL_ID}
+                  >
+                    What you can put in a name
+                  </s-button>
                   <s-button
                     type="button"
                     variant="secondary"
@@ -1006,14 +1081,16 @@ export default function ProductSyncSettings() {
                 </s-stack>
 
                 {/*
-                 * The detail is behind a button, like the locations page puts a
-                 * location behind one. On the page it is a single line of counts
-                 * by outcome, which is the thing being decided.
+                 * The foot of the card was a button, then a stray sentence,
+                 * then another button, each on its own line and none of them
+                 * obviously related. Two rows now: what helps you write a name,
+                 * then what that name would do — the count beside the button
+                 * that explains it, the way Refresh now and "Last read" sit
+                 * together further down the page.
                  */}
-                <s-stack direction="block" gap="small-300">
-                  <s-text color="subdued">
-                    {previewSummary(preview.totals)}
-                  </s-text>
+                <s-divider />
+
+                <s-stack direction="inline" gap="base" alignItems="center">
                   <s-button
                     type="button"
                     variant="secondary"
@@ -1022,33 +1099,44 @@ export default function ProductSyncSettings() {
                   >
                     See what changes
                   </s-button>
+                  <s-text color="subdued">
+                    {previewSummary(preview.totals)}
+                  </s-text>
                 </s-stack>
               </s-stack>
             </s-section>
 
             <s-section heading="Creating products MetaKocka does not have">
               <s-stack direction="block" gap="base">
-                <s-checkbox
-                  name="createMissing"
-                  value="on"
-                  label="Create missing products in MetaKocka"
-                  details="Uses the SKU as the code, the name above, and the barcode."
-                  checked={state.createMissing}
-                  onChange={(e) =>
-                    set({ createMissing: e.currentTarget.checked })
-                  }
-                />
+                <s-stack direction="block" gap="small-400">
+                  <s-checkbox
+                    name="createMissing"
+                    value="on"
+                    label="Create missing products in MetaKocka"
+                    checked={state.createMissing}
+                    onChange={(e) =>
+                      set({ createMissing: e.currentTarget.checked })
+                    }
+                  />
+                  <s-text color="subdued">
+                    Uses the SKU as the code, the name above, and the barcode.
+                  </s-text>
+                </s-stack>
 
-                <s-checkbox
-                  name="sendPricing"
-                  value="on"
-                  label="Give a new product its Shopify price"
-                  details="Applies only as a product is created."
-                  checked={state.sendPricing}
-                  onChange={(e) =>
-                    set({ sendPricing: e.currentTarget.checked })
-                  }
-                />
+                <s-stack direction="block" gap="small-400">
+                  <s-checkbox
+                    name="sendPricing"
+                    value="on"
+                    label="Give a new product its Shopify price"
+                    checked={state.sendPricing}
+                    onChange={(e) =>
+                      set({ sendPricing: e.currentTarget.checked })
+                    }
+                  />
+                  <s-text color="subdued">
+                    Applies only as a product is created.
+                  </s-text>
+                </s-stack>
 
                 <Dropdown
                   name="unit"
