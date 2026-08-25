@@ -55,6 +55,7 @@ import {
   METAKOCKA_UNITS,
   isKnownUnit,
 } from "~/domain/products/units";
+import { Advanced } from "~/web/components/advanced";
 import { Dropdown } from "~/web/components/dropdown";
 import { NamePatternField } from "~/web/components/name-pattern-field";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
@@ -495,12 +496,6 @@ export default function ProductSyncSettings() {
   const [pricelistByHand, setPricelistByHand] = useState(
     () => pricelists.length === 0,
   );
-  /**
-   * Advanced starts closed, and opens itself when something inside it is the
-   * reason a save was refused. A merchant should never be told a field is
-   * wrong and then have to guess which card it is folded into.
-   */
-  const [advanced, setAdvanced] = useState(false);
 
   const set = (patch: Partial<FormState>) =>
     setState((current) => ({ ...current, ...patch }));
@@ -537,12 +532,6 @@ export default function ProductSyncSettings() {
     },
     [],
   );
-
-  useEffect(() => {
-    if (saver.data && !saver.data.ok && saver.data.field === "unit") {
-      setAdvanced(true);
-    }
-  }, [saver.data]);
 
   useEffect(() => {
     if (!saver.data?.ok) return;
@@ -994,6 +983,19 @@ export default function ProductSyncSettings() {
                     set({ sendPricing: e.currentTarget.checked })
                   }
                 />
+
+                <Dropdown
+                  name="unit"
+                  label="Unit of measure for new products"
+                  details="MetaKocka only accepts a unit from its own register."
+                  value={state.unit}
+                  onChange={(next) => set({ unit: next })}
+                  options={METAKOCKA_UNITS.map((unit) => ({
+                    value: unit,
+                    label: unit,
+                  }))}
+                  {...(errorFor("unit") ? { error: errorFor("unit") } : {})}
+                />
               </s-stack>
             </s-section>
           </>
@@ -1206,72 +1208,34 @@ export default function ProductSyncSettings() {
                 ))}
               </s-stack>
             ) : null}
+
+            {/*
+             * Folded, because a pricelist's type is fixed when it is created
+             * and the catalogue usually tells us which it is — but a pricelist
+             * with nothing priced on it cannot be read, so it still has to be
+             * settable.
+             */}
+            <Advanced
+              summary={`Prices ${state.pricelistBasis === "gross" ? "include" : "exclude"} tax.`}
+            >
+              <Dropdown
+                name="pricelistBasis"
+                label="Prices on that pricelist are"
+                details={
+                  observedBasis
+                    ? `Your own priced products say this pricelist is ${observedBasis}. Change it only if they are wrong.`
+                    : "No priced product could tell us. If this is wrong, the first sync says so and corrects itself."
+                }
+                value={state.pricelistBasis}
+                onChange={(next) => set({ pricelistBasis: next })}
+                options={[
+                  { value: "gross", label: "Including tax (gross)" },
+                  { value: "net", label: "Excluding tax (net)" },
+                ]}
+              />
+            </Advanced>
           </s-stack>
         </s-section>
-
-        {/*
-         * The two settings that are right almost always and wrong occasionally.
-         *
-         * Neither belongs in the flow. The pricelist's tax basis is a fact the
-         * catalogue usually tells us, and the unit is MetaKocka's default for
-         * nearly every Slovenian company — but a pricelist with nothing priced
-         * on it cannot be read, and a company selling by weight needs the unit,
-         * so neither can simply go.
-         *
-         * Collapsed, with the answer summarised on the closed card, so the
-         * common case costs one line and the uncommon one costs one click. The
-         * Show action sits in the section's own header slot, like the count on
-         * the locations page.
-         */}
-        {state.enabled ? (
-          <s-section heading="Advanced">
-            <s-button
-              slot="secondary-actions"
-              type="button"
-              variant="tertiary"
-              onClick={() => setAdvanced((now) => !now)}
-            >
-              {advanced ? "Hide" : "Show"}
-            </s-button>
-
-            {advanced ? (
-              <s-stack direction="block" gap="base">
-                <Dropdown
-                  name="pricelistBasis"
-                  label="Prices on that pricelist are"
-                  details={
-                    observedBasis
-                      ? `Your own priced products say this pricelist is ${observedBasis}. Change it only if they are wrong.`
-                      : "No priced product could tell us. If this is wrong, the first sync says so and corrects itself."
-                  }
-                  value={state.pricelistBasis}
-                  onChange={(next) => set({ pricelistBasis: next })}
-                  options={[
-                    { value: "gross", label: "Including tax (gross)" },
-                    { value: "net", label: "Excluding tax (net)" },
-                  ]}
-                />
-
-                <Dropdown
-                  name="unit"
-                  label="Unit of measure for new products"
-                  details="MetaKocka only accepts a unit from its own register."
-                  value={state.unit}
-                  onChange={(next) => set({ unit: next })}
-                  options={METAKOCKA_UNITS.map((unit) => ({
-                    value: unit,
-                    label: unit,
-                  }))}
-                  {...(errorFor("unit") ? { error: errorFor("unit") } : {})}
-                />
-              </s-stack>
-            ) : (
-              <s-text color="subdued">
-                {`Prices ${state.pricelistBasis === "gross" ? "include" : "exclude"} tax, new products are sold in ${state.unit}.`}
-              </s-text>
-            )}
-          </s-section>
-        ) : null}
       </s-stack>
     </s-page>
   );
