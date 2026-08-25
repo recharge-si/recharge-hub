@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { MetakockaClient } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
+import type { ProductTypeFlags } from "~/adapters/metakocka/products";
 import { mkDecimal } from "~/adapters/metakocka/values";
 
 /**
@@ -91,6 +92,10 @@ const productRowSchema = z
     code: z.string(),
     name: z.string().optional(),
     unit: z.string().optional(),
+    // The three type flags, as MetaKocka sends everything: strings.
+    sales: z.string().optional(),
+    purchasing: z.string().optional(),
+    service: z.string().optional(),
   })
   .passthrough();
 
@@ -105,6 +110,36 @@ export interface MetakockaProduct {
   /** Matches a Shopify SKU. */
   code: string;
   name: string | null;
+  /**
+   * Prodajni / Nabavni / Storitev as the catalogue currently holds them, or
+   * null when the response did not carry all three.
+   *
+   * Null is "we do not know", not "all false", and the difference matters:
+   * a caller that treated an absent flag as false would rewrite the type of
+   * every article on every run.
+   */
+  type: ProductTypeFlags | null;
+}
+
+/** MetaKocka sends booleans as "true"/"false"; anything else is unknown. */
+function flagOf(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const normalised = value.trim().toLowerCase();
+  if (normalised === "true") return true;
+  if (normalised === "false") return false;
+  return null;
+}
+
+function typeOf(row: {
+  sales?: string | undefined;
+  purchasing?: string | undefined;
+  service?: string | undefined;
+}): ProductTypeFlags | null {
+  const sales = flagOf(row.sales);
+  const purchasing = flagOf(row.purchasing);
+  const service = flagOf(row.service);
+  if (sales === null || purchasing === null || service === null) return null;
+  return { sales, purchasing, service };
 }
 
 /** The whole product catalogue, paginated. */
@@ -125,6 +160,7 @@ export async function listProducts(
         mkId: row.mk_id,
         code: row.code,
         name: row.name ?? null,
+        type: typeOf(row),
       });
     }
 

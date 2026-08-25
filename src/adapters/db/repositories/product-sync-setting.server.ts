@@ -25,6 +25,12 @@ export interface ProductSyncSettings {
   pricelistIncludesTax: boolean;
   taxPercent: string | null;
   unit: string;
+  /** Prodajni / Nabavni / Storitev for the articles this app writes. */
+  productSales: boolean;
+  productPurchasing: boolean;
+  productService: boolean;
+  /** Also set them on articles MetaKocka already has. */
+  updateProductType: boolean;
   lastRunAt: Date | null;
 }
 
@@ -39,6 +45,10 @@ export const PRODUCT_SYNC_DEFAULTS: ProductSyncSettings = {
   pricelistIncludesTax: true,
   taxPercent: null,
   unit: "kos",
+  productSales: true,
+  productPurchasing: false,
+  productService: false,
+  updateProductType: false,
   lastRunAt: null,
 };
 
@@ -72,6 +82,10 @@ export async function getProductSyncSetting(
     pricelistIncludesTax: row.pricelistIncludesTax,
     taxPercent: row.taxPercent,
     unit: row.unit,
+    productSales: row.productSales,
+    productPurchasing: row.productPurchasing,
+    productService: row.productService,
+    updateProductType: row.updateProductType,
     lastRunAt: row.lastRunAt,
   };
 }

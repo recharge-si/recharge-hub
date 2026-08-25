@@ -59,6 +59,39 @@ export interface PriceInput {
   taxFactor: string | null;
 }
 
+/**
+ * What kind of article MetaKocka holds — Prodajni, Nabavni, Storitev.
+ *
+ * These three are the only type flags `product_add` and `product_update`
+ * accept (`docs/product_concept.md`). The MetaKocka product screen shows two
+ * more, Delo and Osnovno sredstvo: `work` exists only as a `product_list`
+ * filter and fixed asset appears nowhere in the API, so neither can be set
+ * from here and neither is invented (§15).
+ *
+ * Left unset, MetaKocka defaults all three to false, and an article that is
+ * not `sales` cannot go on a sales order at all.
+ */
+export interface ProductTypeFlags {
+  sales: boolean;
+  purchasing: boolean;
+  service: boolean;
+}
+
+/** What this app sent before the flags were settable. */
+export const DEFAULT_PRODUCT_TYPE: ProductTypeFlags = {
+  sales: true,
+  purchasing: false,
+  service: false,
+};
+
+function typeBody(flags: ProductTypeFlags) {
+  return {
+    sales: String(flags.sales),
+    purchasing: String(flags.purchasing),
+    service: String(flags.service),
+  };
+}
+
 export interface ProductInput {
   /** The external reference. This app uses the Shopify SKU for both. */
   countCode: string;
@@ -67,6 +100,8 @@ export interface ProductInput {
   barcode?: string | null;
   unit?: string;
   price?: PriceInput | null;
+  /** Defaults to a sales-only article, which is what this app always sent. */
+  type?: ProductTypeFlags;
 }
 
 export interface ProductWriteResult {
@@ -94,8 +129,8 @@ function pricelistBody(price: PriceInput) {
 }
 
 /**
- * Creates a product. `sales: "true"` and `service: "false"` because everything
- * this app syncs is a stocked item a customer buys.
+ * Creates a product. The type flags are the merchant's (see ProductTypeFlags);
+ * everything else about the article stays MetaKocka's (§8.9).
  */
 export async function addProduct(
   client: MetakockaClient,
@@ -108,8 +143,7 @@ export async function addProduct(
       code: input.code,
       name: input.name,
       unit: input.unit ?? "kos",
-      service: "false",
-      sales: "true",
+      ...typeBody(input.type ?? DEFAULT_PRODUCT_TYPE),
       ...(input.barcode ? { barcode: input.barcode } : {}),
       ...(input.price ? { pricelist: pricelistBody(input.price) } : {}),
     },
@@ -129,6 +163,15 @@ export interface ProductUpdateInput {
   name?: string;
   barcode?: string | null;
   price?: PriceInput | null;
+  /**
+   * Sent only when the merchant asked for it, and only when the article's
+   * flags actually differ — MetaKocka warns and asks for
+   * `confirm_save_change_product_service` when the service flag changes on an
+   * article already used on a document, and that confirmation recalculates
+   * stock. This app never sends it: the rejection is reported to the merchant
+   * instead of silently agreeing to a recalculation on their books.
+   */
+  type?: ProductTypeFlags | null;
 }
 
 /**
@@ -153,6 +196,7 @@ export async function updateProduct(
       ...(input.countCode ? { count_code: input.countCode } : {}),
       ...(input.name ? { name: input.name } : {}),
       ...(input.barcode ? { barcode: input.barcode } : {}),
+      ...(input.type ? typeBody(input.type) : {}),
       ...(input.price ? { pricelist: pricelistBody(input.price) } : {}),
     },
     productResponseSchema,

@@ -11,7 +11,7 @@ import {
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
 import {
-  listPricelists,
+  getPricelistRegister,
   listTaxRates,
   recordObservation,
   rememberPricelistCode,
@@ -60,6 +60,7 @@ import {
   isKnownUnit,
 } from "~/domain/products/units";
 import { Advanced } from "~/web/components/advanced";
+import { AdvancedSection } from "~/web/components/advanced-section";
 import { Dropdown } from "~/web/components/dropdown";
 import { PatternEditor } from "~/web/components/pattern-editor";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
@@ -122,7 +123,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     samples,
     definitions,
     catalogue,
-    pricelists,
+    register,
     taxRates,
     credential,
   ] = await Promise.all([
@@ -134,7 +135,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // products is a sample; twelve out of twelve is the whole catalogue, and
     // the screen must not let those read the same.
     countVariants(admin),
-    listPricelists(principal),
+    getPricelistRegister(principal),
     listTaxRates(principal),
     getCredential(principal),
   ]);
@@ -153,15 +154,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    * Keep the pricelist register current without ever waiting on it. A nightly
    * job already refreshes it; this covers the shop that connected an hour ago.
    * Enqueued, never awaited (§2.5).
+   *
+   * Staleness is measured from when the register was last *read*, not from the
+   * newest sighting in it. A shop whose pricelists have all been deleted has no
+   * sighting at all, and measuring from sightings would have it re-reading on
+   * every page load forever.
    */
-  const observedAt = pricelists
-    .map((entry) => entry.observedAt)
-    .filter((at): at is Date => at !== null)
-    .sort((a, b) => b.getTime() - a.getTime())[0];
-
+  const readAt = register.readAt;
   const stale =
-    observedAt === undefined ||
-    Date.now() - observedAt.getTime() > STALE_AFTER_MS;
+    readAt === null || Date.now() - readAt.getTime() > STALE_AFTER_MS;
 
   let refreshing = false;
   if (credential && stale) {
@@ -183,12 +184,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     definitions,
     catalogue,
     currentNames: [...currentNames.entries()],
-    pricelists: pricelists.map((entry) => ({
+    pricelists: register.entries.map((entry) => ({
       code: entry.code,
       title: entry.title,
       includesTax: entry.includesTax,
+      seen: entry.seen,
+      lastSeenAt: entry.observedAt?.toISOString() ?? null,
     })),
-    pricelistsReadAt: observedAt?.toISOString() ?? null,
+    pricelistsReadAt: readAt?.toISOString() ?? null,
     taxRates,
     connected: Boolean(credential),
     refreshing,
@@ -368,6 +371,22 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
   }
 
+  const productSales = checked("productSales");
+  const productPurchasing = checked("productPurchasing");
+  const productService = checked("productService");
+
+  if (!productSales && !productPurchasing && !productService) {
+    // MetaKocka accepts an article with none of the three set, and it is then
+    // an article that cannot go on any document — least of all the sales order
+    // this app writes. Refused here, once, rather than on every order later.
+    return {
+      ok: false,
+      field: "productType",
+      message:
+        "Choose at least one product type. An article marked none of these cannot be put on a MetaKocka document.",
+    };
+  }
+
   await saveProductSyncSetting(principal, {
     enabled: checked("enabled"),
     nameTemplate,
@@ -379,6 +398,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     pricelistIncludesTax: value("pricelistBasis") !== "net",
     taxPercent,
     unit: unit,
+    productSales,
+    productPurchasing,
+    productService,
+    updateProductType: checked("updateProductType"),
   });
 
   // A code typed by hand is kept in the register so the picker offers it back
@@ -405,6 +428,10 @@ interface FormState {
   pricelistBasis: string;
   taxPercent: string;
   unit: string;
+  productSales: boolean;
+  productPurchasing: boolean;
+  productService: boolean;
+  updateProductType: boolean;
 }
 
 function toState(settings: {
@@ -418,6 +445,10 @@ function toState(settings: {
   pricelistIncludesTax: boolean;
   taxPercent: string | null;
   unit: string;
+  productSales: boolean;
+  productPurchasing: boolean;
+  productService: boolean;
+  updateProductType: boolean;
 }): FormState {
   return {
     enabled: settings.enabled,
@@ -430,7 +461,31 @@ function toState(settings: {
     pricelistBasis: settings.pricelistIncludesTax ? "gross" : "net",
     taxPercent: settings.taxPercent ?? "",
     unit: settings.unit,
+    productSales: settings.productSales,
+    productPurchasing: settings.productPurchasing,
+    productService: settings.productService,
+    updateProductType: settings.updateProductType,
   };
+}
+
+/**
+ * The three MetaKocka type boxes as one phrase: "Sales and Purchase".
+ *
+ * English labels, matching the MetaKocka product screen the merchant is
+ * looking at in the other tab, rather than the API's own `purchasing`.
+ */
+function typeLabels(state: FormState): string[] {
+  const labels: string[] = [];
+  if (state.productSales) labels.push("Sales");
+  if (state.productPurchasing) labels.push("Purchase");
+  if (state.productService) labels.push("Service");
+  return labels;
+}
+
+function joinLabels(labels: string[]): string {
+  if (labels.length === 0) return "nothing";
+  if (labels.length === 1) return labels[0]!;
+  return `${labels.slice(0, -1).join(", ")} and ${labels[labels.length - 1]!}`;
 }
 
 /** Errors first: they are what stops the merchant, and they say why. */
@@ -521,10 +576,12 @@ export default function ProductSyncSettings() {
   /**
    * Whether the pricelist is being typed rather than chosen. The merchant is
    * never hard-blocked on a list we could not load, so a shop with no
-   * pricelists to offer starts here.
+   * pricelists to offer starts here — including one whose pricelists were all
+   * deleted in MetaKocka, which is a register full of rows and nothing to
+   * choose from.
    */
-  const [pricelistByHand, setPricelistByHand] = useState(
-    () => pricelists.length === 0,
+  const [pricelistByHand, setPricelistByHand] = useState(() =>
+    pricelists.every((entry) => !entry.seen),
   );
 
   const set = (patch: Partial<FormState>) =>
@@ -644,13 +701,27 @@ export default function ProductSyncSettings() {
    * It comes back into the label only where the name cannot tell two apart: a
    * pricelist with no name at all, or two sharing one.
    */
+  /**
+   * Only what the newest read actually found.
+   *
+   * The register keeps a code after it stops being seen, on purpose: a
+   * configured setting must not look unconfigured (pricelist.server.ts). But
+   * keeping it and *offering* it are different things. A merchant who deleted
+   * their pricelists in MetaKocka was still shown "Price List 2" in this
+   * picker, ready to be chosen and written into on the next sync, because the
+   * read that found nothing changed no row. A pricelist we cannot see is one we
+   * cannot vouch for, so it is not on the menu — it can still be typed.
+   */
+  const offered = pricelists.filter((entry) => entry.seen);
+  const canChoose = offered.length > 0;
+
   const titleCounts = new Map<string, number>();
-  for (const entry of pricelists) {
+  for (const entry of offered) {
     if (!entry.title) continue;
     titleCounts.set(entry.title, (titleCounts.get(entry.title) ?? 0) + 1);
   }
 
-  const pricelistOptions = pricelists.map((entry) => ({
+  const pricelistOptions = offered.map((entry) => ({
     value: entry.code,
     label: !entry.title
       ? `Code ${entry.code}`
@@ -658,6 +729,23 @@ export default function ProductSyncSettings() {
         ? `${entry.title} (code ${entry.code})`
         : entry.title,
   }));
+
+  /**
+   * The configured code was on a priced product once and is not now. That is a
+   * different sentence from "we have never seen it": one is a new pricelist we
+   * cannot see into, the other is one that has gone away under a setting still
+   * pointing at it.
+   */
+  const chosenVanished = Boolean(
+    chosen && !chosen.seen && chosen.lastSeenAt !== null,
+  );
+
+  /**
+   * A read has run and found nothing to offer. Said once, and not on top of the
+   * line about a specific pricelist having gone, which already explains it.
+   */
+  const registerEmptied =
+    pricelistsReadAt !== null && !canChoose && !chosenVanished;
 
   /**
    * What the price would be written into, in the merchant's own words.
@@ -715,6 +803,10 @@ export default function ProductSyncSettings() {
         pricelistBasis: state.pricelistBasis,
         taxPercent: state.taxPercent,
         unit: state.unit,
+        productSales: state.productSales ? "on" : "",
+        productPurchasing: state.productPurchasing ? "on" : "",
+        productService: state.productService ? "on" : "",
+        updateProductType: state.updateProductType ? "on" : "",
       },
       { method: "post" },
     );
@@ -1258,7 +1350,7 @@ export default function ProductSyncSettings() {
               </s-banner>
             ) : null}
 
-            {pricelistByHand || pricelistOptions.length === 0 ? (
+            {pricelistByHand || !canChoose ? (
               <s-stack direction="block" gap="small-400">
                 <s-text-field
                   name="pricelistCode"
@@ -1290,15 +1382,43 @@ export default function ProductSyncSettings() {
               />
             )}
 
-            {state.pricelistCode !== "" && !chosen ? (
+            {/*
+              Three different facts, and only one of them is a problem.
+
+              A code nobody has priced anything on is ordinary — a brand new
+              pricelist looks exactly like this and refusing it would block the
+              merchant on our inability to ask (§3: MetaKocka cannot list
+              pricelists). A code that *was* priced and is not any more is worth
+              saying out loud, because a setting is still pointing at it and the
+              next sync will write a price into it. And a register that came
+              back empty explains why there is nothing to choose from, which is
+              otherwise an unexplained missing dropdown.
+            */}
+            {chosenVanished ? (
+              <s-text color="subdued">
+                MetaKocka has no priced product on this code any more. It was
+                last seen{" "}
+                {chosen?.lastSeenAt ? formatDateTime(chosen.lastSeenAt) : null}.
+                Check the pricelist still exists in MetaKocka before the next
+                sync sends a price to it.
+              </s-text>
+            ) : state.pricelistCode !== "" && !chosen ? (
               <s-text color="subdued">
                 No priced product uses this code, so it could not be confirmed.
                 That is expected for a pricelist you have just made.
               </s-text>
             ) : null}
 
+            {registerEmptied ? (
+              <s-text color="subdued">
+                Nothing to choose from: no product in MetaKocka has a price on
+                it, so no pricelist can be found. Type the code by hand, exactly
+                as it appears in MetaKocka.
+              </s-text>
+            ) : null}
+
             <s-stack direction="inline" gap="base" alignItems="center">
-              {pricelistOptions.length > 0 ? (
+              {canChoose ? (
                 <s-button
                   type="button"
                   variant="secondary"
@@ -1396,6 +1516,135 @@ export default function ProductSyncSettings() {
             </Advanced>
           </s-stack>
         </s-section>
+
+        {/*
+         * Everything a merchant almost never opens, in one card at the foot of
+         * the page rather than as a card each between the ones they came for.
+         *
+         * Product type is the first thing in it and will not be the last, so
+         * the inside is built as groups under their own headings: another
+         * setting is another group, not another card.
+         */}
+        <AdvancedSection
+          summary={`New products are marked ${joinLabels(typeLabels(state))}.${
+            state.updateProductType
+              ? " Products MetaKocka already has are set to match."
+              : ""
+          }`}
+        >
+          <s-stack direction="block" gap="large-100">
+            <s-stack direction="block" gap="base">
+              <s-stack direction="block" gap="small-400">
+                <s-heading>Product type in MetaKocka</s-heading>
+                <s-text color="subdued">
+                  MetaKocka files an article as a sales item, a purchase item, a
+                  service, or a combination of them.
+                </s-text>
+              </s-stack>
+
+              <s-stack direction="block" gap="small-400">
+                <s-checkbox
+                  name="productSales"
+                  value="on"
+                  label="Sales"
+                  checked={state.productSales}
+                  onChange={(e) =>
+                    set({ productSales: e.currentTarget.checked })
+                  }
+                />
+                <s-checkbox
+                  name="productPurchasing"
+                  value="on"
+                  label="Purchase"
+                  checked={state.productPurchasing}
+                  onChange={(e) =>
+                    set({ productPurchasing: e.currentTarget.checked })
+                  }
+                />
+                <s-checkbox
+                  name="productService"
+                  value="on"
+                  label="Service"
+                  checked={state.productService}
+                  onChange={(e) =>
+                    set({ productService: e.currentTarget.checked })
+                  }
+                />
+                {/*
+                 * Red, inline and persistent (§2.8), under the group it belongs
+                 * to rather than beside one box: the rule is about all three
+                 * together.
+                 */}
+                {errorFor("productType") ? (
+                  <s-text tone="critical">{errorFor("productType")}</s-text>
+                ) : null}
+                {/*
+                 * Said once, plainly, where the missing boxes would be. A
+                 * merchant comparing this card with the MetaKocka screen counts
+                 * five boxes there and three here, and deserves to know why
+                 * rather than to assume a bug.
+                 */}
+                <s-text color="subdued">
+                  MetaKocka also shows Work and Fixed asset. Its API cannot set
+                  those, so tick them in MetaKocka itself if you need them.
+                </s-text>
+              </s-stack>
+
+              <s-box
+                padding="base"
+                background="subdued"
+                borderRadius="base"
+                borderWidth="base"
+                borderStyle="solid"
+                borderColor="subdued"
+              >
+                <s-stack direction="block" gap="small-300">
+                  <s-checkbox
+                    name="updateProductType"
+                    value="on"
+                    label="Keep the product type up to date from here"
+                    checked={state.updateProductType}
+                    onChange={(e) =>
+                      set({ updateProductType: e.currentTarget.checked })
+                    }
+                  />
+                  <s-text color="subdued">
+                    Every sync sets these boxes on every matched product, not
+                    only on new ones.
+                  </s-text>
+                  <OverwriteWarning
+                    saved={settings.updateProductType}
+                    current={state.updateProductType}
+                    heading="Shopify becomes the product type master"
+                  >
+                    {`Save this and the next sync marks every matched product ${joinLabels(typeLabels(state))} in MetaKocka, including products changed there.`}
+                  </OverwriteWarning>
+                </s-stack>
+              </s-box>
+            </s-stack>
+          </s-stack>
+        </AdvancedSection>
+
+        {/*
+         * The way back, where the page actually ends.
+         *
+         * §2.6 is satisfied by the breadcrumb in the header, and the header is
+         * where a merchant who has just arrived looks. It is not where one who
+         * has just finished the last field is: that is several screens down, and
+         * further still at 375 px. Products is in the app nav, but this page is
+         * not — it is reached from a button on Products — so the trip back is
+         * the one piece of navigation the nav cannot make obvious.
+         *
+         * A button rather than a line of blue text, for the reason the Products
+         * page gives for the button that leads here: under a paragraph, a link
+         * reads as a footnote. Navigation rather than an action, so it does not
+         * become a second Save beside the contextual save bar.
+         */}
+        <s-stack direction="inline">
+          <s-button variant="secondary" href="/app/products">
+            Back to products
+          </s-button>
+        </s-stack>
       </s-stack>
     </s-page>
   );

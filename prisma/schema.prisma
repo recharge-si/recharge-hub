@@ -54,6 +54,17 @@ model Shop {
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 
+  /// When the pricelist register was last read, whatever that read found.
+  ///
+  /// Deliberately apart from `metakocka_pricelist.observed_at`, which records
+  /// when a code was last *seen*. A read that finds nothing — every pricelist
+  /// deleted in MetaKocka, or every price taken off — updates no row at all,
+  /// so without a timestamp of its own the screen reports the last sighting as
+  /// the last read, and goes on offering pricelists that no longer exist.
+  /// MetaKocka cannot list pricelists (CLAUDE.md §3), so the absence of a code
+  /// from a read is the only signal there is.
+  pricelistsReadAt DateTime? @map("pricelists_read_at")
+
   eventLogs              EventLog[]
   metakockaCredential    MetakockaCredential?
   supplySources          SupplySource[]
@@ -539,6 +550,24 @@ model ProductSyncSetting {
   taxPercent           String? @map("tax_percent")
   /// MetaKocka unit of measure for created articles.
   unit                 String  @default("kos")
+
+  /// What kind of article MetaKocka holds: Prodajni, Nabavni, Storitev.
+  ///
+  /// `product_add` accepts these three flags and no others. The Delo and
+  /// Osnovno sredstvo boxes in the MetaKocka UI have no API field at all, so
+  /// they are not represented here. Left unset MetaKocka defaults every one of
+  /// them to false, and an article that is not `sales` cannot go on a sales
+  /// order, so the defaults below are what this app has always sent.
+  productSales      Boolean @default(true) @map("product_sales")
+  productPurchasing Boolean @default(false) @map("product_purchasing")
+  productService    Boolean @default(false) @map("product_service")
+
+  /// Also set those flags on articles MetaKocka already has.
+  ///
+  /// Separate and off by default for the reason `updatePricing` is: §8.9 makes
+  /// MetaKocka master for what its own catalogue holds, so changing an article
+  /// the ERP already owns is a decision the merchant takes deliberately.
+  updateProductType Boolean @default(false) @map("update_product_type")
 
   lastRunAt DateTime? @map("last_run_at")
 
