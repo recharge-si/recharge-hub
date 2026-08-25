@@ -166,3 +166,29 @@ Proposed patch once T-06 answers:
 4. Tests: a discounted line on a non-primary source keeps its discount on its
    own document; documents still sum to the Shopify total.
 ```
+
+### [P0] customers/redact was a stale M1 stub — it deleted nothing
+- **Where:** `src/jobs/handlers/customers-redact.ts` (whole file)
+- **What:** The handler logged an event with `redactedRecords: 0` and returned.
+  Its own comment said "M1 stores no customer data at all... When
+  order.raw_payload and metakocka_document.request_body exist, redacting them
+  belongs here" - and both have existed since M4, along with
+  `order.partner_override` (merchant-typed customer details, kept
+  indefinitely). A GDPR deletion request acknowledged 200 to Shopify and erased
+  nothing. Found independently by two audit passes.
+- **Why it matters:** Legal obligation and an App Store rejection criterion.
+  Section 2.4: "customers/redact and shop/redact must actually delete. Test
+  this."
+- **Spec:** CLAUDE.md section 2.4. The spec is right; the code was stale.
+- **Status:** fixed. The handler now redacts `raw_payload` (same walker as the
+  90-day job, so the decision trail survives), redacts every linked
+  `metakocka_document.request_body`, and drops `partner_override` outright, for
+  the orders Shopify names in `orders_to_redact` plus any stored payload still
+  matching the customer id (number or string). Also fixed alongside:
+  **the 90-day retention job never touched `partner_override`** despite
+  `savePartnerOverride`'s comment promising it - it does now.
+- **Verified by:** `tsc --noEmit`, `eslint .`, `npx vitest run` (433 tests).
+  `redactPayload`'s walker behaviour already unit-tested
+  (order-payload.test.ts). The full insert-fire-assert-empty test needs the
+  Postgres harness (TODO-HUMAN T-04) - said plainly: the handler logic is
+  reviewed and typed, not executed against a database in this run.

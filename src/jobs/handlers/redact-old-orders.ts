@@ -1,6 +1,8 @@
 import type { Job } from "pg-boss";
 import { z } from "zod";
 
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { getLogger } from "~/adapters/observability/logger.server";
@@ -122,6 +124,11 @@ export async function handleRedactOldOrders(job: Job<unknown>): Promise<void> {
         where: { id: order.id },
         data: {
           rawPayload: redacted as never,
+          // Customer details a merchant typed in by hand (§11) are the same
+          // promise as the payload — savePartnerOverride says so explicitly —
+          // and unlike the payload there is nothing non-personal in them to
+          // keep, so the column is dropped rather than walked.
+          partnerOverride: Prisma.DbNull,
           redactedAt: new Date(),
         },
       });
