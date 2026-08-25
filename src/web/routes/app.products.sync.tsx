@@ -633,6 +633,35 @@ export default function ProductSyncSettings() {
    * does the warning beside it. Falls back to the bare code when the pricelist
    * has no title, and says nothing has been chosen when nothing has.
    */
+  /**
+   * Net or gross, where the catalogue has already answered it.
+   *
+   * A pricelist's type is fixed when it is created and MetaKocka refuses the
+   * wrong field outright (§3), so this is not a preference — it is a fact about
+   * the pricelist. When the merchant's own priced products carry it, asking
+   * them to confirm it is asking a question we can already answer, so the
+   * choice is not rendered and the observed value is what gets saved. The
+   * dropdown comes back only when no priced product could tell us.
+   */
+  const observedBasis =
+    chosen && chosen.includesTax !== null
+      ? chosen.includesTax
+        ? "gross"
+        : "net"
+      : null;
+  const effectiveBasis = observedBasis ?? state.pricelistBasis;
+
+  /** One line under the field carrying both facts about it. */
+  const pricelistDetails = !chosen
+    ? "Found on your own priced products."
+    : observedBasis
+      ? `Sent to MetaKocka as code ${chosen.code}. Prices on it ${observedBasis === "gross" ? "include" : "exclude"} tax.`
+      : `Sent to MetaKocka as code ${chosen.code}.`;
+
+  const otherRates = taxRates.filter(
+    (rate) => rate !== state.taxPercent.trim().replace(",", "."),
+  );
+
   const pricelistName = chosen?.title?.trim()
     ? `“${chosen.title.trim()}”`
     : state.pricelistCode
@@ -650,7 +679,7 @@ export default function ProductSyncSettings() {
         sendPricing: state.sendPricing ? "on" : "",
         updatePricing: state.updatePricing ? "on" : "",
         pricelistCode: state.pricelistCode,
-        pricelistBasis: state.pricelistBasis,
+        pricelistBasis: effectiveBasis,
         taxPercent: state.taxPercent,
         unit: state.unit,
       },
@@ -711,7 +740,9 @@ export default function ProductSyncSettings() {
           <s-paragraph>
             Pricelists live in MetaKocka under Sales &rsaquo; Pricelists. The
             code this app asks for is the one shown there as &ldquo;Price list
-            ID&rdquo;.
+            ID&rdquo;. Every sales order carries that code and the VAT rate,
+            whether or not product prices are synced, which is why both are
+            needed even with sync off.
           </s-paragraph>
           <s-link href={METAKOCKA_PRICELISTS_URL} target="_blank">
             Open pricelists in MetaKocka
@@ -1060,10 +1091,6 @@ export default function ProductSyncSettings() {
               </s-box>
             ) : null}
 
-            <s-text color="subdued">
-              Every sales order carries these, synced prices or not.
-            </s-text>
-
             {reloadFailed ? (
               <s-banner tone="warning" heading="Could not read your pricelists">
                 <s-paragraph>{reloader.data?.message}</s-paragraph>
@@ -1099,14 +1126,7 @@ export default function ProductSyncSettings() {
               <Dropdown
                 name="pricelistCode"
                 label="MetaKocka pricelist"
-                /* The name is what the merchant picks by; the code is what
-                   MetaKocka is sent. One line, on the field, rather than a
-                   sentence of its own underneath it. */
-                details={
-                  chosen
-                    ? `Sent to MetaKocka as code ${chosen.code}.`
-                    : "Found on your own priced products."
-                }
+                details={pricelistDetails}
                 value={state.pricelistCode}
                 onChange={(next) => set({ pricelistCode: next })}
                 options={pricelistOptions}
@@ -1161,28 +1181,24 @@ export default function ProductSyncSettings() {
             </s-stack>
 
             {/*
-             * A MetaKocka pricelist is created net or gross and cannot be
-             * either. Sending the wrong one is not a format error — the price
-             * lands wrong by the VAT rate. When a priced product told us which
-             * it is, that answer is offered here.
+             * Only when the catalogue could not answer it. See observedBasis:
+             * sending the wrong basis is not a format error, it is a price
+             * wrong by the VAT rate, so it is worth asking — but only once
+             * nobody else can say.
              */}
-            <Dropdown
-              name="pricelistBasis"
-              label="Prices on that pricelist are"
-              details={
-                chosen === undefined || chosen.includesTax === null
-                  ? "If this is wrong, the first sync says so and corrects itself."
-                  : chosen.includesTax
-                    ? "Your priced products say this pricelist is gross."
-                    : "Your priced products say this pricelist is net."
-              }
-              value={state.pricelistBasis}
-              onChange={(next) => set({ pricelistBasis: next })}
-              options={[
-                { value: "gross", label: "Including tax (gross)" },
-                { value: "net", label: "Excluding tax (net)" },
-              ]}
-            />
+            {observedBasis ? null : (
+              <Dropdown
+                name="pricelistBasis"
+                label="Prices on that pricelist are"
+                details="No priced product could tell us. If this is wrong, the first sync says so and corrects itself."
+                value={state.pricelistBasis}
+                onChange={(next) => set({ pricelistBasis: next })}
+                options={[
+                  { value: "gross", label: "Including tax (gross)" },
+                  { value: "net", label: "Excluding tax (net)" },
+                ]}
+              />
+            )}
 
             <s-text-field
               name="taxPercent"
@@ -1194,10 +1210,15 @@ export default function ProductSyncSettings() {
                 ? { error: errorFor("taxPercent") }
                 : {})}
             />
-            {taxRates.length > 0 ? (
+            {/*
+             * Only rates the field does not already hold. A shop with one VAT
+             * rate, already typed in, was being offered it back as the only
+             * suggestion — a whole row saying nothing.
+             */}
+            {otherRates.length > 0 ? (
               <s-stack direction="inline" gap="small-400" alignItems="center">
                 <s-text color="subdued">Rates you already use:</s-text>
-                {taxRates.map((rate) => (
+                {otherRates.map((rate) => (
                   <s-clickable-chip
                     key={rate}
                     onClick={() => set({ taxPercent: rate })}
