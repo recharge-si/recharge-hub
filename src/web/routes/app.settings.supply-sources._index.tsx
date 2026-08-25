@@ -200,13 +200,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : null;
     const lastSync = source ? (lastBySourceId.get(source.id) ?? null) : null;
 
+    /*
+     * The location's own record of its last run, not the activity log.
+     *
+     * The log only ever had entries the job managed to write, and a run that
+     * threw wrote none — so the location that had failed every attempt for nine
+     * hours looked exactly like one that had never had a problem. The outcome
+     * is now recorded on the location whether the run worked or not, which is
+     * the only version of this that can report a failure.
+     */
     const status: LocationStatus = !warehouse
       ? "not_connected"
-      : lastSync && !lastSync.ok
+      : source?.lastSyncOk === false
         ? "error"
-        : source && source.stockDirection !== "none" && source.enabled
-          ? "syncing"
-          : "paused";
+        : lastSync && !lastSync.ok
+          ? "error"
+          : source && source.stockDirection !== "none" && source.enabled
+            ? "syncing"
+            : "paused";
 
     return {
       id: location.id,
@@ -222,6 +233,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       profitCenterInherited: source?.profitCenterInherited ?? true,
       status,
       lastSync,
+      // What went wrong and how long it has been going wrong, so the row says
+      // something a merchant can act on rather than just turning red.
+      syncMessage: source?.lastSyncOk === false ? source.lastSyncMessage : null,
+      syncFailures: source?.syncFailures ?? 0,
+      syncCheckedAt: source?.lastSyncAt?.toISOString() ?? null,
     };
   });
 
@@ -1746,7 +1762,22 @@ export default function Locations() {
                             <SourceBadge />
                           ) : null}
                         </s-stack>
-                        {row.lastSync ? (
+                        {/*
+                          * A failure says what went wrong, not that something
+                          * did. §2.8 asks an error to be actionable, and
+                          * "MetaKocka rejected the request: Internal server
+                          * error." at least sends the merchant to the right
+                          * side of the integration.
+                          */}
+                        {row.syncMessage ? (
+                          <s-text color="subdued" tone="critical">
+                            {`${row.syncFailures} failed ${row.syncFailures === 1 ? "attempt" : "attempts"}${
+                              row.syncCheckedAt
+                                ? `, last ${shortDateTime(row.syncCheckedAt)}`
+                                : ""
+                            } — ${row.syncMessage}`}
+                          </s-text>
+                        ) : row.lastSync ? (
                           <s-text
                             color="subdued"
                             tone={row.lastSync.ok ? "auto" : "caution"}

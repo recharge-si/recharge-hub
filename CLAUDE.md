@@ -283,7 +283,22 @@ merchant's ERP. Treat it as a production database password (§10).
   applied.** Omitted, the order is filed against no pricelist at all, and
   nobody opening it in MetaKocka can tell what it was priced from.
 - **[verified] `get_document` takes `doc_id`, not `mk_id`.** Sending `mk_id`
-  answers "Cannot find document type sales_order with id = null".
+  answers "Cannot find document type sales_order with id = null". The value to
+  put in `doc_id` is the `mk_id` that `put_document` returned.
+- **[verified] `get_document` returns the whole document at the top level**, with
+  `mk_id`, `count_code`, `doc_date`, `partner`, `receiver`, `sales_pricelist_code`,
+  `currency_code`, `buyer_order`, `warehouse`, `product_list`, `sum_basic`,
+  `sum_tax_ex4`, `sum_all`, `profit_center`, `order_create_ts`, `created_ts`.
+  **There is no status field of any kind on a sales order, and no tracking
+  field.** So there is no ERP workflow state to poll for, and §8.5's tracking
+  sync will have to find its codes somewhere else.
+- **[verified] A document this app wrote can simply stop existing.** Asking for a
+  `doc_id` MetaKocka no longer has answers `opr_code 2`, "Cannot find document
+  type sales_order with id = 1200049905201" — the same code as a malformed
+  request, so the description has to be read rather than the code. Two of four
+  documents on the test company had been deleted in the MetaKocka UI while this
+  app still reported those orders as sent. Deleting a document there is a thing
+  merchants do, and nothing else in this system would ever find out (§8.11).
 - `get_document` / `search` support `show_split_orders` — investigate before finalising
   reconciliation queries.
 - Lines in `product_list` with `code`, `amount`, and `price` or `price_with_tax`.
@@ -816,8 +831,33 @@ One Shopify payment becomes N MetaKocka documents. Decided once, here, asserted 
 | `refunded`, `partially_refunded` | See §8.8. |
 | `voided` | Exception. Never auto-delete the MetaKocka document. |
 
+**An order's payment state is not settled at intake, and the app has to keep listening.**
+Most Slovenian orders arrive `pending` — bank transfer, cash on delivery, a manual method
+— and become `paid` minutes or days later. `orders/create` says nothing about that, so the
+app subscribes to **`orders/updated` and `orders/paid`**, and reconciles orders against
+the Admin API on a schedule as well (§8.10). The three are deliberately redundant: a
+webhook is best-effort, and a payment nobody hears about is a payment the merchant chases
+by hand.
+
+The decision itself is pure and lives in `domain/orders/state.ts`. It is written as a
+function of the **destination** status rather than of the transition, because Shopify does
+not promise to deliver every intermediate state and the reconciler routinely sees pending
+jump straight to refunded.
+
 **Cash on delivery is not paid at order time.** Set `method_of_payment` to the COD value
-and leave the document unpaid. Marking a COD order paid at creation misstates the books.
+and leave the document unpaid at creation. Marking a COD order paid at creation misstates
+the books — but that rule is about *order time*: when Shopify later reports the order as
+paid, the courier has remitted and the payment is recorded like any other
+(`jobs/payment.ts`, `phase: "settle"`). Enforcing it as "never" left every COD order
+permanently unpaid in the ERP.
+
+**Recording a payment after the fact means re-sending the whole document.** MetaKocka
+treats an update as a replacement (§3), so `mark-metakocka-paid` replays the exact body
+recorded in `metakocka_document.request_body` with `mk_id` and `mark_paid` added, then
+reads the document back to check it still has its lines. A rebuilt body is never sent: it
+could replace the document with a differently derived version of itself. Past the §2.4
+redaction the stored body no longer holds the customer, so the job stops and raises an
+exception rather than filing "[redacted]" on a live accounting document.
 
 **`mark_paid` is destructive on update** — it deletes and replaces the previous payment.
 Send it exactly once, record `payment_marked_at`, and never include it in a routine
@@ -831,14 +871,56 @@ credit map through the same table.
 **Date format:** `mark_paid.date` is `dd.mm.yyyy`, unlike the ISO-with-offset elsewhere in
 the same payload. Format explicitly at the boundary.
 
-**Split orders:** each document is marked paid for its own share, summing per §8.6.
+**Split orders:** each document is marked paid for its own share, summing per §8.6. Not
+only the primary — that understates the payment by the rest of the order. There is no
+double counting to avoid here, because the shares sum to the Shopify total by
+construction; double counting would only happen if each document were paid the *order*
+total. `jobs/order-shares.ts` computes them once for both the create and the settle path,
+so the two cannot drift.
 
 ### 8.8 Refunds, cancellations, edits
 
-Not implemented in v1, but the webhooks are **received and turned into exceptions from day
-one** so nothing is lost silently: `refunds/create`, `orders/cancelled` (never auto-delete
-a MetaKocka document — it may already be invoiced), `orders/edited` (allocation and
-documents already exist; automatic re-allocation is a phase 2 decision).
+Refunds and credit notes are not implemented in v1, but every one of these webhooks is
+**received and acted on from day one** so nothing is lost silently.
+
+Topics whose payload is the order — `orders/updated`, `orders/paid`, `orders/cancelled` —
+go to `sync-order-state`, which compares the payload against what is stored and acts only
+on what moved. `refunds/create` and `orders/edited` carry something else (a refund, an
+edit), so they queue a read of the order from the Admin API and go through the same
+comparison.
+
+**An edit reaches MetaKocka** (`contentChangePolicy`):
+
+- **No document written.** The edit is simply what the order is: the lines are rewritten
+  and the order is allocated again. Raising an exception here, which the app used to do
+  for every edit, asks a person to resolve something nothing had gone wrong with.
+- **A document written.** The lines are rewritten, the order is allocated again, and each
+  existing document is **updated in place**. This is a change from the original §8.8,
+  which said never to touch a written document: in practice that left the ERP holding
+  quantities nobody had agreed to while the merchant read an exception they could not act
+  on. **[verified 2026-08-25]** raising a line from 1 to 2 rewrote `SH-1006-GLAVNO` from
+  836.00 to 1045.00 under the same `mk_id` and the same `count_code` — no second document.
+
+  MetaKocka has no partial update, so the document is rebuilt whole and swapped
+  (`updateSalesOrder`), then read back to confirm every line survived. Any payment already
+  recorded is put back on the body, because §8.7's warning that `mark_paid` on an update
+  replaces the previous payment means an update without one silently unpays the document.
+
+  Whether this happens at all is `sales_order_setting`, on the Sales orders page:
+  `update_on_change` (on by default) and `update_after_paid` (**off** by default, because
+  a paid document is the one most likely to have been invoiced, and rewriting an invoiced
+  document changes an accounting record). With either switched off the old behaviour is
+  exactly what happens — an `order_diverged` exception naming the difference, and "Mark as
+  sorted in MetaKocka" on the order page to settle it.
+- **A line that moves to a different warehouse** is the one part an update cannot cover:
+  the document written for the old source now describes goods this order no longer takes
+  from there. Emptying it is not automatic and deleting it is forbidden outright, so that
+  stays an exception naming the document.
+
+An order that arrives already cancelled, refunded or voided — which only happens through
+the recovery path — is recorded and **not** allocated. Creating a sales order for money
+that no longer exists, when undoing it is never automatic, is the one mistake worth
+designing out.
 
 Phase 2 maps these to MetaKocka credit notes and the complaint endpoints
 (`create_complaint`, `update_complaint`, `get_complaint`).
@@ -859,6 +941,19 @@ how you build a nightly flip-flop.
 
 Use Shopify bulk operations for reading the catalogue; MetaKocka has no bulk endpoint, so
 writes are sequential and rate-limited.
+
+**The catalogue read is on a schedule, not only on a button.** A registry that is as fresh
+as the last time somebody remembered to press Sync is a registry that silently stops
+matching — a product renamed in the ERP, a SKU corrected in Shopify, a variant added this
+morning — and the first anyone hears of it is an order that cannot be sent. Off by
+default with a merchant-chosen interval (`product_sync_setting.schedule_enabled`,
+`.schedule_interval_minutes`), because this is the one scheduled job that can write into
+the merchant's ERP catalogue.
+
+The same read collects what makes a product list readable — image, price, vendor, product
+type — since it is already walking every variant. A list of bare codes is a diagnostic,
+not a product list: a merchant looking for "the blue one" recognises it by its picture and
+its price.
 
 **Creating articles is a merchant-controlled exception to the table above.** A Shopify SKU
 with no MetaKocka article can be neither stocked nor ordered, so the app can create one:
@@ -881,7 +976,50 @@ ERP's catalogue.
 
 ### 8.10 Reconciliation
 
-Nightly, and mandatory because MetaKocka's webhook gives up after two retries:
+**Orders, every fifteen minutes.** `reconcile-orders` re-reads everything Shopify has
+touched since a stored `updated_at` watermark and applies it through the same path as the
+webhooks. This is not a nicety: Shopify retries a failed delivery for a while and then
+stops, an app that is down for an afternoon never hears what happened in it, and delivery
+order is not promised. So the watermark is read with five minutes of overlap — re-reading
+an order costs one comparison that finds nothing, missing one is silent — and
+`order.shopify_updated_at` is a high-water mark, so a late webhook cannot undo a newer
+state. The same pass ingests orders `orders/create` never delivered, and re-queues an
+order that was allocated and then had nothing written for half an hour.
+
+Its first run never looks further back than the install, so a fresh install does not
+manufacture ERP documents for orders the merchant handled before this app existed.
+
+**`order.raw_payload` is refreshed on every sync, changed or not.** It is Shopify's whole
+record of the order, not a copy of the diff's inputs, and it is what the document writer,
+the partner resolver and the tax re-derivation all read. The diff deliberately watches
+only what this app would *send differently*, so treating "nothing actionable moved" as
+"nothing to store" left every field outside the diff able to go stale permanently. It did:
+an order created with no address, given one in Shopify a minute later, synced, correctly
+diffed as unchanged — and the payload carrying the address was discarded, so the order
+could never be sent however many times anyone pressed retry. The customer is now in the
+snapshot as a fingerprint (never the details themselves — the summary reaches the event
+log, which the §2.4 job does not cover), and an address *arriving* re-drives the write
+without being treated as a divergence: there is no document yet to be wrong.
+
+**Every caller that re-reads a stored payload must use `parseOrderSafe`.** After ninety
+days the §2.4 job has replaced `customer`, `billing_address` and `shipping_address` with
+the string "[redacted]", and a schema expecting an object throws on it. Null says "too old
+to send" without taking the job down.
+
+**Stock every five minutes, and immediately on the MetaKocka webhook.** §3 records
+that `warehouse_product_stock_update` is the only event MetaKocka pushes and that it
+retries twice and gives up, which makes it a nudge rather than a delivery. The receiver
+verifies HMAC-SHA1 over the raw body with the webhook `client_secret`, answers
+`check_respond_status_json_ok: true`, and does nothing but queue the sync — publishing
+stock is an accounting-grade decision (§7) and belongs in the job that knows the rules.
+The five-minute cycle beside it is the guarantee.
+
+**Open exceptions every fifteen minutes** (§11).
+
+**MetaKocka documents hourly** (§8.11).
+
+**Everything else nightly**, and mandatory because MetaKocka's webhook gives up after two
+retries:
 
 - every Shopify order in the window has the expected number of MetaKocka documents
 - every allocation has a corresponding fulfilment order
@@ -891,6 +1029,35 @@ Nightly, and mandatory because MetaKocka's webhook gives up after two retries:
 
 Every discrepancy becomes an exception, never a silent log line. Results surface on the
 home page (§2.7).
+
+### 8.11 What MetaKocka does with a document afterwards
+
+The reconciler above watches Shopify get ahead of us. This is the same problem in the
+other direction, and it needed its own answer because **MetaKocka will not tell us
+anything**: §3 verified that the only event it pushes is a stock update.
+
+**[verified 2026-08-25]** Two of the four documents this app had recorded as `written` on
+the test company had been deleted in the MetaKocka UI. The app reported those orders as
+sent and would have done so indefinitely. So `poll-metakocka-documents` reads each written
+document back hourly for thirty days and asks the two questions that have answers:
+
+- **Is it still there?** A `doc_id` MetaKocka does not have is not a failure — it means
+  somebody deleted the document. The row is marked `failed`, which is both the truth and
+  what lets the `count_code` claim be taken again (§8.4) so the merchant can send it
+  afresh. Nothing is re-sent automatically: deleting it may well have been deliberate.
+- **Does it still say what we sent?** Compared against `metakocka_document.request_body`,
+  the exact body MetaKocka accepted, and **by line code and quantity rather than by
+  total** — what this app sends is gross or net depending on the shop's tax setting (§8.6)
+  while `sum_all` is always gross, so comparing totals would report every document on a
+  tax-exclusive shop as edited.
+
+Both raise an exception and neither is repaired automatically. §8.8's rule holds in this
+direction too: the document may already be invoiced.
+
+Note what this means for "the merchant says it is dealt with". `order_diverged` is cleared
+by a person pressing **Mark as sorted in MetaKocka**, which records their decision and
+sends nothing — the button is named for what it does. This poller is the backstop that
+keeps that from being a way to hide a real difference.
 
 ---
 
@@ -929,6 +1096,43 @@ backoff. No human involved, no UI.
 rejected, insufficient stock across all sources, unmapped payment gateway, partner
 disabled, tax undeterminable. Goes in the exceptions queue with the order, reason, raw
 error, and actions: retry, change supply source, force own warehouse, ignore.
+
+**An exception is a condition, not an event, and the app has to keep checking.** "No
+supply source has enough stock" stops being true the moment stock arrives; "the profit
+centre does not exist" stops being true when the merchant creates it; nothing announces
+either. Left alone, the queue fills with problems that were dealt with days ago, and a
+queue nobody trusts is a queue nobody reads. So `recheck-exceptions` re-evaluates every
+open exception every fifteen minutes and does one of three things:
+
+- **Closes it** when the work actually got done, attributed to the app so the trail says
+  it was not a person.
+- **Re-drives it** when the blocker is gone but the work has not been redone, leaving the
+  exception open on purpose: it closes when the retry succeeds, and if the retry fails
+  again the merchant is still reading a true statement.
+- **Leaves it** — the safe direction to be wrong in. Anything this app cannot see the
+  fix for (a refund credited by hand, a document edited in the ERP) stays until a person
+  says otherwise.
+
+**Retry must re-drive the step that failed, not the pipeline.** It used to re-queue the
+allocation whatever had gone wrong, so for a rejected sales order it re-ran the one step
+that had never failed and the button appeared to do nothing.
+`adapters/queue/redrive.server.ts` maps each kind to the job that answers it, and is
+shared by the exceptions page, the order page and the re-check so all three mean the same
+thing. Where nothing can be re-driven it says so rather than running a job that changes
+nothing.
+
+**Every exception must be solvable from inside the app** (§2.7: a feature that can only be
+completed on an external site is not done). Two that were not:
+
+- *"No supply source has enough stock — choose a source by hand"* was advice with nowhere
+  to act on it. The order page now sets sources per line, showing what each one holds and
+  deliberately **not** refusing a source with none — that is the whole point of an
+  override. A hand-made allocation is locked (`order.allocation_locked_at`) so the next
+  stock sync does not silently revert it.
+- *"This order has no billing or shipping address — add it in Shopify"* is impossible for
+  point-of-sale orders, digital goods and some draft orders. `order.partner_override`
+  holds customer details entered on the order page, and both the document writer and the
+  partner resolver prefer it, so the two cannot file the order against different people.
 
 **Form validation error** — subject to §2.8: red, inline, persistent, actionable, and never
 shown before interaction.
@@ -1010,6 +1214,17 @@ document are marked **[verified]** in §3 and §7.
 8. **Read `warehouse_stock` for a product with an open sales order and confirm `amount`
    does not drop at sales-order creation.** §7 depends on this. If it does drop, the
    correct value to publish is `amount + reserved_amount`.
+9. ~~**`get_document`'s response shape.**~~ **Answered on 2026-08-25**: the document
+   comes back at the top level, `product_list` and `sum_all` included, and there is no
+   status or tracking field. Recorded in §3. The read-back check in `markDocumentPaid`
+   still treats a missing `product_list` as "could not tell" rather than as "the lines
+   are gone", which is the right way round to be wrong.
+10. **`put_document` with `mk_id` and the complete original body.** That a *partial*
+    update destroys the document is verified. That re-sending the whole body leaves it
+    unchanged apart from the payment is inferred from the same behaviour — a replacement
+    replacing a document with itself — and is what the payment path depends on. Create a
+    multi-line sales order on the test company, mark it paid this way, and confirm the
+    lines, totals and pricelist all survive.
 
 Report results before building on top of them.
 

@@ -4,6 +4,8 @@ import { z } from "zod";
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { raiseException } from "~/adapters/db/repositories/exception.server";
+import { enqueue } from "~/adapters/queue/boss.server";
+import { QUEUES } from "~/adapters/queue/queues";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { serviceToken, shopDomainOf } from "~/domain/types";
 
@@ -25,18 +27,24 @@ const identitySchema = z
   .passthrough();
 
 /**
- * Refunds, cancellations and edits (CLAUDE.md §8.8).
+ * The order topics whose payload is not an order (CLAUDE.md §8.8).
  *
- * None of these are implemented in v1, and that is a deliberate decision rather
- * than an omission — but the webhooks are received and turned into exceptions
- * **from day one**, so nothing is lost silently. A refund that nobody hears
- * about is a refund that never reaches the ERP, and the merchant finds out at
- * the end of the quarter.
+ * `orders/updated`, `orders/paid` and `orders/cancelled` all carry the order
+ * itself and go straight to `sync-order-state`, which compares it against what
+ * is stored. The three left here cannot: `refunds/create` describes a refund,
+ * `orders/edited` describes an edit, and `orders/delete` describes an order
+ * that no longer exists.
  *
- * The one rule that matters here: **never auto-delete a MetaKocka document.** A
- * cancelled Shopify order may already be invoiced on the MetaKocka side, and
- * deleting the document would destroy an accounting record. Every one of these
- * ends with a human deciding.
+ * So the first two do the only sensible thing with an event that says *that*
+ * something happened without saying what the order is now — they queue a read
+ * of the order from the Admin API, and let the same comparison as everything
+ * else decide. That matters most for an edit: before this, every edit raised an
+ * exception, including the ones to orders nothing had been sent for yet, where
+ * the right answer is simply to allocate again.
+ *
+ * The rule that outranks all of it: **never auto-delete a MetaKocka document.**
+ * A cancelled or deleted Shopify order may already be invoiced on the MetaKocka
+ * side, and deleting the document would destroy an accounting record.
  */
 export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
   const { shopDomain, topic, payload } = ordersEventJobSchema.parse(job.data);
@@ -91,17 +99,33 @@ export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
       message: `Order ${order.shopifyOrderNumber} was refunded in Shopify. Refunds are not sent to MetaKocka automatically. ${documentNote} Issue the credit note in MetaKocka, then resolve this.`,
       detail: { topic },
     });
-  } else if (topic === "orders/cancelled") {
-    await raiseException(principal, {
-      orderId: order.id,
-      kind: "order_cancelled",
-      message: `Order ${order.shopifyOrderNumber} was cancelled in Shopify. ${documentNote} Cancel or credit it in MetaKocka by hand, then resolve this.`,
-      detail: { topic },
+
+    // The refund also moves the order's financial status, and this event does
+    // not say what it moved to. Reading the order back keeps the payment state
+    // on the order page honest rather than frozen at "paid".
+    await refreshOrder(shopDomain, shopifyOrderId);
+  } else if (topic === "orders/edited") {
+    /*
+     * An edit, described as a set of additions and removals rather than as an
+     * order. Reading the order back and comparing it is the only way to know
+     * what it now is — and the comparison, not this handler, decides what
+     * follows: allocate again when nothing has been sent to MetaKocka, or raise
+     * a divergence when it has.
+     */
+    await refreshOrder(shopDomain, shopifyOrderId);
+
+    await appendEvent(principal, {
+      entityType: "order",
+      entityId: order.id,
+      event: "order.edit_received",
+      detail: { topic, documents: written.length },
     });
-    await prisma.order.update({
-      where: { id: order.id },
-      data: { status: "cancelled" },
-    });
+
+    log.info(
+      { shop: shopDomain, topic, orderId: order.id },
+      "Order edited in Shopify, re-reading it",
+    );
+    return;
   } else if (topic === "orders/delete") {
     /*
      * Deleted in Shopify, kept in MetaKocka.
@@ -132,13 +156,6 @@ export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
       "Order deleted in Shopify; MetaKocka documents left in place",
     );
     return;
-  } else if (topic === "orders/edited") {
-    await raiseException(principal, {
-      orderId: order.id,
-      kind: "order_edited",
-      message: `Order ${order.shopifyOrderNumber} was edited in Shopify after it was allocated. The allocation and any MetaKocka document still describe the order as it was. ${documentNote} Check both sides and update MetaKocka by hand.`,
-      detail: { topic },
-    });
   } else {
     await appendEvent(principal, {
       entityType: "order",
@@ -159,5 +176,25 @@ export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
   log.info(
     { shop: shopDomain, topic, orderId: order.id },
     "Order event raised an exception",
+  );
+}
+
+/**
+ * Queues a read of one order from the Admin API.
+ *
+ * Separate from the exception above rather than replacing it: a refund still
+ * needs a human, and what the order looks like afterwards is a different
+ * question from what somebody has to do about it.
+ */
+async function refreshOrder(
+  shopDomain: string,
+  shopifyOrderId: string | null,
+): Promise<void> {
+  if (!shopifyOrderId) return;
+
+  await enqueue(
+    QUEUES.syncOrderState,
+    { shopDomain, shopifyOrderId },
+    { singletonKey: `refresh:${shopDomain}:${shopifyOrderId}` },
   );
 }

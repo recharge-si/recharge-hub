@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseOrder } from "~/adapters/shopify/order-payload";
+import { parseOrder, parseOrderSafe } from "~/adapters/shopify/order-payload";
 import { redactPayload } from "~/jobs/handlers/redact-old-orders";
 
 /**
@@ -227,5 +227,29 @@ describe("the retention job keeps the decision trail", () => {
 
   it("is safe to run twice", () => {
     expect(redactPayload(redacted)).toEqual(redacted);
+  });
+});
+
+describe("re-reading a stored payload", () => {
+  it("survives a payload the retention job has been through", () => {
+    /*
+     * The §2.4 job replaces whole objects with the string "[redacted]" —
+     * `customer`, `billing_address` and `shipping_address` among them — so a
+     * stored payload is not guaranteed to still be an order.
+     *
+     * Three jobs re-read stored payloads: the document writer, the order sync
+     * and the exception re-check. Handing a schema expecting an object a string
+     * throws, which would have turned "this order is too old to send" into a
+     * job that crashes, retries, and crashes again.
+     */
+    const redacted = redactPayload(PAYLOAD);
+
+    expect(() => parseOrder(redacted)).toThrow();
+    expect(parseOrderSafe(redacted)).toBeNull();
+  });
+
+  it("still reads a payload that is intact", () => {
+    expect(parseOrderSafe(PAYLOAD)?.orderNumber).toBe("1042");
+    expect(parseOrderSafe(null)).toBeNull();
   });
 });

@@ -31,6 +31,16 @@ export interface ProductSyncSettings {
   productService: boolean;
   /** Also set them on articles MetaKocka already has. */
   updateProductType: boolean;
+  /**
+   * Whether the catalogue is re-read on a schedule, and how often in minutes.
+   *
+   * The manual button is a promise the merchant has to remember to keep, and
+   * catalogues drift every day: a product renamed in MetaKocka, a SKU corrected
+   * in Shopify, a variant added this morning. The first anyone hears of a
+   * registry that has quietly stopped matching is an order that cannot be sent.
+   */
+  scheduleEnabled: boolean;
+  scheduleIntervalMinutes: number;
   lastRunAt: Date | null;
 }
 
@@ -49,6 +59,8 @@ export const PRODUCT_SYNC_DEFAULTS: ProductSyncSettings = {
   productPurchasing: false,
   productService: false,
   updateProductType: false,
+  scheduleEnabled: false,
+  scheduleIntervalMinutes: 720,
   lastRunAt: null,
 };
 
@@ -86,6 +98,8 @@ export async function getProductSyncSetting(
     productPurchasing: row.productPurchasing,
     productService: row.productService,
     updateProductType: row.updateProductType,
+    scheduleEnabled: row.scheduleEnabled,
+    scheduleIntervalMinutes: row.scheduleIntervalMinutes,
     lastRunAt: row.lastRunAt,
   };
 }

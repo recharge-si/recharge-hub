@@ -13,6 +13,7 @@ import { listProducts } from "~/adapters/metakocka/stock";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { listVariants } from "~/adapters/shopify/inventory";
+import { getShopPricing } from "~/adapters/shopify/products";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { serviceToken } from "~/domain/types";
@@ -34,7 +35,13 @@ export async function handleSyncCatalogue(job: Job<unknown>): Promise<void> {
   const log = getLogger();
 
   const { admin } = await unauthenticated.admin(shopDomain);
-  const variants = await listVariants(admin);
+  // The shop's own currency, so the product list can show a price rather than a
+  // number. One extra query per catalogue read, not per variant.
+  const [variants, pricing] = await Promise.all([
+    listVariants(admin),
+    getShopPricing(admin),
+  ]);
+  const currency = pricing.currencyCode;
   const { created, updated } = await upsertVariants(
     principal,
     variants.map((variant) => ({
@@ -42,6 +49,13 @@ export async function handleSyncCatalogue(job: Job<unknown>): Promise<void> {
       shopifyVariantId: variant.variantId,
       shopifyInventoryItemId: variant.inventoryItemId,
       title: variant.title,
+      variantTitle: variant.variantTitle,
+      shopifyProductId: variant.productId,
+      imageUrl: variant.imageUrl,
+      priceMinor: variant.priceMinor,
+      currency,
+      vendor: variant.vendor,
+      productType: variant.productType,
     })),
   );
 

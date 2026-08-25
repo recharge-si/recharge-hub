@@ -10,7 +10,10 @@ import {
 
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
 import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
-import { countByStatus, listSkus } from "~/adapters/db/repositories/sku.server";
+import {
+  countByStatus,
+  listSkuPage,
+} from "~/adapters/db/repositories/sku.server";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { listVariantDetails } from "~/adapters/shopify/products";
@@ -50,16 +53,32 @@ const SYNC_EVENTS = new Set([
   "products.sync_skipped",
 ]);
 
+/**
+ * How many unmatched SKUs to name before the count speaks for itself.
+ *
+ * This is a warning, not a browser. Past a couple of dozen the useful sentence
+ * is "twelve hundred of your SKUs are not in MetaKocka", and listing them all
+ * would bury it.
+ */
+const PAGE_SIZE = 25;
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [counts, unmatched, events, productSync] = await Promise.all([
+  const [counts, rows, events, productSync] = await Promise.all([
     countByStatus(principal),
-    listSkus(principal, "unmatched", 10),
+    /*
+     * One row more than fits, which is the whole of the pagination state: if it
+     * came back there is a next page. A count query would double the work to
+     * answer a question the extra row already answers.
+     */
+    listSkuPage(principal, { status: "unmatched", take: PAGE_SIZE }),
     recentEvents(principal, 60),
     getProductSyncSetting(principal),
   ]);
+
+
 
   /*
    * One of the merchant's own products, named the way the sync would name it.
@@ -88,6 +107,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     counts,
+    products: rows,
     productSync: {
       enabled: productSync.enabled,
       createMissing: productSync.createMissing,
@@ -97,11 +117,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       lastRunAt: productSync.lastRunAt?.toISOString() ?? null,
     },
     status: latest ? { at: latest.at, text: latest.text, ok: latest.ok } : null,
-    unmatched: unmatched.map((row) => ({
-      id: row.id,
-      sku: row.sku,
-      title: row.title,
-    })),
     recent: described.slice(0, 6),
   };
 };
@@ -142,7 +157,7 @@ const POLICY_SUMMARY: Record<string, string> = {
 };
 
 export default function Products() {
-  const { counts, unmatched, recent, productSync, status } =
+  const { counts, products, recent, productSync, status } =
     useLoaderData<typeof loader>();
   /*
    * A fetcher rather than a form, like the locations page. There is nothing on
@@ -256,9 +271,14 @@ export default function Products() {
         </s-section>
 
         {/*
-         * A zero does not render at all. A non-zero one is the loudest thing on
-         * the page and the records it is about sit directly under it, so
-         * "which ones" needs no link to answer (docs/ui-conventions.md).
+         * The unmatched SKUs, listed rather than counted.
+         *
+         * A full product browser lived here for a while and was the wrong page
+         * for it: this screen exists to answer "is matching working", and a
+         * merchant who wants to look at a product looks at it in Shopify. What
+         * belongs here is the exception — the SKUs that will stop an order —
+         * and the picture, price and stock that made that browser worth reading
+         * now sit on the order, next to the lines they explain.
          */}
         {counts.unmatched > 0 ? (
           <s-section
@@ -271,17 +291,52 @@ export default function Products() {
                   be sent to MetaKocka.
                 </s-paragraph>
               </s-banner>
-              <s-unordered-list>
-                {unmatched.map((row) => (
-                  <s-list-item key={row.id}>
-                    {row.sku}
-                    {row.title ? ` — ${row.title}` : ""}
-                  </s-list-item>
-                ))}
-              </s-unordered-list>
-              {counts.unmatched > unmatched.length ? (
+
+              <s-table variant="auto">
+                <s-table-header-row>
+                  <s-table-header listSlot="primary">Product</s-table-header>
+                  <s-table-header listSlot="kicker">SKU</s-table-header>
+                </s-table-header-row>
+                <s-table-body>
+                  {products.map((product) => (
+                    <s-table-row key={product.id}>
+                      <s-table-cell>
+                        <s-stack
+                          direction="inline"
+                          gap="small-300"
+                          alignItems="center"
+                        >
+                          {/*
+                            * `s-image` in a fixed box, not `s-thumbnail`: a
+                            * thumbnail draws a framed tile, which reads as a
+                            * missing input beside a name rather than as a
+                            * picture of the thing.
+                            */}
+                          <s-box inlineSize="40px" blockSize="40px">
+                            {product.imageUrl ? (
+                              <s-image
+                                src={product.imageUrl}
+                                alt=""
+                                inlineSize="fill"
+                                objectFit="contain"
+                                loading="lazy"
+                              />
+                            ) : null}
+                          </s-box>
+                          <s-text>{product.title ?? product.sku}</s-text>
+                        </s-stack>
+                      </s-table-cell>
+                      <s-table-cell>
+                        <s-text color="subdued">{product.sku}</s-text>
+                      </s-table-cell>
+                    </s-table-row>
+                  ))}
+                </s-table-body>
+              </s-table>
+
+              {counts.unmatched > products.length ? (
                 <s-text color="subdued">
-                  {`Showing ${unmatched.length} of ${counts.unmatched}.`}
+                  {`Showing ${products.length} of ${counts.unmatched}.`}
                 </s-text>
               ) : null}
             </s-stack>

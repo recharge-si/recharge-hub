@@ -5,6 +5,8 @@ import {
   type MetakockaClient,
 } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
+import { MetakockaError } from "~/adapters/metakocka/errors";
+import { toMinorUnits } from "~/adapters/metakocka/values";
 
 /**
  * Sales orders, per
@@ -382,36 +384,331 @@ export async function putSalesOrder(
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* Reading one document back                                                  */
+/* -------------------------------------------------------------------------- */
+
+const singleDocumentSchema = mkEnvelopeSchema.and(
+  z
+    .object({
+      mk_id: z.union([z.string(), z.number()]).transform(String).optional(),
+      count_code: z.string().optional(),
+      doc_number: z.string().optional(),
+      product_list: z
+        .array(
+          z
+            .object({
+              code: z.string().optional(),
+              amount: z.union([z.string(), z.number()]).optional(),
+            })
+            .passthrough(),
+        )
+        .optional(),
+      // Present once a payment has been recorded. Named for the field the
+      // document carries back, which is not the `mark_paid` we send.
+      payment_list: z.array(z.record(z.string(), z.unknown())).optional(),
+      /*
+       * **[verified against company 6789 on 2026-08-25]** `get_document` with
+       * `doc_id` set to the `mk_id` returned by `put_document` answers with the
+       * whole document at the top level:
+       *
+       *   mk_id, doc_type, opr_code, count_code, doc_date, partner, receiver,
+       *   sales_pricelist_code, currency_code, doc_created_email, buyer_order,
+       *   warehouse, product_list, sum_basic, sum_tax_ex4, sum_all,
+       *   profit_center, profit_center_desc, bank_ref_number, order_create_ts,
+       *   created_ts, fulfillment_user
+       *
+       * Two things are notable by their absence, and both changed what this
+       * poller is for. There is **no status field** on a sales order — no
+       * `status`, no `status_code` — and **no tracking field** of any kind. So
+       * there is no workflow state to follow here, and the useful questions
+       * turn out to be different ones: does the document still exist, and does
+       * it still say what we sent? Both are answerable, and both happen.
+       */
+      sum_all: z.union([z.string(), z.number()]).optional(),
+      buyer_order: z.string().optional(),
+    })
+    .passthrough(),
+);
+
+export interface DocumentSnapshot {
+  mkId: string | null;
+  countCode: string | null;
+  docNumber: string | null;
+  /**
+   * How many lines MetaKocka currently holds on the document.
+   *
+   * **Null means the response did not say**, which is a different answer from
+   * zero and is treated differently by the caller. `get_document`'s exact
+   * response shape has not been verified against a live company (CLAUDE.md
+   * §14), and a check that cannot read the answer must not report a disaster.
+   */
+  lineCount: number | null;
+  /** Whether MetaKocka reports a payment against it, where it says. */
+  hasPayment: boolean | null;
+  /** `sum_all`, the document total as MetaKocka now holds it. Minor units. */
+  totalMinor: number | null;
+  buyerOrder: string | null;
+  /**
+   * The lines as MetaKocka now holds them, as `code` to total quantity.
+   *
+   * This rather than the total is what the poller compares, and the reason is
+   * tax basis. `sum_all` is always gross, while what this app *sends* is gross
+   * or net depending on the shop's `taxesIncluded` setting (§8.6) — so on a
+   * tax-exclusive shop a total comparison would differ by the VAT rate on every
+   * order and report every document as edited. Codes and quantities mean the
+   * same thing on both sides whatever the prices are doing.
+   */
+  lines: Map<string, number>;
+}
+
 /**
- * Marks an already-written document paid.
+ * Reads one sales order back from MetaKocka.
+ *
+ * **[verified] `get_document` takes `doc_id`, not `mk_id`** (§3). Sending
+ * `mk_id` answers "Cannot find document type sales_order with id = null",
+ * which reads like a missing document rather than a wrong parameter name.
+ *
+ * This exists to check an update rather than to fetch data. §7 records the
+ * pattern that makes it necessary: MetaKocka reports success for a call that
+ * changed nothing, and — verified in `markDocumentPaid` below — reports success
+ * for an update that silently deleted every line on the document. `opr_code 0`
+ * is not evidence that the right thing happened, so the write is read back.
+ */
+/**
+ * `product_list` as code to quantity, summed.
+ *
+ * Summed rather than kept per row because MetaKocka is free to hold the same
+ * code on two rows where this app sent one, and for the question being asked —
+ * does the document still describe the same goods — two rows of one are the
+ * same answer as one row of two.
+ */
+function lineQuantities(
+  list: { code?: string; amount?: string | number }[] | undefined,
+): Map<string, number> {
+  const lines = new Map<string, number>();
+  if (!list) return lines;
+
+  for (const row of list) {
+    if (!row.code) continue;
+    const amount = Number(String(row.amount ?? "0").replace(",", "."));
+    if (!Number.isFinite(amount)) continue;
+    lines.set(row.code, (lines.get(row.code) ?? 0) + amount);
+  }
+  return lines;
+}
+
+export async function getSalesOrder(
+  client: MetakockaClient,
+  docId: string,
+): Promise<DocumentSnapshot> {
+  const response = await client.call(
+    ENDPOINTS.getDocument,
+    { doc_type: "sales_order", doc_id: docId },
+    singleDocumentSchema,
+  );
+
+  return {
+    mkId: response.mk_id ?? null,
+    countCode: response.count_code ?? null,
+    docNumber: response.doc_number ?? null,
+    lineCount: response.product_list ? response.product_list.length : null,
+    hasPayment: response.payment_list
+      ? response.payment_list.length > 0
+      : null,
+    // Parsed at the boundary and never as a float (§15). MetaKocka sends money
+    // as a string and sometimes with a decimal comma.
+    totalMinor:
+      response.sum_all === undefined
+        ? null
+        : toMinorUnits(String(response.sum_all)),
+    buyerOrder: response.buyer_order ?? null,
+    lines: lineQuantities(response.product_list),
+  };
+}
+
+/**
+ * Whether a MetaKocka rejection means "that document does not exist".
+ *
+ * **[verified]** A `doc_id` MetaKocka does not have answers `opr_code 2` with
+ * `"Cannot find document type sales_order with id = 1200049905201"` — the same
+ * code it uses for a malformed request, so the code alone cannot be trusted and
+ * the description has to be read (§3, and the same lesson as code 6).
+ *
+ * It is worth telling apart because it is not a failure: a document deleted in
+ * the MetaKocka UI is a thing merchants do, and this app went on reporting the
+ * order as sent regardless.
+ */
+export function isDocumentMissing(error: unknown): boolean {
+  if (!(error instanceof MetakockaError)) return false;
+  const description = (error.oprDesc ?? "").toLowerCase();
+  return (
+    description.includes("cannot find document") ||
+    description.includes("cannot find sales order")
+  );
+}
+
+/** `getSalesOrder`, but a document MetaKocka no longer has is null, not a throw. */
+export async function findSalesOrder(
+  client: MetakockaClient,
+  docId: string,
+): Promise<DocumentSnapshot | null> {
+  try {
+    return await getSalesOrder(client, docId);
+  } catch (error) {
+    if (isDocumentMissing(error)) return null;
+    throw error;
+  }
+}
+
+/**
+ * Replaces a sales order MetaKocka already holds with a corrected version.
+ *
+ * The mechanism is the one verified for `markDocumentPaid` below, used
+ * deliberately rather than discovered by accident: **MetaKocka treats an update
+ * as a replacement**, so `put_document` with `mk_id` and a complete body swaps
+ * the document for the body sent. That is a trap when the body is a patch — it
+ * silently deletes everything left out — and exactly the right tool when the
+ * body is a whole, freshly built document.
+ *
+ * Two things the caller must get right, and both are about what a replacement
+ * takes with it:
+ *
+ *  - **The payment goes back on.** §8.7: `mark_paid` on an update deletes the
+ *    previous payment and replaces it. A document that was paid and is updated
+ *    without one is a document that is no longer paid, silently. `input.body`
+ *    must carry the `mark_paid` the document already had.
+ *  - **The result is read back.** `opr_code 0` is not evidence the right thing
+ *    happened — §7 records MetaKocka reporting success for a call that changed
+ *    nothing, and the note below records it reporting success for one that
+ *    emptied a document.
+ *
+ * This is the one place in the app that changes a document MetaKocka has
+ * accepted. Everything about it assumes the caller has decided that is
+ * appropriate (§8.8: the document may already be invoiced).
+ */
+export async function updateSalesOrder(
+  client: MetakockaClient,
+  input: {
+    mkId: string;
+    /** A complete document, built the same way a create is. Never a patch. */
+    body: Record<string, unknown>;
+  },
+): Promise<{ body: Record<string, unknown>; verified: DocumentSnapshot }> {
+  const expectedLines = Array.isArray(input.body.product_list)
+    ? input.body.product_list.length
+    : 0;
+
+  const body: Record<string, unknown> = { ...input.body, mk_id: input.mkId };
+
+  await client.call(ENDPOINTS.putDocument, body, documentResponseSchema);
+
+  const verified = await getSalesOrder(client, input.mkId);
+
+  if (
+    expectedLines > 0 &&
+    verified.lineCount !== null &&
+    verified.lineCount < expectedLines
+  ) {
+    throw new MetakockaError(
+      `MetaKocka accepted the update but the document now holds ${verified.lineCount} of ${expectedLines} lines`,
+      {
+        endpoint: ENDPOINTS.putDocument,
+        kind: "exception",
+        oprDesc: `Document ${input.mkId} lost lines when it was updated. MetaKocka treats an update as a replacement and reported success regardless. Check the document in MetaKocka before doing anything else with this order.`,
+      },
+    );
+  }
+
+  return { body, verified };
+}
+
+/**
+ * Marks an already-written document paid, and checks that it survived.
  *
  * **[verified] A partial update destroys the document.** Sending
  * `put_document` with `mk_id` and `mark_paid` and nothing else answered
  * "Partner data are missing"; adding the partner answered "Value is require for
- * doc_date"; adding that succeeded — and **deleted every line on the document**.
- * A five-line order came back with no `product_list` and no totals, silently,
- * reported as success. MetaKocka treats an update as a replacement, so anything
- * left out is removed.
+ * doc_date"; adding that succeeded — and **deleted every line on the
+ * document**. A five-line order came back with no `product_list` and no totals,
+ * silently, reported as success. MetaKocka treats an update as a replacement,
+ * so anything left out is removed.
  *
- * That is why payment is folded into the create instead (`SalesOrderInput.markPaid`),
- * and why this function demands the whole document rather than a payment on its
- * own. §8.7 also warns that `mark_paid` on an update deletes the previous
- * payment and replaces it, so this is only ever a deliberate, single-purpose
- * correction — never part of a routine retry.
+ * Two things follow, and both are load-bearing:
+ *
+ *  - **The whole document goes with the payment.** `body` is the complete
+ *    document, not a patch. The caller sends back the exact body MetaKocka
+ *    accepted when the document was created, so a replacement replaces it with
+ *    itself.
+ *  - **The result is read back.** `expectedLines` is checked against what
+ *    MetaKocka holds afterwards, because the failure mode above reported
+ *    success. A merchant finding out at the end of the quarter that a document
+ *    lost its lines is not an acceptable way to learn this.
+ *
+ * §8.7 also warns that `mark_paid` on an update deletes the previous payment
+ * and replaces it, so this is only ever sent once per document — the caller
+ * claims the document before calling and records `payment_marked_at` after.
  */
 export async function markDocumentPaid(
   client: MetakockaClient,
-  input: SalesOrderInput & {
+  input: {
     mkId: string;
-    markPaid: NonNullable<SalesOrderInput["markPaid"]>;
+    /** The complete document body, as originally sent. Never a subset. */
+    body: Record<string, unknown>;
+    payment: NonNullable<SalesOrderInput["markPaid"]>;
+    timeZone?: string;
+    currencyDecimals?: number;
   },
-): Promise<void> {
-  await client.call(
-    ENDPOINTS.putDocument,
-    // The complete document, plus the payment. Never a subset.
-    { mk_id: input.mkId, ...buildSalesOrderBody(input) },
-    documentResponseSchema,
-  );
+): Promise<{ body: Record<string, unknown>; verified: DocumentSnapshot }> {
+  const decimals = input.currencyDecimals ?? 2;
+
+  const expectedLines = Array.isArray(input.body.product_list)
+    ? input.body.product_list.length
+    : 0;
+
+  const body: Record<string, unknown> = {
+    ...input.body,
+    mk_id: input.mkId,
+    mark_paid: [
+      {
+        payment_type: input.payment.paymentType,
+        date: toPaymentDate(input.payment.paidAt, input.timeZone),
+        ...(input.payment.amountMinor !== undefined
+          ? { amount: minorToDecimalString(input.payment.amountMinor, decimals) }
+          : {}),
+      },
+    ],
+  };
+
+  await client.call(ENDPOINTS.putDocument, body, documentResponseSchema);
+
+  const verified = await getSalesOrder(client, input.mkId);
+
+  /*
+   * Only an answer counts as a failure.
+   *
+   * `null` means `get_document` did not return a `product_list` at all, which
+   * says nothing about the document and everything about a response shape this
+   * app has not verified (§14). Treating that as "the lines are gone" would
+   * raise an alarming exception immediately after a payment that went through
+   * perfectly, which is its own kind of damage.
+   */
+  if (
+    expectedLines > 0 &&
+    verified.lineCount !== null &&
+    verified.lineCount < expectedLines
+  ) {
+    throw new MetakockaError(
+      `MetaKocka accepted the payment but the document now holds ${verified.lineCount} of ${expectedLines} lines`,
+      {
+        endpoint: ENDPOINTS.putDocument,
+        kind: "exception",
+        oprDesc: `Document ${input.mkId} lost lines when the payment was recorded. MetaKocka treats an update as a replacement and reported success regardless. Check the document in MetaKocka before doing anything else with this order.`,
+      },
+    );
+  }
+
+  return { body, verified };
 }
 
 const searchResponseSchema = mkEnvelopeSchema.and(
@@ -456,4 +753,20 @@ export async function findDocumentByBuyerOrder(
     countCode: row.count_code ?? null,
     docNumber: row.doc_number ?? null,
   }));
+}
+
+/**
+ * Where a document lives in MetaKocka's own interface.
+ *
+ * A link out, deliberately, and one of the few this app has. §2.7 requires the
+ * primary workflows to be completable inside the Shopify admin, and they are —
+ * this is not a workflow. It is the answer to "let me look at the actual
+ * document", which no amount of summarising here replaces, and which a merchant
+ * otherwise reaches by searching MetaKocka for a reference they have to copy by
+ * hand.
+ *
+ * The `mk_id` returned by `put_document` is the id this URL takes.
+ */
+export function metakockaDocumentUrl(mkId: string): string {
+  return `https://main.metakocka.si/index.jsp#prodaja_salesorder?id=${encodeURIComponent(mkId)}`;
 }

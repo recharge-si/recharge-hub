@@ -65,6 +65,19 @@ model Shop {
   /// from a read is the only signal there is.
   pricelistsReadAt DateTime? @map("pricelists_read_at")
 
+  /// How far the order reconciler has read (CLAUDE.md section 8.10).
+  ///
+  /// Shopify webhooks are best-effort: they are retried for a while and then
+  /// dropped, and an app that is down for an afternoon simply never hears about
+  /// what happened in it. So a scheduled pass re-reads every order Shopify has
+  /// touched since this mark and applies whatever it finds. Null means the
+  /// reconciler has never run, and the first run deliberately starts from a
+  /// short window rather than the beginning of time.
+  ordersReconciledThrough DateTime? @map("orders_reconciled_through")
+
+  /// How far the MetaKocka document poll has read. See `poll-metakocka-documents`.
+  documentsPolledThrough DateTime? @map("documents_polled_through")
+
   eventLogs              EventLog[]
   metakockaCredential    MetakockaCredential?
   supplySources          SupplySource[]
@@ -76,6 +89,7 @@ model Shop {
   skus                   Sku[]
   paymentTypeMaps        PaymentTypeMap[]
   paymentSetting         PaymentSetting?
+  salesOrderSetting      SalesOrderSetting?
   supplySetting          SupplySetting?
   productSyncSetting     ProductSyncSetting?
   orders                 Order[]
@@ -222,6 +236,20 @@ model SupplySource {
   profitCenterInherited  Boolean @default(false) @map("profit_center_inherited")
 
   /// Lower runs first in allocation.
+  /// How the last stock sync for this location went, and when.
+  ///
+  /// Stock sync had no per-location outcome at all: the job logged one line for
+  /// the whole run and let one location's failure throw, which killed the sweep
+  /// and re-ran every location in front of it on the next retry. A location
+  /// that had failed every attempt for nine hours still showed as "Syncing",
+  /// and a status nobody can tell apart from working is worse than none.
+  lastSyncAt      DateTime? @map("last_sync_at")
+  lastSyncOk      Boolean?  @map("last_sync_ok")
+  /// What went wrong, in the merchant's words. Null when the last run worked.
+  lastSyncMessage String?   @map("last_sync_message")
+  /// Consecutive failures. One blip is not news; an hour of them is.
+  syncFailures    Int       @default(0) @map("sync_failures")
+
   priority            Int     @default(100)
   leadTimeDays        Int     @default(0) @map("lead_time_days")
   defaultDeliveryType String? @map("default_delivery_type")
@@ -441,7 +469,27 @@ model Sku {
   sku                    String
   shopifyVariantId       String? @map("shopify_variant_id")
   shopifyInventoryItemId String? @map("shopify_inventory_item_id")
-  title                  String?
+  shopifyProductId       String? @map("shopify_product_id")
+
+  /// The product's own title, and the variant's option values, kept apart.
+  ///
+  /// Shopify's `displayName` glues them together with a hyphen, which is fine
+  /// until a product title contains one. Keeping them separate is also what
+  /// lets the order page show the product and its options as two lines, which
+  /// is how a merchant reads a line: what it is, then which one.
+  title        String?
+  variantTitle String? @map("variant_title")
+
+  /// What the merchant sees in Shopify, so the product list is scannable.
+  ///
+  /// A list of bare codes is not a product list — it is a database table with a
+  /// heading. These come from the catalogue read, which already walks every
+  /// variant, so showing them costs nothing at page load (CLAUDE.md 2.5).
+  imageUrl    String? @map("image_url")
+  priceMinor  Int?    @map("price_minor")
+  currency    String?
+  vendor      String?
+  productType String? @map("product_type")
 
   metakockaCode String?   @map("metakocka_code")
   metakockaMkId String?   @map("metakocka_mk_id")
@@ -567,6 +615,16 @@ model ProductSyncSetting {
   /// Separate and off by default for the reason `updatePricing` is: §8.9 makes
   /// MetaKocka master for what its own catalogue holds, so changing an article
   /// the ERP already owns is a decision the merchant takes deliberately.
+  /// Whether the catalogue is re-read and re-matched on a schedule.
+  ///
+  /// A manual sync is a promise the merchant has to remember to keep. Products
+  /// change in Shopify and in MetaKocka every day, and a registry that is only
+  /// as fresh as the last time somebody pressed a button is a registry that
+  /// silently stops matching.
+  scheduleEnabled         Boolean @default(false) @map("schedule_enabled")
+  /// How often, in minutes. Labelled with its unit in the UI (CLAUDE.md 2.8).
+  scheduleIntervalMinutes Int     @default(720) @map("schedule_interval_minutes")
+
   updateProductType Boolean @default(false) @map("update_product_type")
 
   lastRunAt DateTime? @map("last_run_at")
@@ -661,6 +719,54 @@ model Order {
   /// from this app instead.
   shopifyDeletedAt DateTime? @map("shopify_deleted_at")
 
+  /// Shopify's own `updated_at` for this order.
+  ///
+  /// The high-water mark that makes order updates safe. Shopify does not
+  /// promise webhooks arrive in the order the changes happened, and the
+  /// reconciler re-reads orders the webhooks already delivered, so an update
+  /// carrying an older timestamp than the one already applied is discarded
+  /// rather than allowed to undo a newer one.
+  shopifyUpdatedAt DateTime? @map("shopify_updated_at")
+
+  /// When this app last compared the order against Shopify, by webhook or by
+  /// reconciliation. What the home page means by "orders are in step".
+  lastSyncedAt DateTime? @map("last_synced_at")
+
+  /// Shopify's fulfilment status, normalised (`FulfillmentState`). Read and
+  /// shown, not acted on: tracking back to Shopify is M5.
+  fulfillmentState String? @map("fulfillment_state")
+
+  /// The gateway the order was paid on, kept out of the payload so a payment
+  /// can still be described after the section 2.4 redaction has run.
+  paymentGateway String? @map("payment_gateway")
+
+  /// Set when Shopify cancels the order. The MetaKocka document stays where it
+  /// is (section 8.8) and an exception asks a human to decide.
+  cancelledAt DateTime? @map("cancelled_at")
+
+  /// Set when Shopify's version of the order stopped matching what was written
+  /// to MetaKocka: a line, a quantity, a price or a total changed after the
+  /// document existed. Cleared when the exception is resolved.
+  divergedAt DateTime? @map("diverged_at")
+
+  /// A partner the merchant entered by hand, for an order Shopify has no
+  /// address on.
+  ///
+  /// Point-of-sale orders, digital goods and some draft orders arrive with
+  /// neither a billing nor a shipping address, and MetaKocka refuses a sales
+  /// order without a partner. Before this the only advice the app could give
+  /// was "add the address in Shopify and retry", which is not always possible
+  /// and never quick. Shaped like `ParsedAddress`, and it wins over the payload
+  /// when it is set.
+  partnerOverride Json? @map("partner_override")
+
+  /// Set when a person chose the supply sources themselves.
+  ///
+  /// Automatic allocation replaces the whole set every time it runs, so without
+  /// this a hand-made decision would survive exactly until the next stock sync
+  /// re-drove the order. Cleared by allocating again on purpose.
+  allocationLockedAt DateTime? @map("allocation_locked_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -672,6 +778,7 @@ model Order {
   @@unique([shopId, shopifyOrderId])
   @@index([shopId, status])
   @@index([shopId, receivedAt])
+  @@index([shopId, financialStatus])
   @@map("order")
 }
 
@@ -774,6 +881,34 @@ model MetakockaDocument {
   /// and this records that it happened.
   paymentMarkedAt DateTime? @map("payment_marked_at")
 
+  /// Which MetaKocka payment type was used and for how much, in minor units.
+  ///
+  /// Recorded because "this document was marked paid" is not enough to
+  /// reconcile against: a split order pays each document its own share
+  /// (section 8.6), and the shares have to be shown to add up.
+  paymentType        String? @map("payment_type")
+  paymentAmountMinor Int?    @map("payment_amount_minor")
+
+  /// What MetaKocka reports about the document now, and when it was asked.
+  ///
+  /// A document is not finished when it is written. It is confirmed, picked,
+  /// delivered and given a tracking code inside the ERP, and MetaKocka has no
+  /// webhook for any of it (CLAUDE.md section 3: the only event is stock). So
+  /// the documents this app wrote are polled, and what comes back is shown on
+  /// the order rather than leaving the merchant to guess from "written".
+  mkStatus        String?   @map("mk_status")
+  mkDocNumber     String?   @map("mk_doc_number")
+  mkCheckedAt     DateTime? @map("mk_checked_at")
+  /// Tracking codes MetaKocka holds, ready for the M5 fulfilment write-back.
+  trackingNumbers Json?     @map("tracking_numbers")
+
+  /// Taken before the payment call goes out, released by paymentMarkedAt.
+  ///
+  /// The same shape of guard as the count_code claim, and for the same reason:
+  /// mark_paid on an update deletes the previous payment and replaces it, so
+  /// two jobs arriving together must not both send one.
+  paymentClaimedAt DateTime? @map("payment_claimed_at")
+
   /// Redacted with the order after 90 days. Recorded whatever the outcome,
   /// because section 8.4 requires the request and response either way.
   requestBody  Json? @map("request_body")
@@ -807,6 +942,16 @@ enum ExceptionKind {
   metakocka_write_failed
   fulfillment_split_failed
   tax_undeterminable
+  /// Shopify's order no longer matches the document MetaKocka holds.
+  order_diverged
+  /// Stock could not be synced for a location, and kept not working.
+  stock_sync_failed
+  /// The document was deleted in MetaKocka. Verified as a thing that happens.
+  metakocka_document_missing
+  /// The document is still there but no longer says what this app sent.
+  metakocka_document_changed
+  /// The payment could not be recorded against the MetaKocka document.
+  payment_write_failed
 
   @@map("exception_kind")
 }
@@ -834,6 +979,22 @@ model Exception {
   resolvedBy String?         @map("resolved_by")
   resolvedAt DateTime?       @map("resolved_at")
 
+  /// How many times the work behind this has been re-driven, and when last.
+  ///
+  /// An exception whose retry keeps failing looks identical to one nobody has
+  /// touched, which is how "Retry does nothing" happens: it did something, it
+  /// failed the same way, and the screen had no way to say so.
+  attempts      Int       @default(0)
+  lastAttemptAt DateTime? @map("last_attempt_at")
+
+  /// When the background re-check last looked at this.
+  ///
+  /// Exceptions are conditions, not events: "not enough stock" stops being true
+  /// the moment stock arrives, and nothing in Shopify or MetaKocka will announce
+  /// that. So a scheduled job re-evaluates every open exception and closes the
+  /// ones that have fixed themselves (`recheck-exceptions`).
+  lastCheckedAt DateTime? @map("last_checked_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -843,6 +1004,41 @@ model Exception {
   @@index([shopId, status])
   @@index([orderId])
   @@map("exception")
+}
+
+/// How this app treats a sales order MetaKocka has already accepted.
+///
+/// §8.8 originally said an order that changes after it has been written is a
+/// human's problem, and automatic re-allocation was a phase 2 decision. In
+/// practice that left the ERP holding quantities nobody had agreed to, with an
+/// exception the merchant could read but not act on — so the behaviour is a
+/// choice they make rather than one the app makes for them.
+model SalesOrderSetting {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// Rewrite the MetaKocka document when the Shopify order changes.
+  ///
+  /// On by default, because the alternative is an ERP that is quietly wrong.
+  /// MetaKocka treats an update as a replacement (§3), so the document is
+  /// rebuilt whole and read back afterwards; it is never patched.
+  updateOnChange Boolean @default(true) @map("update_on_change")
+
+  /// Keep updating even after a payment has been recorded against it.
+  ///
+  /// Off by default, and this is the safety rail. A paid document is the one
+  /// most likely to have been invoiced in MetaKocka, and replacing an invoiced
+  /// document changes an accounting record. With this off, a change to a paid
+  /// order raises an exception instead — the same behaviour as turning updates
+  /// off entirely, applied only where the stakes are highest.
+  updateAfterPaid Boolean @default(false) @map("update_after_paid")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("sales_order_setting")
 }
 
 /// Shop-level payment settings (CLAUDE.md section 8.7).

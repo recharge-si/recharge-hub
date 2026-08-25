@@ -20,6 +20,13 @@ export interface VariantSnapshot {
   shopifyVariantId: string;
   shopifyInventoryItemId: string | null;
   title: string | null;
+  variantTitle?: string | null;
+  shopifyProductId?: string | null;
+  imageUrl?: string | null;
+  priceMinor?: number | null;
+  currency?: string | null;
+  vendor?: string | null;
+  productType?: string | null;
 }
 
 /**
@@ -48,10 +55,20 @@ export async function upsertVariants(
     await prisma.sku.upsert({
       where: { shopId_sku: { shopId, sku: variant.sku } },
       create: { shopId, ...variant },
+      // Deliberately field by field rather than spreading the snapshot: the
+      // MetaKocka columns on this row are owned by `applyMetakockaMatches`, and
+      // a catalogue read must never clear a match that is still good.
       update: {
         shopifyVariantId: variant.shopifyVariantId,
         shopifyInventoryItemId: variant.shopifyInventoryItemId,
         title: variant.title,
+        variantTitle: variant.variantTitle ?? null,
+        shopifyProductId: variant.shopifyProductId ?? null,
+        imageUrl: variant.imageUrl ?? null,
+        priceMinor: variant.priceMinor ?? null,
+        currency: variant.currency ?? null,
+        vendor: variant.vendor ?? null,
+        productType: variant.productType ?? null,
       },
     });
 
@@ -194,4 +211,110 @@ export async function metakockaNamesFor(
   });
 
   return new Map(rows.map((row) => [row.sku, row.metakockaName]));
+}
+
+export interface SkuPageOptions {
+  status: "matched" | "unmatched" | "ignored" | "all";
+  /** Matches the SKU, the Shopify title, or the name MetaKocka holds. */
+  search?: string;
+  skip?: number;
+  take?: number;
+}
+
+export interface SkuRow {
+  id: string;
+  sku: string;
+  title: string | null;
+  variantTitle: string | null;
+  imageUrl: string | null;
+  priceMinor: number | null;
+  currency: string | null;
+  vendor: string | null;
+  status: Sku["status"];
+  metakockaName: string | null;
+  metakockaMkId: string | null;
+  /** Free to sell across every enabled source, or null when nothing is mapped. */
+  stock: number | null;
+}
+
+/**
+ * One page of the product list.
+ *
+ * The list used to be ten unmatched codes and nothing else, which is a
+ * diagnostic, not a product list — a merchant looking for "the blue one"
+ * recognises it by its picture and its price, not by P04200014440. So the row
+ * carries what makes a product recognisable, and every field of it comes from
+ * the catalogue read that was already walking every variant. Nothing here
+ * queries Shopify or MetaKocka at page load (CLAUDE.md §2.5).
+ *
+ * Stock is joined in because it is the other question anyone opens this page
+ * with, and it is the figure that decides whether an order can be allocated at
+ * all. Null means no warehouse is mapped to a source yet, which reads
+ * differently from zero and should.
+ */
+export async function listSkuPage(
+  principal: Principal,
+  options: SkuPageOptions,
+): Promise<SkuRow[]> {
+  const search = options.search?.trim();
+
+  const rows = await prisma.sku.findMany({
+    where: {
+      shop: { domain: shopDomainOf(principal) },
+      ...(options.status === "all" ? {} : { status: options.status }),
+      ...(search
+        ? {
+            OR: [
+              { sku: { contains: search, mode: "insensitive" } },
+              { title: { contains: search, mode: "insensitive" } },
+              { metakockaName: { contains: search, mode: "insensitive" } },
+              { vendor: { contains: search, mode: "insensitive" } },
+            ],
+          }
+        : {}),
+    },
+    select: {
+      id: true,
+      sku: true,
+      title: true,
+      variantTitle: true,
+      imageUrl: true,
+      priceMinor: true,
+      currency: true,
+      vendor: true,
+      status: true,
+      metakockaName: true,
+      metakockaMkId: true,
+      supplyLevels: {
+        where: { supplySource: { enabled: true } },
+        select: { quantity: true, reserved: true },
+      },
+    },
+    orderBy: [{ status: "asc" }, { sku: "asc" }],
+    skip: options.skip ?? 0,
+    take: options.take ?? 25,
+  });
+
+  return rows.map((row) => ({
+    id: row.id,
+    sku: row.sku,
+    title: row.title,
+    variantTitle: row.variantTitle,
+    imageUrl: row.imageUrl,
+    priceMinor: row.priceMinor,
+    currency: row.currency,
+    vendor: row.vendor,
+    status: row.status,
+    metakockaName: row.metakockaName,
+    metakockaMkId: row.metakockaMkId,
+    stock:
+      row.supplyLevels.length === 0
+        ? null
+        : row.supplyLevels.reduce(
+            // What is free to sell, not what is physically there — the same
+            // figure the allocator works from (§8.2).
+            (sum, level) => sum + Math.max(0, level.quantity - level.reserved),
+            0,
+          ),
+  }));
 }

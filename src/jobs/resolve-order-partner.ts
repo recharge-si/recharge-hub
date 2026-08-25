@@ -3,10 +3,11 @@ import { getCredential } from "~/adapters/db/repositories/metakocka-credential.s
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { resolvePartner } from "~/adapters/metakocka/partners";
 import {
-  parseOrder,
+  parseOrderSafe,
   type ParsedAddress,
 } from "~/adapters/shopify/order-payload";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { parsePartnerOverride } from "~/domain/orders/partner";
 import type { Principal } from "~/domain/types";
 
 /**
@@ -28,6 +29,7 @@ export async function ensureOrderPartner(
     where: { id: orderId },
     select: {
       rawPayload: true,
+      partnerOverride: true,
       metakockaPartnerMkId: true,
       metakockaPartnerAddressId: true,
     },
@@ -41,10 +43,19 @@ export async function ensureOrderPartner(
     };
   }
 
-  if (!order.rawPayload) return null;
+  /*
+   * A hand-entered partner wins here too.
+   *
+   * It has to: this is what looks the partner up in MetaKocka and records the
+   * id the document then references. Resolving from the payload while the
+   * document was built from the override would file the order against one
+   * customer and name another.
+   */
+  const override = parsePartnerOverride(order.partnerOverride);
 
-  const parsed = parseOrder(order.rawPayload);
-  const address: ParsedAddress | null = parsed.partner ?? parsed.receiver;
+  const parsed = parseOrderSafe(order.rawPayload);
+  const address: ParsedAddress | null =
+    override ?? parsed?.partner ?? parsed?.receiver ?? null;
   if (!address) return null;
 
   const credential = await getCredential(principal);
@@ -61,7 +72,7 @@ export async function ensureOrderPartner(
     postNumber: address.postNumber,
     place: address.place,
     country: address.country,
-    taxNumber: null,
+    taxNumber: override?.taxNumber ?? null,
     email: address.email,
     phone: address.phone,
     isBusiness: address.isBusiness,

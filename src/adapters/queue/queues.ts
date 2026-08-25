@@ -23,6 +23,11 @@ export const QUEUES = {
   writeMetakockaOrder: "write-metakocka-order",
   writeShopifyFulfilment: "write-shopify-fulfilment",
   ordersEvent: "orders-event",
+  syncOrderState: "sync-order-state",
+  markMetakockaPaid: "mark-metakocka-paid",
+  reconcileOrders: "reconcile-orders",
+  recheckExceptions: "recheck-exceptions",
+  pollMetakockaDocuments: "poll-metakocka-documents",
   redactOldOrders: "redact-old-orders",
   scheduledTick: "scheduled-tick",
 } as const;
@@ -92,6 +97,51 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 300,
+  },
+  // Everything that happens to an order after it arrives. Cheap and idempotent
+  // — the diff does nothing for an order that has not moved — so it retries
+  // freely.
+  [QUEUES.syncOrderState]: {
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+  },
+  // Recording a payment in the ERP. Retrying is safe only because each document
+  // is claimed before the call and `payment_marked_at` is written after
+  // (§8.7: mark_paid on an update replaces the previous payment).
+  [QUEUES.markMetakockaPaid]: {
+    retryLimit: 4,
+    retryDelay: 60,
+    retryBackoff: true,
+    // Kept in step with PAYMENT_CLAIM_LEASE_MS in the order repository.
+    expireInSeconds: 300,
+  },
+  // Re-reads every open exception and closes or re-drives it. Pure database
+  // work, so it is cheap enough to run every quarter of an hour; a dropped run
+  // costs nothing because the next one sees the same state.
+  [QUEUES.recheckExceptions]: {
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 600,
+  },
+  // Asks MetaKocka what became of the documents this app wrote. Several calls
+  // and MetaKocka is slow (§3), so it gets a long window and a short leash.
+  [QUEUES.pollMetakockaDocuments]: {
+    retryLimit: 2,
+    retryDelay: 120,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+  },
+  // Reads pages of orders back from Shopify. Bounded per run, and the watermark
+  // only advances over work that was actually done, so a dropped run costs a
+  // repeat rather than a gap.
+  [QUEUES.reconcileOrders]: {
+    retryLimit: 2,
+    retryDelay: 120,
+    retryBackoff: true,
+    expireInSeconds: 1800,
   },
   // Pure and fast: it reads stock and rules and decides. Worth retrying, since
   // a failure here is almost always the database being briefly unavailable.

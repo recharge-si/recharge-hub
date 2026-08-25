@@ -67,3 +67,25 @@ export function isProgressFilter(value: string): boolean {
     (option) => option.value !== "" && option.value === value,
   );
 }
+
+/**
+ * A tax factor as the rate a merchant knows.
+ *
+ * `"0.22"` is what goes to MetaKocka (§3: `tax_factor` is a decimal); 22% is
+ * what appears on the invoice and in the merchant's head. The decimal place
+ * only shows when it carries something — 9.5% keeps it, 22% does not gain
+ * "22.0%".
+ *
+ * Null means Shopify never said, which is a different statement from zero and
+ * is the difference between a legitimate exempt line and an order this app
+ * refuses to guess at (§11).
+ */
+export function formatTaxRate(taxFactor: string | null): string {
+  if (taxFactor === null) return "—";
+
+  const rate = Number(taxFactor);
+  if (!Number.isFinite(rate)) return "—";
+
+  const percent = rate * 100;
+  return `${percent.toFixed(Number.isInteger(percent) ? 0 : 1)}%`;
+}

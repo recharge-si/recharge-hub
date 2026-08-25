@@ -11,7 +11,12 @@ import { makeAppUninstalledHandler } from "~/jobs/handlers/app-uninstalled";
 import { handleCustomersDataRequest } from "~/jobs/handlers/customers-data-request";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
 import { handleAllocateOrder } from "~/jobs/handlers/allocate-order";
+import { handleMarkMetakockaPaid } from "~/jobs/handlers/mark-metakocka-paid";
 import { handleOrdersEvent } from "~/jobs/handlers/orders-event";
+import { handlePollMetakockaDocuments } from "~/jobs/handlers/poll-metakocka-documents";
+import { handleRecheckExceptions } from "~/jobs/handlers/recheck-exceptions";
+import { handleReconcileOrders } from "~/jobs/handlers/reconcile-orders";
+import { handleSyncOrderState } from "~/jobs/handlers/sync-order-state";
 import { handleReloadPaymentTypes } from "~/jobs/handlers/reload-payment-types";
 import { handleReloadPricelists } from "~/jobs/handlers/reload-pricelists";
 import { handleReloadProfitCenters } from "~/jobs/handlers/reload-profit-centers";
@@ -87,6 +92,37 @@ async function main(): Promise<void> {
     QUEUES.ordersEvent,
     withIdempotency(QUEUES.ordersEvent, handleOrdersEvent),
   );
+  /*
+   * Payment status, edits, cancellations: everything that happens to an order
+   * after it arrives (§8.7, §8.8).
+   *
+   * Deliberately outside the idempotency guard. The guard keys on Shopify's
+   * webhook id, and this queue is also fed by the reconciler and by the order
+   * page, neither of which has one. It does not need the guard either: the
+   * handler compares the order against what is stored and does nothing when
+   * nothing moved, so a redelivery costs one comparison.
+   */
+  await boss.work(QUEUES.syncOrderState, async (jobs) => {
+    for (const job of jobs) await handleSyncOrderState(job);
+  });
+  // Not wrapped in the idempotency guard: this is also queued by the
+  // reconciler and by the order page, neither of which carries a webhook id.
+  // Sending a payment twice is prevented where it matters instead — by the
+  // per-document claim (§8.7).
+  await boss.work(QUEUES.markMetakockaPaid, async (jobs) => {
+    for (const job of jobs) await handleMarkMetakockaPaid(job);
+  });
+  await boss.work(QUEUES.reconcileOrders, async (jobs) => {
+    for (const job of jobs) await handleReconcileOrders(job);
+  });
+  // An exception is a condition, not an event (§11): it stops being true the
+  // moment somebody fixes what it describes, and nothing announces that.
+  await boss.work(QUEUES.recheckExceptions, async (jobs) => {
+    for (const job of jobs) await handleRecheckExceptions(job);
+  });
+  await boss.work(QUEUES.pollMetakockaDocuments, async (jobs) => {
+    for (const job of jobs) await handlePollMetakockaDocuments(job);
+  });
 
   await boss.work(QUEUES.reloadWarehouses, async (jobs) => {
     for (const job of jobs) await handleReloadWarehouses(job);
@@ -108,8 +144,16 @@ async function main(): Promise<void> {
     for (const job of jobs) await handleRedactOldOrders(job);
   });
 
-  // One cron entry, fanned out per shop by the tick handler. Everything it
-  // sends is throttled, so a slow run is never lapped by the next tick.
+  // One cron entry per cadence, fanned out per shop by the tick handler.
+  // Everything it sends is throttled, so a slow run is never lapped.
+  //
+  // Stock gets its own five-minute cycle: MetaKocka's webhook gives up after
+  // two retries (§3), and stock is the one figure where being behind means
+  // selling something that is not there.
+  await boss.schedule(QUEUES.scheduledTick, "*/5 * * * *", {
+    cadence: "fast",
+  });
+
   await boss.schedule(QUEUES.scheduledTick, "*/15 * * * *", {
     cadence: "quarter_hourly",
   });

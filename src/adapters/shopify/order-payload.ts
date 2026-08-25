@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 import { toMinorUnits } from "~/adapters/metakocka/values";
+import { partyFingerprint } from "~/domain/orders/state";
+import {
+  FINANCIAL_STATUSES,
+  type FinancialStatus,
+  type FulfillmentState,
+  type OrderSnapshot,
+} from "~/domain/orders/types";
 
 /**
  * The Shopify `orders/create` payload, narrowed to what this app actually uses.
@@ -77,6 +84,12 @@ export const orderPayloadSchema = z.object({
   gateway: z.string().nullish(),
   note: z.string().nullish(),
   created_at: z.string().nullish(),
+  /// The ordering key for everything in `jobs/handlers/sync-order-state`.
+  /// Shopify does not promise webhooks arrive in the order they happened, so an
+  /// update older than the one already applied has to be recognisable.
+  updated_at: z.string().nullish(),
+  fulfillment_status: z.string().nullish(),
+  cancelled_at: z.string().nullish(),
   line_items: z.array(lineItemSchema).default([]),
   customer: z
     .object({
@@ -94,32 +107,55 @@ export const orderPayloadSchema = z.object({
 
 export type OrderPayload = z.infer<typeof orderPayloadSchema>;
 
-/** Shopify's financial_status, narrowed to the values §8.7 has a rule for. */
-export type FinancialStatus =
-  | "pending"
-  | "authorized"
-  | "paid"
-  | "partially_paid"
-  | "refunded"
-  | "partially_refunded"
-  | "voided"
-  | "unknown";
+/**
+ * `financial_status`, narrowed to the values §8.7 has a rule for.
+ *
+ * The type itself lives in `domain/orders/types` because the rules that read
+ * it are pure and belong there; this is only the boundary that produces it.
+ * Anything unrecognised — Shopify's `expired`, or a status added after this was
+ * written — becomes `unknown`, which every rule treats as "not a payment this
+ * app records" rather than as a reason to guess.
+ */
+export type { FinancialStatus, FulfillmentState } from "~/domain/orders/types";
 
-const FINANCIAL_STATUSES = new Set<FinancialStatus>([
-  "pending",
-  "authorized",
-  "paid",
-  "partially_paid",
-  "refunded",
-  "partially_refunded",
-  "voided",
-]);
+const KNOWN_FINANCIAL_STATUSES = new Set<string>(
+  FINANCIAL_STATUSES.filter((status) => status !== "unknown"),
+);
 
-export function toFinancialStatus(raw: string | null | undefined) {
-  const value = (raw ?? "").toLowerCase();
-  return FINANCIAL_STATUSES.has(value as FinancialStatus)
+export function toFinancialStatus(
+  raw: string | null | undefined,
+): FinancialStatus {
+  const value = (raw ?? "").toLowerCase().trim();
+  return KNOWN_FINANCIAL_STATUSES.has(value)
     ? (value as FinancialStatus)
-    : ("unknown" as const);
+    : "unknown";
+}
+
+/**
+ * `fulfillment_status`, normalised across the two shapes Shopify reports it in.
+ *
+ * The webhook sends null for an unfulfilled order and "partial", "fulfilled" or
+ * "restocked" otherwise. The Admin API sends `displayFulfillmentStatus`, an
+ * upper-case enum with several more members (`IN_PROGRESS`, `ON_HOLD`,
+ * `SCHEDULED`, `PENDING_FULFILLMENT`, `REQUEST_DECLINED`, `OPEN`). Both reach
+ * this app — the second one through the reconciler — so both collapse into one
+ * small set here rather than leaving every reader to know both vocabularies.
+ *
+ * Nothing in v1 acts on it (tracking back to Shopify is M5). It is read so the
+ * order screen can stop implying an order is waiting when it shipped last week.
+ */
+export function toFulfillmentState(
+  raw: string | null | undefined,
+): FulfillmentState {
+  const value = (raw ?? "").toLowerCase().trim();
+
+  if (value === "" || value === "unfulfilled" || value === "null") {
+    return "unfulfilled";
+  }
+  if (value === "fulfilled") return "fulfilled";
+  if (value === "partial" || value === "partially_fulfilled") return "partial";
+  if (value === "restocked") return "restocked";
+  return "other";
 }
 
 export interface ParsedAddress {
@@ -273,8 +309,16 @@ export interface ParsedOrder {
   taxesIncluded: boolean;
   /** Tax charged on the whole order, minor units. */
   totalTaxMinor: number;
+  fulfillmentState: FulfillmentState;
   note: string | null;
   createdAt: Date | null;
+  /**
+   * Shopify's `updated_at`. The high-water mark that keeps an out-of-order
+   * webhook from undoing a newer one.
+   */
+  updatedAt: Date | null;
+  /** Set when Shopify has cancelled the order. */
+  cancelledAt: Date | null;
   /**
    * The timestamp exactly as Shopify sent it, offset included. Kept as a string
    * because parsing it to a Date throws the offset away, and MetaKocka needs it
@@ -325,8 +369,11 @@ export function parseOrder(payload: unknown): ParsedOrder {
     // as exclusive would inflate every price by the VAT rate.
     taxesIncluded: order.taxes_included ?? true,
     totalTaxMinor: orderTaxMinor,
+    fulfillmentState: toFulfillmentState(order.fulfillment_status),
     note: order.note ?? null,
     createdAt: order.created_at ? new Date(order.created_at) : null,
+    updatedAt: order.updated_at ? new Date(order.updated_at) : null,
+    cancelledAt: order.cancelled_at ? new Date(order.cancelled_at) : null,
     createdAtRaw: order.created_at ?? null,
     lines: order.line_items.map((line) => ({
       shopifyLineItemId: line.id,
@@ -344,4 +391,61 @@ export function parseOrder(payload: unknown): ParsedOrder {
     partner: toParty(order.billing_address, contact, fallbackName),
     receiver: toParty(order.shipping_address, contact, fallbackName),
   };
+}
+
+/**
+ * The part of a parsed order that this app would send differently if it moved
+ * (`domain/orders/state`).
+ *
+ * Kept beside the parser rather than in the domain so there is exactly one
+ * place that knows how a Shopify payload becomes a snapshot, and one place —
+ * the pure `diffOrder` — that knows what a difference between two of them
+ * means.
+ */
+export function toSnapshot(parsed: ParsedOrder): OrderSnapshot {
+  return {
+    financialStatus: parsed.financialStatus,
+    fulfillmentState: parsed.fulfillmentState,
+    currency: parsed.currency,
+    totalMinor: parsed.totalMinor,
+    shippingMinor: parsed.shippingMinor,
+    discountMinor: parsed.discountMinor,
+    cancelled: parsed.cancelledAt !== null,
+    // Billing first, then shipping — the same order the document writer uses,
+    // so the diff watches whichever party the order would actually be filed
+    // against rather than a field that may never be sent.
+    party: partyFingerprint(parsed.partner ?? parsed.receiver),
+    lines: parsed.lines.map((line) => ({
+      shopifyLineItemId: line.shopifyLineItemId,
+      sku: line.sku,
+      title: line.title,
+      quantity: line.quantity,
+      unitPriceWithTaxMinor: line.unitPriceWithTaxMinor,
+      discountMinor: line.discountMinor,
+    })),
+  };
+}
+
+/**
+ * `parseOrder`, but a payload it cannot read is null rather than a throw.
+ *
+ * For every caller that re-parses a *stored* payload rather than an incoming
+ * one, because a stored payload is not guaranteed to still be an order. The
+ * §2.4 retention job overwrites personal data in place after ninety days, and
+ * it replaces whole objects with the string "[redacted]" — `customer`,
+ * `billing_address` and `shipping_address` among them. Handing that to a schema
+ * expecting an object throws.
+ *
+ * That failure would land in the worst possible places: the document writer,
+ * the order sync and the exception re-check all re-read the stored payload, and
+ * all three would have gone from "this order is too old to send" to "this job
+ * crashes, retries, and crashes again". Null says the same thing without
+ * taking anything down, and every caller already has a path for a payload that
+ * is not there.
+ */
+export function parseOrderSafe(payload: unknown): ParsedOrder | null {
+  if (!payload) return null;
+  const parsed = orderPayloadSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  return parseOrder(payload);
 }

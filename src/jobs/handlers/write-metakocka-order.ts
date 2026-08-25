@@ -9,29 +9,34 @@ import {
 } from "~/adapters/db/repositories/exception.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
 import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
+import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import {
+  applyPrimaryDocument,
   claimDocument,
   getOrderDetail,
-  markDocumentPaymentSent,
   recordDocumentResult,
+  recordPaymentMark,
 } from "~/adapters/db/repositories/order.server";
-import {
-  findPaymentType,
-  getFallbackPaymentType,
-} from "~/adapters/db/repositories/payment-type-map.server";
 import { listCachedWarehouses } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
-import { putSalesOrder } from "~/adapters/metakocka/documents";
+import {
+  buildSalesOrderBody,
+  putSalesOrder,
+  updateSalesOrder,
+  type SalesOrderInput,
+} from "~/adapters/metakocka/documents";
 import {
   MetakockaError,
   describeForMerchant,
   exceptionKindFor,
 } from "~/adapters/metakocka/errors";
-import { parseOrder } from "~/adapters/shopify/order-payload";
+import { parseOrderSafe } from "~/adapters/shopify/order-payload";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { ensureOrderPartner } from "~/jobs/resolve-order-partner";
-import { splitOrderMoney } from "~/domain/money/split";
+import { computeDocumentShares } from "~/jobs/order-shares";
+import { resolvePaymentType } from "~/jobs/payment";
+import { parsePartnerOverride } from "~/domain/orders/partner";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -44,6 +49,10 @@ const WRITE_FAILURE_KINDS = [
   "tax_undeterminable",
   "unmapped_payment_gateway",
   "metakocka_write_failed",
+  // A document that went through is proof every SKU on it is in the catalogue,
+  // which is the only thing that proves it. The allocation job cannot: it knows
+  // whether a line has a SKU, not whether MetaKocka has the product.
+  "sku_not_in_metakocka",
 ] as const;
 
 export const writeMetakockaOrderJobSchema = z.object({
@@ -187,7 +196,7 @@ export async function handleWriteMetakockaOrder(
   // The addresses come from the stored payload rather than being kept as
   // columns: §2.4 says store only what is sent, and the retention job redacts
   // this in place after 90 days without touching the decision trail.
-  const parsed = order.rawPayload ? parseOrder(order.rawPayload) : null;
+  const parsed = parseOrderSafe(order.rawPayload);
 
   /**
    * Tax, re-derived from the payload rather than read off the row.
@@ -256,58 +265,47 @@ export async function handleWriteMetakockaOrder(
     isPrimary: false,
   });
 
-  // Somebody else is writing this document, or it is already written. Either
-  // way, not ours to send. This is the duplicate guard doing its job.
-  if (!claim || claim.alreadyWritten) {
+  // Somebody else is mid-write. Not ours to touch — this is the duplicate guard
+  // doing its job (§8.4).
+  if (!claim) {
     log.info(
       { shop: shopDomain, orderId, countCode },
-      "Sales order already claimed or written, skipping",
+      "Sales order already claimed by another job, skipping",
     );
     return;
   }
 
   // §8.6: shipping, COD surcharge and order-level discount belong to exactly
   // one document. Which one is decided from the whole order, not from this
-  // source alone, so the same answer comes out however the jobs interleave.
-  const totalsBySource = new Map<string, number>();
-  for (const line of order.lines) {
-    for (const allocation of line.allocations) {
-      if (!allocation.supplySourceId) continue;
-      const current = totalsBySource.get(allocation.supplySourceId) ?? 0;
-      totalsBySource.set(
-        allocation.supplySourceId,
-        current + allocation.quantity * line.unitPriceWithTaxMinor,
-      );
-    }
-  }
-
-  const sources = await prisma.supplySource.findMany({
-    where: { id: { in: [...totalsBySource.keys()] } },
-  });
-
-  const shares = splitOrderMoney({
-    perSource: sources.map((entry) => ({
-      sourceId: entry.id,
-      sourceCode: entry.code,
-      kind: entry.kind,
-      lineTotalMinor: totalsBySource.get(entry.id) ?? 0,
-    })),
-    orderTotalMinor: order.totalMinor,
-    shippingMinor: order.shippingMinor,
-    discountMinor: order.discountMinor,
-  });
-
+  // source alone, so the same answer comes out however the jobs interleave —
+  // and it is computed by the same function the payment job uses, so the two
+  // can never disagree about what a document is worth.
+  const shares = await computeDocumentShares(orderId);
   const share = shares.find((entry) => entry.sourceId === supplySourceId);
   const isPrimary = share?.isPrimary ?? false;
 
-  if (isPrimary) {
-    await prisma.metakockaDocument.update({
-      where: { id: claim.id },
-      data: { isPrimary: true },
-    });
-  }
+  /*
+   * Which document is primary is a fact about the order, so it is written for
+   * the whole order rather than for this job's document. Setting only this one
+   * left the previous primary still flagged when an allocation moved, and an
+   * order with two primary documents has the shipping on both.
+   */
+  await applyPrimaryDocument(
+    orderId,
+    shares.find((entry) => entry.isPrimary)?.sourceId ?? null,
+  );
 
-  const partner = parsed?.partner ?? parsed?.receiver ?? null;
+  /*
+   * Who to file the order against.
+   *
+   * A partner the merchant entered by hand wins over the payload. It only
+   * exists because Shopify had no address at all — point of sale, digital
+   * goods, some draft orders — and MetaKocka will not take a sales order
+   * without one, so before this the order simply could not move and the advice
+   * was to go and edit it in Shopify.
+   */
+  const override = parsePartnerOverride(order.partnerOverride);
+  const partner = override ?? parsed?.partner ?? parsed?.receiver ?? null;
 
   // Falls back to resolving here for orders allocated before partners were
   // looked up, and for a retry after a MetaKocka blip during allocation.
@@ -336,7 +334,7 @@ export async function handleWriteMetakockaOrder(
       orderId,
       kind: "metakocka_write_failed",
       message:
-        "This order has no billing or shipping address, and MetaKocka needs a partner on every sales order. Add the address in Shopify and retry.",
+        "This order has no billing or shipping address, and MetaKocka needs a partner on every sales order. Enter the customer details on the order page under “Customer details for MetaKocka”, or add the address in Shopify, then retry.",
     });
     await recordDocumentResult(claim.id, { status: "failed" });
     return;
@@ -347,52 +345,242 @@ export async function handleWriteMetakockaOrder(
     secretKey: credential.secretKey,
   });
 
-  // §8.7, and it goes into the create rather than following it: an update that
-  // omits product_list deletes every line on the document, which is what a
-  // separate mark_paid call turned out to do.
-  //
-  // Only the primary document carries the payment. Spreading one Shopify
-  // payment across every document of a split order would record the money
-  // several times over.
-  const payment = isPrimary
+  /*
+   * §8.7, and it goes into the create rather than following it: MetaKocka
+   * treats an update as a replacement, so a separate `mark_paid` call that
+   * omits `product_list` deletes every line on the document.
+   *
+   * **Each document carries its own share, not just the primary one.** This
+   * previously paid the primary and left every other document of a split order
+   * unpaid, which understated the payment by the rest of the order. §8.7 says
+   * each document is marked paid for its own share and §8.6 makes the shares
+   * sum to the Shopify total exactly, so there is no double counting to avoid:
+   * that would only happen if each document were paid the *order* total.
+   */
+  /*
+   * No share, no payment — and the fallback that used to be here is why.
+   *
+   * `share` is undefined when this source is not in the current allocation,
+   * which happens after a line moves to another warehouse. Falling back to the
+   * order total then paid the *whole order* against a document that no longer
+   * describes any of it: order 1007, one line at 209.00, ended up recorded as
+   * 418.00 paid across two documents. §8.6's shares sum to the order total by
+   * construction, so anything outside them is not a share of anything.
+   */
+  const payment = share
     ? await resolvePayment(principal, {
         orderId,
-        gateway: parsed?.gateway ?? null,
+        gateway: order.paymentGateway ?? parsed?.gateway ?? null,
         financialStatus: order.financialStatus,
         paidAt: order.receivedAt,
-        amountMinor: share?.totalMinor ?? order.totalMinor,
+        amountMinor: share.totalMinor,
       })
     : null;
 
-  try {
-    const { body, result } = await putSalesOrder(client, {
-      countCode,
-      // §3, verified: `buyer_order` is what links sibling documents.
-      buyerOrder: order.customerOrderRef,
-      docDate: order.receivedAt,
-      currencyCode: order.presentmentCurrency,
-      taxesIncluded: parsed?.taxesIncluded ?? true,
-      partner: {
+  const salesOrder: SalesOrderInput = {
+    countCode,
+    // §3, verified: `buyer_order` is what links sibling documents.
+    buyerOrder: order.customerOrderRef,
+    docDate: order.receivedAt,
+    currencyCode: order.presentmentCurrency,
+    taxesIncluded: parsed?.taxesIncluded ?? true,
+    partner: {
         ...partner,
         mkId: resolvedPartner?.mkId ?? null,
         mkAddressId: resolvedPartner?.mkAddressId ?? null,
-      },
-      // Buyer and receiver differ for gift and B2B orders, so they are mapped
-      // separately rather than one being reused for both (§8.4).
-      receiver: parsed?.receiver ?? null,
-      salesPricelistCode: productSettings.pricelistCode,
-      warehouse: source.metakockaWarehouse,
-      profitCenter: source.metakockaProfitCenter,
-      deliveryType: source.defaultDeliveryType,
-      notes: isPrimary && parsed?.note ? parsed.note : null,
-      markPaid: payment,
-      lines: perSourceLines.map((entry) => ({
-        code: entry.line.sku,
-        amount: entry.quantity,
-        priceWithTaxMinor: entry.line.unitPriceWithTaxMinor,
-        taxFactor: taxFactorFor(entry.line),
-      })),
+    },
+    // Buyer and receiver differ for gift and B2B orders, so they are mapped
+    // separately rather than one being reused for both (§8.4).
+    receiver: parsed?.receiver ?? null,
+    salesPricelistCode: productSettings.pricelistCode,
+    warehouse: source.metakockaWarehouse,
+    profitCenter: source.metakockaProfitCenter,
+    deliveryType: source.defaultDeliveryType,
+    notes: isPrimary && parsed?.note ? parsed.note : null,
+    markPaid: payment,
+    lines: perSourceLines.map((entry) => ({
+      code: entry.line.sku,
+      amount: entry.quantity,
+      priceWithTaxMinor: entry.line.unitPriceWithTaxMinor,
+      taxFactor: taxFactorFor(entry.line),
+    })),
+  };
+
+  /*
+   * Exactly the bytes that would go to MetaKocka.
+   *
+   * Built here rather than inside `putSalesOrder` because it is needed twice:
+   * once to send, and once to compare against what was sent last time. The
+   * builder is deterministic, so the two are the same document.
+   */
+  const desired = buildSalesOrderBody(salesOrder);
+
+  /**
+   * Rewrites a document MetaKocka already holds, when the order has moved.
+   *
+   * §8.8 originally ended the story at "written": a document was never touched
+   * again, so an order edited in Shopify afterwards left the ERP holding
+   * quantities nobody had agreed to and an exception the merchant could read
+   * but not act on. Whether this runs at all is the merchant's choice
+   * (`sales_order_setting`), because replacing a document that has been
+   * invoiced changes an accounting record and only they know whether it has.
+   */
+  async function updateExistingDocument(): Promise<void> {
+    const existing = await prisma.metakockaDocument.findUnique({
+      where: { id: claim!.id },
+      select: { mkId: true, requestBody: true, paymentMarkedAt: true },
     });
+
+    // Nothing to update against. A document with no MetaKocka id was never
+    // really written, and the next run re-claims it as a create.
+    if (!existing?.mkId) return;
+
+    if (sameDocument(existing.requestBody, desired)) {
+      log.info(
+        { shop: shopDomain, orderId, countCode },
+        "Sales order already matches what would be sent, nothing to do",
+      );
+      return;
+    }
+
+    const settings = await getSalesOrderSettings(principal);
+
+    /*
+     * Two ways to be told not to touch it, and they mean different things.
+     *
+     * Updates off is a standing preference. Updates-off-after-payment is the
+     * safety rail: a paid document is the one most likely to have been invoiced
+     * in MetaKocka. Either way the merchant gets an exception naming the
+     * difference rather than silence — which is the behaviour §8.8 always had.
+     */
+    const blocked = !settings.updateOnChange
+      ? "updates to orders already sent are turned off"
+      : existing.paymentMarkedAt && !settings.updateAfterPaid
+        ? "the payment for this order has already been recorded in MetaKocka, and updating a paid document is turned off"
+        : null;
+
+    if (blocked) {
+      await raiseException(principal, {
+        orderId,
+        kind: "order_diverged",
+        message: `Order ${order!.shopifyOrderNumber} has changed in Shopify since ${countCode} was sent, and the MetaKocka document was not updated because ${blocked}. Correct it in MetaKocka by hand, or change this on the Sales orders settings page.`,
+        detail: { countCode, reason: blocked },
+      });
+
+      await prisma.metakockaDocument.update({
+        where: { id: claim!.id },
+        data: { mkStatus: "behind Shopify" },
+      });
+      return;
+    }
+
+    /*
+     * The payment goes back on the document.
+     *
+     * MetaKocka treats an update as a replacement and §8.7 adds that
+     * `mark_paid` on an update deletes the previous payment — so a paid
+     * document updated without one silently stops being paid. Normally the
+     * payment resolver produces it again, but if Shopify has since moved off
+     * `paid` it returns nothing, and the payment already recorded is carried
+     * over from the body that recorded it.
+     */
+    const body: Record<string, unknown> = { ...desired };
+    if (existing.paymentMarkedAt && body.mark_paid === undefined) {
+      const previous = (existing.requestBody as { mark_paid?: unknown } | null)
+        ?.mark_paid;
+      if (previous !== undefined) body.mark_paid = previous;
+    }
+
+    try {
+      const { body: sent, verified } = await updateSalesOrder(client, {
+        mkId: existing.mkId,
+        body,
+      });
+
+      await recordDocumentResult(claim!.id, {
+        status: "written",
+        requestBody: sent,
+        responseBody: { updated: true, lines: verified.lineCount },
+      });
+
+      await prisma.metakockaDocument.update({
+        where: { id: claim!.id },
+        data: { mkStatus: "in step", mkCheckedAt: new Date() },
+      });
+
+      await prisma.allocation.updateMany({
+        where: { supplySourceId, orderLine: { orderId } },
+        data: { status: "written_to_metakocka" },
+      });
+
+      // The document now says what the order says, so nothing about the
+      // difference still needs a person.
+      await closeExceptionsFor(principal, orderId, [
+        ...WRITE_FAILURE_KINDS,
+        "order_diverged",
+        "metakocka_document_changed",
+      ]);
+
+      await prisma.order.updateMany({
+        where: { id: orderId, divergedAt: { not: null } },
+        data: { divergedAt: null },
+      });
+
+      await appendEvent(principal, {
+        entityType: "order",
+        entityId: orderId,
+        event: "order.document_updated",
+        detail: {
+          countCode,
+          mkId: existing.mkId,
+          source: source!.name,
+          lines: perSourceLines.length,
+          paymentKept: existing.paymentMarkedAt !== null,
+        },
+      });
+
+      log.info(
+        { shop: shopDomain, orderId, countCode },
+        "Sales order updated in MetaKocka",
+      );
+    } catch (error) {
+      /*
+       * The document is still there and still MetaKocka's. It is not marked
+       * failed — that would invite the next run to write a second one — so the
+       * status stays written and the response records what went wrong.
+       */
+      await prisma.metakockaDocument.update({
+        where: { id: claim!.id },
+        data: {
+          mkStatus: "update refused",
+          responseBody:
+            error instanceof MetakockaError
+              ? { oprCode: error.oprCode, oprDesc: error.oprDesc }
+              : { error: String(error) },
+        },
+      });
+
+      if (error instanceof MetakockaError && error.kind === "exception") {
+        await raiseException(principal, {
+          orderId,
+          kind: "order_diverged",
+          message: `Order ${order!.shopifyOrderNumber} changed in Shopify, and MetaKocka refused the update to ${countCode}. ${describeForMerchant(error)} The document is unchanged. Correct it in MetaKocka by hand.`,
+          detail: { countCode, oprCode: error.oprCode },
+        });
+        return;
+      }
+
+      throw error;
+    }
+  }
+
+  if (claim.alreadyWritten) {
+    await updateExistingDocument();
+    return;
+  }
+
+  try {
+    const { body, result } = await putSalesOrder(client, salesOrder);
 
     await recordDocumentResult(claim.id, {
       status: "written",
@@ -436,7 +624,17 @@ export async function handleWriteMetakockaOrder(
       },
     });
 
-    if (payment) await markDocumentPaymentSent(claim.id, new Date());
+    // Records what was paid, not only that it was: a split order pays each
+    // document its own share, and the shares have to be shown to add up. It is
+    // also what stops `mark-metakocka-paid` sending a second payment for a
+    // document that already carries one (§8.7).
+    if (payment) {
+      await recordPaymentMark(claim.id, {
+        at: new Date(),
+        paymentType: payment.paymentType,
+        amountMinor: payment.amountMinor,
+      });
+    }
 
     // Once every source has a document, the order is done.
     const remaining = await prisma.metakockaDocument.count({
@@ -509,26 +707,27 @@ export async function handleWriteMetakockaOrder(
 }
 
 /**
- * What payment, if any, the primary document should be created with (§8.7).
+ * What payment, if any, a document should be created with (§8.7).
  *
  * This decides; it does not write. Payment travels in the `put_document` that
  * creates the order, because a follow-up update is destructive: MetaKocka
- * treats an update as a replacement and an update omitting `product_list`
+ * treats an update as a replacement, and an update omitting `product_list`
  * silently deletes every line on the document. §8.7's other warning still
  * holds — `mark_paid` on an update replaces the previous payment — and both are
  * avoided by never updating in the first place.
  *
- * The rules, from §8.7:
+ * Which payment *type* is a question for `jobs/payment`, shared with the job
+ * that records a payment arriving later, so a gateway cannot mean one type at
+ * order time and another an hour afterwards. What is decided here is the part
+ * that is specific to creating a document:
  *
  *  - `pending` and `authorized` create the order and are **not** marked paid.
- *  - `paid` is marked paid, dated from the order.
+ *  - `paid` is marked paid, dated from the order, for this document's share.
  *  - `partially_paid` raises an exception rather than guessing an amount.
- *  - Cash on delivery is not paid at order time, whatever Shopify says.
- *  - An unmapped gateway falls back to the type the merchant chose for exactly
- *    that case on the Payment types page, and raises an exception only when no
- *    fallback is set. That is still not a guess: `payment_type` has to match a
- *    type in the merchant's own MetaKocka register and no endpoint lists them
- *    (§3), so every candidate here came from the merchant.
+ *  - Cash on delivery is not paid at order time, whatever Shopify says. It is
+ *    recorded when Shopify reports the money as collected, by
+ *    `mark-metakocka-paid` — which is a change from this being "never", and the
+ *    reason COD orders used to stay unpaid in the ERP permanently.
  */
 export async function resolvePayment(
   principal: Principal,
@@ -552,36 +751,19 @@ export async function resolvePayment(
 
   if (input.financialStatus !== "paid") return null;
 
-  if (!input.gateway) {
+  const decision = await resolvePaymentType(principal, {
+    gateway: input.gateway,
+    phase: "create",
+  });
+
+  if (decision.kind === "none") return null;
+
+  if (decision.kind === "exception") {
     await raiseException(principal, {
       orderId: input.orderId,
-      kind: "unmapped_payment_gateway",
-      message:
-        "Shopify did not name a payment gateway for this order, so there is no MetaKocka payment type to use. Record the payment in MetaKocka by hand.",
-    });
-    return null;
-  }
-
-  // Cash on delivery is not paid at order time. Marking it paid on creation
-  // misstates the books, whatever Shopify's financial status says.
-  if (/cash[ _-]?on[ _-]?delivery|\bcod\b/i.test(input.gateway)) return null;
-
-  const mapped = await findPaymentType(principal, input.gateway);
-
-  // The fallback answers the question the mapping table leaves open: gateways
-  // appear without warning — a new provider, a manual method renamed in
-  // Shopify — and before this, every one of them left an order unpaid and a
-  // person to chase. The merchant names the fallback themselves and the
-  // settings screen will not save without one.
-  const fallback = mapped ? null : await getFallbackPaymentType(principal);
-  const paymentType = mapped ?? fallback;
-
-  if (!paymentType) {
-    await raiseException(principal, {
-      orderId: input.orderId,
-      kind: "unmapped_payment_gateway",
-      message: `The gateway "${input.gateway}" is not mapped to a MetaKocka payment type and no fallback type is set, so this order was created unpaid. Map it on the Payment types page, then retry.`,
-      detail: { gateway: input.gateway },
+      kind: decision.exception,
+      message: decision.message,
+      detail: decision.detail,
     });
     return null;
   }
@@ -591,18 +773,55 @@ export async function resolvePayment(
     entityId: input.orderId,
     event: "order.payment_marked",
     detail: {
-      paymentType,
+      paymentType: decision.paymentType,
       gateway: input.gateway,
+      amountMinor: input.amountMinor,
       // Worth having in the trail: a payment recorded against a type the
       // merchant never chose for this gateway reads differently in a
       // reconciliation than one that was mapped deliberately.
-      viaFallback: mapped === null,
+      viaFallback: decision.viaFallback,
+      when: "with the sales order",
     },
   });
 
   return {
-    paymentType,
+    paymentType: decision.paymentType,
     paidAt: input.paidAt,
     amountMinor: input.amountMinor,
   };
+}
+
+/**
+ * Whether two document bodies say the same thing.
+ *
+ * Key order cannot be relied on: one side has been through a Postgres `jsonb`
+ * column, which reorders object keys, so a plain `JSON.stringify` comparison
+ * would report every document as changed on the first pass after it was
+ * written. Sorting the keys first makes the comparison about content.
+ *
+ * Deliberately compares the whole body rather than the lines. Everything in it
+ * is something MetaKocka was told — the pricelist, the warehouse, the profit
+ * centre, the partner, the tax on each line — so any of them drifting counts,
+ * and something the app never sends cannot.
+ */
+export function sameDocument(a: unknown, b: unknown): boolean {
+  return stableStringify(a) === stableStringify(b);
+}
+
+function stableStringify(value: unknown): string {
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+
+  if (Array.isArray(value)) {
+    return `[${value.map(stableStringify).join(",")}]`;
+  }
+
+  const entries = Object.entries(value as Record<string, unknown>)
+    // `undefined` never survives a round trip through the database, so a key
+    // holding one has to read as absent on both sides.
+    .filter(([, entry]) => entry !== undefined)
+    .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0));
+
+  return `{${entries
+    .map(([key, entry]) => `${JSON.stringify(key)}:${stableStringify(entry)}`)
+    .join(",")}}`;
 }

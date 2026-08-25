@@ -238,6 +238,25 @@ export default function Home() {
               >
                 {`Last stock sync ${ago(dashboard.lastStockSyncAt)}`}
               </s-badge>
+              {/*
+                * Order sync is the part with no other symptom when it stops: an
+                * order paid in Shopify and unpaid in the ERP looks completely
+                * normal on both screens (§2.7 asks the home page to say whether
+                * syncing is working, not only that it ran).
+                */}
+              <s-badge
+                tone={
+                  dashboard.ordersAwaitingPayment > 0
+                    ? "caution"
+                    : dashboard.lastOrderSyncAt
+                      ? "success"
+                      : "neutral"
+                }
+              >
+                {dashboard.ordersAwaitingPayment > 0
+                  ? `${dashboard.ordersAwaitingPayment} ${dashboard.ordersAwaitingPayment === 1 ? "payment" : "payments"} not yet in MetaKocka`
+                  : `Orders checked ${ago(dashboard.lastOrderSyncAt)}`}
+              </s-badge>
               <s-badge tone={supplySources.syncing > 0 ? "success" : "neutral"}>
                 {`${supplySources.syncing} ${supplySources.syncing === 1 ? "warehouse" : "warehouses"} syncing`}
               </s-badge>

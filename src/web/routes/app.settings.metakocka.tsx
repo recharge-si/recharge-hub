@@ -26,6 +26,7 @@ import {
   describeForMerchant,
 } from "~/adapters/metakocka/errors";
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
+import { getEnv } from "~/adapters/config/env.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
   isOwnershipKnown,
@@ -68,6 +69,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       allowed: false as const,
       ownershipKnown: isOwnershipKnown(session),
       summary: null,
+      stockWebhookUrl: "",
     };
   }
 
@@ -75,6 +77,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     allowed: true as const,
     ownershipKnown: true,
     summary: await getCredentialSummary(principal),
+    /*
+     * The URL to paste into MetaKocka's own webhook settings.
+     *
+     * MetaKocka has no idea what a Shopify store is, so the shop is in the path
+     * and each store gets its own address. Built here rather than in the
+     * browser because the app's public URL is configuration, not something a
+     * page should infer from `window.location` — an embedded app is being
+     * rendered inside admin.shopify.com.
+     */
+    stockWebhookUrl: `${getEnv().SHOPIFY_APP_URL.replace(/\/$/, "")}/webhooks/metakocka/${encodeURIComponent(principal.shopDomain)}/stock`,
   };
 };
 
@@ -207,7 +219,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function MetakockaSettings() {
-  const { allowed, ownershipKnown, summary } = useLoaderData<typeof loader>();
+  const { allowed, ownershipKnown, summary, stockWebhookUrl } =
+    useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
@@ -337,21 +350,44 @@ export default function MetakockaSettings() {
             </s-section>
 
             <s-section heading="Stock webhook">
-              <s-box maxInlineSize="520px">
-                <s-password-field
-                  name="webhookClientSecret"
-                  label="Webhook client secret (optional)"
-                  value={webhookSecret}
-                  onChange={(event) =>
-                    setWebhookSecret(event.currentTarget.value)
-                  }
-                  details={
-                    summary?.webhookSecretSet
-                      ? "A secret is saved. Leave blank to keep it."
-                      : "Verifies that stock updates really came from MetaKocka. Add it after registering the webhook."
-                  }
-                />
-              </s-box>
+              <s-stack direction="block" gap="base">
+                <s-paragraph>
+                  Stock is read from MetaKocka every five minutes. Registering
+                  this webhook makes most changes arrive in seconds instead.
+                </s-paragraph>
+
+                {/*
+                  * The URL, shown so it can be copied.
+                  *
+                  * Read-only rather than a link: it is not something to open,
+                  * it is something to paste into MetaKocka.
+                  */}
+                <s-box maxInlineSize="640px">
+                  <s-text-field
+                    label="Webhook URL for MetaKocka"
+                    name="stockWebhookUrl"
+                    value={stockWebhookUrl}
+                    readOnly
+                    details="Paste this into the webhook settings in MetaKocka, for the warehouse product stock update event."
+                  />
+                </s-box>
+
+                <s-box maxInlineSize="520px">
+                  <s-password-field
+                    name="webhookClientSecret"
+                    label="Webhook client secret"
+                    value={webhookSecret}
+                    onChange={(event) =>
+                      setWebhookSecret(event.currentTarget.value)
+                    }
+                    details={
+                      summary?.webhookSecretSet
+                        ? "A secret is saved. Leave blank to keep it."
+                        : "MetaKocka shows this when you register the webhook. Without it, stock updates from MetaKocka are refused, because there is no way to tell they came from MetaKocka."
+                    }
+                  />
+                </s-box>
+              </s-stack>
             </s-section>
           </s-stack>
         </Form>

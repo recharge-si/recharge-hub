@@ -3,12 +3,17 @@ import { z } from "zod";
 
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { raiseException } from "~/adapters/db/repositories/exception.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
 import {
   listCachedWarehouses,
   listSupplySources,
 } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
+import {
+  MetakockaError,
+  describeForMerchant,
+} from "~/adapters/metakocka/errors";
 import { listWarehouseStock } from "~/adapters/metakocka/stock";
 import {
   buildCompleteStockList,
@@ -28,6 +33,18 @@ import { serviceToken } from "~/domain/types";
 export const syncInventoryJobSchema = z.object({
   shopDomain: z.string().min(1),
 });
+
+/**
+ * How many consecutive failures before a person is told.
+ *
+ * Twelve is an hour of the five-minute cycle. Below it the exceptions queue
+ * fills with things that fixed themselves before anyone read them.
+ */
+const FAILURES_BEFORE_EXCEPTION = 12;
+
+function formatWhen(at: Date): string {
+  return at.toISOString().slice(0, 16).replace("T", " ");
+}
 
 /**
  * Publishes MetaKocka stock into Shopify (CLAUDE.md §7).
@@ -88,7 +105,129 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
   });
   const { admin } = await unauthenticated.admin(shopDomain);
 
+  /**
+   * How this location's sync went, kept on the location itself.
+   *
+   * A count of consecutive failures rather than a flag, because one blip is not
+   * news: the sync runs every five minutes and MetaKocka is not always up. What
+   * deserves a person is a location that has been failing for an hour, and that
+   * is what the threshold below means.
+   */
+  async function recordOutcome(
+    sourceId: string,
+    outcome: { ok: true } | { ok: false; error: unknown },
+  ): Promise<void> {
+    const now = new Date();
+
+    if (outcome.ok) {
+      await prisma.supplySource.update({
+        where: { id: sourceId },
+        data: {
+          lastSyncAt: now,
+          lastSyncOk: true,
+          lastSyncMessage: null,
+          syncFailures: 0,
+        },
+      });
+      /*
+       * A location that started working again has nothing left to answer for.
+       *
+       * Closed by hand rather than through `closeExceptionsFor`, which keys on
+       * an order: this exception belongs to a location, and the detail is the
+       * only thing that says which one.
+       */
+      await prisma.exception.updateMany({
+        where: {
+          shop: { domain: shopDomain },
+          kind: "stock_sync_failed",
+          status: "open",
+          detail: { path: ["sourceId"], equals: sourceId },
+        },
+        data: { status: "resolved", resolvedBy: "app", resolvedAt: now },
+      });
+      return;
+    }
+
+    const { error } = outcome;
+    const message =
+      error instanceof MetakockaError
+        ? describeForMerchant(error)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+
+    const updated = await prisma.supplySource.update({
+      where: { id: sourceId },
+      data: {
+        lastSyncAt: now,
+        lastSyncOk: false,
+        lastSyncMessage: message,
+        syncFailures: { increment: 1 },
+      },
+      select: { id: true, name: true, syncFailures: true, stockDirection: true },
+    });
+
+    log.error(
+      { shop: shopDomain, source: updated.name, failures: updated.syncFailures },
+      "Stock sync failed for a location",
+    );
+
+    /*
+     * Twelve failures is an hour of a five-minute cycle. Below that the queue
+     * would fill with things that fixed themselves before anyone read them;
+     * above it, the merchant is publishing stock nobody has checked since
+     * breakfast and nothing has said so.
+     */
+    if (updated.syncFailures >= FAILURES_BEFORE_EXCEPTION) {
+      await raiseException(principal, {
+        kind: "stock_sync_failed",
+        message: `Stock has not synced for ${updated.name} since ${formatWhen(now)} — ${updated.syncFailures} attempts have failed. ${message} ${
+          updated.stockDirection === "shopify_to_mk"
+            ? "Shopify's counts are not reaching MetaKocka."
+            : "MetaKocka's counts are not reaching Shopify, so what the store is selling may be out of date."
+        }`,
+        detail: {
+          // Keyed on, so the sweep can close exactly this location's exception
+          // when it starts working again.
+          sourceId: updated.id,
+          source: updated.name,
+          failures: updated.syncFailures,
+          direction: updated.stockDirection,
+        },
+      });
+    }
+  }
+
   for (const source of writable) {
+    /*
+     * One location at a time, and one location's failure is its own.
+     *
+     * This loop used to let anything thrown escape the job. The sweep then died
+     * at whichever location failed, every location behind it was skipped, and
+     * pg-boss retried the whole run — so a warehouse MetaKocka was refusing
+     * (verified: `sync_stock` answering `opr_code 1, "Internal server error."`
+     * for nine hours) both hid every other location and re-synced the ones in
+     * front of it three times a minute.
+     *
+     * The outcome is recorded per location either way, because "Syncing" that
+     * cannot be told apart from "failing since this morning" is worse than no
+     * status at all.
+     */
+    try {
+      await syncOneSource(source);
+      await recordOutcome(source.id, { ok: true });
+    } catch (error) {
+      await recordOutcome(source.id, { ok: false, error });
+    }
+  }
+
+  /** Everything for one location. Throws; the caller records the outcome. */
+  async function syncOneSource(
+    source: (typeof writable)[number],
+  ): Promise<void> {
+    // Narrowed above, but the check does not survive into a nested function.
+    if (!credential) return;
+
     const warehouseMkId = warehouseIdByMark.get(source.metakockaWarehouse!);
     if (!warehouseMkId) {
       // The mapping points at a warehouse that is no longer in MetaKocka.
@@ -110,7 +249,9 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
           mark: source.metakockaWarehouse,
         },
       });
-      continue;
+      throw new Error(
+        `MetaKocka has no warehouse with the mark "${source.metakockaWarehouse}". Reload the warehouse list and check this location's mapping.`,
+      );
     }
 
     const stock = await listWarehouseStock(client, warehouseMkId);
@@ -126,7 +267,7 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         credential,
         admin,
       });
-      continue;
+      return;
     }
 
     const skus = await prisma.sku.findMany({

@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 
+import { toMinorUnits } from "~/adapters/metakocka/values";
 import { getLogger } from "~/adapters/observability/logger.server";
 
 /**
@@ -13,6 +14,17 @@ import { getLogger } from "~/adapters/observability/logger.server";
  * not a convention.
  */
 
+/*
+ * Everything the registry keeps about a variant, in one pass.
+ *
+ * The image, price and vendor are not needed to match a SKU to a MetaKocka
+ * product — they are needed so the product screen is a list of products rather
+ * than a list of codes. They come from the walk that was happening anyway, so
+ * the page never pays for them at load time (§2.5).
+ *
+ * `image` falls back to the product's featured image, which is what Shopify
+ * shows for a variant that has none of its own.
+ */
 const VARIANTS_QUERY = `#graphql
   query OrchestratorVariants($cursor: String) {
     productVariants(first: 250, after: $cursor) {
@@ -20,8 +32,18 @@ const VARIANTS_QUERY = `#graphql
       nodes {
         id
         sku
+        title
         displayName
+        price
         inventoryItem { id }
+        image { url(transform: { maxWidth: 80, maxHeight: 80 }) }
+        product {
+          id
+          title
+          vendor
+          productType
+          featuredImage { url(transform: { maxWidth: 80, maxHeight: 80 }) }
+        }
       }
     }
   }
@@ -38,8 +60,20 @@ const variantsSchema = z.object({
         z.object({
           id: z.string(),
           sku: z.string().nullable(),
+          title: z.string().nullable(),
           displayName: z.string().nullable(),
+          price: z.string().nullable(),
           inventoryItem: z.object({ id: z.string() }).nullable(),
+          image: z.object({ url: z.string() }).nullable(),
+          product: z
+            .object({
+              id: z.string(),
+              title: z.string().nullable(),
+              vendor: z.string().nullable(),
+              productType: z.string().nullable(),
+              featuredImage: z.object({ url: z.string() }).nullable(),
+            })
+            .nullable(),
         }),
       ),
     }),
@@ -50,7 +84,16 @@ export interface ShopifyVariant {
   variantId: string;
   sku: string;
   inventoryItemId: string | null;
+  /** The product's own title. */
   title: string | null;
+  /** The variant's option values, as Shopify names them. */
+  variantTitle: string | null;
+  productId: string | null;
+  imageUrl: string | null;
+  /** Minor units (§15). Shopify sends a decimal string. */
+  priceMinor: number | null;
+  vendor: string | null;
+  productType: string | null;
 }
 
 /**
@@ -80,7 +123,25 @@ export async function listVariants(
         variantId: node.id,
         sku,
         inventoryItemId: node.inventoryItem?.id ?? null,
-        title: node.displayName ?? null,
+        /*
+         * The product title, not `displayName`.
+         *
+         * `displayName` is "Product - Options" joined with a hyphen, which
+         * cannot be taken apart again once a product title contains one. The
+         * two fields are read separately and stay separate.
+         */
+        title: node.product?.title ?? node.displayName ?? null,
+        // Shopify calls a variant with no options "Default Title", which is not
+        // an option value and should not be shown as one.
+        variantTitle:
+          node.title && node.title !== "Default Title" ? node.title : null,
+        productId: node.product?.id ?? null,
+        // A variant with no image of its own shows the product's, which is what
+        // the merchant sees in Shopify.
+        imageUrl: node.image?.url ?? node.product?.featuredImage?.url ?? null,
+        priceMinor: node.price === null ? null : toMinorUnits(node.price),
+        vendor: node.product?.vendor ?? null,
+        productType: node.product?.productType ?? null,
       });
     }
 

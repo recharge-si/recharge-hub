@@ -387,6 +387,19 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
   }
 
+  /*
+   * How often the catalogue is re-read, in minutes.
+   *
+   * Clamped rather than rejected: this is a cadence, not an identifier, and
+   * every value between the bounds is a legitimate answer. Under fifteen
+   * minutes would outrun the scheduler that reads it, and a week is long enough
+   * that the merchant means "off".
+   */
+  const scheduleMinutes = Math.min(
+    10080,
+    Math.max(15, Number(value("scheduleIntervalMinutes")) || 720),
+  );
+
   await saveProductSyncSetting(principal, {
     enabled: checked("enabled"),
     nameTemplate,
@@ -402,6 +415,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     productPurchasing,
     productService,
     updateProductType: checked("updateProductType"),
+    scheduleEnabled: checked("scheduleEnabled"),
+    scheduleIntervalMinutes: scheduleMinutes,
   });
 
   // A code typed by hand is kept in the register so the picker offers it back
@@ -432,6 +447,8 @@ interface FormState {
   productPurchasing: boolean;
   productService: boolean;
   updateProductType: boolean;
+  scheduleEnabled: boolean;
+  scheduleIntervalMinutes: string;
 }
 
 function toState(settings: {
@@ -449,6 +466,8 @@ function toState(settings: {
   productPurchasing: boolean;
   productService: boolean;
   updateProductType: boolean;
+  scheduleEnabled: boolean;
+  scheduleIntervalMinutes: number;
 }): FormState {
   return {
     enabled: settings.enabled,
@@ -465,6 +484,8 @@ function toState(settings: {
     productPurchasing: settings.productPurchasing,
     productService: settings.productService,
     updateProductType: settings.updateProductType,
+    scheduleEnabled: settings.scheduleEnabled,
+    scheduleIntervalMinutes: String(settings.scheduleIntervalMinutes),
   };
 }
 
@@ -807,6 +828,8 @@ export default function ProductSyncSettings() {
         productPurchasing: state.productPurchasing ? "on" : "",
         productService: state.productService ? "on" : "",
         updateProductType: state.updateProductType ? "on" : "",
+        scheduleEnabled: state.scheduleEnabled ? "on" : "",
+        scheduleIntervalMinutes: state.scheduleIntervalMinutes,
       },
       { method: "post" },
     );
@@ -1064,6 +1087,62 @@ export default function ProductSyncSettings() {
             <s-text color="subdued">
               Names, new products and prices. Nothing is written to MetaKocka
               while this is off.
+            </s-text>
+          </s-stack>
+        </s-section>
+
+        {/*
+          * Syncing on a schedule.
+          *
+          * Outside the `enabled` branch on purpose: re-reading and re-matching
+          * the two catalogues is worth doing whether or not anything is written
+          * back. A registry that is only as fresh as the last time somebody
+          * pressed a button silently stops matching — a product renamed in
+          * MetaKocka, a SKU corrected in Shopify, a variant added this morning
+          * — and the first anyone hears of it is an order that cannot be sent.
+          */}
+        <s-section heading="Automatic syncing">
+          <s-stack direction="block" gap="base">
+            <s-stack direction="block" gap="small-400">
+              <s-checkbox
+                name="scheduleEnabled"
+                value="on"
+                label="Sync on a schedule"
+                checked={state.scheduleEnabled}
+                onChange={(e) =>
+                  set({ scheduleEnabled: e.currentTarget.checked })
+                }
+              />
+              <s-text color="subdued">
+                Reads both catalogues and matches them without anyone pressing
+                the button.
+                {state.enabled
+                  ? " Because product sync is on, it also writes names and prices to MetaKocka."
+                  : " Nothing is written to MetaKocka while product sync is off."}
+              </s-text>
+            </s-stack>
+
+            {state.scheduleEnabled ? (
+              <s-box maxInlineSize="260px">
+                <s-number-field
+                  name="scheduleIntervalMinutes"
+                  // §2.8: labels state their units.
+                  label="Sync every (minutes)"
+                  min={15}
+                  max={10080}
+                  value={state.scheduleIntervalMinutes}
+                  onChange={(e) =>
+                    set({ scheduleIntervalMinutes: e.currentTarget.value })
+                  }
+                  details="Twelve hours by default. MetaKocka has no bulk endpoint, so a full sync is slow — hourly is plenty for most catalogues."
+                />
+              </s-box>
+            ) : null}
+
+            <s-text color="subdued">
+              Stock is separate and always automatic: it is read from MetaKocka
+              every five minutes, and immediately when MetaKocka sends a stock
+              update.
             </s-text>
           </s-stack>
         </s-section>

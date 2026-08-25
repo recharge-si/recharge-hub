@@ -75,6 +75,36 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "The allocation and any document still describe the order as it was. Check both sides and update MetaKocka.",
   },
+  order_diverged: {
+    label: "Changed after it was sent",
+    short: "changed after being sent to MetaKocka",
+    guidance:
+      "Shopify's version of the order no longer matches the document in MetaKocka. Correct it there, then use \"Mark as sorted in MetaKocka\" on the order so it stops being reported.",
+  },
+  stock_sync_failed: {
+    label: "Stock not syncing",
+    short: "whose stock is not syncing",
+    guidance:
+      "Quantities are not moving between Shopify and MetaKocka for that location, so what the store is selling may be out of date. The message says what MetaKocka answered.",
+  },
+  metakocka_document_missing: {
+    label: "Document deleted in MetaKocka",
+    short: "whose MetaKocka document has been deleted",
+    guidance:
+      "The order is no longer in the ERP. Send it again if that was not deliberate, or resolve this if it was.",
+  },
+  metakocka_document_changed: {
+    label: "Document edited in MetaKocka",
+    short: "whose MetaKocka document has been edited",
+    guidance:
+      "The document no longer says what this app sent. Nothing is changed automatically — it may already be invoiced. Check it in MetaKocka.",
+  },
+  payment_write_failed: {
+    label: "Payment not recorded",
+    short: "whose payment could not be recorded",
+    guidance:
+      "The sales order itself is unchanged. Record the payment in MetaKocka by hand, or fix what the message names and retry.",
+  },
   metakocka_write_failed: {
     label: "MetaKocka rejected the order",
     short: "MetaKocka would not accept",

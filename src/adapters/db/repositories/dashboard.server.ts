@@ -38,6 +38,17 @@ export interface DashboardData {
   lastMetakockaWriteAt: string | null;
   lastStockSyncAt: string | null;
   lastStockSyncOk: boolean | null;
+  /**
+   * When orders were last checked against Shopify, and how many are not in
+   * step.
+   *
+   * §2.7 asks the home page to say whether syncing is working, and order sync
+   * is the part with no other symptom when it stops: an order that is paid in
+   * Shopify and unpaid in the ERP looks completely normal on both screens. The
+   * two figures below are how that becomes visible.
+   */
+  lastOrderSyncAt: string | null;
+  ordersAwaitingPayment: number;
   totalOrders: number;
 }
 
@@ -71,6 +82,8 @@ export async function getDashboard(
     exceptionGroups,
     lastDocument,
     lastStockEvent,
+    lastOrderSync,
+    ordersAwaitingPayment,
   ] = await Promise.all([
     prisma.order.count({
       where: {
@@ -140,6 +153,23 @@ export async function getDashboard(
       orderBy: { at: "desc" },
       select: { at: true, event: true },
     }),
+
+    prisma.shop.findUnique({
+      where: { domain },
+      select: { ordersReconciledThrough: true },
+    }),
+
+    // Paid in Shopify, written to MetaKocka, and MetaKocka has not been told.
+    // Zero is the only healthy number; anything else is money the merchant is
+    // about to reconcile by hand.
+    prisma.order.count({
+      where: {
+        shop: { domain },
+        shopifyDeletedAt: null,
+        financialStatus: "paid",
+        documents: { some: { status: "written", paymentMarkedAt: null } },
+      },
+    }),
   ]);
 
   const buckets = new Map<string, DaySeriesPoint>();
@@ -176,6 +206,8 @@ export async function getDashboard(
     lastStockSyncOk: lastStockEvent
       ? lastStockEvent.event !== "inventory.sync_skipped"
       : null,
+    lastOrderSyncAt: lastOrderSync?.ordersReconciledThrough?.toISOString() ?? null,
+    ordersAwaitingPayment,
     totalOrders,
   };
 }
