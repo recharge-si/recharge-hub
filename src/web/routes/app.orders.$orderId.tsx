@@ -13,8 +13,10 @@ import { getOrderDetail } from "~/adapters/db/repositories/order.server";
 import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
+import { formatDateTime } from "~/web/lib/datetime";
 import { describeExceptionKind } from "~/web/lib/exceptions";
 import { formatMoney } from "~/web/lib/money";
+import { describePayment, describeProgress } from "~/web/lib/orders";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -138,21 +140,6 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
   return { ok: false, message: "Unknown action." };
 };
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  received: "Received",
-  allocated: "Allocated",
-  written: "Sent to MetaKocka",
-  needs_attention: "Needs attention",
-  cancelled: "Cancelled",
-};
-
 export default function OrderDetail() {
   const { order } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
@@ -191,19 +178,17 @@ export default function OrderDetail() {
 
         <s-section heading="Summary">
           <s-stack direction="block" gap="base">
+            {/*
+             * The same two badges the list shows, from the same table, so an
+             * order does not change vocabulary when it is opened.
+             */}
             <s-stack direction="inline" gap="small-300" alignItems="center">
-              <s-badge
-                tone={
-                  order.status === "written"
-                    ? "success"
-                    : order.status === "needs_attention"
-                      ? "critical"
-                      : "neutral"
-                }
-              >
-                {STATUS_LABEL[order.status] ?? order.status}
+              <s-badge tone={describeProgress(order.status).tone}>
+                {describeProgress(order.status).label}
               </s-badge>
-              <s-badge tone="neutral">{order.financialStatus}</s-badge>
+              <s-badge tone={describePayment(order.financialStatus).tone}>
+                {describePayment(order.financialStatus).label}
+              </s-badge>
             </s-stack>
 
             <s-text color="subdued">

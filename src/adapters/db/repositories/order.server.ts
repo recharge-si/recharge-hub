@@ -117,16 +117,53 @@ export async function getOrderForAllocation(
   });
 }
 
+export interface OrderListOptions {
+  limit?: number;
+  skip?: number;
+  status?: string;
+  /**
+   * Free text from the search field above the list.
+   *
+   * It matches what a merchant has in front of them when they come looking: the
+   * order number on the Shopify order, the reference this app files against it
+   * in MetaKocka, or a SKU or product name off one of its lines. There is
+   * deliberately no customer name here — section 2.4 keeps personal data out of
+   * our own columns and inside the raw payload the retention job redacts, so a
+   * name is not ours to index.
+   */
+  search?: string;
+}
+
 export async function listOrders(
   principal: Principal,
-  options: { limit?: number; status?: string } = {},
+  options: OrderListOptions = {},
 ) {
+  const search = options.search?.trim();
+
   return prisma.order.findMany({
     where: {
       shop: { domain: shopDomainOf(principal) },
       // Deleted in Shopify: gone from this app, still in MetaKocka.
       shopifyDeletedAt: null,
       ...(options.status ? { status: options.status as never } : {}),
+      ...(search
+        ? {
+            OR: [
+              { shopifyOrderNumber: { contains: search, mode: "insensitive" } },
+              { customerOrderRef: { contains: search, mode: "insensitive" } },
+              {
+                lines: {
+                  some: { sku: { contains: search, mode: "insensitive" } },
+                },
+              },
+              {
+                lines: {
+                  some: { title: { contains: search, mode: "insensitive" } },
+                },
+              },
+            ],
+          }
+        : {}),
     },
     include: {
       lines: { include: { allocations: { include: { supplySource: true } } } },
@@ -134,6 +171,7 @@ export async function listOrders(
       exceptions: { where: { status: "open" } },
     },
     orderBy: { receivedAt: "desc" },
+    skip: options.skip ?? 0,
     take: options.limit ?? 50,
   });
 }
