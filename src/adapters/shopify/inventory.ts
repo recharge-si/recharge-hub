@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 
@@ -71,7 +73,7 @@ export async function listVariants(
 
     for (const node of nodes) {
       const sku = node.sku?.trim();
-      // A variant with no SKU cannot be matched to a MetaKocka article.
+      // A variant with no SKU cannot be matched to a MetaKocka product.
       if (!sku) continue;
 
       variants.push({
@@ -129,9 +131,10 @@ const onHandSchema = z.object({
 /**
  * Current on-hand at one location, keyed by inventory item id.
  *
- * Needed because §7 asks for `ignoreCompareQuantity: false`, and that means
- * every write has to state the value it believes it is replacing. Without it a
- * concurrent change by the merchant would be silently clobbered.
+ * Used to satisfy §7's "write only on change": a value that already matches is
+ * not rewritten, which keeps our own `inventory_levels/update` webhooks rare.
+ * An inventory item missing from this map is not stocked at the location at
+ * all, and needs activating before any quantity can be set on it.
  */
 export async function readOnHandAtLocation(
   admin: AdminApiContext,
@@ -162,13 +165,29 @@ export async function readOnHandAtLocation(
 }
 
 const SET_QUANTITIES = `#graphql
-  mutation OrchestratorSetOnHand($input: InventorySetQuantitiesInput!) {
-    inventorySetQuantities(input: $input) {
+  mutation OrchestratorSetOnHand($input: InventorySetQuantitiesInput!, $key: String!) {
+    inventorySetQuantities(input: $input) @idempotent(key: $key) {
       userErrors { field message }
       inventoryAdjustmentGroup { createdAt reason }
     }
   }
 `;
+
+/**
+ * The key `@idempotent` demands, which Shopify requires on this mutation.
+ *
+ * Derived from the run and from the batch's exact contents, so all three cases
+ * come out right: a retry of the same job sending the same numbers is
+ * recognised as the same write and not applied twice; a retry that re-read
+ * different numbers gets a new key and is applied; and a later run that happens
+ * to send an identical batch — stock going 10, 5, 10, 5 — is a different write
+ * and is not swallowed by the cached result of the earlier one.
+ */
+function idempotencyKey(runId: string, batch: unknown): string {
+  return createHash("sha256")
+    .update(`${runId}:${JSON.stringify(batch)}`)
+    .digest("hex");
+}
 
 const setQuantitiesSchema = z.object({
   data: z.object({
@@ -194,12 +213,20 @@ export class InventoryOwnershipError extends Error {
   }
 }
 
-export interface OnHandWrite {
+export interface OnHandActivation {
   inventoryItemId: string;
   locationId: string;
   quantity: number;
-  /** What Shopify currently holds. Required by `ignoreCompareQuantity: false`. */
-  compareQuantity: number;
+}
+
+export interface OnHandWrite extends OnHandActivation {
+  /**
+   * What Shopify held when we read the location. `InventoryQuantityInput`
+   * rejects a quantity without it — the schema marks it optional but the API
+   * requires it — so there is no unconditional set. A value that moved under us
+   * fails the batch, and the next run corrects it from a fresh read.
+   */
+  changeFromQuantity: number;
 }
 
 /** Shopify caps one mutation at 250 quantities. */
@@ -209,6 +236,8 @@ export interface WriteOnHandOptions {
   /** From `supply_source.inventory_writer`. Anything but "metakocka" throws. */
   inventoryWriter: string;
   locationId: string;
+  /** Stable for one job and its retries. Feeds the `@idempotent` key. */
+  runId: string;
 }
 
 /**
@@ -239,16 +268,15 @@ export async function writeOnHand(
 
     const response = await admin.graphql(SET_QUANTITIES, {
       variables: {
+        key: idempotencyKey(options.runId, ["set-on-hand", chunk]),
         input: {
           name: "on_hand",
           reason: "correction",
-          // Fail rather than clobber a value that changed under us.
-          ignoreCompareQuantity: false,
           quantities: chunk.map((write) => ({
             inventoryItemId: write.inventoryItemId,
             locationId: write.locationId,
             quantity: write.quantity,
-            compareQuantity: write.compareQuantity,
+            changeFromQuantity: write.changeFromQuantity,
           })),
         },
       },
@@ -270,3 +298,102 @@ export async function writeOnHand(
     }
   }
 }
+
+/**
+ * Stocks inventory items at a location for the first time, at a given on-hand.
+ *
+ * `inventorySetQuantities` only speaks about items that already have a level at
+ * the location. A product that exists in MetaKocka but has never been stocked at
+ * the mapped Shopify location has no level, so without this it would be skipped
+ * on every run and its stock would never appear in Shopify.
+ *
+ * `inventoryActivate` takes one item per field, so several are aliased into a
+ * single document rather than sent as a query in a loop (§2.5).
+ */
+export async function activateOnHand(
+  admin: AdminApiContext,
+  writes: OnHandActivation[],
+  options: WriteOnHandOptions,
+): Promise<void> {
+  // §7: same ownership rule as writeOnHand. Activating is a write.
+  if (options.inventoryWriter !== "metakocka") {
+    throw new InventoryOwnershipError(
+      options.locationId,
+      options.inventoryWriter,
+    );
+  }
+
+  if (writes.length === 0) return;
+
+  for (let start = 0; start < writes.length; start += ACTIVATE_CHUNK) {
+    const chunk = writes.slice(start, start + ACTIVATE_CHUNK);
+
+    const declarations = chunk
+      .map(
+        (_, index) =>
+          `$item${index}: ID!, $qty${index}: Int, $key${index}: String!`,
+      )
+      .join(", ");
+    // Each alias is its own mutation execution, so each carries its own
+    // `@idempotent` key. Shopify requires the directive on this mutation too.
+    const fields = chunk
+      .map(
+        (_, index) =>
+          `a${index}: inventoryActivate(inventoryItemId: $item${index}, locationId: $locationId, onHand: $qty${index}) @idempotent(key: $key${index}) { userErrors { field message } }`,
+      )
+      .join("\n    ");
+
+    const variables: Record<string, unknown> = {
+      locationId: options.locationId,
+    };
+    for (const [index, write] of chunk.entries()) {
+      variables[`item${index}`] = write.inventoryItemId;
+      variables[`qty${index}`] = write.quantity;
+      variables[`key${index}`] = idempotencyKey(options.runId, [
+        "activate",
+        write,
+      ]);
+    }
+
+    const response = await admin.graphql(
+      `mutation OrchestratorActivateOnHand($locationId: ID!, ${declarations}) {\n    ${fields}\n  }`,
+      { variables },
+    );
+
+    const parsed = activateSchema.parse(await response.json());
+    const userErrors = Object.values(parsed.data).flatMap(
+      (result) => result?.userErrors ?? [],
+    );
+
+    if (userErrors.length > 0) {
+      getLogger().error(
+        { locationId: options.locationId, userErrors },
+        "inventoryActivate reported user errors",
+      );
+      throw new Error(
+        `Shopify rejected stocking these items at the location: ${userErrors
+          .map((error) => error.message)
+          .join("; ")}`,
+      );
+    }
+  }
+}
+
+/** Kept well under the cost ceiling: each alias is a separate mutation. */
+const ACTIVATE_CHUNK = 25;
+
+const activateSchema = z.object({
+  data: z.record(
+    z.string(),
+    z
+      .object({
+        userErrors: z.array(
+          z.object({
+            field: z.array(z.string()).nullable().optional(),
+            message: z.string(),
+          }),
+        ),
+      })
+      .nullable(),
+  ),
+});

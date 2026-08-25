@@ -26,7 +26,12 @@
     "paths": {
       "~/*": ["./src/*"]
     },
-    "types": ["@react-router/node", "vite/client", "@shopify/polaris-types"],
+    "types": [
+      "@react-router/node",
+      "vite/client",
+      "@shopify/polaris-types",
+      "@shopify/app-bridge-types"
+    ],
     "rootDirs": [".", "./.react-router/types"]
   }
 }

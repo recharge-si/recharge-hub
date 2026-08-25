@@ -1,8 +1,5 @@
-import { z } from "zod";
-
 import type { MetakockaClient } from "~/adapters/metakocka/client";
-import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
-import { MetakockaError } from "~/adapters/metakocka/errors";
+import { probeDocument, SENTINEL_PAYMENT_TYPE } from "~/adapters/metakocka/probe";
 
 /**
  * Discovering the payment types a company accepts.
@@ -15,31 +12,15 @@ import { MetakockaError } from "~/adapters/metakocka/errors";
  *   "Paramether 'payment_type' has invalid value : X.
  *    Valid values : Transakcijski račun,Gotovina,Prenos preplačila,Kartica BA"
  *
- * So the list is discoverable by deliberately failing validation. The request is
- * rejected before any document is created — confirmed with a partner and no
- * product list, and with an empty product list — so this writes nothing.
+ * So the list is discoverable by deliberately failing validation. The request
+ * that does the failing lives in `probe.ts`, which writes nothing.
  *
  * It is still parsing a human-readable string, so it can break. When it does,
  * `discoverPaymentTypes` returns null rather than guessing, and the settings
  * screen falls back to typing the value by hand.
  */
 
-/** Chosen so it can never collide with a real payment type. */
-const SENTINEL = "__ORCHESTRATOR_DISCOVER__";
-
 const VALID_VALUES = /Valid values\s*:\s*(.+)$/i;
-
-/** Minimal document that reaches payment_type validation and no further. */
-const PROBE_PARTNER = {
-  business_entity: "false",
-  taxpayer: "false",
-  foreign_county: "false",
-  customer: "Payment type discovery",
-  street: "-",
-  post_number: "-",
-  place: "-",
-  country: "Slovenia",
-};
 
 export function parsePaymentTypes(description: string): string[] | null {
   const match = VALID_VALUES.exec(description);
@@ -48,7 +29,7 @@ export function parsePaymentTypes(description: string): string[] | null {
   const values = match[1]
     .split(",")
     .map((value) => value.trim())
-    .filter((value) => value.length > 0 && value !== SENTINEL);
+    .filter((value) => value.length > 0 && value !== SENTINEL_PAYMENT_TYPE);
 
   return values.length > 0 ? values : null;
 }
@@ -60,38 +41,6 @@ export function parsePaymentTypes(description: string): string[] | null {
 export async function discoverPaymentTypes(
   client: MetakockaClient,
 ): Promise<string[] | null> {
-  try {
-    // Expected to throw. A success would mean MetaKocka accepted the sentinel
-    // as a real payment type, which would also mean it created a document.
-    const created = await client.call(
-      ENDPOINTS.putDocument,
-      {
-        doc_type: "sales_order",
-        doc_date: new Date().toISOString().slice(0, 10),
-        partner: PROBE_PARTNER,
-        mark_paid: [
-          { payment_type: SENTINEL, date: "01.01.2000", amount: "0.00" },
-        ],
-      },
-      z.object({ mk_id: z.string().optional() }).passthrough(),
-    );
-
-    // Defensive: clean up something that should be impossible.
-    if (created.mk_id) {
-      await client
-        .call(
-          ENDPOINTS.deleteDocument,
-          { doc_type: "sales_order", mk_id: created.mk_id },
-          z.object({}).passthrough(),
-        )
-        .catch(() => undefined);
-    }
-
-    return null;
-  } catch (error) {
-    if (error instanceof MetakockaError && error.oprDesc) {
-      return parsePaymentTypes(error.oprDesc);
-    }
-    throw error;
-  }
+  const description = await probeDocument(client);
+  return description ? parsePaymentTypes(description) : null;
 }

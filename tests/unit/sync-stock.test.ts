@@ -20,7 +20,9 @@ describe("building the stock list for sync_stock", () => {
       current: new Map([["SKU-A", 3]]),
     });
 
-    expect(lines).toEqual([{ warehouseId: "W1", productCode: "SKU-A", amount: 7 }]);
+    expect(lines).toEqual([
+      { warehouseId: "W1", productCode: "SKU-A", amount: 7 },
+    ]);
   });
 
   it("preserves products it does not manage, because omission removes them", () => {
@@ -67,7 +69,9 @@ describe("building the stock list for sync_stock", () => {
       current: new Map(),
     });
 
-    expect(lines).toEqual([{ warehouseId: "W1", productCode: "NEW", amount: 5 }]);
+    expect(lines).toEqual([
+      { warehouseId: "W1", productCode: "NEW", amount: 5 },
+    ]);
   });
 
   it("floors negatives to zero rather than sending them", () => {
@@ -155,7 +159,10 @@ describe("syncStockToMetakocka", () => {
     const fetchImpl = vi.fn(
       async () =>
         new Response(
-          JSON.stringify({ opr_code: "0", stock_list: [{ product_code: "A" }] }),
+          JSON.stringify({
+            opr_code: "0",
+            stock_list: [{ product_code: "A" }],
+          }),
           { status: 200, headers: { "Content-Type": "application/json" } },
         ),
     );
@@ -166,7 +173,10 @@ describe("syncStockToMetakocka", () => {
       { fetchImpl: fetchImpl as unknown as typeof fetch },
     );
 
-    const [, init] = fetchImpl.mock.calls[0]! as unknown as [string, RequestInit];
+    const [, init] = fetchImpl.mock.calls[0]! as unknown as [
+      string,
+      RequestInit,
+    ];
     expect(JSON.parse(String(init.body))).toMatchObject({
       api_user_email: "api@example.test",
       stock_list: [{ warehouse_id: "W1", product_code: "A", amount: "1" }],

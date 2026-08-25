@@ -259,11 +259,57 @@ merchant's ERP. Treat it as a production database password (§10).
   company default instead. MetaKocka validates `profit_center` and does not
   validate `warehouse`, so `supply_source.metakocka_warehouse` must be validated
   against `warehouse_list` by us, on save and before use.
+- **[verified] A line is a catalogue reference, and `unit` is what turns it into a
+  new product.** An unknown `code` is refused with `opr_code 8`, "Product with
+  code X not found - unit must be set to add new product" — so sending `unit` on
+  a document line makes MetaKocka **create the catalogue product from the
+  order**. Never send it. `name` is pointless too: MetaKocka overrides it with
+  the catalogue's own name for a product that exists, and it only describes a
+  manual line for one that does not. Validate the SKU against the catalogue
+  before writing and raise an exception instead (§11).
+- **[verified] Inline partner data creates a new partner every time.** Sending
+  `partner: { customer, street, ... }` on a document does not match an existing
+  record, it makes another one — two documents for one customer left company 6789
+  with two "Grega Rotar" partners. Resolve the partner first with `get_partner`
+  (searchable by `partner_tax_number`, `partner_email`, `partner_name`,
+  `partner_phone_number`), create it with `add_partner` only when there is none,
+  and reference it on the document.
+- **[verified] Referencing a partner needs an address as well as an id.**
+  `partner: { mk_id }` alone is refused with "Partner must have mk_address_id or
+  customer and street for address identification." Send `mk_id` plus either
+  `mk_address_id` (from `partner_delivery_address_list`, type "Račun" for
+  billing) or `customer` and `street`.
+- **[verified] `sales_pricelist_code` is how a document records which prices
+  applied.** Omitted, the order is filed against no pricelist at all, and
+  nobody opening it in MetaKocka can tell what it was priced from.
+- **[verified] `get_document` takes `doc_id`, not `mk_id`.** Sending `mk_id`
+  answers "Cannot find document type sales_order with id = null".
 - `get_document` / `search` support `show_split_orders` — investigate before finalising
   reconciliation queries.
 - Lines in `product_list` with `code`, `amount`, and `price` or `price_with_tax`.
   **Always `price_with_tax` for webshop orders** — the docs say so explicitly.
 - Tax is a `tax` code string or a `tax_factor` decimal (`"0.22"`).
+- **[verified] MetaKocka will not infer a line's tax rate, and zero is not a safe
+  default.** Omitting `tax_factor` is refused even when the product carries a
+  pricelist entry with a rate on it. Sending `"0"` *is* accepted, and produces a
+  line of 209.00 net at 0% where the pricelist says 171.31 at 22% — the right
+  gross, a net matching nothing, and VAT understated to the tax office. Sending
+  `"0.22"` produces `price 171.31 / price_with_tax 209 / tax EX4`, which is the
+  correct line. So when Shopify supplies no rate — any shop with no tax
+  registration for that market, which includes every development store — use the
+  shop's configured VAT rate. Only `taxable: false` means zero.
+- **[verified] Tax on a line is not optional.** A line whose product carries no
+  `tax` attribute in MetaKocka is rejected with `opr_code 6, "Attribute 'tax' for
+  product with code 'X' or name 'Y' must be set."` So `tax_factor` is always sent,
+  including `"0"`. Deriving that zero is legitimate when Shopify reports
+  `total_tax: 0.00` or `taxable: false` — that is the ERP being told what the
+  customer actually paid — but when tax *was* charged and Shopify has not broken
+  it down per line, the rate is undeterminable and the order becomes an exception
+  (§11) rather than a guess.
+- **Send `price` for a tax-exclusive shop, `price_with_tax` for a tax-inclusive
+  one.** The docs say webshop orders should always send gross, which holds only
+  while `taxes_included` is true. Shopify's `price` is net when it is false, and
+  putting a net figure in `price_with_tax` understates every line by the VAT rate.
 - `create_invoice: "true"` creates the invoice in the same call and returns `bill_mk_id`
   inside `attachment_list`. The documented example reports ~47 seconds. Never inline.
 - `mark_paid` on an update **deletes the previous payment and replaces it**.
@@ -277,6 +323,24 @@ merchant's ERP. Treat it as a production database password (§10).
   `service`/`sales`/`purchasing`, dimensions, `weight`, `gross_weight`, `min_stock`,
   `minimal_order_quantity`, `localization[]`, `categories[]`, `pricelist[]` with tiered
   `price_def` including `lowest_price_30_days` (Omnibus).
+- **[verified] A pricelist is net or gross, and it is not Shopify's choice.**
+  Every pricelist has its own price type, fixed when it was created. Sending the
+  wrong field is refused outright — pricelist `1` on company 6789 answers
+  `opr_code 2, "Pricelist '1' has 'net' price type. Use 'price' instead of
+  'price_with_tax' to set the product price on the pricelist."` — and, worse,
+  sending the wrong *amount* is not refused at all. A Shopify gross price of
+  209.00 written into a net pricelist is stored as 209.00 net, a price 22% too
+  high, with no complaint. So the amount must be restated on the pricelist's
+  basis (`domain/money/tax.ts`), not merely relabelled. The rejection names the
+  type, so a wrong setting is self-correcting on the next call.
+- **[verified] `count_code` and `code` are not the same thing.** Products created
+  in the MetaKocka UI carry an internal `count_code` (`"4451"`) and the SKU in
+  `code`. `product_update` selected by `count_code` fails with
+  `"Product with count_code 'X' does not exist."` for those — match on `code`,
+  update by `mk_id`.
+- **[verified] `product_list` omits prices unless asked.** Pass
+  `return_pricelist: "true"` or the response carries no `pricelist` at all,
+  which looks exactly like a product with no prices.
 - `supplier_info.partner_id` sets the supplier.
 - `product_partner_info[]` holds each partner's own code and name for the product.
   **Use it** — the supplier ↔ SKU mapping belongs in the ERP, not only our database.
@@ -317,13 +381,42 @@ splitting. Our allocation engine sits above this ceiling — that is the product
 - Provide idempotency keys. Duplicate prevention is entirely ours.
 - Return machine-readable errors. Failures are `opr_code` plus a human-readable
   `opr_desc`. Build our own classifier. **[verified]** codes so far: `0` success,
-  `2` request not accepted as written, `6` named entity does not exist
-  ("Profit center 'X' doesn't exist."). Anything unrecognised is an exception, not
+  `2` request not accepted as written, `6` a general rejection. `6` was first
+  seen as "Profit center 'X' doesn't exist." and was briefly assumed to mean
+  "named entity does not exist"; a live order then returned `6` with "Not valid
+  date for doc_date", so **the code alone does not identify the cause** and an
+  exception kind must be read from `opr_desc`. Anything unrecognised is an exception, not
   a retry.
 
 ### Data format
 Numbers come back as **strings**. Dates are inconsistent: ISO-with-offset
-(`"2024-09-12+02:00"`) in most fields, `dd.mm.yyyy` in `mark_paid`. Decimal commas appear
+(`"2024-09-12+02:00"`) in most fields, `dd.mm.yyyy` in `mark_paid`.
+
+**[verified] `doc_date` accepts `dd.mm.yyyy`, and its ISO form only works with a
+hardcoded `+02:00`.** Probed against company 6789 by sending `put_document` with a
+profit centre that cannot exist, so MetaKocka refuses before creating anything and the
+error says whether the date got past validation:
+
+| `doc_date` | result |
+|---|---|
+| `25.08.2026`, `15.01.2026` | accepted |
+| `2026-08-25+02:00`, `2026-01-15+02:00`, `2025-08-25+02:00` | accepted |
+| `2026-08-25` (bare) | rejected |
+| `2026-08-25+00:00`, `2026-08-25-04:00` | rejected |
+| `2026-08-25+01:00`, `2026-08-25+03:00`, `2025-01-15+01:00` | rejected |
+| `2026-08-25+0200`, `2026-08-25T09:52:00+02:00` | rejected |
+
+**`+02:00` is a literal, not a timezone.** It is refused in January only if you change it
+to the real Ljubljana winter offset, and accepted in January when left at `+02:00`. So the
+ISO form documented throughout MetaKocka's own docs is only usable by hardcoding an offset
+that is wrong for five months of the year, and any implementation that computes the true
+offset breaks between late October and late March.
+
+Use `dd.mm.yyyy` — the same format `mark_paid` already requires — and take the calendar
+date in the ERP's timezone, not UTC and not the shop's. A document date belongs to the
+ledger it is filed in: an order placed at 23:00 in New York is the next day in Ljubljana.
+
+Decimal commas appear
 in the docs' own examples (`"gross_weight": "0,8"`). Parse and normalise at the boundary
 with Zod; never let a raw MetaKocka value reach domain code. MetaKocka keeps its own API
 log for **two months only** — our audit log is the permanent record, subject to §2.4
@@ -409,9 +502,18 @@ client_secret (encrypted), last_verified_at.
 metakocka_mk_id, status. Unique (shop_id, sku).
 
 **`supply_source`** — shop_id, code, name, kind (`own` | `partner`), shopify_location_id,
-`inventory_writer` (`metakocka` | `external` | `manual`), metakocka_warehouse,
-metakocka_profit_center, priority, lead_time_days, default_delivery_type, can_split,
-enabled.
+`inventory_writer` (`metakocka` | `external` | `manual`), stock_direction,
+stock_direction_inherited, metakocka_warehouse, metakocka_profit_center,
+profit_center_inherited, priority, lead_time_days, default_delivery_type, can_split,
+enabled. The two `_inherited` flags say whether the value beside them came from
+`supply_setting`; the value itself stays materialised here (§7).
+
+**`supply_setting`** — shop_id (unique), default_stock_direction,
+default_profit_center. The answers a source inherits unless it overrides them.
+
+**`metakocka_profit_center`** — shop_id, value, is_valid, validated_at.
+Merchant-maintained, because MetaKocka can neither list nor validate profit
+centres (§3, §7). Unique (shop_id, value).
 
 **`supply_level`** — supply_source_id, sku_id, quantity, reserved, observed_at.
 Unique (supply_source_id, sku_id).
@@ -464,6 +566,79 @@ warehouses are counted in Shopify instead, and those write back to the ERP:
 `supply_source.stock_direction` holds the choice, and `inventory_writer` follows
 from it: only `mk_to_shopify` gives this app the pen for a Shopify location.
 Stock is never copied both ways for one warehouse.
+
+### The settings model: shop defaults, per-location overrides
+
+The merchant answers "where is stock counted" once for the store, not once per
+warehouse. Two tables hold it:
+
+- **`supply_setting`** — one row per shop. `default_stock_direction` and
+  `default_profit_center`.
+- **`supply_source.stock_direction_inherited` / `.profit_center_inherited`** —
+  whether this source took the default or chose for itself.
+
+**The effective value stays materialised on the source.** `stock_direction` and
+`metakocka_profit_center` are still the single columns the sync engine and the
+order writer read, with no default to resolve at read time. Changing a default
+therefore writes through to every source flagged as inheriting, in
+`saveSupplyDefaults`. The alternative — a nullable column meaning "ask the
+shop" — pushes that resolution into every reader, including the two places where
+getting it wrong publishes the wrong stock.
+
+Two rules survive a write-through, and both live in
+`domain/supply/defaults.ts` so they can be tested without a database:
+
+- A source with **no Shopify location** gets `none` whatever the default says.
+  It stays flagged as inheriting, so connecting a location later picks the
+  default up.
+- **One writer per location still wins.** An inherited source that would become
+  a second `mk_to_shopify` writer for a location is left alone and named back to
+  the merchant, never silently skipped. An explicit override outranks a default,
+  so its claim is counted first.
+
+A migration that introduces a default must back-fill both flags to `false`:
+values a merchant configured one at a time are deliberate choices, and they
+become explicit overrides rather than being reset to something they have never
+seen.
+
+### Profit centres are a register, not a text field
+
+MetaKocka refuses a whole document over a profit centre it does not recognise
+(§3), and §3 also records that it will neither **list** profit centres nor
+**validate** one. The payment-type trick does not transfer: that rejection
+enumerates the valid set, and this one only ever says
+`"Profit center 'X' doesn't exist."`.
+
+So `metakocka_profit_center` is a **merchant-maintained register**, checked as
+each entry is added, and every field that needs a profit centre is a choice over
+it rather than free text. A typo is then caught once, on the settings screen,
+instead of on an order days later.
+
+**The check is a probe, and it needs a control.** `adapters/metakocka/probe.ts`
+sends a sales order that MetaKocka is guaranteed to refuse — a sentinel
+`payment_type` — and the refusal is the read. Sending the value under test on
+that document gives two readable outcomes: the error names the profit centre
+(wrong), or the error lists payment types (validation got past it, so it is
+right).
+
+That second inference only holds if MetaKocka checks the profit centre **before**
+the payment type. Nothing documents the order, and assuming it backwards would
+call every value valid, including the typos. So `validateProfitCenters` first
+probes a profit centre that cannot exist: if MetaKocka names it, the ordering is
+established; if it answers about payment types instead, every verdict is
+`unknown`.
+
+**`unknown` is an answer, not a failure.** A value that could not be checked is
+stored unchecked and the merchant is told, never refused — being unable to ask
+is our problem, not theirs. Only an explicit rejection refuses. A rejected entry
+is kept in the register and marked, because a supply source may still point at
+it and removing it would make that source look unconfigured rather than broken.
+
+Nothing above is on the page-load path (§2.5). The register is re-checked
+nightly by `reload-profit-centers`, beside the payment-type reload and for the
+same reason: each check is a request designed to fail, and running it every
+fifteen minutes would fill the merchant's own MetaKocka API log with rejections
+that are not failures.
 
 **Writing back is destructive by design. Two verified hazards:**
 
@@ -522,11 +697,32 @@ difference. `amount` → on hand is confirmed correct; no fallback to
 
 Prefer 1:1 warehouse ↔ location; if several warehouses map to one location, sum `amount`
 and log that the breakdown was flattened. Write only on change — keep the last written
-value per (location, inventory item) and skip no-ops. Use `inventorySetQuantities` with
-`name: "on_hand"`, a stable `reason`, and `ignoreCompareQuantity: false`. **Loop
-prevention:** we receive `inventory_levels/update` for our own writes — compare against
-the last value written and drop matching events. Full stock reconciliation runs on a
-schedule regardless, because MetaKocka's webhook gives up after two retries.
+value per (location, inventory item) and skip no-ops.
+
+**[verified] The write shape on API 2026-07, corrected against the live schema.** This
+section previously specified `ignoreCompareQuantity: false`, which does not exist:
+
+- `InventorySetQuantitiesInput` has `name`, `reason`, `referenceDocumentUri` and
+  `quantities` only. There is no `ignoreCompareQuantity`, so there is no unconditional
+  set.
+- `InventoryQuantityInput` calls the guard `changeFromQuantity`, not `compareQuantity`.
+  Introspection reports it optional; the API rejects the mutation without it. Send the
+  value read from the location in the same run.
+- **Both `inventorySetQuantities` and `inventoryActivate` require the `@idempotent(key:)`
+  directive** and fail with `BAD_REQUEST` without it. Derive the key from the job id and
+  the batch contents: a retry sending the same numbers is then recognised as one write,
+  a retry that re-read different numbers is applied, and a later run that happens to
+  repeat an earlier batch — stock going 10, 5, 10, 5 — is not swallowed by the cached
+  result of the first.
+- `inventorySetQuantities` only speaks about items that already have a level at the
+  location. A product held in MetaKocka but never stocked at the mapped Shopify location
+  has none, and is stocked with `inventoryActivate(…, onHand:)` instead. Without that
+  step its stock never reaches Shopify at all. `inventoryActivate` takes one item per
+  field, so batch them as aliases in one document rather than a query in a loop.
+
+**Loop prevention:** we receive `inventory_levels/update` for our own writes — compare
+against the last value written and drop matching events. Full stock reconciliation runs
+on a schedule regardless, because MetaKocka's webhook gives up after two retries.
 
 Safety stock and virtual availability (phase 2) need a location this app exclusively
 owns. Never attempt it by writing partner locations.
@@ -663,6 +859,25 @@ how you build a nightly flip-flop.
 
 Use Shopify bulk operations for reading the catalogue; MetaKocka has no bulk endpoint, so
 writes are sequential and rate-limited.
+
+**Creating articles is a merchant-controlled exception to the table above.** A Shopify SKU
+with no MetaKocka article can be neither stocked nor ordered, so the app can create one:
+`product_add` with `count_code` and `code` set to the SKU, the barcode, and a name built
+from a template the merchant writes (`domain/products/name-template.ts`). Where this
+departs from the table, it does so deliberately and only when asked:
+
+- **Price and tax on creation only**, behind their own switch, off by default. The price
+  goes into a pricelist whose `count_code` the merchant names, because §3 says a pricelist
+  cannot be created through the API. Whether Shopify's number is `price` or
+  `price_with_tax` is read from the shop's `taxesIncluded` setting, never assumed.
+- **An article that already exists keeps its price and tax.** Updates send `name` and
+  nothing else, so MetaKocka stays master for everything in the table for every article it
+  already owns.
+- **Renaming is a three-way choice** — always, only when MetaKocka's name is empty, or
+  never — because a merchant who edits names in the ERP must be able to keep them.
+
+Everything here defaults to off. This is the only place in the app that writes into the
+ERP's catalogue.
 
 ### 8.10 Reconciliation
 

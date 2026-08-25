@@ -321,20 +321,22 @@ export default function MetakockaSettings() {
             </s-section>
 
             <s-section heading="Writing stock back to MetaKocka">
-          <s-box maxInlineSize="520px">
-            <s-stack direction="block" gap="base">
-              <s-email-field
-                name="apiUserEmail"
-                label="MetaKocka API user email"
-                value={apiUserEmail}
-                onChange={(event) => setApiUserEmail(event.currentTarget.value)}
-                details="Only needed for warehouses counted in Shopify. MetaKocka requires it before it will accept a stock update."
-              />
-            </s-stack>
-          </s-box>
-        </s-section>
+              <s-box maxInlineSize="520px">
+                <s-stack direction="block" gap="base">
+                  <s-email-field
+                    name="apiUserEmail"
+                    label="MetaKocka API user email"
+                    value={apiUserEmail}
+                    onChange={(event) =>
+                      setApiUserEmail(event.currentTarget.value)
+                    }
+                    details="Only needed for warehouses counted in Shopify. MetaKocka requires it before it will accept a stock update."
+                  />
+                </s-stack>
+              </s-box>
+            </s-section>
 
-        <s-section heading="Stock webhook">
+            <s-section heading="Stock webhook">
               <s-box maxInlineSize="520px">
                 <s-password-field
                   name="webhookClientSecret"

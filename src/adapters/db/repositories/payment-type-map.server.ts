@@ -110,3 +110,44 @@ export async function replaceCachedPaymentTypes(
     ),
   ]);
 }
+
+/* -------------------------------------------------------------------------- */
+/* Shop-level payment settings                                                */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The payment type used when a gateway has no mapping of its own.
+ *
+ * §8.7 says never to guess a payment type, and this does not guess: it is a
+ * value the merchant chose, and the settings screen refuses to save without it.
+ * Before it existed, an order on an unmapped gateway was simply created unpaid
+ * with an exception attached, which is safe but leaves the books waiting on
+ * somebody every time a new gateway appears.
+ */
+export async function getFallbackPaymentType(
+  principal: Principal,
+): Promise<string | null> {
+  const row = await prisma.paymentSetting.findFirst({
+    where: { shop: { domain: shopDomainOf(principal) } },
+    select: { fallbackPaymentType: true },
+  });
+  return row?.fallbackPaymentType ?? null;
+}
+
+export async function saveFallbackPaymentType(
+  principal: Principal,
+  value: string | null,
+): Promise<void> {
+  const domain = shopDomainOf(principal);
+  const shop = await prisma.shop.findUnique({
+    where: { domain },
+    select: { id: true },
+  });
+  if (!shop) throw new Error(`No shop record for ${domain}`);
+
+  await prisma.paymentSetting.upsert({
+    where: { shopId: shop.id },
+    create: { shopId: shop.id, fallbackPaymentType: value },
+    update: { fallbackPaymentType: value },
+  });
+}

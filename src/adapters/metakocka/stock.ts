@@ -107,7 +107,7 @@ export interface MetakockaProduct {
   name: string | null;
 }
 
-/** The whole article catalogue, paginated. */
+/** The whole product catalogue, paginated. */
 export async function listProducts(
   client: MetakockaClient,
 ): Promise<MetakockaProduct[]> {

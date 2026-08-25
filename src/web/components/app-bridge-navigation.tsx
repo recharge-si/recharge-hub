@@ -23,7 +23,8 @@ export function AppBridgeNavigation() {
     };
 
     document.addEventListener("shopify:navigate", handleNavigate);
-    return () => document.removeEventListener("shopify:navigate", handleNavigate);
+    return () =>
+      document.removeEventListener("shopify:navigate", handleNavigate);
   }, [navigate]);
 
   return null;

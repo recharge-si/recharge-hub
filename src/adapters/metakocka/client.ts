@@ -43,10 +43,19 @@ export interface MetakockaClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-/** Every response shares this envelope. Endpoint schemas extend it. */
+/**
+ * The envelope most responses share. Endpoint schemas extend it.
+ *
+ * **[verified] `opr_code` is optional, because not every endpoint sends one.**
+ * `add_partner` answers a successful create with the new ids and nothing else
+ * — no `opr_code`, no `opr_desc`. Requiring it rejected a response that was
+ * perfectly fine, as "an unrecognised response envelope", and took the job down
+ * with it. Absence is treated as success: an endpoint that reports failures does
+ * so with a code, so no code means nothing went wrong.
+ */
 export const mkEnvelopeSchema = z
   .object({
-    opr_code: z.union([z.string(), z.number()]).transform(String),
+    opr_code: z.union([z.string(), z.number()]).transform(String).optional(),
     opr_desc: z.string().optional(),
     opr_desc_app: z.string().optional(),
     opr_time_ms: z.union([z.string(), z.number()]).optional(),
@@ -124,7 +133,12 @@ export class MetakockaClient {
       // A 200 that is not JSON is not something a retry will fix.
       throw new MetakockaError(
         `MetaKocka ${path} returned a response that is not JSON`,
-        { endpoint: path, kind: "exception", httpStatus: response.status, cause },
+        {
+          endpoint: path,
+          kind: "exception",
+          httpStatus: response.status,
+          cause,
+        },
       );
     }
 
@@ -138,7 +152,8 @@ export class MetakockaClient {
 
     const { opr_code: oprCode, opr_desc: oprDesc } = envelope.data;
 
-    if (oprCode !== MK_SUCCESS) {
+    // No code at all means the endpoint does not report one; see the envelope.
+    if (oprCode !== undefined && oprCode !== MK_SUCCESS) {
       throw new MetakockaError(
         `MetaKocka ${path} failed with opr_code ${oprCode}`,
         {

@@ -24,7 +24,16 @@ export const ENDPOINTS = {
   warehouseList: "json/warehouse_list",
   warehouseStock: "json/warehouse_stock",
   productList: "json/product_list",
+  // Documented as https://main.metakocka.si/rest/eshop/v1/json/product_add and
+  // .../json/product_update, the same family as the probed `json/product_list`.
+  // Taken from the docs rather than a live probe: confirm on the test company
+  // before the first production write.
+  productAdd: "json/product_add",
+  productUpdate: "json/product_update",
   putDocument: "put_document",
+  // Probed 2026-08-25: both answer on the no-json family, like put_document.
+  getPartner: "get_partner",
+  addPartner: "add_partner",
   getDocument: "get_document",
   deleteDocument: "delete_document",
 } as const;

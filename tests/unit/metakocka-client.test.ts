@@ -3,7 +3,7 @@ import { z } from "zod";
 
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
-import { MetakockaError } from "~/adapters/metakocka/errors";
+import { MetakockaError, exceptionKindFor } from "~/adapters/metakocka/errors";
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
 
 import warehouseListFixture from "../fixtures/metakocka/warehouse_list.json";
@@ -24,7 +24,9 @@ function clientWith(fetchImpl: typeof fetch) {
 const passthrough = z.object({}).passthrough();
 
 /** Runs a call that is expected to fail and returns the MetakockaError. */
-async function expectFailure(promise: Promise<unknown>): Promise<MetakockaError> {
+async function expectFailure(
+  promise: Promise<unknown>,
+): Promise<MetakockaError> {
   const error = await promise.then(
     () => new Error("expected the call to fail"),
     (e: unknown) => e,
@@ -73,7 +75,9 @@ describe("MetaKocka client", () => {
     expect(urls[0]).toBe(
       "https://main.metakocka.si/rest/eshop/v1/json/warehouse_list",
     );
-    expect(urls[1]).toBe("https://main.metakocka.si/rest/eshop/v1/put_document");
+    expect(urls[1]).toBe(
+      "https://main.metakocka.si/rest/eshop/v1/put_document",
+    );
   });
 
   it("classifies the observed opr_code 2 as a validation exception", async () => {
@@ -120,8 +124,11 @@ describe("MetaKocka client", () => {
   it("treats a 500 as retryable", async () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(ENDPOINTS.warehouseList, {}, passthrough),
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.warehouseList,
+        {},
+        passthrough,
+      ),
     );
 
     expect(error.kind).toBe("retryable");
@@ -129,10 +136,15 @@ describe("MetaKocka client", () => {
   });
 
   it("treats a 429 as retryable", async () => {
-    const fetchImpl = vi.fn(async () => new Response("slow down", { status: 429 }));
+    const fetchImpl = vi.fn(
+      async () => new Response("slow down", { status: 429 }),
+    );
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(ENDPOINTS.warehouseList, {}, passthrough),
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.warehouseList,
+        {},
+        passthrough,
+      ),
     );
 
     expect(error.kind).toBe("retryable");
@@ -141,8 +153,11 @@ describe("MetaKocka client", () => {
   it("treats a 403 as an exception", async () => {
     const fetchImpl = vi.fn(async () => new Response("nope", { status: 403 }));
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(ENDPOINTS.warehouseList, {}, passthrough),
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.warehouseList,
+        {},
+        passthrough,
+      ),
     );
 
     expect(error.kind).toBe("exception");
@@ -153,8 +168,11 @@ describe("MetaKocka client", () => {
       throw new TypeError("network down");
     });
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(ENDPOINTS.warehouseList, {}, passthrough),
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.warehouseList,
+        {},
+        passthrough,
+      ),
     );
 
     expect(error.kind).toBe("retryable");
@@ -165,8 +183,11 @@ describe("MetaKocka client", () => {
       async () => new Response("<html>maintenance</html>", { status: 200 }),
     );
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(ENDPOINTS.warehouseList, {}, passthrough),
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.warehouseList,
+        {},
+        passthrough,
+      ),
     );
 
     expect(error.kind).toBe("exception");
@@ -179,8 +200,7 @@ describe("MetaKocka client", () => {
     );
 
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(
+      clientWith(fetchImpl as unknown as typeof fetch).call(
         ENDPOINTS.warehouseList,
         {},
         z.object({ warehouse_list: z.array(z.object({})) }),
@@ -194,13 +214,16 @@ describe("MetaKocka client", () => {
   it("never puts the secret key in the error it throws", async () => {
     const fetchImpl = vi.fn(async () => new Response("boom", { status: 500 }));
     const error = await expectFailure(
-      clientWith(fetchImpl as unknown as typeof fetch)
-        .call(ENDPOINTS.warehouseList, {}, passthrough),
+      clientWith(fetchImpl as unknown as typeof fetch).call(
+        ENDPOINTS.warehouseList,
+        {},
+        passthrough,
+      ),
     );
 
-    expect(JSON.stringify({ m: error.message, d: error.oprDesc })).not.toContain(
-      "super-secret-key",
-    );
+    expect(
+      JSON.stringify({ m: error.message, d: error.oprDesc }),
+    ).not.toContain("super-secret-key");
   });
 });
 
@@ -236,5 +259,36 @@ describe("warehouse_list", () => {
     );
 
     expect(warehouses).toEqual([]);
+  });
+});
+
+describe("which exception a rejection becomes", () => {
+  const rejection = (oprDesc: string) =>
+    new MetakockaError("rejected", {
+      endpoint: "put_document",
+      kind: "exception",
+      oprCode: "6",
+      oprDesc,
+    });
+
+  it("blames the profit centre only when MetaKocka did", () => {
+    expect(
+      exceptionKindFor(rejection("Profit center 'X' doesn't exist.")),
+    ).toBe("profit_center_rejected");
+  });
+
+  it("does not blame the profit centre for an unrelated code 6", () => {
+    // The bug this guards: code 6 also covers a malformed date, and mapping the
+    // code straight to a kind showed merchants a profit centre error for a
+    // profit centre that was fine.
+    expect(
+      exceptionKindFor(
+        rejection("Not valid date for doc_date : 2026-08-25+00:00"),
+      ),
+    ).toBe("metakocka_write_failed");
+  });
+
+  it("falls back to the honest kind when there is nothing to go on", () => {
+    expect(exceptionKindFor(rejection(""))).toBe("metakocka_write_failed");
   });
 });

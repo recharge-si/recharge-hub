@@ -31,6 +31,33 @@ api_version = "2026-10"
   topics = [ "app/uninstalled" ]
   uri = "/webhooks/app/uninstalled"
 
+  # Order intake (section 8.1). The handler writes the order and queues its
+  # allocation in one transaction, then answers 200 well inside the five-second
+  # budget.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
+
+  # Not implemented in v1 (section 8.8), but received from day one and turned
+  # into exceptions so nothing is lost silently.
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  # Deleted in Shopify, kept in MetaKocka: the ERP document is the accounting
+  # record and may already be invoiced. The order is hidden from this app only.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/delete" ]
+  uri = "/webhooks/orders/delete"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"

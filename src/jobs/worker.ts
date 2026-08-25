@@ -10,9 +10,18 @@ import { QUEUES } from "~/adapters/queue/queues";
 import { makeAppUninstalledHandler } from "~/jobs/handlers/app-uninstalled";
 import { handleCustomersDataRequest } from "~/jobs/handlers/customers-data-request";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
+import { handleAllocateOrder } from "~/jobs/handlers/allocate-order";
+import { handleOrdersEvent } from "~/jobs/handlers/orders-event";
+import { handleReloadPaymentTypes } from "~/jobs/handlers/reload-payment-types";
+import { handleReloadProfitCenters } from "~/jobs/handlers/reload-profit-centers";
+import { handleReloadWarehouses } from "~/jobs/handlers/reload-warehouses";
+import { handleRedactOldOrders } from "~/jobs/handlers/redact-old-orders";
+import { handleScheduledTick } from "~/jobs/handlers/scheduled-tick";
+import { handleWriteMetakockaOrder } from "~/jobs/handlers/write-metakocka-order";
 import { handleShopRedact } from "~/jobs/handlers/shop-redact";
 import { handleSyncCatalogue } from "~/jobs/handlers/sync-catalogue";
 import { handleSyncInventory } from "~/jobs/handlers/sync-inventory";
+import { handleSyncProducts } from "~/jobs/handlers/sync-products";
 import { withIdempotency } from "~/jobs/with-idempotency";
 
 /**
@@ -61,6 +70,48 @@ async function main(): Promise<void> {
   });
   await boss.work(QUEUES.syncInventory, async (jobs) => {
     for (const job of jobs) await handleSyncInventory(job);
+  });
+  await boss.work(QUEUES.syncProducts, async (jobs) => {
+    for (const job of jobs) await handleSyncProducts(job);
+  });
+  // Order flow. Allocation is pure and cheap; the MetaKocka write is the one
+  // that must never run twice, which the count_code claim guarantees (§8.4).
+  await boss.work(QUEUES.allocateOrder, async (jobs) => {
+    for (const job of jobs) await handleAllocateOrder(job);
+  });
+  await boss.work(QUEUES.writeMetakockaOrder, async (jobs) => {
+    for (const job of jobs) await handleWriteMetakockaOrder(job);
+  });
+  await boss.work(
+    QUEUES.ordersEvent,
+    withIdempotency(QUEUES.ordersEvent, handleOrdersEvent),
+  );
+
+  await boss.work(QUEUES.reloadWarehouses, async (jobs) => {
+    for (const job of jobs) await handleReloadWarehouses(job);
+  });
+  await boss.work(QUEUES.reloadPaymentTypes, async (jobs) => {
+    for (const job of jobs) await handleReloadPaymentTypes(job);
+  });
+  await boss.work(QUEUES.reloadProfitCenters, async (jobs) => {
+    for (const job of jobs) await handleReloadProfitCenters(job);
+  });
+  await boss.work(QUEUES.scheduledTick, async (jobs) => {
+    for (const job of jobs) await handleScheduledTick(job);
+  });
+  await boss.work(QUEUES.redactOldOrders, async (jobs) => {
+    for (const job of jobs) await handleRedactOldOrders(job);
+  });
+
+  // One cron entry, fanned out per shop by the tick handler. Everything it
+  // sends is throttled, so a slow run is never lapped by the next tick.
+  await boss.schedule(QUEUES.scheduledTick, "*/15 * * * *", {
+    cadence: "quarter_hourly",
+  });
+
+  // Nightly work: the section 2.4 retention promise, kept at a quiet hour.
+  await boss.schedule(QUEUES.scheduledTick, "20 3 * * *", {
+    cadence: "nightly",
   });
 
   log.info({ queues: Object.values(QUEUES) }, "Worker started");

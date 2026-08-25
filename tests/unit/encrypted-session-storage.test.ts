@@ -2,12 +2,11 @@ import { Session } from "@shopify/shopify-api";
 import { describe, expect, it } from "vitest";
 
 import { isEncrypted } from "~/adapters/crypto/secrets.server";
-import {
-  open,
-  seal,
-} from "~/adapters/db/encrypted-session-storage.server";
+import { open, seal } from "~/adapters/db/encrypted-session-storage.server";
 
-function makeSession(overrides: Partial<ConstructorParameters<typeof Session>[0]> = {}) {
+function makeSession(
+  overrides: Partial<ConstructorParameters<typeof Session>[0]> = {},
+) {
   return new Session({
     id: "offline_test-store.myshopify.com",
     shop: "test-store.myshopify.com",

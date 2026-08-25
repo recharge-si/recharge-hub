@@ -70,7 +70,7 @@ export interface MatchSnapshot {
 /**
  * Matches the registry against the MetaKocka catalogue by code.
  *
- * A SKU that no longer has an article is set back to `unmatched` rather than
+ * A SKU that no longer has a product is set back to `unmatched` rather than
  * left pointing at something that is gone. `ignored` is the merchant's decision
  * and is never overwritten.
  */

@@ -16,8 +16,10 @@ import {
 } from "~/adapters/metakocka/sync-stock";
 import { getLogger } from "~/adapters/observability/logger.server";
 import {
+  activateOnHand,
   readOnHandAtLocation,
   writeOnHand,
+  type OnHandActivation,
   type OnHandWrite,
 } from "~/adapters/shopify/inventory";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
@@ -42,12 +44,18 @@ export const syncInventoryJobSchema = z.object({
  */
 export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
   const { shopDomain } = syncInventoryJobSchema.parse(job.data);
+  // Stable across this job's retries, so an ambiguous Shopify timeout is
+  // recognised as the same write rather than applied twice.
+  const runId = job.id;
   const principal = serviceToken(shopDomain, "sync-inventory");
   const log = getLogger();
 
   const credential = await getCredential(principal);
   if (!credential) {
-    log.warn({ shop: shopDomain }, "Inventory sync skipped, MetaKocka not connected");
+    log.warn(
+      { shop: shopDomain },
+      "Inventory sync skipped, MetaKocka not connected",
+    );
     return;
   }
 
@@ -67,7 +75,10 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
   );
 
   if (writable.length === 0) {
-    log.info({ shop: shopDomain }, "Inventory sync: nothing configured to sync");
+    log.info(
+      { shop: shopDomain },
+      "Inventory sync: nothing configured to sync",
+    );
     return;
   }
 
@@ -83,14 +94,21 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
       // The mapping points at a warehouse that is no longer in MetaKocka.
       // Skipping is right: writing the wrong stock is worse than writing none.
       log.error(
-        { shop: shopDomain, source: source.code, mark: source.metakockaWarehouse },
+        {
+          shop: shopDomain,
+          source: source.code,
+          mark: source.metakockaWarehouse,
+        },
         "Inventory sync skipped: warehouse not in the cached list",
       );
       await appendEvent(principal, {
         entityType: "supply_source",
         entityId: source.id,
         event: "inventory.sync_skipped",
-        detail: { reason: "warehouse_not_found", mark: source.metakockaWarehouse },
+        detail: {
+          reason: "warehouse_not_found",
+          mark: source.metakockaWarehouse,
+        },
       });
       continue;
     }
@@ -130,6 +148,9 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
     );
 
     const writes: OnHandWrite[] = [];
+    // Items Shopify does not stock at this location yet. They cannot be set,
+    // only activated, and skipping them would hide MetaKocka stock forever.
+    const activations: OnHandActivation[] = [];
     let skipped = 0;
 
     for (const sku of skus) {
@@ -159,14 +180,20 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
 
       const shopifyQuantity = currentOnHand.get(sku.shopifyInventoryItemId!);
 
-      // Shopify does not know this item at this location yet; setting a
-      // compareQuantity we cannot prove would be a guess.
+      // Not stocked here yet: activate it at MetaKocka's amount. `inventorySet-
+      // Quantities` would reject an item with no level at the location.
       if (shopifyQuantity === undefined) {
-        skipped += 1;
+        activations.push({
+          inventoryItemId: sku.shopifyInventoryItemId!,
+          locationId: source.shopifyLocationId!,
+          quantity: amount,
+        });
         continue;
       }
 
-      // §7: write only on change.
+      // §7: write only on change. The write itself is unconditional, so this is
+      // about keeping our own inventory_levels/update webhooks rare, not about
+      // refusing to overwrite.
       if (shopifyQuantity === amount) {
         skipped += 1;
         continue;
@@ -176,18 +203,31 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         inventoryItemId: sku.shopifyInventoryItemId!,
         locationId: source.shopifyLocationId!,
         quantity: amount,
-        compareQuantity: shopifyQuantity,
+        changeFromQuantity: shopifyQuantity,
       });
     }
+
+    if (activations.length > 0) {
+      await activateOnHand(admin, activations, {
+        inventoryWriter: source.inventoryWriter,
+        locationId: source.shopifyLocationId!,
+        runId,
+      });
+    }
+
+    const pushed: OnHandActivation[] = [...activations, ...writes];
 
     if (writes.length > 0) {
       await writeOnHand(admin, writes, {
         inventoryWriter: source.inventoryWriter,
         locationId: source.shopifyLocationId!,
+        runId,
       });
+    }
 
+    if (pushed.length > 0) {
       const now = new Date();
-      for (const write of writes) {
+      for (const write of pushed) {
         await prisma.supplyLevel.updateMany({
           where: {
             supplySourceId: source.id,
@@ -206,6 +246,7 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         source: source.code,
         stockRows: stock.length,
         written: writes.length,
+        stocked: activations.length,
         unchanged: skipped,
       },
     });
@@ -216,6 +257,7 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         source: source.code,
         stockRows: stock.length,
         written: writes.length,
+        stocked: activations.length,
         unchanged: skipped,
       },
       "Inventory synced",
@@ -234,7 +276,11 @@ interface ReverseSyncInput {
   };
   warehouseMkId: string;
   metakockaStock: Array<{ code: string; amount: number }>;
-  credential: { companyId: string; secretKey: string; apiUserEmail: string | null };
+  credential: {
+    companyId: string;
+    secretKey: string;
+    apiUserEmail: string | null;
+  };
   admin: Parameters<typeof readOnHandAtLocation>[0];
 }
 

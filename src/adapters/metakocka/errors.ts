@@ -39,8 +39,14 @@ const KNOWN_CODES: Record<string, FailureKind> = {
   // same payload fails identically, so a human has to change something.
   "2": "exception",
   // "Profit center 'X' doesn't exist." A named entity that must pre-exist in
-  // the MetaKocka UI (CLAUDE.md section 3) and does not.
+  // the MetaKocka UI (CLAUDE.md section 3) and does not. Not exclusively that,
+  // though: code 6 also answers a malformed doc_date, so the cause has to be
+  // read from opr_desc rather than the code. See exceptionKindFor.
   "6": "exception",
+  // "Product with code X not found - unit must be set to add new product."
+  // The SKU is not in the catalogue. Retrying changes nothing; either the
+  // product is created in MetaKocka or a human decides otherwise.
+  "8": "exception",
 };
 
 export interface MetakockaErrorOptions {
@@ -115,4 +121,64 @@ export function describeForMerchant(error: MetakockaError): string {
   }
 
   return "MetaKocka could not be reached. Check your connection and try again.";
+}
+
+/**
+ * Which exception kind a MetaKocka rejection belongs to.
+ *
+ * **Not derived from `opr_code`.** This once mapped code 6 straight to
+ * "profit centre rejected", on the strength of the one code-6 response anyone
+ * had seen — `"Profit center 'X' doesn't exist."`. A live order then came back
+ * with code 6 and `"Not valid date for doc_date"`, and the merchant was shown a
+ * red banner blaming a profit centre that was perfectly fine. Code 6 is a
+ * general rejection, not a named-entity one.
+ *
+ * So the kind comes from the description, and anything unrecognised is the
+ * honest `metakocka_write_failed` rather than a confident wrong guess. The full
+ * `opr_desc` is always shown alongside (see `describeForMerchant`), so a
+ * mislabelled heading is the only thing at stake — but a heading that names the
+ * wrong cause sends someone to change a setting that was never the problem.
+ */
+export function exceptionKindFor(
+  error: MetakockaError,
+):
+  | "profit_center_rejected"
+  | "warehouse_invalid"
+  | "tax_undeterminable"
+  | "sku_not_in_metakocka"
+  | "unmapped_payment_gateway"
+  | "metakocka_write_failed" {
+  const description = (error.oprDesc ?? "").toLowerCase();
+
+  // "Product with code 'X' not found - unit must be set to add new product."
+  if (
+    description.includes("product with code") &&
+    description.includes("not found")
+  ) {
+    return "sku_not_in_metakocka";
+  }
+
+  // "Attribute 'tax' for product with code 'X' ... must be set."
+  if (description.includes("attribute 'tax'")) return "tax_undeterminable";
+
+  // "Paramether 'payment_type' has invalid value", or "The payment instrument
+  // X needs to be tax certified". Both mean the gateway is mapped to a type this
+  // company cannot use, which is a mapping to change rather than a write to fix.
+  if (
+    description.includes("payment_type") ||
+    description.includes("payment instrument")
+  ) {
+    return "unmapped_payment_gateway";
+  }
+
+  if (
+    description.includes("profit center") ||
+    description.includes("profit centre")
+  ) {
+    return "profit_center_rejected";
+  }
+  if (description.includes("warehouse") || description.includes("skladi")) {
+    return "warehouse_invalid";
+  }
+  return "metakocka_write_failed";
 }

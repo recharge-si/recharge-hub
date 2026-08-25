@@ -59,8 +59,15 @@ model Shop {
   supplySources         SupplySource[]
   metakockaWarehouses   MetakockaWarehouse[]
   metakockaPaymentTypes MetakockaPaymentType[]
+  metakockaProfitCenters MetakockaProfitCenter[]
   skus                  Sku[]
   paymentTypeMaps       PaymentTypeMap[]
+  paymentSetting        PaymentSetting?
+  supplySetting         SupplySetting?
+  productSyncSetting    ProductSyncSetting?
+  orders                Order[]
+  metakockaDocuments    MetakockaDocument[]
+  exceptions            Exception[]
 
   @@map("shop")
 }
@@ -181,11 +188,25 @@ model SupplySource {
   shopifyLocationId String?         @map("shopify_location_id")
   inventoryWriter   InventoryWriter @default(external) @map("inventory_writer")
   stockDirection    StockDirection  @default(none) @map("stock_direction")
+  /// True when `stockDirection` above was copied from the shop default
+  /// rather than chosen for this source (CLAUDE.md §7). The effective value
+  /// stays materialised so the sync engine reads one column and no caller has
+  /// to resolve a default; this records only where that value came from, and
+  /// is what lets a change to the default flow through to the sources that
+  /// never overrode it.
+  stockDirectionInherited Boolean @default(false) @map("stock_direction_inherited")
 
   /// The `mark` of a MetaKocka warehouse. MetaKocka accepts an unknown value
   /// silently (§3), so this is validated against warehouse_list on save.
   metakockaWarehouse    String? @map("metakocka_warehouse")
+  /// Stable MetaKocka id of that warehouse. Documents are addressed by mark, so
+  /// the mark is what gets sent, but the mark changes when a warehouse is
+  /// renamed. Following the id lets a reload update the mark in place instead
+  /// of retiring a source that never went anywhere.
+  metakockaWarehouseMkId String? @map("metakocka_warehouse_mk_id")
   metakockaProfitCenter String? @map("metakocka_profit_center")
+  /// As `stockDirectionInherited`, for the profit centre.
+  profitCenterInherited Boolean @default(false) @map("profit_center_inherited")
 
   /// Lower runs first in allocation.
   priority            Int     @default(100)
@@ -197,8 +218,10 @@ model SupplySource {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  shop         Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
   supplyLevels SupplyLevel[]
+  allocations  Allocation[]
+  documents    MetakockaDocument[]
 
   @@unique([shopId, code])
   @@index([shopId, priority])
@@ -250,7 +273,11 @@ model MetakockaWarehouse {
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
-  @@unique([shopId, mark])
+  /// Keyed on the MetaKocka id, not the mark. A merchant who renames a
+  /// warehouse changes its mark, and keying the cache on the mark made a rename
+  /// look like a deletion followed by an unrelated new warehouse.
+  @@unique([shopId, mkId])
+  @@index([shopId, mark])
   @@map("metakocka_warehouse")
 }
 
@@ -275,6 +302,44 @@ model MetakockaPaymentType {
 
   @@unique([shopId, value])
   @@map("metakocka_payment_type")
+}
+
+/// Profit centres this company accepts, as a merchant-maintained register.
+///
+/// Unlike the warehouse list there is no endpoint behind this. CLAUDE.md §3
+/// says MetaKocka cannot list profit centres, and unlike payment types the
+/// rejection does not enumerate the valid set either: it only ever says
+/// `"Profit center 'X' doesn't exist."`. So the register is what the merchant
+/// adds, and every entry is checked against the live company before it lands
+/// here (adapters/metakocka/profit-centers.ts). That check writes nothing.
+///
+/// The point of holding it is that a profit centre must match MetaKocka
+/// exactly and MetaKocka refuses a document outright when it does not (§3,
+/// verified). A register turns every other screen's free text field into a
+/// choice, so the typo is caught once, here, rather than on an order.
+model MetakockaProfitCenter {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  value String
+
+  /// False once MetaKocka has told us this name no longer resolves. The row
+  /// is kept rather than deleted: a supply source may still point at it, and
+  /// silently dropping it from the list would leave that source looking
+  /// unconfigured instead of broken.
+  isValid Boolean @default(true) @map("is_valid")
+
+  /// Null for a value carried over from the free text field it replaced,
+  /// which has never been checked against MetaKocka.
+  validatedAt DateTime? @map("validated_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, value])
+  @@map("metakocka_profit_center")
 }
 
 enum SkuStatus {
@@ -309,6 +374,7 @@ model Sku {
 
   shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
   supplyLevels SupplyLevel[]
+  orderLines   OrderLine[]
 
   @@unique([shopId, sku])
   @@index([shopId, status])
@@ -342,4 +408,378 @@ model SupplyLevel {
 
   @@unique([supplySourceId, skuId])
   @@map("supply_level")
+}
+
+/// What the product sync is allowed to do to a name MetaKocka already holds.
+enum ProductNamePolicy {
+  /// Set the name from the template on every run.
+  always
+  /// Only fill in a name when MetaKocka has none.
+  when_empty
+  /// Never touch a name that already exists.
+  never
+
+  @@map("product_name_policy")
+}
+
+/// How Shopify products are pushed into MetaKocka (CLAUDE.md §8.9).
+///
+/// §8.9 gives Shopify the customer-facing title and MetaKocka everything else,
+/// which is why every write here is off until the merchant turns it on, and why
+/// creating an article with a price is a separate, deliberate switch: it is the
+/// one place this app can put a price into the ERP, and the merchant has to ask
+/// for it.
+model ProductSyncSetting {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// Master switch. Nothing is written to MetaKocka while this is false.
+  enabled Boolean @default(false)
+
+  /// Token template rendered by domain/products/name-template.ts.
+  nameTemplate String            @default("{title}[ {options}]") @map("name_template")
+  namePolicy   ProductNamePolicy @default(always) @map("name_policy")
+
+  /// Create an article for a Shopify SKU MetaKocka does not have.
+  createMissing Boolean @default(false) @map("create_missing")
+  /// Send price and tax when creating one. Off means code and name only.
+  sendPricing   Boolean @default(false) @map("send_pricing")
+  /// Also write the price onto products MetaKocka already has. Deliberately a
+  /// separate switch from sendPricing and off by default: §8.9 makes MetaKocka
+  /// master for price, so overwriting one it already holds has to be a decision
+  /// the merchant takes on purpose, not a side effect of enabling pricing.
+  updatePricing Boolean @default(false) @map("update_pricing")
+
+  /// Pricelist a price is written into. It must already exist in MetaKocka;
+  /// the API cannot create one (§3).
+  pricelistCode String? @map("pricelist_code")
+  /// Whether that pricelist holds gross prices.
+  ///
+  /// A MetaKocka pricelist has its own net-or-gross type, fixed when it was
+  /// created and unrelated to Shopify's tax setting. Sending the wrong basis
+  /// does not produce a format error, it produces a price wrong by the VAT
+  /// rate. Corrected automatically when MetaKocka says otherwise, because it
+  /// names the field it wants in the rejection.
+  pricelistIncludesTax Boolean @default(true) @map("pricelist_includes_tax")
+  /// Tax rate as a percentage, for example "22". Sent as `tax_factor`.
+  taxPercent    String? @map("tax_percent")
+  /// MetaKocka unit of measure for created articles.
+  unit          String  @default("kos")
+
+  lastRunAt DateTime? @map("last_run_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("product_sync_setting")
+}
+
+/* -------------------------------------------------------------------------- */
+/* Orders (CLAUDE.md section 6 and section 8)                                  */
+/* -------------------------------------------------------------------------- */
+
+enum OrderStatus {
+  received
+  allocated
+  /// Every supply source has a MetaKocka document.
+  written
+  /// Something needs a human. There is an open Exception row alongside.
+  needs_attention
+  cancelled
+
+  @@map("order_status")
+}
+
+/// Shopify's financial_status, narrowed to the values section 8.7 has a rule for.
+enum OrderFinancialStatus {
+  pending
+  authorized
+  paid
+  partially_paid
+  refunded
+  partially_refunded
+  voided
+  unknown
+
+  @@map("order_financial_status")
+}
+
+model Order {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  shopifyOrderId     String @map("shopify_order_id")
+  shopifyOrderNumber String @map("shopify_order_number")
+
+  /// The MetaKocka partner this order belongs to, resolved once and reused.
+  ///
+  /// Resolved before any document is written, so the several jobs of a split
+  /// order all reference the same partner instead of racing to create their
+  /// own. Null until it has been looked up.
+  metakockaPartnerMkId      String? @map("metakocka_partner_mk_id")
+  metakockaPartnerAddressId String? @map("metakocka_partner_address_id")
+
+  /// Shared across every MetaKocka document from this order. Section 3: the
+  /// field that actually links sibling documents is buyer_order.
+  customerOrderRef String @map("customer_order_ref")
+
+  status          OrderStatus          @default(received)
+  financialStatus OrderFinancialStatus @default(unknown) @map("financial_status")
+
+  /// Section 8.6: presentment currency and amount, never converted.
+  presentmentCurrency String @map("presentment_currency")
+
+  /// Order-level money in minor units (section 15). Shipping and discount go on
+  /// the primary document only (section 8.6).
+  totalMinor    Int @map("total_minor")
+  shippingMinor Int @default(0) @map("shipping_minor")
+  discountMinor Int @default(0) @map("discount_minor")
+
+  /// The Shopify payload as received. PII is redacted in place after 90 days by
+  /// the retention job (section 2.4); the decision trail outlives it.
+  rawPayload Json?     @map("raw_payload")
+  redactedAt DateTime? @map("redacted_at")
+
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  /// Set when the order is deleted in Shopify.
+  ///
+  /// The row and its MetaKocka documents are kept. The ERP holds the real
+  /// accounting record, which may already be invoiced, and deleting our side
+  /// would destroy the trail that explains why it is there. The order is hidden
+  /// from this app instead.
+  shopifyDeletedAt DateTime? @map("shopify_deleted_at")
+
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop       Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lines      OrderLine[]
+  documents  MetakockaDocument[]
+  exceptions Exception[]
+
+  @@unique([shopId, shopifyOrderId])
+  @@index([shopId, status])
+  @@index([shopId, receivedAt])
+  @@map("order")
+}
+
+model OrderLine {
+  id      String @id @default(cuid())
+  orderId String @map("order_id")
+
+  skuId String? @map("sku_id")
+  /// Kept even when the SKU is unknown, so an unmatched line is still visible.
+  sku   String
+
+  title    String
+  quantity Int
+
+  /// Section 8.4: webshop orders always send price_with_tax. Minor units.
+  unitPriceWithTaxMinor Int     @map("unit_price_with_tax_minor")
+  /// Section 8.6: derived from the Shopify tax lines, never a product default.
+  taxFactor             String? @map("tax_factor")
+  /// Line-level discounts stay with their line (section 8.6).
+  discountMinor         Int     @default(0) @map("discount_minor")
+
+  shopifyLineItemId String @map("shopify_line_item_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  order       Order        @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  skuRecord   Sku?         @relation(fields: [skuId], references: [id])
+  allocations Allocation[]
+
+  @@index([orderId])
+  @@map("order_line")
+}
+
+enum AllocationStatus {
+  planned
+  written_to_shopify
+  written_to_metakocka
+  failed
+  /// Nothing could satisfy it; a human decides (section 8.2).
+  manual
+
+  @@map("allocation_status")
+}
+
+model Allocation {
+  id          String @id @default(cuid())
+  orderLineId String @map("order_line_id")
+
+  supplySourceId String?          @map("supply_source_id")
+  quantity       Int
+  status         AllocationStatus @default(planned)
+
+  /// Which rule fired and why. The audit trail is a product feature.
+  reason Json?
+
+  /// Set once the fulfilment order has been moved or split (section 8.3).
+  shopifyFulfillmentOrderId String? @map("shopify_fulfillment_order_id")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orderLine    OrderLine     @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  supplySource SupplySource? @relation(fields: [supplySourceId], references: [id])
+
+  @@index([orderLineId])
+  @@index([supplySourceId])
+  @@map("allocation")
+}
+
+enum DocumentStatus {
+  pending
+  written
+  failed
+
+  @@map("document_status")
+}
+
+model MetakockaDocument {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  orderId        String  @map("order_id")
+  supplySourceId String? @map("supply_source_id")
+
+  /// Section 8.6: shipping, COD surcharge and order-level discount go here and
+  /// nowhere else. Exactly one document per order carries them.
+  isPrimary Boolean @default(false) @map("is_primary")
+
+  docType String @default("sales_order") @map("doc_type")
+
+  /// SH-{orderNumber}-{sourceCode}. Section 3 verified MetaKocka does not treat
+  /// this as unique, so the uniqueness below is the only duplicate guard.
+  countCode String  @map("count_code")
+  mkId      String? @map("mk_id")
+
+  status DocumentStatus @default(pending)
+
+  /// Section 8.7: mark_paid replaces the previous payment, so it is sent once
+  /// and this records that it happened.
+  paymentMarkedAt DateTime? @map("payment_marked_at")
+
+  /// Redacted with the order after 90 days. Recorded whatever the outcome,
+  /// because section 8.4 requires the request and response either way.
+  requestBody  Json? @map("request_body")
+  responseBody Json? @map("response_body")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  supplySource SupplySource? @relation(fields: [supplySourceId], references: [id])
+
+  @@unique([shopId, countCode])
+  @@index([orderId])
+  @@map("metakocka_document")
+}
+
+/// A business condition needing a human (section 11). Not a retryable failure,
+/// and not a form validation error.
+enum ExceptionKind {
+  sku_not_in_metakocka
+  insufficient_stock
+  profit_center_rejected
+  warehouse_invalid
+  unmapped_payment_gateway
+  partially_paid
+  voided_payment
+  refund_received
+  order_cancelled
+  order_edited
+  metakocka_write_failed
+  fulfillment_split_failed
+  tax_undeterminable
+
+  @@map("exception_kind")
+}
+
+enum ExceptionStatus {
+  open
+  resolved
+  ignored
+
+  @@map("exception_status")
+}
+
+model Exception {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  orderId String? @map("order_id")
+
+  kind    ExceptionKind
+  /// Says what is wrong and what to do about it (section 2.8).
+  message String
+  detail  Json?
+
+  status     ExceptionStatus @default(open)
+  resolvedBy String?         @map("resolved_by")
+  resolvedAt DateTime?       @map("resolved_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop  Shop   @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  order Order? @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, status])
+  @@index([orderId])
+  @@map("exception")
+}
+
+/// Shop-level payment settings (CLAUDE.md section 8.7).
+///
+/// Separate from `payment_type_map`, which is one row per gateway: this is the
+/// single answer for gateways that have no row at all. Section 8.7 says never to
+/// guess a payment type, and this does not — it is a value the merchant chose
+/// and the settings screen refuses to save without.
+model PaymentSetting {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// Used when an order arrives on a gateway with no mapping of its own.
+  fallbackPaymentType String? @map("fallback_payment_type")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("payment_setting")
+}
+
+/// Shop-level stock and profit centre defaults (CLAUDE.md §7).
+///
+/// Most merchants answer "where is stock counted" once for the whole store,
+/// and the warehouse screen used to ask it again for every warehouse. These
+/// are the answers a supply source inherits unless it says otherwise; which
+/// sources inherit is recorded on the source itself, so the sync engine keeps
+/// reading one materialised column and never resolves a default at read time.
+model SupplySetting {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// Where stock is counted, for every location that has not overridden it.
+  defaultStockDirection StockDirection @default(mk_to_shopify) @map("default_stock_direction")
+
+  /// The profit centre orders carry, for every location that has not
+  /// overridden it. Null means none is sent and MetaKocka applies the company
+  /// setting, which is what it did before this app existed.
+  defaultProfitCenter String? @map("default_profit_center")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("supply_setting")
 }

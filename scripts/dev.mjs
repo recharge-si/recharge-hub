@@ -16,6 +16,12 @@
  *     when run by hand, but under the CLI the dev server started silently and
  *     never bound its port, so the proxy reported ECONNREFUSED.
  *
+ * Neither child gets stdin. With `stdio: "inherit"` the web server inherited the
+ * CLI's console input, and under `shopify app dev` it then hung during startup:
+ * no Vite banner, no listening port, and the CLI proxy answering every admin
+ * request with ECONNREFUSED. The CLI already owns the keyboard, so Vite's own
+ * shortcuts are unreachable anyway and nothing is lost by closing stdin.
+ *
  * If the web server ever goes quiet again, the startup lines below say exactly
  * what was launched, and a child that dies is reported rather than swallowed.
  *
@@ -64,7 +70,8 @@ for (const target of targets) {
   console.log(`[dev] starting ${target.name}: npm ${target.args.join(" ")}`);
 
   const child = spawn("npm", target.args, {
-    stdio: "inherit",
+    // stdin closed on purpose: see the note above about the hung web server.
+    stdio: ["ignore", "inherit", "inherit"],
     cwd: projectRoot,
     env: process.env,
     // npm is a .cmd shim on Windows, which cannot be spawned without a shell.

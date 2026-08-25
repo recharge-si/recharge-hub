@@ -90,7 +90,8 @@ export function toMinorUnits(raw: string | number, decimals = 2): number {
   const kept = padded.slice(0, decimals);
   const nextDigit = Number(padded[decimals] ?? "0");
 
-  const magnitude = BigInt(`${whole || "0"}${kept}`) + BigInt(nextDigit >= 5 ? 1 : 0);
+  const magnitude =
+    BigInt(`${whole || "0"}${kept}`) + BigInt(nextDigit >= 5 ? 1 : 0);
   const signed = sign === "-" ? -magnitude : magnitude;
 
   if (

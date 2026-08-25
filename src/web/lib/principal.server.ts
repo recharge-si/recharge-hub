@@ -15,7 +15,8 @@ export function principalFromSession(session: Session): ShopSession {
   return {
     kind: "shop",
     shopDomain: session.shop,
-    isShopOwner: session.onlineAccessInfo?.associated_user?.account_owner === true,
+    isShopOwner:
+      session.onlineAccessInfo?.associated_user?.account_owner === true,
   };
 }
 
