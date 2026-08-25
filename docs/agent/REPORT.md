@@ -356,3 +356,22 @@ Proposed patch once T-06 answers:
   re-check walked around it.
 - **Status:** fixed - `redriveOrder` takes an actor; the re-check passes
   `background` and is refused with a reason, people keep the override.
+
+### [P2] Two write jobs racing an unresolved partner could both create the customer
+- **Where:** `src/jobs/resolve-order-partner.ts`
+- **What:** Allocation resolves the partner while one job owns the order, but
+  the per-source write jobs also call `ensureOrderPartner` as a fallback after
+  a blip. Two of a split order's jobs arriving together both read
+  `metakockaPartnerMkId: null`, both searched MetaKocka, both found nothing,
+  and both called `add_partner` - the duplicated "Grega Rotar" that section 3
+  records verbatim.
+- **Spec:** CLAUDE.md section 3 (inline/duplicate partner creation is what
+  resolution exists to prevent).
+- **Status:** fixed - resolution is single-flight behind a conditional-update
+  claim (`metakocka_partner_claimed_at`, additive migration
+  20260826020000_partner_claim), the same pattern as the payment mark. The
+  loser re-reads; a finished resolution is an answer, a running one throws and
+  lets the pg-boss retry find the stored id. The claim is released on failure
+  so a retry does not wait out the lease.
+- **Verified by:** prisma validate, `tsc`, `eslint`, `vitest run` green;
+  concurrent assertion belongs to T-04.

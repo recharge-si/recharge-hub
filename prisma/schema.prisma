@@ -687,6 +687,10 @@ model Order {
   /// own. Null until it has been looked up.
   metakockaPartnerMkId      String? @map("metakocka_partner_mk_id")
   metakockaPartnerAddressId String? @map("metakocka_partner_address_id")
+  /// Claim making that lookup single-flight, in the mould of
+  /// payment_claimed_at: taken before get_partner/add_partner, so two write
+  /// jobs racing an unresolved order cannot both create the customer.
+  metakockaPartnerClaimedAt DateTime? @map("metakocka_partner_claimed_at")
 
   /// Shared across every MetaKocka document from this order. Section 3: the
   /// field that actually links sibling documents is buyer_order.
