@@ -185,7 +185,6 @@ export function PatternEditor({
   /** The value the DOM was last written from. See the note at the top. */
   const written = useRef<string | null>(null);
 
-  const [asText, setAsText] = useState(false);
   const [open, setOpen] = useState(false);
   /**
    * The suggestion the merchant closed, so it stays closed while they carry on
@@ -211,12 +210,12 @@ export function PatternEditor({
   /* Rewrite only when the value changed for a reason other than typing. */
   useEffect(() => {
     const element = host.current;
-    if (!element || asText) return;
+    if (!element) return;
     if (written.current === value) return;
 
     writeDisplay(element, toDisplay(toAtoms(value)).display, registry);
     written.current = value;
-  }, [value, registry, asText]);
+  }, [value, registry]);
 
   /** Store what the DOM now says, leaving the DOM exactly as it is. */
   const commit = (display: Atom[]): void => {
@@ -472,180 +471,164 @@ export function PatternEditor({
         {label}
       </s-text>
 
-      {asText ? (
-        <s-text-field
-          label={label}
-          labelAccessibilityVisibility="exclusive"
-          value={value}
-          autocomplete="off"
-          onInput={(event) => {
-            written.current = null;
-            onChange(event.currentTarget.value);
-          }}
-          {...(error ? { error } : {})}
-        />
-      ) : (
-        // The list hangs off the field, so the field is what it measures
-        // itself against. Anchored to the whole control it came out below
-        // the buttons, a long way from what it was suggesting for.
-        <div style={{ position: "relative" }}>
-          <s-box
-            border="base"
-            borderRadius="base"
-            background="base"
-            paddingInline="small-200"
-            paddingBlock="small-300"
-          >
-            {/*
-             * The frame is bigger than the words in it, and a click landing on
-             * the padding beside them did nothing at all — the control looked
-             * dead until you happened to hit a character. Anywhere inside the
-             * frame now puts the caret at the end, which is what a text field
-             * does.
-             */}
-            <div
-              onMouseDown={(event) => {
-                const element = host.current;
-                if (!element || event.target === element) return;
-                if (element.contains(event.target as Node)) return;
-                event.preventDefault();
-                element.focus();
-                placeCaret(
-                  element,
-                  element.childNodes.length - 1,
-                  Number.MAX_SAFE_INTEGER,
-                );
-              }}
-            >
-              <div
-                ref={host}
-                contentEditable
-                suppressContentEditableWarning
-                role="combobox"
-                aria-labelledby={labelId}
-                aria-multiline="false"
-                aria-expanded={open && rows.length > 0}
-                aria-controls={listId}
-                aria-autocomplete="list"
-                style={{ outline: "none", minHeight: "1.25rem" }}
-                {...(open && rows[active]
-                  ? { "aria-activedescendant": `${listId}-${active}` }
-                  : {})}
-                onInput={handleInput}
-                onKeyDown={handleKeyDown}
-                onPaste={handlePaste}
-              />
-            </div>
-          </s-box>
+      {/*
+       * The list hangs off the field, so the field is what it measures itself
+       * against. Anchored to the whole control it came out below everything
+       * else, a long way from what it was suggesting for.
+       */}
+      <div style={{ position: "relative" }}>
+        <s-box
+          border="base"
+          borderRadius="base"
+          background="base"
+          paddingInline="small-200"
+          paddingBlock="small-300"
+        >
           {/*
-           * Hanging under the field rather than sitting in the flow, the way the
-           * admin's own filters do it. As a block in the flow it shoved the
-           * preview, the lint and the save controls down the page every time a
-           * word matched something.
-           *
-           * Polaris has no popover that can anchor to a contenteditable — its
-           * overlays anchor to whatever declared `commandFor`, and that has to be
-           * a Polaris control. So the placement is ours and the appearance is
-           * still theirs: `s-box` paints it, and the only styling here is where
-           * it sits.
+           * The frame is bigger than the words in it, and a click landing on
+           * the padding beside them did nothing at all — the control looked
+           * dead until you happened to hit a character. Anywhere inside the
+           * frame now puts the caret at the end, which is what a text field
+           * does.
            */}
-          {open ? (
+          <div
+            onMouseDown={(event) => {
+              const element = host.current;
+              if (!element || event.target === element) return;
+              if (element.contains(event.target as Node)) return;
+              event.preventDefault();
+              element.focus();
+              placeCaret(
+                element,
+                element.childNodes.length - 1,
+                Number.MAX_SAFE_INTEGER,
+              );
+            }}
+          >
             <div
-              style={{
-                position: "absolute",
-                insetInlineStart: 0,
-                insetInlineEnd: 0,
-                top: "100%",
-                zIndex: 30,
-              }}
+              ref={host}
+              contentEditable
+              suppressContentEditableWarning
+              role="combobox"
+              aria-labelledby={labelId}
+              aria-multiline="false"
+              aria-expanded={open && rows.length > 0}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              style={{ outline: "none", minHeight: "1.25rem" }}
+              {...(open && rows[active]
+                ? { "aria-activedescendant": `${listId}-${active}` }
+                : {})}
+              onInput={handleInput}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+            />
+          </div>
+        </s-box>
+        {/*
+         * Hanging under the field rather than sitting in the flow, the way the
+         * admin's own filters do it. As a block in the flow it shoved the
+         * preview, the lint and the save controls down the page every time a
+         * word matched something.
+         *
+         * Polaris has no popover that can anchor to a contenteditable — its
+         * overlays anchor to whatever declared `commandFor`, and that has to be
+         * a Polaris control. So the placement is ours and the appearance is
+         * still theirs: `s-box` paints it, and the only styling here is where
+         * it sits.
+         */}
+        {open ? (
+          <div
+            style={{
+              position: "absolute",
+              insetInlineStart: 0,
+              insetInlineEnd: 0,
+              top: "100%",
+              zIndex: 30,
+            }}
+          >
+            <s-box
+              id={listId}
+              background="base"
+              border="base"
+              borderRadius="base"
+              padding="small-200"
+              overflow="hidden"
             >
-              <s-box
-                id={listId}
-                background="base"
-                border="base"
-                borderRadius="base"
-                padding="small-200"
-                overflow="hidden"
+              {/*
+               * The cap and the scrolling are done here rather than with
+               * `s-scroll-box`, which did not hold the rows in: a long list
+               * ran straight out of the bottom of the panel and over the
+               * page behind it. Height and overflow are layout, which is
+               * this component's business anyway.
+               */}
+              <div
+                style={{ maxHeight: "260px", overflowY: "auto" }}
+                role="presentation"
               >
-                {/*
-                 * The cap and the scrolling are done here rather than with
-                 * `s-scroll-box`, which did not hold the rows in: a long list
-                 * ran straight out of the bottom of the panel and over the
-                 * page behind it. Height and overflow are layout, which is
-                 * this component's business anyway.
-                 */}
-                <div
-                  style={{ maxHeight: "260px", overflowY: "auto" }}
-                  role="presentation"
-                >
-                  <s-stack direction="block" gap="small-400">
-                    {rows.length === 0 ? (
-                      <s-text color="subdued">
-                        No field matches what you typed.
-                      </s-text>
-                    ) : (
-                      groups.map((group) => (
-                        <s-stack key={group.id} direction="block" gap="none">
-                          <s-box
-                            paddingInline="small-200"
-                            paddingBlock="small-400"
-                          >
-                            <s-text color="subdued" type="strong">
-                              {group.label}
-                            </s-text>
-                          </s-box>
-                          {group.rows.map((row) => {
-                            rowIndex += 1;
-                            const isActive = rowIndex === active;
-                            return (
-                              <s-clickable
-                                key={row.field.id}
-                                id={`${listId}-${rowIndex}`}
-                                background={
-                                  isActive ? "subdued" : "transparent"
-                                }
-                                borderRadius="base"
-                                paddingInline="small-200"
-                                paddingBlock="small-300"
-                                inlineSize="100%"
-                                accessibilityLabel={
-                                  row.value
-                                    ? `${row.field.label}, ${row.value} for this product`
-                                    : row.field.label
-                                }
-                                onClick={() => insert(row)}
+                <s-stack direction="block" gap="small-400">
+                  {rows.length === 0 ? (
+                    <s-text color="subdued">
+                      No field matches what you typed.
+                    </s-text>
+                  ) : (
+                    groups.map((group) => (
+                      <s-stack key={group.id} direction="block" gap="none">
+                        <s-box
+                          paddingInline="small-200"
+                          paddingBlock="small-400"
+                        >
+                          <s-text color="subdued" type="strong">
+                            {group.label}
+                          </s-text>
+                        </s-box>
+                        {group.rows.map((row) => {
+                          rowIndex += 1;
+                          const isActive = rowIndex === active;
+                          return (
+                            <s-clickable
+                              key={row.field.id}
+                              id={`${listId}-${rowIndex}`}
+                              background={isActive ? "subdued" : "transparent"}
+                              borderRadius="base"
+                              paddingInline="small-200"
+                              paddingBlock="small-300"
+                              inlineSize="100%"
+                              accessibilityLabel={
+                                row.value
+                                  ? `${row.field.label}, ${row.value} for this product`
+                                  : row.field.label
+                              }
+                              onClick={() => insert(row)}
+                            >
+                              <s-grid
+                                gridTemplateColumns="1fr auto"
+                                gap="small-200"
+                                alignItems="center"
                               >
-                                <s-grid
-                                  gridTemplateColumns="1fr auto"
-                                  gap="small-200"
-                                  alignItems="center"
-                                >
-                                  <s-text
-                                    type={isActive ? "strong" : undefined}
-                                  >
-                                    {row.field.label}
-                                  </s-text>
-                                  <s-text color="subdued">
-                                    {row.value === null
-                                      ? ""
-                                      : row.value === ""
-                                        ? "empty here"
-                                        : row.value}
-                                  </s-text>
-                                </s-grid>
-                              </s-clickable>
-                            );
-                          })}
-                        </s-stack>
-                      ))
-                    )}
-                  </s-stack>
-                </div>
-              </s-box>
-            </div>
-          ) : null}
-        </div>
-      )}
+                                <s-text type={isActive ? "strong" : undefined}>
+                                  {row.field.label}
+                                </s-text>
+                                <s-text color="subdued">
+                                  {row.value === null
+                                    ? ""
+                                    : row.value === ""
+                                      ? "empty here"
+                                      : row.value}
+                                </s-text>
+                              </s-grid>
+                            </s-clickable>
+                          );
+                        })}
+                      </s-stack>
+                    ))
+                  )}
+                </s-stack>
+              </div>
+            </s-box>
+          </div>
+        ) : null}
+      </div>
 
       <span aria-live="polite">
         <s-text accessibilityVisibility="exclusive">{announcement}</s-text>
@@ -658,26 +641,6 @@ export function PatternEditor({
       {resolved ? (
         <s-text color="subdued">{`${sample?.sku}: ${resolved}`}</s-text>
       ) : null}
-
-      {/*
-       * No "Add a field" button. Fields suggest themselves as the merchant
-       * types, which is the same bargain the admin's own filters make: you
-       * write what you mean and it offers what it has. A button asking you to
-       * stop and go shopping for a field is a worse version of that.
-       */}
-      <s-stack direction="inline" gap="small-300" alignItems="center">
-        <s-button
-          type="button"
-          variant="secondary"
-          onClick={() => {
-            written.current = null;
-            setOpen(false);
-            setAsText((now) => !now);
-          }}
-        >
-          {asText ? "Back to chips" : "Edit as text"}
-        </s-button>
-      </s-stack>
     </s-stack>
   );
 }
