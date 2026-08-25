@@ -375,7 +375,13 @@ export async function syncOrderState(
   if (shouldSettle) {
     await enqueue(
       QUEUES.markMetakockaPaid,
-      { shopDomain: principal.shopDomain, orderId: existing.id },
+      {
+        shopDomain: principal.shopDomain,
+        orderId: existing.id,
+        // When Shopify says the order changed into paid — the closest thing
+        // to the transaction date this pipeline sees (§8.7).
+        ...(parsed.updatedAt ? { paidAt: parsed.updatedAt.toISOString() } : {}),
+      },
       { singletonKey: `paid:${existing.id}` },
     );
   }

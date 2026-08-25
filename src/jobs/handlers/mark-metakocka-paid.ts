@@ -55,6 +55,13 @@ import { serviceToken } from "~/domain/types";
 export const markMetakockaPaidJobSchema = z.object({
   shopDomain: z.string().min(1),
   orderId: z.string().min(1),
+  /**
+   * When the money moved, as Shopify reported it — the `updated_at` of the
+   * sync that saw the status become paid. Optional because the retry paths
+   * (the exceptions page, the order page) cannot know it; they fall back to
+   * the order's last Shopify timestamp.
+   */
+  paidAt: z.coerce.date().optional(),
 });
 
 /** The kinds this job owns, closed when a payment finally goes through. */
@@ -83,7 +90,11 @@ function looksReplayable(body: unknown): boolean {
 }
 
 export async function handleMarkMetakockaPaid(job: Job<unknown>): Promise<void> {
-  const { shopDomain, orderId } = markMetakockaPaidJobSchema.parse(job.data);
+  const {
+    shopDomain,
+    orderId,
+    paidAt: reportedPaidAt,
+  } = markMetakockaPaidJobSchema.parse(job.data);
   const principal = serviceToken(shopDomain, "mark-metakocka-paid");
   const log = getLogger();
 
@@ -96,6 +107,7 @@ export async function handleMarkMetakockaPaid(job: Job<unknown>): Promise<void> 
       paymentGateway: true,
       totalMinor: true,
       receivedAt: true,
+      shopifyUpdatedAt: true,
       redactedAt: true,
       shopifyDeletedAt: true,
     },
@@ -246,10 +258,18 @@ export async function handleMarkMetakockaPaid(job: Job<unknown>): Promise<void> 
         body: document.requestBody as Record<string, unknown>,
         payment: {
           paymentType: decision.paymentType,
-          // The order's own timestamp, not the clock: a payment belongs to the
-          // day the money moved, and the ERP timezone decides which day that is
-          // (`toPaymentDate`).
-          paidAt: order.receivedAt,
+          /*
+           * When the money moved, not when the order arrived. §8.7: "dated
+           * from the Shopify transaction". This job runs when a payment
+           * *arrives after the fact* — bank transfer, cash on delivery — so
+           * the order's own receivedAt is precisely the wrong day for it: a
+           * COD order collected on Friday was booked on Monday's date. The
+           * sync that saw the status flip passes Shopify's timestamp along;
+           * a retry without one uses the order's last Shopify change, and
+           * only then the clock. The ERP timezone decides which calendar day
+           * any of them lands on (`toPaymentDate`).
+           */
+          paidAt: reportedPaidAt ?? order.shopifyUpdatedAt ?? new Date(),
           amountMinor,
         },
       });

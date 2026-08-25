@@ -275,3 +275,36 @@ Proposed patch once T-06 answers:
 - **Status:** fixed in both the create-success and recovery-adoption paths.
 - **Verified by:** `tsc`, `eslint`, `vitest run` green. A DB-backed
   two-source assertion belongs to the T-04 harness.
+
+### [P1] Settle-phase payments were dated from the order, not the payment
+- **Where:** `src/jobs/handlers/mark-metakocka-paid.ts`,
+  `src/jobs/handlers/sync-order-state.ts` (settle enqueue)
+- **What:** `mark_paid.date` was `order.receivedAt` - the day the order
+  arrived. This job exists precisely for payments that arrive *later* (bank
+  transfer, COD), so a COD order collected Friday was booked in the ERP under
+  Monday's date, with a comment claiming the opposite ("a payment belongs to
+  the day the money moved").
+- **Why it matters:** Wrong ledger dates on real payments; VAT periods can
+  straddle the gap at month end.
+- **Spec:** CLAUDE.md section 8.7: "Mark paid, dated from the Shopify
+  transaction."
+- **Status:** fixed - the sync that sees the status flip passes Shopify's
+  `updated_at` into the job (`paidAt`); retries without one fall back to the
+  order's last Shopify change, then the clock. `receivedAt` is no longer used
+  for settle-phase dating. (The create path keeps `receivedAt`: an order that
+  arrives already paid was paid when it arrived.)
+- **Verified by:** `tsc`, `eslint`, `vitest run` green; the date conversion
+  itself (`toPaymentDate`, ERP timezone) was already tested.
+
+### [P1] customers/data_request answered "recordsHeld: 0" while holding the records
+- **Where:** `src/jobs/handlers/customers-data-request.ts`
+- **What:** Another M1 stub: the audit event always recorded `recordsHeld: 0`.
+  An operator answering a GDPR access request read a false inventory from the
+  app's own audit trail.
+- **Spec:** CLAUDE.md section 2.4.
+- **Status:** fixed - the event now records which requested orders are held,
+  how many ERP request bodies sit beside them, how many carry hand-typed
+  customer details, and how many are already redacted. Order ids only, never
+  the person, because the event log outlives the payloads.
+- **Verified by:** `tsc`, `eslint`, `vitest run` green; DB assertion needs
+  T-04.
