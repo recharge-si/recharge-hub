@@ -316,9 +316,14 @@ export default function Products() {
               </s-text>
             )}
 
-            <s-link href="/app/products/sync">
-              Change product sync settings
-            </s-link>
+            {/*
+             * A button, not a link. This is the way out of this card to the
+             * only place any of it can be changed, and as a line of blue text
+             * under a paragraph it read as a footnote.
+             */}
+            <s-button variant="secondary" href="/app/products/sync">
+              Change these settings
+            </s-button>
           </s-stack>
         </s-section>
 
