@@ -53,7 +53,13 @@ export {
 export { hasBlockingError, lintTemplate, type LintInput } from "./lint";
 
 export {
+  CARET_HOLDER,
   escapeText,
+  fieldOrdinal,
+  indexOfField,
+  stripHolders,
+  toDisplay,
+  type DisplayRow,
   filterArg,
   fieldSrc,
   insertField,

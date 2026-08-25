@@ -1,8 +1,13 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  CARET_HOLDER,
+  fieldOrdinal,
   filterArg,
   fromAtoms,
+  indexOfField,
+  stripHolders,
+  toDisplay,
   hasFilter,
   insertField,
   makeTextAtom,
@@ -332,5 +337,98 @@ describe("normalising the row", () => {
     const atoms = [makeTextAtom("a{"), makeTextAtom("b")];
 
     expect(fromAtoms(normaliseAtoms(atoms))).toBe(String.raw`a\{b`);
+  });
+});
+
+describe("the row an editor has to hold", () => {
+  it("gives every field text on both sides", () => {
+    const { display } = toDisplay(toAtoms("{title}{sku}"));
+
+    // Without this a browser has nowhere to put the caret and the control
+    // cannot be typed into at all.
+    expect(display.map((atom) => atom.kind)).toEqual([
+      "text",
+      "field",
+      "text",
+      "field",
+      "text",
+    ]);
+  });
+
+  it("leaves text that is already there to do the job", () => {
+    const { display } = toDisplay(toAtoms("a{sku}b"));
+
+    expect(display.map((atom) => atom.kind)).toEqual(["text", "field", "text"]);
+    expect(display[0]).toMatchObject({ text: "a" });
+  });
+
+  it("says where each atom went", () => {
+    const atoms = toAtoms("{title}{sku}");
+    const { display, map } = toDisplay(atoms);
+
+    expect(map).toEqual([1, 3]);
+    expect(display[map[0]!]).toMatchObject({ field: "title" });
+    expect(display[map[1]!]).toMatchObject({ field: "sku" });
+  });
+
+  it("comes back to the same pattern once the holders are stripped", () => {
+    for (const pattern of PATTERNS) {
+      const { display } = toDisplay(toAtoms(pattern));
+
+      expect(fromAtoms(stripHolders(display))).toBe(canonical(pattern));
+    }
+  });
+
+  it("strips holders that a browser merged into typed text", () => {
+    const typed = [makeTextAtom(`${CARET_HOLDER}Shirt${CARET_HOLDER}`)];
+
+    expect(fromAtoms(stripHolders(typed))).toBe("Shirt");
+  });
+});
+
+describe("finding a field again after the row is rebuilt", () => {
+  it("counts fields, not atoms", () => {
+    const atoms = toAtoms("a{title}b{sku}c");
+
+    expect(fieldOrdinal(atoms, 1)).toBe(0);
+    expect(fieldOrdinal(atoms, 3)).toBe(1);
+  });
+
+  it("survives padding and stripping", () => {
+    const atoms = toAtoms("{title}{sku}");
+    const ordinal = fieldOrdinal(atoms, 1);
+    const { display, map } = toDisplay(atoms);
+
+    // The sku is at a different index in every one of these, and is still
+    // the same field.
+    expect(indexOfField(atoms, ordinal)).toBe(1);
+    expect(map[indexOfField(atoms, ordinal)]).toBe(3);
+    expect(display[3]).toMatchObject({ field: "sku" });
+    expect(indexOfField(stripHolders(display), ordinal)).toBe(1);
+  });
+
+  it("points past the end when there is no such field", () => {
+    const atoms = toAtoms("{title}");
+
+    expect(indexOfField(atoms, 5)).toBe(atoms.length);
+  });
+});
+
+describe("merging text never re-escapes it", () => {
+  it("keeps a group's bracket as a bracket", () => {
+    // The bracket is a text atom whose source is a bare "[". Merging it by
+    // re-escaping its text turned "[ m2]" into "\[ m2\]" and silently
+    // changed a group into two literal characters.
+    const atoms = toAtoms("{metafield.specs.area}[ m2]");
+
+    expect(fromAtoms(normaliseAtoms(atoms))).toBe(
+      "{metafield.specs.area}[ m2]",
+    );
+  });
+
+  it("still escapes a brace the merchant typed", () => {
+    const atoms = [makeTextAtom("a{"), makeTextAtom("}b")];
+
+    expect(fromAtoms(normaliseAtoms(atoms))).toBe(String.raw`a\{\}b`);
   });
 });

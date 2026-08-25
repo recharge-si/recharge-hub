@@ -1,24 +1,22 @@
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
-  filterArg,
+  CARET_HOLDER,
   flattenGroups,
+  fieldOrdinal,
   fromAtoms,
-  hasFilter,
+  indexOfField,
   insertField,
   makeTextAtom,
   nameFor,
-  normaliseAtoms,
   pickerGroups,
   pickerQueryAt,
   removeAtom,
   settingsFromTemplate,
+  stripHolders,
   toAtoms,
-  withFilter,
-  withOptional,
-  withSeparators,
+  toDisplay,
   type Atom,
-  type FieldAtom,
   type FieldDef,
   type PickerRow,
   type VariantFacts,
@@ -57,11 +55,16 @@ import {
  * character: arrows step over it and a selection cannot land inside it.
  * Backspace and Delete beside a chip are handled explicitly, because browsers
  * disagree about whether the first press selects it or removes it.
+ *
+ * A field's own options — a fallback value, upper case, a different separator
+ * — are not here. They were, as a panel that opened when a chip was pressed,
+ * and it filled the card while stealing the click that should have been
+ * placing the caret. The syntax for all of it is in "Edit as text", and the
+ * separator a field needs is worked out when it is inserted.
  */
 
 /** What a chip carries so the DOM can be read back without trusting anything. */
 const SRC = "data-src";
-const INDEX = "data-index";
 
 export interface PatternEditorProps {
   label: string;
@@ -78,29 +81,31 @@ function isChip(node: Node): node is HTMLElement {
   return node instanceof HTMLElement && node.hasAttribute(SRC);
 }
 
-/** The row the DOM currently holds, defensively — the browser adds nodes. */
-function readAtoms(host: HTMLElement): Atom[] {
-  const atoms: Atom[] = [];
-
-  for (const child of Array.from(host.childNodes)) {
+/**
+ * The row the DOM holds, one atom per child node.
+ *
+ * One per node, deliberately, and nothing merged or dropped: the caret is read
+ * as an index into `host.childNodes`, so any list that does not line up with
+ * them means edits land on the wrong atom at the wrong offset. That is not a
+ * theory — it is why choosing a field left the half-typed `{ven` sitting on
+ * screen beside the chip it should have become. Merging and stripping happen
+ * on the way out, in `stripHolders`, once indices no longer matter.
+ */
+function readDisplay(host: HTMLElement): Atom[] {
+  return Array.from(host.childNodes).map((child) => {
     if (child.nodeType === Node.TEXT_NODE) {
-      atoms.push(makeTextAtom((child as Text).data));
-      continue;
+      return makeTextAtom((child as Text).data);
     }
     if (isChip(child)) {
       const [atom] = toAtoms(child.getAttribute(SRC) ?? "");
-      if (atom) atoms.push(atom);
-      continue;
+      if (atom) return atom;
     }
     // A <br>, or a wrapper a browser inserted on paste. Keep its words.
-    const text = child.textContent ?? "";
-    if (text !== "") atoms.push(makeTextAtom(text));
-  }
-
-  return normaliseAtoms(atoms);
+    return makeTextAtom(child.textContent ?? "");
+  });
 }
 
-/** Which atom the caret is in, and how far into it. */
+/** Which child node the caret is in, and how far into it. */
 function caretIn(host: HTMLElement): { atom: number; offset: number } | null {
   const selection = window.getSelection();
   const node = selection?.anchorNode;
@@ -134,40 +139,33 @@ function placeCaret(host: HTMLElement, atom: number, offset: number): void {
   selection?.addRange(range);
 }
 
-function writeAtoms(
+/** Writes the display row, one node per atom, in order. */
+function writeDisplay(
   host: HTMLElement,
-  atoms: Atom[],
+  display: Atom[],
   registry: FieldDef[],
 ): void {
   const label = new Map(registry.map((field) => [field.id, field.label]));
   host.replaceChildren();
 
-  atoms.forEach((atom, index) => {
+  for (const atom of display) {
     if (atom.kind === "text") {
       host.append(document.createTextNode(atom.text));
-      return;
+      continue;
     }
 
     const holder = document.createElement("span");
     holder.contentEditable = "false";
     holder.setAttribute(SRC, atom.src);
-    holder.setAttribute(INDEX, String(index));
-    holder.setAttribute("role", "button");
-    holder.setAttribute("tabindex", "-1");
-    holder.setAttribute(
-      "aria-label",
-      `${label.get(atom.field) ?? atom.field}. Press to change or remove.`,
-    );
+    holder.setAttribute("aria-label", label.get(atom.field) ?? atom.field);
+    // The only styling here, and it is spacing rather than appearance: two
+    // chips with a single space between them read as one word.
+    holder.style.marginInline = "1px";
 
     const chip = document.createElement("s-chip");
     chip.textContent = label.get(atom.field) ?? atom.field;
     holder.append(chip);
     host.append(holder);
-  });
-
-  // A row ending in a chip has nowhere to put the caret after it.
-  if (atoms[atoms.length - 1]?.kind === "field") {
-    host.append(document.createTextNode(""));
   }
 }
 
@@ -186,17 +184,12 @@ export function PatternEditor({
 
   /** The value the DOM was last written from. See the note at the top. */
   const written = useRef<string | null>(null);
-  /** Where to put the caret after the next rewrite, in atom terms. */
-  const pending = useRef<{ atom: number; offset: number } | null>(null);
 
   const [asText, setAsText] = useState(false);
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
-  const [editing, setEditing] = useState<number | null>(null);
   const [announcement, setAnnouncement] = useState("");
-
-  const atoms = useMemo(() => toAtoms(value), [value]);
 
   const groups = useMemo(
     () => (open ? pickerGroups(registry, query, sample) : []),
@@ -215,30 +208,46 @@ export function PatternEditor({
     if (!element || asText) return;
     if (written.current === value) return;
 
-    writeAtoms(element, toAtoms(value), registry);
+    writeDisplay(element, toDisplay(toAtoms(value)).display, registry);
     written.current = value;
-
-    const target = pending.current;
-    pending.current = null;
-    if (target && document.activeElement === element) {
-      placeCaret(element, target.atom, target.offset);
-    }
   }, [value, registry, asText]);
 
-  /** Store what the DOM now says, without touching the DOM. */
-  const commit = (next: Atom[]): string => {
-    const source = fromAtoms(normaliseAtoms(next));
+  /** Store what the DOM now says, leaving the DOM exactly as it is. */
+  const commit = (display: Atom[]): void => {
+    const source = fromAtoms(stripHolders(display));
     written.current = source;
     onChange(source);
-    return source;
   };
 
-  /** Store and rewrite, for a change the browser did not make itself. */
-  const apply = (next: Atom[], caret: number, said: string): void => {
-    const rowsOut = normaliseAtoms(next);
-    pending.current = { atom: caret + 1, offset: 0 };
-    written.current = null;
-    onChange(fromAtoms(rowsOut));
+  /**
+   * Apply an edit the browser did not make, and put the caret back.
+   *
+   * The row is rebuilt three times between here and the screen — stripped of
+   * its holders, turned into a pattern, padded again — and its indices mean
+   * something different each time. So the caret is tracked as "after the nth
+   * field", which none of those steps can move.
+   */
+  const apply = (edited: Atom[], fieldAt: number, said: string): void => {
+    const element = host.current;
+    if (!element) return;
+
+    const ordinal = fieldOrdinal(edited, fieldAt);
+    const cleaned = stripHolders(edited);
+    const source = fromAtoms(cleaned);
+    const { display, map } = toDisplay(cleaned);
+
+    writeDisplay(element, display, registry);
+    written.current = source;
+    onChange(source);
+
+    const landed = map[indexOfField(cleaned, ordinal)];
+    const after = landed === undefined ? display.length : landed + 1;
+    const node = element.childNodes[after];
+    placeCaret(
+      element,
+      after,
+      node?.nodeType === Node.TEXT_NODE ? (node as Text).data.length : 0,
+    );
     setAnnouncement(said);
   };
 
@@ -246,8 +255,7 @@ export function PatternEditor({
     const element = host.current;
     if (!element) return;
 
-    const current = readAtoms(element);
-    commit(current);
+    commit(readDisplay(element));
 
     // A `{` immediately before the caret opens the list, and carrying on
     // typing filters it. Read from the text node itself, so the offsets are
@@ -270,48 +278,45 @@ export function PatternEditor({
     const element = host.current;
     if (!element) return;
 
-    const current = readAtoms(element);
+    const display = readDisplay(element);
     const at = caretIn(element);
     const node = at === null ? null : element.childNodes[at.atom];
 
+    // Where the half-typed `{ven` starts, so the field replaces it rather
+    // than landing next to it.
     let from = at?.offset ?? 0;
     if (node?.nodeType === Node.TEXT_NODE && at) {
       from = pickerQueryAt((node as Text).data, at.offset)?.start ?? at.offset;
     }
 
     const result = insertField(
-      current,
-      at?.atom ?? current.length,
+      display,
+      at?.atom ?? display.length,
       from,
       at?.offset ?? from,
       row.field.id,
     );
 
-    apply(result.atoms, result.caret, `${row.field.label} added.`);
     setOpen(false);
     setQuery("");
     element.focus();
+    apply(result.atoms, result.caret, `${row.field.label} added.`);
   };
 
   const removeAt = (index: number, name: string): void => {
     const element = host.current;
-    const current = element ? readAtoms(element) : atoms;
-    const result = removeAtom(current, index);
+    if (!element) return;
 
-    apply(result.atoms, result.caret - 1, `${name} removed.`);
-    setEditing(null);
-    element?.focus();
-  };
+    const display = readDisplay(element);
+    const result = removeAtom(display, index);
 
-  const replaceAt = (index: number, atom: FieldAtom): void => {
-    const element = host.current;
-    const current = element ? readAtoms(element) : atoms;
-    const next = [...current];
-    next[index] = atom;
-
-    pending.current = null;
-    written.current = null;
-    onChange(fromAtoms(normaliseAtoms(next)));
+    // Removing a field is not a reason to offer a list of them. Chrome fires
+    // an input event of its own on the way through here, and it was leaving
+    // the whole field list open over the page afterwards.
+    setOpen(false);
+    element.focus();
+    // The caret goes where the field was, which is the field before it.
+    apply(result.atoms, Math.max(0, index - 1), `${name} removed.`);
   };
 
   const handleKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
@@ -355,31 +360,40 @@ export function PatternEditor({
     const selection = window.getSelection();
     if (selection && !selection.isCollapsed) return;
 
-    // Browsers disagree about whether the first Backspace beside a
-    // contenteditable=false node selects it or removes it. Decide here.
-    if (event.key === "Backspace" && at.offset === 0) {
+    /*
+     * Browsers disagree about whether the first Backspace beside a
+     * contenteditable=false node selects it or removes it, so it is decided
+     * here — and "beside" has to ignore the caret holders. Without that, the
+     * first press quietly ate an invisible character and the chip only went
+     * on the second, which reads as the key not working.
+     */
+    const node = element.childNodes[at.atom];
+    const text = node?.nodeType === Node.TEXT_NODE ? (node as Text).data : null;
+    const bare = (part: string) => part.split(CARET_HOLDER).join("") === "";
+
+    if (
+      event.key === "Backspace" &&
+      (text === null || bare(text.slice(0, at.offset)))
+    ) {
       const previous = element.childNodes[at.atom - 1];
       if (previous && isChip(previous)) {
         event.preventDefault();
-        const current = readAtoms(element);
-        const index = Number(previous.getAttribute(INDEX));
-        const target = current[index];
+        const index = at.atom - 1;
+        const target = readDisplay(element)[index];
         removeAt(index, target?.kind === "field" ? target.field : "The field");
       }
       return;
     }
 
-    if (event.key === "Delete") {
-      const node = element.childNodes[at.atom];
-      const atEnd =
-        node?.nodeType === Node.TEXT_NODE &&
-        at.offset === (node as Text).data.length;
+    if (
+      event.key === "Delete" &&
+      (text === null || bare(text.slice(at.offset)))
+    ) {
       const next = element.childNodes[at.atom + 1];
-      if (atEnd && next && isChip(next)) {
+      if (next && isChip(next)) {
         event.preventDefault();
-        const current = readAtoms(element);
-        const index = Number(next.getAttribute(INDEX));
-        const target = current[index];
+        const index = at.atom + 1;
+        const target = readDisplay(element)[index];
         removeAt(index, target?.kind === "field" ? target.field : "The field");
       }
     }
@@ -394,36 +408,29 @@ export function PatternEditor({
     const element = host.current;
     if (!element) return;
 
-    const current = readAtoms(element);
+    const display = readDisplay(element);
     const at = caretIn(element);
-    const index = at?.atom ?? current.length;
-    const target = current[index];
+    const index = at?.atom ?? display.length;
+    const target = display[index];
 
     if (target?.kind === "text" && at) {
-      const before = target.text.slice(0, at.offset);
-      const after = target.text.slice(at.offset);
-      const next = [...current];
-      next[index] = makeTextAtom(before + text + after);
-      apply(next, index - 1, "Pasted.");
+      const next = [...display];
+      next[index] = makeTextAtom(
+        target.text.slice(0, at.offset) + text + target.text.slice(at.offset),
+      );
+      apply(next, index, "Pasted.");
       return;
     }
 
     apply(
       [
-        ...current.slice(0, index + 1),
+        ...display.slice(0, index + 1),
         makeTextAtom(text),
-        ...current.slice(index + 1),
+        ...display.slice(index + 1),
       ],
       index,
       "Pasted.",
     );
-  };
-
-  const handleClick = (event: React.MouseEvent<HTMLDivElement>): void => {
-    const chip = (event.target as HTMLElement | null)?.closest(`[${SRC}]`);
-    if (!chip) return;
-    event.preventDefault();
-    setEditing(Number(chip.getAttribute(INDEX)));
   };
 
   const openList = (): void => {
@@ -433,8 +440,6 @@ export function PatternEditor({
     host.current?.focus();
   };
 
-  const chosen = editing === null ? null : atoms[editing];
-  const chosenField = chosen?.kind === "field" ? chosen : null;
   let rowIndex = -1;
 
   return (
@@ -463,24 +468,46 @@ export function PatternEditor({
           paddingInline="small-200"
           paddingBlock="small-300"
         >
+          {/*
+           * The frame is bigger than the words in it, and a click landing on
+           * the padding beside them did nothing at all — the control looked
+           * dead until you happened to hit a character. Anywhere inside the
+           * frame now puts the caret at the end, which is what a text field
+           * does.
+           */}
           <div
-            ref={host}
-            contentEditable
-            suppressContentEditableWarning
-            role="combobox"
-            aria-labelledby={labelId}
-            aria-multiline="false"
-            aria-expanded={open && rows.length > 0}
-            aria-controls={listId}
-            aria-autocomplete="list"
-            {...(open && rows[active]
-              ? { "aria-activedescendant": `${listId}-${active}` }
-              : {})}
-            onInput={handleInput}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            onClick={handleClick}
-          />
+            onMouseDown={(event) => {
+              const element = host.current;
+              if (!element || event.target === element) return;
+              if (element.contains(event.target as Node)) return;
+              event.preventDefault();
+              element.focus();
+              placeCaret(
+                element,
+                element.childNodes.length - 1,
+                Number.MAX_SAFE_INTEGER,
+              );
+            }}
+          >
+            <div
+              ref={host}
+              contentEditable
+              suppressContentEditableWarning
+              role="combobox"
+              aria-labelledby={labelId}
+              aria-multiline="false"
+              aria-expanded={open && rows.length > 0}
+              aria-controls={listId}
+              aria-autocomplete="list"
+              style={{ outline: "none", minHeight: "1.25rem" }}
+              {...(open && rows[active]
+                ? { "aria-activedescendant": `${listId}-${active}` }
+                : {})}
+              onInput={handleInput}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+            />
+          </div>
         </s-box>
       )}
 
@@ -561,112 +588,6 @@ export function PatternEditor({
         </s-scroll-box>
       ) : null}
 
-      {/* One field's options, opened by pressing its chip. */}
-      {chosenField && editing !== null ? (
-        <s-box
-          background="subdued"
-          borderRadius="base"
-          padding="base"
-          accessibilityLabel={`Options for ${chosenField.field}`}
-        >
-          <s-stack direction="block" gap="base">
-            <s-checkbox
-              label="Hide it, and the text beside it, when the product has no value"
-              checked={chosenField.optional}
-              onChange={(e) =>
-                replaceAt(
-                  editing,
-                  withOptional(chosenField, e.currentTarget.checked),
-                )
-              }
-            />
-            <s-text-field
-              label="Text before it"
-              details="Goes only when there is a value to put it against."
-              value={chosenField.before}
-              onInput={(e) =>
-                replaceAt(
-                  editing,
-                  withSeparators(
-                    chosenField,
-                    e.currentTarget.value,
-                    chosenField.after,
-                  ),
-                )
-              }
-            />
-            <s-text-field
-              label="Text after it"
-              value={chosenField.after}
-              onInput={(e) =>
-                replaceAt(
-                  editing,
-                  withSeparators(
-                    chosenField,
-                    chosenField.before,
-                    e.currentTarget.value,
-                  ),
-                )
-              }
-            />
-            <s-choice-list
-              label="Change the letters"
-              values={
-                hasFilter(chosenField, "upper")
-                  ? ["upper"]
-                  : hasFilter(chosenField, "lower")
-                    ? ["lower"]
-                    : ["none"]
-              }
-              onChange={(e) => {
-                const picked = e.currentTarget.values[0] ?? "none";
-                const cleared = withFilter(
-                  withFilter(chosenField, "upper", null),
-                  "lower",
-                  null,
-                );
-                replaceAt(
-                  editing,
-                  picked === "none" ? cleared : withFilter(cleared, picked, []),
-                );
-              }}
-            >
-              <s-choice value="none">Leave them</s-choice>
-              <s-choice value="upper">UPPER CASE</s-choice>
-              <s-choice value="lower">lower case</s-choice>
-            </s-choice-list>
-            <s-text-field
-              label="Use this when the product has no value"
-              value={filterArg(chosenField, "default")}
-              onInput={(e) =>
-                replaceAt(
-                  editing,
-                  withFilter(chosenField, "default", [e.currentTarget.value]),
-                )
-              }
-            />
-
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-button
-                type="button"
-                variant="secondary"
-                onClick={() => setEditing(null)}
-              >
-                Done
-              </s-button>
-              <s-button
-                type="button"
-                variant="secondary"
-                tone="critical"
-                onClick={() => removeAt(editing, chosenField.field)}
-              >
-                Remove this field
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-box>
-      ) : null}
-
       <s-stack direction="inline" gap="small-300" alignItems="center">
         {asText ? null : (
           <s-button
@@ -684,7 +605,6 @@ export function PatternEditor({
           onClick={() => {
             written.current = null;
             setOpen(false);
-            setEditing(null);
             setAsText((now) => !now);
           }}
         >

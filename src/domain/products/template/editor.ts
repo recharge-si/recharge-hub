@@ -337,11 +337,103 @@ export function normaliseAtoms(atoms: Atom[]): Atom[] {
     if (atom.kind === "text" && atom.text === "") continue;
 
     if (atom.kind === "text" && last?.kind === "text") {
-      out[out.length - 1] = textAtom(last.text + atom.text);
+      // Joined by source, not by re-escaping the text. Escaping is per
+      // character, so the two are the same for anything a merchant typed —
+      // but a group's bracket is a text atom whose source is a bare `[`, and
+      // running it through the escaper again turned `[ m2]` into `\[ m2\]`.
+      out[out.length - 1] = {
+        kind: "text",
+        src: last.src + atom.src,
+        text: last.text + atom.text,
+      };
       continue;
     }
     out.push(atom);
   }
 
   return out;
+}
+
+/* -------------------------------------------------------------------------- */
+/* The row as an editor has to hold it                                        */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * A zero-width space, used as somewhere to put the caret.
+ *
+ * A browser cannot place a caret between two `contenteditable="false"` nodes,
+ * or before one at the start of a line: there is no text there to place it in.
+ * A pattern that is nothing but fields is then impossible to type into, which
+ * is exactly what happened. These give every field a text position either side.
+ */
+export const CARET_HOLDER = "\u200B";
+
+export interface DisplayRow {
+  /** Strictly alternating: text, field, text, field, ..., text. */
+  display: Atom[];
+  /** `map[i]` is where `atoms[i]` ended up in `display`. */
+  map: number[];
+}
+
+/**
+ * Pads a row so every field has text on both sides, and says where everything
+ * went.
+ *
+ * The map is the point. An editor reads the caret as a position in the DOM,
+ * and the DOM holds the padded row — so any index computed against the unpadded
+ * one means a different atom. Getting that wrong is subtle and silent: the
+ * trigger text `{ven` stayed on screen beside the field it should have become,
+ * because the edit was applied to the wrong atom at the wrong offset.
+ */
+export function toDisplay(atoms: Atom[]): DisplayRow {
+  const display: Atom[] = [];
+  const map: number[] = [];
+  const holder = () => display.push(makeTextAtom(CARET_HOLDER));
+
+  for (const atom of atoms) {
+    if (atom.kind === "field" && display[display.length - 1]?.kind !== "text") {
+      holder();
+    }
+    map.push(display.length);
+    display.push(atom);
+  }
+
+  if (display[display.length - 1]?.kind !== "text") holder();
+  return { display, map };
+}
+
+/** The row without its caret holders, ready to become a pattern again. */
+export function stripHolders(display: Atom[]): Atom[] {
+  return normaliseAtoms(
+    display.map((atom) =>
+      // Only rebuild the atoms that actually hold one. Rebuilding the rest
+      // would put a group's bracket back through the escaper.
+      atom.kind === "text" && atom.text.includes(CARET_HOLDER)
+        ? makeTextAtom(atom.text.split(CARET_HOLDER).join(""))
+        : atom,
+    ),
+  );
+}
+
+/**
+ * Where a field sits among the other fields, which is the one thing that
+ * survives padding, stripping and merging.
+ *
+ * Used to put the caret back after an edit: the atom list is rebuilt several
+ * times on the way from a keystroke to the DOM, and its indices mean something
+ * different each time, but "the third field" does not move.
+ */
+export function fieldOrdinal(atoms: Atom[], at: number): number {
+  return atoms.slice(0, at).filter((atom) => atom.kind === "field").length;
+}
+
+/** The index of the nth field, or the end of the row when there is no nth. */
+export function indexOfField(atoms: Atom[], ordinal: number): number {
+  let seen = 0;
+  for (const [index, atom] of atoms.entries()) {
+    if (atom.kind !== "field") continue;
+    if (seen === ordinal) return index;
+    seen += 1;
+  }
+  return atoms.length;
 }
