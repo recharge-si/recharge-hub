@@ -14,7 +14,12 @@
  * their data.
  */
 import { resolveField, type FieldDef } from "./fields";
-import { MAX_TOKENS, tokensOf } from "./parse";
+import {
+  MAX_TOKENS,
+  parseTemplate,
+  serializeTemplate,
+  tokensOf,
+} from "./parse";
 import type { TemplateNode, VariantFacts } from "./types";
 
 /** Characters that may follow `{` while the picker is still open. */
@@ -193,4 +198,109 @@ export function flattenGroups(groups: PickerGroup[]): PickerRow[] {
  */
 export function canAddField(nodes: TemplateNode[]): boolean {
   return tokensOf(nodes).length < MAX_TOKENS;
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reading a pattern back as parts, and taking one out                        */
+/* -------------------------------------------------------------------------- */
+
+export interface PatternPart {
+  /** Where it starts in the source, which is also how it is addressed. */
+  start: number;
+  /** A field, or the merchant's own words between fields. */
+  kind: "field" | "text";
+  /** The field's label, or the literal text. */
+  label: string;
+  /** What the field resolves to for the previewed variant. Null for text. */
+  value: string | null;
+  /** False when the field does not exist, so the editor can say so. */
+  known: boolean;
+}
+
+/**
+ * A pattern as a row of parts a merchant can read.
+ *
+ * `{title}[ {options}]` tells nobody anything. "Product title" followed by
+ * "All option values" does, and so does seeing what each one is for one of
+ * their own products. Groups are flattened: the brackets are a rendering rule
+ * about empty values, not a thing to look at.
+ */
+export function patternParts(
+  source: string,
+  registry: FieldDef[],
+  facts: VariantFacts | null,
+): PatternPart[] {
+  const byId = new Map(registry.map((field) => [field.id, field]));
+
+  const walk = (nodes: TemplateNode[]): PatternPart[] =>
+    nodes.flatMap((node) => {
+      if (node.kind === "group") return walk(node.children);
+
+      if (node.kind === "literal") {
+        const text = node.text.trim();
+        return text === ""
+          ? []
+          : [
+              {
+                start: node.start,
+                kind: "text" as const,
+                label: text,
+                value: null,
+                known: true,
+              },
+            ];
+      }
+
+      const field = byId.get(node.field);
+      const resolved = facts ? resolveField(node.field, facts) : null;
+      return [
+        {
+          start: node.start,
+          kind: "field" as const,
+          label: field?.label ?? node.field,
+          value: resolved,
+          known: resolved !== null,
+        },
+      ];
+    });
+
+  return walk(parseTemplate(source).nodes);
+}
+
+/** Separators that mean nothing once the field beside them has gone. */
+const EDGE = /^[\s\-–—/|,;:]+|[\s\-–—/|,;:]+$/g;
+
+function stripToken(nodes: TemplateNode[], start: number): TemplateNode[] {
+  return nodes.flatMap((node): TemplateNode[] => {
+    if (node.kind === "token") return node.start === start ? [] : [node];
+
+    if (node.kind === "group") {
+      const children = stripToken(node.children, start);
+      // A group exists to make its separator vanish with its field. With the
+      // field gone the group is a separator on its own, so it goes too.
+      if (
+        tokensOf(node.children).length > 0 &&
+        tokensOf(children).length === 0
+      ) {
+        return [];
+      }
+      return [{ ...node, children }];
+    }
+
+    return [node];
+  });
+}
+
+/**
+ * Removes one field from a pattern, and the punctuation it leaves stranded.
+ *
+ * Addressed by its position in the source, because that is what identifies one
+ * `{options}` among several. Returns the pattern unchanged when nothing sits
+ * there, so a stale click cannot rewrite something else.
+ */
+export function removeFieldAt(source: string, start: number): string {
+  const { nodes } = parseTemplate(source);
+  if (!tokensOf(nodes).some((token) => token.start === start)) return source;
+
+  return serializeTemplate(stripToken(nodes, start)).replace(EDGE, "");
 }

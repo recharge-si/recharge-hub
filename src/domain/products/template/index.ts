@@ -61,6 +61,9 @@ export {
 export {
   applyPick,
   canAddField,
+  patternParts,
+  removeFieldAt,
+  type PatternPart,
   flattenGroups,
   pickerGroups,
   pickerQueryAt,

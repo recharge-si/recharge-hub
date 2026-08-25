@@ -5,40 +5,50 @@ import {
   canAddField,
   flattenGroups,
   parseTemplate,
+  patternParts,
   pickerGroups,
   pickerQueryAt,
+  removeFieldAt,
   type FieldDef,
   type PickerRow,
   type VariantFacts,
 } from "~/domain/products/template";
 
 /**
- * The name-pattern field, with a list of fields that opens when the merchant
- * types `{`.
+ * The name-pattern field: what is typed, what it is made of, and what can be
+ * added to it.
  *
- * **Why this is not a plain primitive, and how little it adds.** The field is
- * `s-text-field` with nothing restyled; what is added is a list that appears
- * when the text says it should. Every row is an `s-clickable`, so it is in the
- * tab order and activates on Enter or Space with no key handling of our own.
- * That is the whole reason it is built this way: Polaris's typed surface has no
- * combobox and no `keydown`, and a control assembled from focusable primitives
- * has keyboard parity by construction rather than by us reimplementing it.
+ * Three parts, in that order.
  *
- * What it does not do, deliberately: no arrow-key navigation of the list and no
- * inline pills. Those need a control that owns its own caret, undo stack and
- * paste handling, which is a decision to take with this in front of us rather
- * than ahead of it.
+ *  - The field itself is `s-text-field`, unstyled. It holds the pattern, which
+ *    is the stored value, and anything typable stays typable.
+ *  - Under it, the pattern read back as chips: "Product title", "All option
+ *    values", each showing what it comes to for one of the merchant's own
+ *    products. `{title}[ {options}]` tells nobody anything; this does. A chip
+ *    can be pressed to take that field out, and the punctuation left holding
+ *    nothing goes with it.
+ *  - A list of fields, opened by typing `{` or by pressing Add a field,
+ *    filtered as they type and never more than a handful at a time.
  *
- * Insertion is announced, because the caret lands after a token the merchant
- * cannot see the shape of.
+ * **Why the chips are under the field and not inside it.** Chips inline with
+ * typed text needs `contenteditable`: Polaris's typed surface has no combobox,
+ * no `keydown` on a text field and no listbox role, so the input itself would
+ * have to be ours. That control owns its caret, undo stack, paste handling and
+ * IME composition, and gets them wrong differently on iOS. Both halves of what
+ * chips are for — seeing the structure, and seeing what each piece comes to —
+ * are available without it, so they are available now.
+ *
+ * Every control here is a Polaris primitive and is in the tab order, so
+ * keyboard operation is theirs rather than something reimplemented.
  *
  * **One known limitation, deliberately not worked around.** The caret comes
  * from `selectionStart` when the component exposes it, and falls back to the
  * end of the value when it does not. Reaching into the component's shadow root
- * to find the real input would work today and break on a Polaris release. With
- * the fallback the list still opens, filters and inserts; it inserts at the end
- * rather than at the caret, which is exactly what this field did before.
+ * would work today and break on a Polaris release.
  */
+
+/** Enough to choose from without becoming a wall. Typing narrows it. */
+const VISIBLE_ROWS = 6;
 
 export interface NamePatternFieldProps {
   name: string;
@@ -49,9 +59,9 @@ export interface NamePatternFieldProps {
   /** Fields this shop can use, metafield definitions included. */
   registry: FieldDef[];
   /**
-   * The product the list resolves values against — one of the merchant's own.
-   * Null when the catalogue is empty, and then rows show no value rather than
-   * an invented one.
+   * The product the chips and the list resolve against — one of the merchant's
+   * own. Null when the catalogue is empty, and then nothing shows a value
+   * rather than showing an invented one.
    */
   sample: VariantFacts | null;
   /** Persistent, actionable, rendered against the field (CLAUDE.md 2.8). */
@@ -75,33 +85,61 @@ export function NamePatternField({
   error,
 }: NamePatternFieldProps) {
   const [caret, setCaret] = useState(value.length);
-  /**
-   * The brace position the merchant closed the list on. Dismissing is per
-   * brace, not forever: typing a new `{` somewhere else opens a new list, and
-   * carrying on typing into the dismissed one does not reopen it.
-   */
+  /** Dismissing is per brace: a new `{` elsewhere opens a new list. */
   const [dismissed, setDismissed] = useState<number | null>(null);
+  const [forced, setForced] = useState(false);
   const [announcement, setAnnouncement] = useState("");
 
   const query = pickerQueryAt(value, caret);
-  const open = query !== null && query.start !== dismissed;
+  const open = forced || (query !== null && query.start !== dismissed);
 
   const groups = useMemo(
-    () => (open && query ? pickerGroups(registry, query.query, sample) : []),
+    () => (open ? pickerGroups(registry, query?.query ?? "", sample) : []),
     [open, query, registry, sample],
   );
   const rows = useMemo(() => flattenGroups(groups), [groups]);
   const full = !canAddField(parseTemplate(value).nodes);
+
+  const parts = useMemo(
+    () => patternParts(value, registry, sample),
+    [value, registry, sample],
+  );
+
+  const close = () => {
+    setForced(false);
+    if (query) setDismissed(query.start);
+  };
 
   const insert = (row: PickerRow) => {
     const next = applyPick(value, caret, row.field.id);
     onChange(next.source);
     setCaret(next.caret);
     setDismissed(null);
-    setAnnouncement(
-      `${row.field.label} added to the name. The name is now ${next.source}.`,
-    );
+    setForced(false);
+    setAnnouncement(`${row.field.label} added. The name is now ${next.source}.`);
   };
+
+  const remove = (start: number, partLabel: string) => {
+    const next = removeFieldAt(value, start);
+    onChange(next);
+    setCaret(next.length);
+    setAnnouncement(`${partLabel} removed. The name is now ${next}.`);
+  };
+
+  /*
+   * Grouped, but never more than a screenful. An unfiltered list of every
+   * field a shop has was taller than the card holding it, which teaches a
+   * merchant to scroll past it rather than read it.
+   */
+  let shown = 0;
+  const visible = groups
+    .map((group) => {
+      const take = group.rows.slice(0, Math.max(0, VISIBLE_ROWS - shown));
+      shown += take.length;
+      return { ...group, rows: take };
+    })
+    .filter((group) => group.rows.length > 0);
+  const hidden = rows.length - shown;
 
   return (
     <s-stack direction="block" gap="small-300">
@@ -123,14 +161,41 @@ export function NamePatternField({
       {/*
        * A plain span, because `aria-live` is not part of the Polaris element's
        * typed surface and inventing a prop is worse than using the platform.
-       * The text inside is hidden visually by Polaris rather than by CSS of
-       * ours, which is the rule the rest of this app follows.
        */}
       <span aria-live="polite">
         <s-text accessibilityVisibility="exclusive">{announcement}</s-text>
       </span>
 
-      {open && query ? (
+      {/* The pattern, read back, with each piece removable. */}
+      {parts.length > 0 ? (
+        <s-stack direction="inline" gap="small-400" alignItems="center">
+          {parts.map((part) =>
+            part.kind === "text" ? (
+              <s-text key={part.start} color="subdued">
+                {part.label}
+              </s-text>
+            ) : (
+              <s-clickable-chip
+                key={part.start}
+                accessibilityLabel={
+                  part.known
+                    ? `Remove ${part.label}${part.value ? `, which is ${part.value} for this product` : ""}`
+                    : `Remove ${part.label}, which is not a field`
+                }
+                onClick={() => remove(part.start, part.label)}
+              >
+                {part.known
+                  ? part.value
+                    ? `${part.label}: ${part.value}`
+                    : part.label
+                  : `${part.label} — no such field`}
+              </s-clickable-chip>
+            ),
+          )}
+        </s-stack>
+      ) : null}
+
+      {open ? (
         <s-box
           background="subdued"
           borderRadius="base"
@@ -144,61 +209,61 @@ export function NamePatternField({
                 Remove one before adding another.
               </s-text>
             ) : rows.length === 0 ? (
-              <s-text color="subdued">
-                No field matches what you typed. Keep typing to use the brace as
-                ordinary text.
-              </s-text>
+              <s-text color="subdued">No field matches what you typed.</s-text>
             ) : (
-              groups.map((group) => (
-                <s-stack key={group.id} direction="block" gap="small-500">
-                  <s-text color="subdued" type="strong">
-                    {group.label}
-                  </s-text>
-                  {group.rows.map((row) => (
-                    <s-clickable
-                      key={row.field.id}
-                      accessibilityLabel={
-                        row.value
-                          ? `Add ${row.field.label}, which is ${row.value} for this product`
-                          : `Add ${row.field.label}`
-                      }
-                      onClick={() => insert(row)}
-                    >
-                      <s-stack
-                        direction="inline"
-                        gap="small-300"
-                        alignItems="center"
+              <>
+                {visible.map((group) => (
+                  <s-stack key={group.id} direction="block" gap="small-500">
+                    <s-text color="subdued" type="strong">
+                      {group.label}
+                    </s-text>
+                    {group.rows.map((row) => (
+                      <s-clickable
+                        key={row.field.id}
+                        accessibilityLabel={
+                          row.value
+                            ? `Add ${row.field.label}, which is ${row.value} for this product`
+                            : `Add ${row.field.label}`
+                        }
+                        onClick={() => insert(row)}
                       >
-                        <s-text>{row.field.label}</s-text>
-                        {/*
-                         * The value this field has for one of the merchant's
-                         * own products. Never a stand-in: an empty field says
-                         * it is empty, which is the thing worth knowing.
-                         */}
-                        <s-text color="subdued">
-                          {row.value === null
-                            ? ""
-                            : row.value === ""
-                              ? "empty for this product"
-                              : row.value}
-                        </s-text>
-                      </s-stack>
-                    </s-clickable>
-                  ))}
-                </s-stack>
-              ))
+                        <s-stack
+                          direction="inline"
+                          gap="small-300"
+                          alignItems="center"
+                        >
+                          <s-text>{row.field.label}</s-text>
+                          <s-text color="subdued">
+                            {row.value === null
+                              ? ""
+                              : row.value === ""
+                                ? "empty for this product"
+                                : row.value}
+                          </s-text>
+                        </s-stack>
+                      </s-clickable>
+                    ))}
+                  </s-stack>
+                ))}
+                {hidden > 0 ? (
+                  <s-text color="subdued">
+                    {`${hidden} more. Keep typing to narrow the list.`}
+                  </s-text>
+                ) : null}
+              </>
             )}
-
-            <s-button
-              type="button"
-              variant="secondary"
-              onClick={() => setDismissed(query.start)}
-            >
-              Close the field list
-            </s-button>
           </s-stack>
         </s-box>
       ) : null}
+
+      <s-button
+        type="button"
+        variant="tertiary"
+        icon={open ? "chevron-up" : "chevron-down"}
+        onClick={() => (open ? close() : setForced(true))}
+      >
+        {open ? "Close field list" : "Add a field"}
+      </s-button>
     </s-stack>
   );
 }

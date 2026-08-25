@@ -79,6 +79,7 @@ import { principalFromSession } from "~/web/lib/principal.server";
  */
 const HELP_MODAL_ID = "about-product-names";
 const PREVIEW_MODAL_ID = "name-preview";
+const PATTERNS_MODAL_ID = "ready-patterns";
 const SAVE_BAR_ID = "product-sync-save-bar";
 
 /**
@@ -580,15 +581,18 @@ export default function ProductSyncSettings() {
   const parseError = parsed.errors[0];
   const blocked = Boolean(parseError) || hasBlockingError(preview.diagnostics);
 
+  /*
+   * The field says what is wrong with the characters; the banner says what is
+   * wrong with the names. Showing a lint error in both put two red blocks on
+   * screen for one problem, and the field's copy — a sentence about every
+   * product checked — was never about the field anyway.
+   */
   const fieldError =
     touched && parseError
       ? parseError.message
-      : touched && blocked
-        ? (diagnostics.find((d) => d.severity === "error")?.message ??
-          undefined)
-        : result && !result.ok && result.field === "nameTemplate"
-          ? result.message
-          : undefined;
+      : !touched && result && !result.ok && result.field === "nameTemplate"
+        ? result.message
+        : undefined;
 
   const errorFor = (field: string) =>
     result && !result.ok && result.field === field ? result.message : undefined;
@@ -758,6 +762,73 @@ export default function ProductSyncSettings() {
         </s-button>
       </s-modal>
 
+      {/*
+       * Four cards, each as wide as the card holding them, for something a
+       * merchant picks once. Behind a button they cost a line; each still
+       * shows the name it would give one of their own products, which is the
+       * only reason to show a pattern at all (docs/ui-conventions.md).
+       */}
+      <s-modal id={PATTERNS_MODAL_ID} heading="Ready patterns">
+        <s-stack direction="block" gap="base">
+          <s-grid
+            gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))"
+            gap="small-300"
+          >
+            {NAME_PATTERNS.map((option) => {
+              const inUse = option.pattern === state.nameTemplate;
+              const produced = patternSample
+                ? nameFor(
+                    settingsFromTemplate(option.pattern),
+                    patternSample as VariantFacts,
+                  ).name
+                : null;
+
+              return (
+                <s-clickable
+                  key={option.id}
+                  accessibilityLabel={
+                    produced
+                      ? `${option.label}. Would produce ${produced}.`
+                      : option.label
+                  }
+                  onClick={() => {
+                    setTouched(true);
+                    set({ nameTemplate: option.pattern });
+                  }}
+                >
+                  <s-box
+                    background="subdued"
+                    borderRadius="base"
+                    padding="small-200"
+                  >
+                    <s-stack direction="block" gap="small-500">
+                      <s-text type="strong">{option.label}</s-text>
+                      {/*
+                       * The name this pattern gives one of the merchant's
+                       * own products. A shop with an empty catalogue gets
+                       * the pattern's name and no invented example.
+                       */}
+                      {produced ? (
+                        <s-text color="subdued">{produced}</s-text>
+                      ) : null}
+                      {inUse ? <s-text color="subdued">In use</s-text> : null}
+                    </s-stack>
+                  </s-box>
+                </s-clickable>
+              );
+            })}
+          </s-grid>
+        </s-stack>
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          command="--hide"
+          commandFor={PATTERNS_MODAL_ID}
+        >
+          Close
+        </s-button>
+      </s-modal>
+
       <s-modal id={PREVIEW_MODAL_ID} heading="What changes in MetaKocka">
         <s-stack direction="block" gap="base">
           <s-text color="subdued">
@@ -885,59 +956,14 @@ export default function ProductSyncSettings() {
                   </s-banner>
                 ) : null}
 
-                <s-stack direction="block" gap="small-300">
-                  <s-text type="strong">Or start from a ready pattern</s-text>
-                  <s-grid
-                    gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))"
-                    gap="small-300"
-                  >
-                    {NAME_PATTERNS.map((option) => {
-                      const inUse = option.pattern === state.nameTemplate;
-                      const produced = patternSample
-                        ? nameFor(
-                            settingsFromTemplate(option.pattern),
-                            patternSample as VariantFacts,
-                          ).name
-                        : null;
-
-                      return (
-                        <s-clickable
-                          key={option.id}
-                          accessibilityLabel={
-                            produced
-                              ? `${option.label}. Would produce ${produced}.`
-                              : option.label
-                          }
-                          onClick={() => {
-                            setTouched(true);
-                            set({ nameTemplate: option.pattern });
-                          }}
-                        >
-                          <s-box
-                            background="subdued"
-                            borderRadius="base"
-                            padding="small-200"
-                          >
-                            <s-stack direction="block" gap="small-500">
-                              <s-text type="strong">{option.label}</s-text>
-                              {/*
-                               * The name this pattern gives one of the merchant's
-                               * own products. A shop with an empty catalogue gets
-                               * the pattern's name and no invented example.
-                               */}
-                              {produced ? (
-                                <s-text color="subdued">{produced}</s-text>
-                              ) : null}
-                              {inUse ? (
-                                <s-text color="subdued">In use</s-text>
-                              ) : null}
-                            </s-stack>
-                          </s-box>
-                        </s-clickable>
-                      );
-                    })}
-                  </s-grid>
-                </s-stack>
+                <s-button
+                  type="button"
+                  variant="tertiary"
+                  command="--show"
+                  commandFor={PATTERNS_MODAL_ID}
+                >
+                  Start from a ready pattern
+                </s-button>
 
                 {/*
                  * The detail is behind a button, like the locations page puts a
