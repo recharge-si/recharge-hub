@@ -68,20 +68,25 @@ export function RecentActivity({
       )}
 
       {/*
-       * The chevron is not decoration. Without it this is a line of text that
-       * happens to be clickable, which is exactly how it read: the locations
-       * page opens its warehouse list and its advanced settings with the same
-       * pairing, so a disclosure looks like a disclosure everywhere.
+       * A bordered button, not a tertiary one. At the foot of a card with
+       * nothing under it, a borderless button is a line of text floating in
+       * space however clickable it is — the chevron alone did not fix that.
+       * The divider gives it something to sit against.
        */}
       {items.length > 1 ? (
-        <s-button
-          type="button"
-          variant="tertiary"
-          icon={showAll ? "chevron-up" : "chevron-down"}
-          onClick={() => setShowAll((on) => !on)}
-        >
-          {showAll ? "Show less" : `Show ${items.length - 1} more`}
-        </s-button>
+        <s-stack direction="block" gap="small-300">
+          <s-divider />
+          <s-stack direction="inline">
+            <s-button
+              type="button"
+              variant="secondary"
+              icon={showAll ? "chevron-up" : "chevron-down"}
+              onClick={() => setShowAll((on) => !on)}
+            >
+              {showAll ? "Show less" : `Show ${items.length - 1} more`}
+            </s-button>
+          </s-stack>
+        </s-stack>
       ) : null}
     </s-stack>
   );

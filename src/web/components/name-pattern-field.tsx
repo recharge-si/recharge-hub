@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useId, useMemo, useRef, useState } from "react";
 
 import {
   applyPick,
@@ -27,8 +27,11 @@ import {
  *    products. `{title}[ {options}]` tells nobody anything; this does. A chip
  *    can be pressed to take that field out, and the punctuation left holding
  *    nothing goes with it.
- *  - A list of fields, opened by typing `{` or by pressing Add a field,
- *    filtered as they type and never more than a handful at a time.
+ *  - A list of fields in a floating popover, opened by typing `{` or by
+ *    pressing Add a field, filtered as they type. It floats rather than
+ *    sitting in the flow, so opening it does not push the rest of the card
+ *    down, and it is capped and scrolls — the same shape as the admin's own
+ *    filter combobox, and the same construction `dropdown.tsx` uses.
  *
  * **Why the chips are under the field and not inside it.** Chips inline with
  * typed text needs `contenteditable`: Polaris's typed surface has no combobox,
@@ -47,8 +50,8 @@ import {
  * would work today and break on a Polaris release.
  */
 
-/** Enough to choose from without becoming a wall. Typing narrows it. */
-const VISIBLE_ROWS = 6;
+/** The popover anchors to whatever declared `commandFor` and shows on demand. */
+type Overlay = { showOverlay: () => void; hideOverlay: () => void };
 
 export interface NamePatternFieldProps {
   name: string;
@@ -84,18 +87,29 @@ export function NamePatternField({
   sample,
   error,
 }: NamePatternFieldProps) {
+  // An id attribute cannot hold the colons React puts in a generated id.
+  const listId = `fields-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  const list = useRef<Overlay | null>(null);
+
   const [caret, setCaret] = useState(value.length);
-  /** Dismissing is per brace: a new `{` elsewhere opens a new list. */
-  const [dismissed, setDismissed] = useState<number | null>(null);
-  const [forced, setForced] = useState(false);
+  const [open, setOpen] = useState(false);
   const [announcement, setAnnouncement] = useState("");
 
   const query = pickerQueryAt(value, caret);
-  const open = forced || (query !== null && query.start !== dismissed);
+
+  /*
+   * A new `{` opens the list; carrying on typing inside the same one only
+   * filters it. Keyed on where the brace is, so closing the list and typing
+   * on does not fight the merchant by reopening it.
+   */
+  const brace = query?.start ?? null;
+  useEffect(() => {
+    if (brace !== null) list.current?.showOverlay();
+  }, [brace]);
 
   const groups = useMemo(
-    () => (open ? pickerGroups(registry, query?.query ?? "", sample) : []),
-    [open, query, registry, sample],
+    () => pickerGroups(registry, query?.query ?? "", sample),
+    [query, registry, sample],
   );
   const rows = useMemo(() => flattenGroups(groups), [groups]);
   const full = !canAddField(parseTemplate(value).nodes);
@@ -105,18 +119,13 @@ export function NamePatternField({
     [value, registry, sample],
   );
 
-  const close = () => {
-    setForced(false);
-    if (query) setDismissed(query.start);
-  };
-
   const insert = (row: PickerRow) => {
     const next = applyPick(value, caret, row.field.id);
     onChange(next.source);
     setCaret(next.caret);
-    setDismissed(null);
-    setForced(false);
-    setAnnouncement(`${row.field.label} added. The name is now ${next.source}.`);
+    setAnnouncement(
+      `${row.field.label} added. The name is now ${next.source}.`,
+    );
   };
 
   const remove = (start: number, partLabel: string) => {
@@ -125,21 +134,6 @@ export function NamePatternField({
     setCaret(next.length);
     setAnnouncement(`${partLabel} removed. The name is now ${next}.`);
   };
-
-  /*
-   * Grouped, but never more than a screenful. An unfiltered list of every
-   * field a shop has was taller than the card holding it, which teaches a
-   * merchant to scroll past it rather than read it.
-   */
-  let shown = 0;
-  const visible = groups
-    .map((group) => {
-      const take = group.rows.slice(0, Math.max(0, VISIBLE_ROWS - shown));
-      shown += take.length;
-      return { ...group, rows: take };
-    })
-    .filter((group) => group.rows.length > 0);
-  const hidden = rows.length - shown;
 
   return (
     <s-stack direction="block" gap="small-300">
@@ -152,7 +146,6 @@ export function NamePatternField({
         onInput={(event) => {
           const next = event.currentTarget.value;
           setCaret(caretIn(event.currentTarget, next));
-          setDismissed(null);
           onChange(next);
         }}
         {...(error ? { error } : {})}
@@ -195,75 +188,83 @@ export function NamePatternField({
         </s-stack>
       ) : null}
 
-      {open ? (
-        <s-box
-          background="subdued"
-          borderRadius="base"
-          padding="small-200"
-          accessibilityLabel="Fields you can add to the name"
-        >
-          <s-stack direction="block" gap="small-400">
-            {full ? (
-              <s-text color="subdued">
-                This name already uses as many fields as a pattern can hold.
-                Remove one before adding another.
-              </s-text>
-            ) : rows.length === 0 ? (
-              <s-text color="subdued">No field matches what you typed.</s-text>
-            ) : (
-              <>
-                {visible.map((group) => (
-                  <s-stack key={group.id} direction="block" gap="small-500">
-                    <s-text color="subdued" type="strong">
-                      {group.label}
-                    </s-text>
-                    {group.rows.map((row) => (
-                      <s-clickable
-                        key={row.field.id}
-                        accessibilityLabel={
-                          row.value
-                            ? `Add ${row.field.label}, which is ${row.value} for this product`
-                            : `Add ${row.field.label}`
-                        }
-                        onClick={() => insert(row)}
-                      >
-                        <s-stack
-                          direction="inline"
-                          gap="small-300"
-                          alignItems="center"
-                        >
-                          <s-text>{row.field.label}</s-text>
-                          <s-text color="subdued">
-                            {row.value === null
-                              ? ""
-                              : row.value === ""
-                                ? "empty for this product"
-                                : row.value}
-                          </s-text>
-                        </s-stack>
-                      </s-clickable>
-                    ))}
-                  </s-stack>
-                ))}
-                {hidden > 0 ? (
-                  <s-text color="subdued">
-                    {`${hidden} more. Keep typing to narrow the list.`}
-                  </s-text>
-                ) : null}
-              </>
-            )}
-          </s-stack>
-        </s-box>
-      ) : null}
-
-      <s-button
-        type="button"
-        variant="tertiary"
-        icon={open ? "chevron-up" : "chevron-down"}
-        onClick={() => (open ? close() : setForced(true))}
+      {/*
+       * Capped and scrolling, so a shop with many metafields gets a list it
+       * can move through rather than one running off the bottom of the page.
+       */}
+      <s-popover
+        id={listId}
+        maxBlockSize="320px"
+        ref={(element) => {
+          list.current = (element as Overlay | null) ?? null;
+        }}
+        onShow={() => setOpen(true)}
+        onAfterHide={() => setOpen(false)}
       >
-        {open ? "Close field list" : "Add a field"}
-      </s-button>
+        <s-stack direction="block" gap="small-400">
+          {full ? (
+            <s-text color="subdued">
+              This name already uses as many fields as a pattern can hold.
+              Remove one before adding another.
+            </s-text>
+          ) : rows.length === 0 ? (
+            <s-text color="subdued">No field matches what you typed.</s-text>
+          ) : (
+            groups.map((group) => (
+              <s-stack key={group.id} direction="block" gap="none">
+                <s-box paddingInline="small-200" paddingBlock="small-400">
+                  <s-text color="subdued" type="strong">
+                    {group.label}
+                  </s-text>
+                </s-box>
+                {group.rows.map((row) => (
+                  <s-clickable
+                    key={row.field.id}
+                    command="--hide"
+                    commandFor={listId}
+                    borderRadius="base"
+                    paddingInline="small-200"
+                    paddingBlock="small-300"
+                    inlineSize="100%"
+                    accessibilityLabel={
+                      row.value
+                        ? `Add ${row.field.label}, which is ${row.value} for this product`
+                        : `Add ${row.field.label}`
+                    }
+                    onClick={() => insert(row)}
+                  >
+                    <s-grid
+                      gridTemplateColumns="1fr auto"
+                      gap="small-200"
+                      alignItems="center"
+                    >
+                      <s-text>{row.field.label}</s-text>
+                      <s-text color="subdued">
+                        {row.value === null
+                          ? ""
+                          : row.value === ""
+                            ? "empty for this product"
+                            : row.value}
+                      </s-text>
+                    </s-grid>
+                  </s-clickable>
+                ))}
+              </s-stack>
+            ))
+          )}
+        </s-stack>
+      </s-popover>
+
+      <s-stack direction="inline">
+        <s-button
+          type="button"
+          variant="secondary"
+          commandFor={listId}
+          icon={open ? "chevron-up" : "chevron-down"}
+        >
+          Add a field
+        </s-button>
+      </s-stack>
     </s-stack>
   );
 }

@@ -33,7 +33,7 @@ export function Advanced({ summary, children }: AdvancedProps) {
       <s-stack direction="inline" gap="small-300" alignItems="center">
         <s-button
           type="button"
-          variant="tertiary"
+          variant="secondary"
           icon={open ? "chevron-up" : "chevron-down"}
           accessibilityLabel={
             open ? "Hide advanced settings" : "Show advanced settings"
