@@ -194,3 +194,43 @@ export function flattenGroups(groups: PickerGroup[]): PickerRow[] {
 export function canAddField(nodes: TemplateNode[]): boolean {
   return tokensOf(nodes).length < MAX_TOKENS;
 }
+
+/**
+ * How short a word can be and still be worth suggesting fields for.
+ *
+ * One letter matches most of the register and would open a list on the first
+ * keystroke of every word a merchant types.
+ */
+export const MIN_SUGGEST = 2;
+
+export interface Trigger extends PickerQuery {
+  /**
+   * True when the merchant typed `{`, which says they are looking for a field.
+   *
+   * It decides what happens when nothing matches: an explicit ask deserves an
+   * answer, even if the answer is "nothing matches that". A word they were
+   * only ever typing does not, and its list simply does not appear.
+   */
+  explicit: boolean;
+}
+
+/** Letters and digits, so a suggestion is offered for a word and not a space. */
+const WORD = /[\p{L}\p{N}]+$/u;
+
+/**
+ * What the merchant is typing that fields could be suggested for.
+ *
+ * Either a `{` they typed on purpose, or just a word — because being made to
+ * learn a punctuation mark before the app will help is the sort of thing that
+ * makes software feel like it is for somebody else.
+ */
+export function triggerAt(text: string, caret: number): Trigger | null {
+  const brace = pickerQueryAt(text, caret);
+  if (brace) return { ...brace, explicit: true };
+
+  const at = Math.max(0, Math.min(caret, text.length));
+  const word = WORD.exec(text.slice(0, at));
+  if (!word || word[0].length < MIN_SUGGEST) return null;
+
+  return { start: word.index, query: word[0].toLowerCase(), explicit: false };
+}

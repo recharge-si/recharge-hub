@@ -10,10 +10,10 @@ import {
   makeTextAtom,
   nameFor,
   pickerGroups,
-  pickerQueryAt,
   removeAtom,
   settingsFromTemplate,
   stripHolders,
+  triggerAt,
   toAtoms,
   toDisplay,
   type Atom,
@@ -187,6 +187,12 @@ export function PatternEditor({
 
   const [asText, setAsText] = useState(false);
   const [open, setOpen] = useState(false);
+  /**
+   * The suggestion the merchant closed, so it stays closed while they carry on
+   * typing the same word. Keyed by where it started, so a different word — or
+   * the same one somewhere else — offers itself again.
+   */
+  const [dismissed, setDismissed] = useState<string | null>(null);
   const [query, setQuery] = useState("");
   const [active, setActive] = useState(0);
   const [announcement, setAnnouncement] = useState("");
@@ -257,19 +263,34 @@ export function PatternEditor({
 
     commit(readDisplay(element));
 
-    // A `{` immediately before the caret opens the list, and carrying on
-    // typing filters it. Read from the text node itself, so the offsets are
-    // the browser's own rather than something reconstructed.
+    /*
+     * Fields are suggested for whatever is being typed, not only after a `{`.
+     * Read from the text node itself, so the offsets are the browser's own
+     * rather than something reconstructed.
+     *
+     * A word only opens the list when something actually matches it. Otherwise
+     * every word in a product name would drop a "nothing matches" panel over
+     * the page. A `{` is different: it was typed to ask, so it gets an answer
+     * either way.
+     */
     const at = caretIn(element);
     const node = at === null ? null : element.childNodes[at.atom];
     if (node?.nodeType === Node.TEXT_NODE && at) {
-      const found = pickerQueryAt((node as Text).data, at.offset);
-      if (found) {
-        setOpen(true);
-        setQuery(found.query);
-        setActive(0);
-        return;
+      const trigger = triggerAt((node as Text).data, at.offset);
+      const key = trigger ? `${at.atom}:${trigger.start}` : null;
+
+      if (trigger && key !== dismissed) {
+        const matches = flattenGroups(
+          pickerGroups(registry, trigger.query, sample),
+        );
+        if (trigger.explicit || matches.length > 0) {
+          setOpen(true);
+          setQuery(trigger.query);
+          setActive(0);
+          return;
+        }
       }
+      if (!trigger) setDismissed(null);
     }
     setOpen(false);
   };
@@ -282,11 +303,11 @@ export function PatternEditor({
     const at = caretIn(element);
     const node = at === null ? null : element.childNodes[at.atom];
 
-    // Where the half-typed `{ven` starts, so the field replaces it rather
-    // than landing next to it.
+    // Where what they were typing starts, so the field replaces it rather
+    // than landing next to it — the word as much as the `{ven`.
     let from = at?.offset ?? 0;
     if (node?.nodeType === Node.TEXT_NODE && at) {
-      from = pickerQueryAt((node as Text).data, at.offset)?.start ?? at.offset;
+      from = triggerAt((node as Text).data, at.offset)?.start ?? at.offset;
     }
 
     const result = insertField(
@@ -299,6 +320,7 @@ export function PatternEditor({
 
     setOpen(false);
     setQuery("");
+    setDismissed(null);
     element.focus();
     apply(result.atoms, result.caret, `${row.field.label} added.`);
   };
@@ -343,8 +365,16 @@ export function PatternEditor({
     }
 
     if (event.key === "Escape" && open) {
-      // The brace stays: it may be a brace the merchant meant to type.
+      // Whatever was typed stays; only the suggestion goes, and it stays gone
+      // while they keep typing the same word.
       event.preventDefault();
+      const at = caretIn(element);
+      const node = at === null ? null : element.childNodes[at.atom];
+      const trigger =
+        node?.nodeType === Node.TEXT_NODE && at
+          ? triggerAt((node as Text).data, at.offset)
+          : null;
+      if (at && trigger) setDismissed(`${at.atom}:${trigger.start}`);
       setOpen(false);
       return;
     }
@@ -433,16 +463,10 @@ export function PatternEditor({
     );
   };
 
-  const openList = (): void => {
-    setOpen(true);
-    setQuery("");
-    setActive(0);
-    host.current?.focus();
-  };
-
   let rowIndex = -1;
 
   return (
+    // The list hangs off this, so it has to be the thing it is measured from.
     <s-stack direction="block" gap="small-300">
       <s-text id={labelId} type="strong">
         {label}
@@ -461,54 +485,158 @@ export function PatternEditor({
           {...(error ? { error } : {})}
         />
       ) : (
-        <s-box
-          border="base"
-          borderRadius="base"
-          background="base"
-          paddingInline="small-200"
-          paddingBlock="small-300"
-        >
-          {/*
-           * The frame is bigger than the words in it, and a click landing on
-           * the padding beside them did nothing at all — the control looked
-           * dead until you happened to hit a character. Anywhere inside the
-           * frame now puts the caret at the end, which is what a text field
-           * does.
-           */}
-          <div
-            onMouseDown={(event) => {
-              const element = host.current;
-              if (!element || event.target === element) return;
-              if (element.contains(event.target as Node)) return;
-              event.preventDefault();
-              element.focus();
-              placeCaret(
-                element,
-                element.childNodes.length - 1,
-                Number.MAX_SAFE_INTEGER,
-              );
-            }}
+        // The list hangs off the field, so the field is what it measures
+        // itself against. Anchored to the whole control it came out below
+        // the buttons, a long way from what it was suggesting for.
+        <div style={{ position: "relative" }}>
+          <s-box
+            border="base"
+            borderRadius="base"
+            background="base"
+            paddingInline="small-200"
+            paddingBlock="small-300"
           >
+            {/*
+             * The frame is bigger than the words in it, and a click landing on
+             * the padding beside them did nothing at all — the control looked
+             * dead until you happened to hit a character. Anywhere inside the
+             * frame now puts the caret at the end, which is what a text field
+             * does.
+             */}
             <div
-              ref={host}
-              contentEditable
-              suppressContentEditableWarning
-              role="combobox"
-              aria-labelledby={labelId}
-              aria-multiline="false"
-              aria-expanded={open && rows.length > 0}
-              aria-controls={listId}
-              aria-autocomplete="list"
-              style={{ outline: "none", minHeight: "1.25rem" }}
-              {...(open && rows[active]
-                ? { "aria-activedescendant": `${listId}-${active}` }
-                : {})}
-              onInput={handleInput}
-              onKeyDown={handleKeyDown}
-              onPaste={handlePaste}
-            />
-          </div>
-        </s-box>
+              onMouseDown={(event) => {
+                const element = host.current;
+                if (!element || event.target === element) return;
+                if (element.contains(event.target as Node)) return;
+                event.preventDefault();
+                element.focus();
+                placeCaret(
+                  element,
+                  element.childNodes.length - 1,
+                  Number.MAX_SAFE_INTEGER,
+                );
+              }}
+            >
+              <div
+                ref={host}
+                contentEditable
+                suppressContentEditableWarning
+                role="combobox"
+                aria-labelledby={labelId}
+                aria-multiline="false"
+                aria-expanded={open && rows.length > 0}
+                aria-controls={listId}
+                aria-autocomplete="list"
+                style={{ outline: "none", minHeight: "1.25rem" }}
+                {...(open && rows[active]
+                  ? { "aria-activedescendant": `${listId}-${active}` }
+                  : {})}
+                onInput={handleInput}
+                onKeyDown={handleKeyDown}
+                onPaste={handlePaste}
+              />
+            </div>
+          </s-box>
+          {/*
+           * Hanging under the field rather than sitting in the flow, the way the
+           * admin's own filters do it. As a block in the flow it shoved the
+           * preview, the lint and the save controls down the page every time a
+           * word matched something.
+           *
+           * Polaris has no popover that can anchor to a contenteditable — its
+           * overlays anchor to whatever declared `commandFor`, and that has to be
+           * a Polaris control. So the placement is ours and the appearance is
+           * still theirs: `s-box` paints it, and the only styling here is where
+           * it sits.
+           */}
+          {open ? (
+            <div
+              style={{
+                position: "absolute",
+                insetInlineStart: 0,
+                insetInlineEnd: 0,
+                top: "100%",
+                zIndex: 30,
+              }}
+            >
+              <s-box
+                id={listId}
+                background="base"
+                border="base"
+                borderRadius="base"
+                padding="small-200"
+              >
+                <s-scroll-box
+                  maxBlockSize="260px"
+                  accessibilityLabel="Fields you can add"
+                >
+                  <s-stack direction="block" gap="small-400">
+                    {rows.length === 0 ? (
+                      <s-text color="subdued">
+                        No field matches what you typed.
+                      </s-text>
+                    ) : (
+                      groups.map((group) => (
+                        <s-stack key={group.id} direction="block" gap="none">
+                          <s-box
+                            paddingInline="small-200"
+                            paddingBlock="small-400"
+                          >
+                            <s-text color="subdued" type="strong">
+                              {group.label}
+                            </s-text>
+                          </s-box>
+                          {group.rows.map((row) => {
+                            rowIndex += 1;
+                            const isActive = rowIndex === active;
+                            return (
+                              <s-clickable
+                                key={row.field.id}
+                                id={`${listId}-${rowIndex}`}
+                                background={
+                                  isActive ? "subdued" : "transparent"
+                                }
+                                borderRadius="base"
+                                paddingInline="small-200"
+                                paddingBlock="small-300"
+                                inlineSize="100%"
+                                accessibilityLabel={
+                                  row.value
+                                    ? `${row.field.label}, ${row.value} for this product`
+                                    : row.field.label
+                                }
+                                onClick={() => insert(row)}
+                              >
+                                <s-grid
+                                  gridTemplateColumns="1fr auto"
+                                  gap="small-200"
+                                  alignItems="center"
+                                >
+                                  <s-text
+                                    type={isActive ? "strong" : undefined}
+                                  >
+                                    {row.field.label}
+                                  </s-text>
+                                  <s-text color="subdued">
+                                    {row.value === null
+                                      ? ""
+                                      : row.value === ""
+                                        ? "empty here"
+                                        : row.value}
+                                  </s-text>
+                                </s-grid>
+                              </s-clickable>
+                            );
+                          })}
+                        </s-stack>
+                      ))
+                    )}
+                  </s-stack>
+                </s-scroll-box>
+              </s-box>
+            </div>
+          ) : null}
+        </div>
       )}
 
       <span aria-live="polite">
@@ -523,82 +651,13 @@ export function PatternEditor({
         <s-text color="subdued">{`${sample?.sku}: ${resolved}`}</s-text>
       ) : null}
 
-      {open ? (
-        <s-scroll-box
-          id={listId}
-          background="subdued"
-          borderRadius="base"
-          padding="small-200"
-          maxBlockSize="240px"
-          accessibilityLabel="Fields you can add"
-        >
-          <s-stack direction="block" gap="small-400">
-            {rows.length === 0 ? (
-              <s-text color="subdued">No field matches what you typed.</s-text>
-            ) : (
-              groups.map((group) => (
-                <s-stack key={group.id} direction="block" gap="none">
-                  <s-box paddingInline="small-200" paddingBlock="small-400">
-                    <s-text color="subdued" type="strong">
-                      {group.label}
-                    </s-text>
-                  </s-box>
-                  {group.rows.map((row) => {
-                    rowIndex += 1;
-                    const isActive = rowIndex === active;
-                    return (
-                      <s-clickable
-                        key={row.field.id}
-                        id={`${listId}-${rowIndex}`}
-                        background={isActive ? "subdued" : "transparent"}
-                        borderRadius="base"
-                        paddingInline="small-200"
-                        paddingBlock="small-300"
-                        inlineSize="100%"
-                        accessibilityLabel={
-                          row.value
-                            ? `${row.field.label}, ${row.value} for this product`
-                            : row.field.label
-                        }
-                        onClick={() => insert(row)}
-                      >
-                        <s-grid
-                          gridTemplateColumns="1fr auto"
-                          gap="small-200"
-                          alignItems="center"
-                        >
-                          <s-text type={isActive ? "strong" : undefined}>
-                            {row.field.label}
-                          </s-text>
-                          <s-text color="subdued">
-                            {row.value === null
-                              ? ""
-                              : row.value === ""
-                                ? "empty here"
-                                : row.value}
-                          </s-text>
-                        </s-grid>
-                      </s-clickable>
-                    );
-                  })}
-                </s-stack>
-              ))
-            )}
-          </s-stack>
-        </s-scroll-box>
-      ) : null}
-
+      {/*
+       * No "Add a field" button. Fields suggest themselves as the merchant
+       * types, which is the same bargain the admin's own filters make: you
+       * write what you mean and it offers what it has. A button asking you to
+       * stop and go shopping for a field is a worse version of that.
+       */}
       <s-stack direction="inline" gap="small-300" alignItems="center">
-        {asText ? null : (
-          <s-button
-            type="button"
-            variant="secondary"
-            icon={open ? "chevron-up" : "chevron-down"}
-            onClick={() => (open ? setOpen(false) : openList())}
-          >
-            Add a field
-          </s-button>
-        )}
         <s-button
           type="button"
           variant="secondary"

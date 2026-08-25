@@ -8,6 +8,7 @@ import {
   parseTemplate,
   pickerGroups,
   pickerQueryAt,
+  triggerAt,
   type VariantFacts,
 } from "~/domain/products/template";
 
@@ -184,5 +185,46 @@ describe("the field cap", () => {
     const full = "{title}".repeat(24);
 
     expect(canAddField(parseTemplate(full).nodes)).toBe(false);
+  });
+});
+
+describe("suggesting fields for what is being typed", () => {
+  it("suggests for a plain word, with no punctuation to learn", () => {
+    expect(triggerAt("Acme ven", 8)).toEqual({
+      start: 5,
+      query: "ven",
+      explicit: false,
+    });
+  });
+
+  it("still knows a brace was deliberate", () => {
+    expect(triggerAt("Acme {ven", 9)).toEqual({
+      start: 5,
+      query: "ven",
+      explicit: true,
+    });
+  });
+
+  it("waits for a second letter rather than opening on every word", () => {
+    expect(triggerAt("Acme v", 6)).toBeNull();
+    expect(triggerAt("Acme ve", 7)).not.toBeNull();
+  });
+
+  it("says nothing after a space, a dash or an empty field", () => {
+    expect(triggerAt("Acme ", 5)).toBeNull();
+    expect(triggerAt("Acme - ", 7)).toBeNull();
+    expect(triggerAt("", 0)).toBeNull();
+  });
+
+  it("reads the word under the caret, not the whole line", () => {
+    expect(triggerAt("vendor and title", 10)?.query).toBe("and");
+  });
+
+  it("lowercases, so the list does not depend on the shift key", () => {
+    expect(triggerAt("VEN", 3)?.query).toBe("ven");
+  });
+
+  it("treats a brace as deliberate even when nothing follows it", () => {
+    expect(triggerAt("{", 1)).toEqual({ start: 0, query: "", explicit: true });
   });
 });
