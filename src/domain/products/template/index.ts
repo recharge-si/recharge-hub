@@ -53,6 +53,19 @@ export {
 export { hasBlockingError, lintTemplate, type LintInput } from "./lint";
 
 export {
+  applyPick,
+  canAddField,
+  flattenGroups,
+  pickerGroups,
+  pickerQueryAt,
+  type PickerGroup,
+  type PickerGroupId,
+  type PickerQuery,
+  type PickerRow,
+  type PickResult,
+} from "./picker";
+
+export {
   buildPreview,
   type PreviewInput,
   type PreviewResult,
