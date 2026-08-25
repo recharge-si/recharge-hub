@@ -50,8 +50,15 @@ import {
  * would work today and break on a Polaris release.
  */
 
-/** The popover anchors to whatever declared `commandFor` and shows on demand. */
-type Overlay = { showOverlay: () => void; hideOverlay: () => void };
+/**
+ * The overlay methods Polaris puts on the element — once it has upgraded.
+ *
+ * Optional on purpose. A custom element is a plain `HTMLElement` until the
+ * browser upgrades it, and React sets a ref the moment the node exists, which
+ * is earlier than that. Typing these as present is how `showOverlay is not a
+ * function` happens on first render.
+ */
+type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
 
 export interface NamePatternFieldProps {
   name: string;
@@ -90,6 +97,8 @@ export function NamePatternField({
   // An id attribute cannot hold the colons React puts in a generated id.
   const listId = `fields-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   const list = useRef<Overlay | null>(null);
+  /** True until the first effect has run, so nothing opens on page load. */
+  const mounted = useRef(false);
 
   const [caret, setCaret] = useState(value.length);
   const [open, setOpen] = useState(false);
@@ -101,10 +110,32 @@ export function NamePatternField({
    * A new `{` opens the list; carrying on typing inside the same one only
    * filters it. Keyed on where the brace is, so closing the list and typing
    * on does not fight the merchant by reopening it.
+   *
+   * Never on the first run. A saved pattern can already hold a half-typed
+   * brace — that is exactly what an unclosed-brace error looks like — and
+   * opening a list over the page before the merchant has touched anything is
+   * the app talking first.
    */
   const brace = query?.start ?? null;
   useEffect(() => {
-    if (brace !== null) list.current?.showOverlay();
+    if (!mounted.current) {
+      mounted.current = true;
+      return;
+    }
+    if (brace === null) return;
+
+    const element = list.current;
+    if (typeof element?.showOverlay === "function") {
+      element.showOverlay();
+      return;
+    }
+
+    // Not upgraded yet. Ask again once the browser has defined it, rather
+    // than dropping the merchant's keystroke on the floor.
+    if (typeof customElements === "undefined") return;
+    void customElements
+      .whenDefined("s-popover")
+      .then(() => list.current?.showOverlay?.());
   }, [brace]);
 
   const groups = useMemo(

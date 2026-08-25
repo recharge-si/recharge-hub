@@ -830,7 +830,11 @@ function formatDateTime(iso: string): string {
 }
 
 /** The part of the Polaris modal element this page drives from code. */
-type Overlay = { showOverlay: () => void; hideOverlay: () => void };
+// Optional: a custom element is a plain HTMLElement until the browser upgrades
+// it, and a ref is set before that happens. These calls all follow a user
+// action so the element has long since upgraded, but the types should not
+// promise something that is only true later.
+type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
 
 const HELP_MODAL_ID = "about-locations";
 const EDITOR_MODAL_ID = "location-editor";
@@ -948,8 +952,8 @@ export default function Locations() {
   useEffect(() => {
     const result = locationFetcher.data;
     if (!result?.ok) return;
-    if (openDialog.current === "editor") editor.current?.hideOverlay();
-    if (openDialog.current === "connect") connector.current?.hideOverlay();
+    if (openDialog.current === "editor") editor.current?.hideOverlay?.();
+    if (openDialog.current === "connect") connector.current?.hideOverlay?.();
     openDialog.current = null;
     if (typeof shopify !== "undefined") shopify.toast.show(result.message);
   }, [locationFetcher.data]);
