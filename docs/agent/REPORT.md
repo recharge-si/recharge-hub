@@ -127,3 +127,42 @@ Proposed design (for review, not built):
    discount inside the payment share only and raise an exception when
    discountMinor > 0 and a document is written, naming the difference.
 ```
+
+### [P1] Line-level discounts never reach the document or the shares
+- **Where:** `src/adapters/shopify/order-payload.ts:387` (parsed and stored),
+  `src/jobs/handlers/write-metakocka-order.ts` (line built from
+  `unitPriceWithTaxMinor` alone), `src/jobs/order-shares.ts:44` (share =
+  `quantity * unitPriceWithTaxMinor`, discount ignored)
+- **What:** A Shopify line's `total_discount` is parsed, stored on
+  `order_line.discount_minor`, shown in the order-state diff - and then never
+  used. The MetaKocka document line carries the **undiscounted** unit price, so
+  `sum_all` overstates the goods by every line discount; an invoice raised from
+  that sales order overcharges the customer. The per-document shares have the
+  same blindness, so a discounted line on a non-primary source silently shifts
+  its discount onto the primary document's payment (the remainder assignment in
+  `splitOrderMoney` forces the total to balance, on the wrong document).
+- **Why it matters:** Real money on every order using line discounts (sales,
+  automatic discounts, B2B price lists). Aggregate payment still matches the
+  Shopify total, which is exactly why nobody would notice until an invoice is
+  disputed.
+- **Spec:** CLAUDE.md section 8.6: "Line-level discounts stay with their line."
+  The code does not implement the sentence.
+- **Status:** needs human. The official put_document docs show a per-line
+  `discount` field (`"discount": "10"`), but whether it is a percent or an
+  amount, and its interaction with `price_with_tax`, is unverified - inventing
+  it is rule 8. Proposed patch below, gated on the T-06 probe.
+- **Verified by:** grep of every `discountMinor` consumer; the only arithmetic
+  consumers are `splitOrderMoney` (order-level only) and the diff.
+
+Proposed patch once T-06 answers:
+```text
+1. order-shares.ts: lineTotalMinor -> quantity * unitPriceWithTaxMinor minus the
+   allocation's share of line.discountMinor (proportional by quantity,
+   remainder to the larger allocation - proportionalSplit already exists).
+2. splitOrderMoney input discountMinor -> order-level discount only
+   (order.total_discounts minus the sum of line total_discounts).
+3. buildSalesOrderBody line: send the verified discount field, or restate the
+   unit price when the probe says that is the only faithful encoding.
+4. Tests: a discounted line on a non-primary source keeps its discount on its
+   own document; documents still sum to the Shopify total.
+```

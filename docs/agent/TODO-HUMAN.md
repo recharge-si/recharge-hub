@@ -46,3 +46,11 @@ Needed before the section 8.6 gap (shipping never on the document) can close:
 2. put_document with `"discount_value": "5.00"` and read back sum_basic /
    sum_all to learn its basis and whether it spreads per line.
 Record both under tests/fixtures/metakocka/.
+
+## T-06 - Probe the per-line `discount` field (test company only)
+put_document a sales order on company 6789 with one line
+`{ "code": "...", "amount": "2", "price_with_tax": "10.00", "tax_factor": "0.22", "discount": "10" }`
+and read it back: is `10` a percent or an amount, what does `sum_all` become,
+and does `price_with_tax` mean before-discount or after? Repeat with
+`"discount": "10.00"`. Record under tests/fixtures/metakocka/. Blocks the
+line-discount fix in REPORT.md.
