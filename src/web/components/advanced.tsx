@@ -14,8 +14,9 @@ import { useState, type ReactNode } from "react";
  * checking.
  *
  * Built from a divider, a button and a line, because Polaris has no disclosure
- * element. Nothing here is styled: the divider separates it from the card's
- * main content and the button is a plain tertiary one.
+ * element. The chevron is what makes it read as one rather than as a stray
+ * word — the locations page already opens its own advanced settings this way,
+ * and an unadorned tertiary button is indistinguishable from a label.
  */
 export interface AdvancedProps {
   /** What the folded settings currently say, in one short sentence. */
@@ -33,9 +34,13 @@ export function Advanced({ summary, children }: AdvancedProps) {
         <s-button
           type="button"
           variant="tertiary"
+          icon={open ? "chevron-up" : "chevron-down"}
+          accessibilityLabel={
+            open ? "Hide advanced settings" : "Show advanced settings"
+          }
           onClick={() => setOpen((now) => !now)}
         >
-          {open ? "Hide advanced" : "Advanced"}
+          Advanced
         </s-button>
         {open ? null : <s-text color="subdued">{summary}</s-text>}
       </s-stack>

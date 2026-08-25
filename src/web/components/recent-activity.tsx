@@ -67,8 +67,19 @@ export function RecentActivity({
         </s-stack>
       )}
 
+      {/*
+       * The chevron is not decoration. Without it this is a line of text that
+       * happens to be clickable, which is exactly how it read: the locations
+       * page opens its warehouse list and its advanced settings with the same
+       * pairing, so a disclosure looks like a disclosure everywhere.
+       */}
       {items.length > 1 ? (
-        <s-button variant="tertiary" onClick={() => setShowAll((on) => !on)}>
+        <s-button
+          type="button"
+          variant="tertiary"
+          icon={showAll ? "chevron-up" : "chevron-down"}
+          onClick={() => setShowAll((on) => !on)}
+        >
           {showAll ? "Show less" : `Show ${items.length - 1} more`}
         </s-button>
       ) : null}
