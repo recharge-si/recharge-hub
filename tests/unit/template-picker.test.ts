@@ -7,9 +7,7 @@ import {
   flattenGroups,
   parseTemplate,
   pickerGroups,
-  patternParts,
   pickerQueryAt,
-  removeFieldAt,
   type VariantFacts,
 } from "~/domain/products/template";
 
@@ -186,88 +184,5 @@ describe("the field cap", () => {
     const full = "{title}".repeat(24);
 
     expect(canAddField(parseTemplate(full).nodes)).toBe(false);
-  });
-});
-
-describe("reading a pattern back as parts", () => {
-  it("names each field and what it resolves to", () => {
-    const parts = patternParts("{title}[ {option1}]", registry, sail);
-
-    expect(parts.map((part) => [part.kind, part.label, part.value])).toEqual([
-      ["field", "Product title", "Sail"],
-      ["field", "First option value", "5.4"],
-    ]);
-  });
-
-  it("keeps a separator between two fields as a part of its own", () => {
-    const parts = patternParts("{title} - {sku}", registry, sail);
-
-    expect(parts.map((part) => part.label)).toEqual([
-      "Product title",
-      "-",
-      "SKU",
-    ]);
-  });
-
-  it("keeps the merchant's own words as their own part", () => {
-    const parts = patternParts('{vendor} "sale" {sku}', registry, sail);
-
-    expect(parts.map((part) => part.kind)).toEqual(["field", "text", "field"]);
-    expect(parts[1]?.label).toBe('"sale"');
-  });
-
-  it("marks a field that does not exist rather than hiding it", () => {
-    const [part] = patternParts("{colour}", registry, sail);
-
-    expect(part).toMatchObject({ known: false, label: "colour" });
-  });
-
-  it("says nothing about values when there is no product to read", () => {
-    const parts = patternParts("{title}", registry, null);
-
-    expect(parts[0]?.value).toBeNull();
-  });
-});
-
-/** Parts are addressed by position, so find the one under test by name. */
-function partAt(source: string, label: string): number {
-  const part = patternParts(source, registry, sail).find(
-    (candidate) => candidate.label === label,
-  );
-  if (!part) throw new Error(`No part labelled ${label} in ${source}`);
-  return part.start;
-}
-
-describe("removing a field", () => {
-  it("takes the separator with it when the group held only that field", () => {
-    const source = "{title}[ - {options}]";
-
-    expect(removeFieldAt(source, partAt(source, "All option values"))).toBe(
-      "{title}",
-    );
-  });
-
-  it("keeps a group that still has a field in it", () => {
-    const source = "{title}[ ({option1}/{option2})]";
-
-    expect(removeFieldAt(source, partAt(source, "Second option value"))).toBe(
-      "{title}[ ({option1}/)]",
-    );
-  });
-
-  it("trims punctuation left at the ends", () => {
-    const source = "{title} - {sku}";
-
-    expect(removeFieldAt(source, partAt(source, "SKU"))).toBe("{title}");
-  });
-
-  it("leaves the pattern alone when nothing sits at that position", () => {
-    expect(removeFieldAt("{title}", 99)).toBe("{title}");
-  });
-
-  it("keeps filters on the fields it does not remove", () => {
-    const source = "{title|upper}[ {sku|lower}]";
-
-    expect(removeFieldAt(source, partAt(source, "SKU"))).toBe("{title|upper}");
   });
 });

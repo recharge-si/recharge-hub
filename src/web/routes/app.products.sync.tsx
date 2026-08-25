@@ -42,10 +42,13 @@ import {
   fieldRegistry,
   hasBlockingError,
   lintTemplate,
+  MAX_TEMPLATE_LENGTH,
+  MAX_TOKENS,
   NAME_PATTERNS,
   nameFor,
   parseTemplate,
   settingsFromTemplate,
+  tokensOf,
   type Diagnostic,
   type MetafieldDefinition,
   type VariantFacts,
@@ -57,7 +60,7 @@ import {
 } from "~/domain/products/units";
 import { Advanced } from "~/web/components/advanced";
 import { Dropdown } from "~/web/components/dropdown";
-import { NamePatternField } from "~/web/components/name-pattern-field";
+import { PatternEditor } from "~/web/components/pattern-editor";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
 import { OverwriteWarning } from "~/web/components/overwrite-warning";
 import { formatDateTime } from "~/web/lib/datetime";
@@ -279,10 +282,31 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
   }
 
+  /*
+   * The parser's own limits, enforced where they can actually stop something.
+   * They existed as constants and nothing checked them: a pasted essay would
+   * have gone into the database and been re-parsed on every render.
+   */
+  if (nameTemplate.length > MAX_TEMPLATE_LENGTH) {
+    return {
+      ok: false,
+      field: "nameTemplate",
+      message: `The name is ${nameTemplate.length} characters long and cannot be more than ${MAX_TEMPLATE_LENGTH}. Remove some of it.`,
+    };
+  }
+
   const parsed = parseTemplate(nameTemplate);
   const parseError = parsed.errors[0];
   if (parseError) {
     return { ok: false, field: "nameTemplate", message: parseError.message };
+  }
+
+  if (tokensOf(parsed.nodes).length > MAX_TOKENS) {
+    return {
+      ok: false,
+      field: "nameTemplate",
+      message: `The name uses more than ${MAX_TOKENS} fields. Remove some of them.`,
+    };
   }
 
   /*
@@ -915,8 +939,7 @@ export default function ProductSyncSettings() {
                   MetaKocka product, including names edited in MetaKocka.
                 </OverwriteWarning>
 
-                <NamePatternField
-                  name="nameTemplate"
+                <PatternEditor
                   label="Product name in MetaKocka"
                   value={state.nameTemplate}
                   onChange={(next) => {

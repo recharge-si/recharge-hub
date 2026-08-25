@@ -53,6 +53,27 @@ export {
 export { hasBlockingError, lintTemplate, type LintInput } from "./lint";
 
 export {
+  escapeText,
+  filterArg,
+  fieldSrc,
+  insertField,
+  makeTextAtom,
+  normaliseAtoms,
+  removeAtom,
+  type EditResult,
+  fromAtoms,
+  hasFilter,
+  toAtoms,
+  withFilter,
+  withFilters,
+  withOptional,
+  withSeparators,
+  type Atom,
+  type FieldAtom,
+  type TextAtom,
+} from "./editor";
+
+export {
   DEFAULT_NAME_PATTERN,
   NAME_PATTERNS,
   type NamePattern,
@@ -61,9 +82,6 @@ export {
 export {
   applyPick,
   canAddField,
-  patternParts,
-  removeFieldAt,
-  type PatternPart,
   flattenGroups,
   pickerGroups,
   pickerQueryAt,
