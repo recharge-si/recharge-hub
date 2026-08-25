@@ -87,6 +87,18 @@ export async function handleScheduledTick(job: Job<unknown>): Promise<void> {
         20 * 60 * 60,
       );
 
+      // Which pricelists and VAT rates the company's own catalogue uses.
+      // MetaKocka lists neither (3), so this reads them off priced products.
+      // An ordinary read rather than a deliberate rejection, but several
+      // MetaKocka calls all the same, and the answer changes about as often as
+      // a payment register does.
+      await enqueueThrottled(
+        QUEUES.reloadPricelists,
+        { shopDomain: domain },
+        `pricelists:${domain}`,
+        20 * 60 * 60,
+      );
+
       // Section 2.4: the retention promise is kept by a job, not by intent.
       await enqueueThrottled(
         QUEUES.redactOldOrders,

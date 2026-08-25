@@ -13,6 +13,7 @@ import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
 import { handleAllocateOrder } from "~/jobs/handlers/allocate-order";
 import { handleOrdersEvent } from "~/jobs/handlers/orders-event";
 import { handleReloadPaymentTypes } from "~/jobs/handlers/reload-payment-types";
+import { handleReloadPricelists } from "~/jobs/handlers/reload-pricelists";
 import { handleReloadProfitCenters } from "~/jobs/handlers/reload-profit-centers";
 import { handleReloadWarehouses } from "~/jobs/handlers/reload-warehouses";
 import { handleRedactOldOrders } from "~/jobs/handlers/redact-old-orders";
@@ -93,6 +94,10 @@ async function main(): Promise<void> {
   await boss.work(QUEUES.reloadPaymentTypes, async (jobs) => {
     for (const job of jobs) await handleReloadPaymentTypes(job);
   });
+  await boss.work(QUEUES.reloadPricelists, async (jobs) => {
+    for (const job of jobs) await handleReloadPricelists(job);
+  });
+
   await boss.work(QUEUES.reloadProfitCenters, async (jobs) => {
     for (const job of jobs) await handleReloadProfitCenters(job);
   });

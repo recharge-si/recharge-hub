@@ -17,6 +17,7 @@ export const QUEUES = {
   reloadWarehouses: "reload-warehouses",
   reloadPaymentTypes: "reload-payment-types",
   reloadProfitCenters: "reload-profit-centers",
+  reloadPricelists: "reload-pricelists",
   ordersCreate: "orders-create",
   allocateOrder: "allocate-order",
   writeMetakockaOrder: "write-metakocka-order",
@@ -134,6 +135,15 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // One probe per registered profit centre plus a control, so it is slower than
   // the payment type reload it otherwise mirrors. Still small, still invisible.
   [QUEUES.reloadProfitCenters]: {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 900,
+  },
+  // Several product_list pages, and MetaKocka is slow (3), so it gets a longer
+  // window than the registers it sits beside. Nothing depends on it finishing:
+  // a stale list only means the settings screen offers fewer suggestions.
+  [QUEUES.reloadPricelists]: {
     retryLimit: 3,
     retryDelay: 60,
     retryBackoff: true,

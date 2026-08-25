@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Form,
   useActionData,
+  useFetcher,
   useLoaderData,
   type ActionFunctionArgs,
   type HeadersFunction,
@@ -10,12 +11,27 @@ import {
 } from "react-router";
 
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import {
+  listPricelists,
+  listTaxRates,
+  recordObservation,
+  rememberPricelistCode,
+} from "~/adapters/db/repositories/pricelist.server";
 import {
   getProductSyncSetting,
   saveProductSyncSetting,
 } from "~/adapters/db/repositories/product-sync-setting.server";
 import { metakockaNamesFor } from "~/adapters/db/repositories/sku.server";
+import { MetakockaClient } from "~/adapters/metakocka/client";
+import {
+  describeForMerchant,
+  MetakockaError,
+} from "~/adapters/metakocka/errors";
+import { observeCatalogue } from "~/adapters/metakocka/pricelists";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
+import { enqueueThrottled } from "~/adapters/queue/boss.server";
+import { QUEUES } from "~/adapters/queue/queues";
 import {
   countVariants,
   listMetafieldDefinitions,
@@ -44,10 +60,11 @@ import {
 import { Dropdown } from "~/web/components/dropdown";
 import { NamePatternField } from "~/web/components/name-pattern-field";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
+import { OverwriteWarning } from "~/web/components/overwrite-warning";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
- * Settings for writing product names into MetaKocka (CLAUDE.md §8.9).
+ * Settings for writing product names and prices into MetaKocka (CLAUDE.md §8.9).
  *
  * Every switch here defaults to off. This is the only place in the app that
  * writes into the ERP's catalogue, so nothing happens until the merchant says
@@ -55,25 +72,33 @@ import { principalFromSession } from "~/web/lib/principal.server";
  * call is made.
  *
  * The preview, the lint and the save check all run through
- * `domain/products/template`, which is the same entry point the sync job uses.
- * `tests/unit/template-agreement.test.ts` holds them to each other: a preview
- * that can disagree with the job is a promise the job then breaks across the
- * whole catalogue.
+ * `domain/products/template`, the same entry point the sync job uses.
+ * `tests/unit/template-agreement.test.ts` holds them to each other.
  *
- * Grouped sections and the contextual save bar, per §2.6.
+ * Sections follow `docs/ui-conventions.md`: the two settings that overwrite
+ * data the merchant keeps elsewhere — the name and the price — are separate,
+ * each headed by what it does, and each carries the same three-part treatment
+ * and no more.
  */
 
 /**
  * How many of the merchant's products the preview covers.
  *
  * Enough rows to see a pattern behave on more than one shape of product, few
- * enough that a settings page reads one small page of the catalogue rather
- * than all of it (§2.5). The lint runs over the same set, so what blocks saving
- * is exactly what the merchant can see.
+ * enough that a settings page reads one small page of the catalogue rather than
+ * all of it (§2.5). The lint runs over the same set, so what blocks saving is
+ * exactly what the merchant can see — and the screen says so, because twelve
+ * rows out of a large catalogue is a sample, not an answer.
  */
 const PREVIEW_SIZE = 12;
 
 const previewOptions = { first: PREVIEW_SIZE, maxPages: 1, metafields: true };
+
+/** A pricelist register changes a few times a year, so a day old is current. */
+const STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+
+/** Long enough that reloading the page a few times sends one job, not five. */
+const REFRESH_THROTTLE_SECONDS = 30 * 60;
 
 function knownMetafieldPaths(definitions: MetafieldDefinition[]): Set<string> {
   return new Set(
@@ -87,7 +112,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [settings, samples, definitions, catalogue] = await Promise.all([
+  const [
+    settings,
+    samples,
+    definitions,
+    catalogue,
+    pricelists,
+    taxRates,
+    credential,
+  ] = await Promise.all([
     getProductSyncSetting(principal),
     listVariantDetails(admin, previewOptions),
     listMetafieldDefinitions(admin),
@@ -96,6 +129,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     // products is a sample; twelve out of twelve is the whole catalogue, and
     // the screen must not let those read the same.
     countVariants(admin),
+    listPricelists(principal),
+    listTaxRates(principal),
+    getCredential(principal),
   ]);
 
   // What MetaKocka calls these products now, read from our own registry. No
@@ -108,6 +144,36 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     samples.map((sample) => sample.sku),
   );
 
+  /*
+   * Keep the pricelist register current without ever waiting on it.
+   *
+   * A nightly job already refreshes it. This covers what the nightly job
+   * cannot: a shop that connected MetaKocka an hour ago, and a merchant who
+   * made a pricelist this morning and came straight here. Enqueued, never
+   * awaited — a MetaKocka call takes tens of seconds and no page load may wait
+   * on one (§2.5), so the screen renders from the database and the fresh list
+   * arrives underneath it.
+   */
+  const observedAt = pricelists
+    .map((entry) => entry.observedAt)
+    .filter((at): at is Date => at !== null)
+    .sort((a, b) => b.getTime() - a.getTime())[0];
+
+  const stale =
+    observedAt === undefined ||
+    Date.now() - observedAt.getTime() > STALE_AFTER_MS;
+
+  let refreshing = false;
+  if (credential && stale) {
+    await enqueueThrottled(
+      QUEUES.reloadPricelists,
+      { shopDomain: session.shop },
+      `pricelists:${session.shop}`,
+      REFRESH_THROTTLE_SECONDS,
+    );
+    refreshing = true;
+  }
+
   return {
     settings: {
       ...settings,
@@ -117,6 +183,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     definitions,
     catalogue,
     currentNames: [...currentNames.entries()],
+    pricelists: pricelists.map((entry) => ({
+      ...entry,
+      observedAt: entry.observedAt?.toISOString() ?? null,
+    })),
+    taxRates,
+    connected: Boolean(credential),
+    refreshing,
   };
 };
 
@@ -127,6 +200,54 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const formData = await request.formData();
   const value = (name: string) => String(formData.get(name) ?? "").trim();
   const checked = (name: string) => formData.get(name) === "on";
+
+  /*
+   * Reading the pricelists on request, for the merchant who has just made one
+   * and does not want to wait for tonight. Its own intent rather than part of
+   * the save: it writes nothing to the settings and nothing to MetaKocka.
+   */
+  if (value("intent") === "load-pricelists") {
+    const credential = await getCredential(principal);
+    if (!credential) {
+      return {
+        ok: false,
+        field: null,
+        message:
+          "Connect MetaKocka first. The pricelists come from your company's own products.",
+      };
+    }
+
+    try {
+      const client = new MetakockaClient(
+        { companyId: credential.companyId, secretKey: credential.secretKey },
+        { timeoutMs: 60_000 },
+      );
+      const counts = await recordObservation(
+        principal,
+        await observeCatalogue(client),
+      );
+
+      if (counts.pricelists === 0) {
+        return {
+          ok: false,
+          field: null,
+          message:
+            "No product in MetaKocka has a price on it, so there is no pricelist to find. Type the code by hand, exactly as it appears in MetaKocka.",
+        };
+      }
+
+      return {
+        ok: true,
+        field: null,
+        message: `Found ${counts.pricelists} ${counts.pricelists === 1 ? "pricelist" : "pricelists"} in MetaKocka.`,
+      };
+    } catch (error) {
+      if (error instanceof MetakockaError) {
+        return { ok: false, field: null, message: describeForMerchant(error) };
+      }
+      throw error;
+    }
+  }
 
   const nameTemplate = value("nameTemplate");
   const rawPolicy = value("namePolicy");
@@ -171,45 +292,62 @@ export const action = async ({ request }: ActionFunctionArgs) => {
    * The same check the screen shows, run again where it cannot be skipped.
    *
    * This reads a page of variants, which a page load may not do for MetaKocka
-   * but an action may do for Shopify: it is one small GraphQL call on an
-   * explicit save, not on every render. Two names that collide would become one
-   * product in the ERP, so it is worth the call.
+   * but an action may do for Shopify: one small GraphQL call on an explicit
+   * save, not on every render. Two names that collide would become one product
+   * in the ERP, so it is worth the call.
    */
   const [samples, definitions] = await Promise.all([
     listVariantDetails(admin, previewOptions),
     listMetafieldDefinitions(admin),
   ]);
 
-  const diagnostics = lintTemplate({
+  const blocking = lintTemplate({
     nodes: parsed.nodes,
     variants: samples,
     knownMetafields: knownMetafieldPaths(definitions),
-  });
+  }).find((diagnostic) => diagnostic.severity === "error");
 
-  const blocking = diagnostics.find(
-    (diagnostic) => diagnostic.severity === "error",
-  );
   if (blocking) {
     return { ok: false, field: "nameTemplate", message: blocking.message };
   }
 
-  // §3: a pricelist cannot be created through the API, so a price with no
-  // pricelist to go in has nowhere to land.
-  if (sendPricing && pricelistCode === "") {
+  /*
+   * §3: a pricelist cannot be created through the API and cannot be guessed.
+   * Every sales order this app writes carries it as `sales_pricelist_code`, so
+   * this is required whether or not product prices are being synced — a
+   * document filed against no pricelist gives whoever opens it in MetaKocka no
+   * way to see which prices applied.
+   */
+  if (pricelistCode === "") {
     return {
       ok: false,
       field: "pricelistCode",
       message:
-        "Sending prices needs the code of a pricelist that already exists in MetaKocka. Add the pricelist code, or turn prices off.",
+        "Choose the pricelist this shop's prices belong to. It must already exist in MetaKocka; the API cannot create one, and there is no safe value to assume.",
     };
   }
 
-  if (taxPercent !== "" && taxFactorFromPercent(taxPercent) === null) {
+  /*
+   * §3, verified: MetaKocka refuses a document line with no tax attribute and
+   * will not infer one. Zero is not a safe stand-in — it files the right gross
+   * against a net that matches no pricelist and understates the VAT — so an
+   * empty field is refused rather than defaulted.
+   */
+  if (taxPercent === "") {
     return {
       ok: false,
       field: "taxPercent",
       message:
-        "The tax rate must be a percentage between 0 and 100, for example 22. Leave it empty to let MetaKocka decide the tax.",
+        "Enter the VAT rate this shop charges, for example 22. MetaKocka refuses an order line with no tax rate, and sending zero would understate the VAT rather than leave it unanswered.",
+    };
+  }
+
+  if (taxFactorFromPercent(taxPercent) === null) {
+    return {
+      ok: false,
+      field: "taxPercent",
+      message:
+        "The VAT rate must be a percentage between 0 and 100, for example 22.",
     };
   }
 
@@ -220,11 +358,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     createMissing: checked("createMissing"),
     sendPricing,
     updatePricing: sendPricing && checked("updatePricing"),
-    pricelistCode: pricelistCode || null,
+    pricelistCode,
     pricelistIncludesTax: value("pricelistBasis") !== "net",
-    taxPercent: taxPercent || null,
+    taxPercent,
     unit: unit,
   });
+
+  // A code typed by hand is kept in the register so the picker offers it back
+  // rather than presenting an empty field on the next visit.
+  await rememberPricelistCode(principal, pricelistCode);
 
   await appendEvent(principal, {
     entityType: "product_sync",
@@ -274,6 +416,13 @@ function toState(settings: {
   };
 }
 
+/** Errors first: they are what stops the merchant, and they say why. */
+function bySeverity(diagnostics: Diagnostic[]): Diagnostic[] {
+  return [...diagnostics].sort((a, b) =>
+    a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1,
+  );
+}
+
 /** Fixed locale so the server and the browser render the same string. */
 const NUMBER = new Intl.NumberFormat("en-GB");
 
@@ -300,22 +449,33 @@ function previewScope(shown: number, catalogue: VariantCount | null): string {
   return `Checked against ${shown} of your ${total} product variants. Anything not shown here has not been checked.`;
 }
 
-/** Errors first: they are what stops the merchant, and they say why. */
-function bySeverity(diagnostics: Diagnostic[]): Diagnostic[] {
-  return [...diagnostics].sort((a, b) =>
-    a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1,
-  );
-}
-
 export default function ProductSyncSettings() {
-  const { settings, samples, definitions, catalogue, currentNames } =
-    useLoaderData<typeof loader>();
+  const {
+    settings,
+    samples,
+    definitions,
+    catalogue,
+    currentNames,
+    pricelists,
+    taxRates,
+    connected,
+    refreshing,
+  } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
+  const reloader = useFetcher<typeof action>();
   const formRef = useRef<HTMLFormElement>(null);
 
   const [state, setState] = useState<FormState>(() => toState(settings));
   // §2.8: no error before the merchant has had a chance to answer.
   const [touched, setTouched] = useState(false);
+  /**
+   * Whether the pricelist is being typed rather than chosen. The merchant is
+   * never hard-blocked on a list we could not load, so a shop with no
+   * pricelists to offer starts here.
+   */
+  const [pricelistByHand, setPricelistByHand] = useState(
+    () => pricelists.length === 0,
+  );
 
   const set = (patch: Partial<FormState>) =>
     setState((current) => ({ ...current, ...patch }));
@@ -376,7 +536,21 @@ export default function ProductSyncSettings() {
           ? result.message
           : undefined;
 
+  const errorFor = (field: string) =>
+    result && !result.ok && result.field === field ? result.message : undefined;
+
   const patternSample = samples[0] ?? null;
+  const loadingPricelists =
+    refreshing ||
+    reloader.state === "submitting" ||
+    reloader.state === "loading";
+  const reloadFailed = reloader.data && !reloader.data.ok;
+
+  const chosen = pricelists.find((entry) => entry.code === state.pricelistCode);
+  const pricelistOptions = pricelists.map((entry) => ({
+    value: entry.code,
+    label: entry.title ? `${entry.code} — ${entry.title}` : entry.code,
+  }));
 
   useEffect(() => {
     const form = formRef.current;
@@ -409,21 +583,18 @@ export default function ProductSyncSettings() {
         ) : null}
 
         {/*
-         * Saving is blocked in the action, not here. Cancelling the submit
-         * would leave Shopify's save bar mid-save with nothing to show for it,
-         * and the merchant already has the reason on screen: the banner below
-         * is computed as they type, so a blocking rule is visible well before
-         * they reach for Save.
+         * Saving is blocked in the action, not by cancelling the submit here:
+         * that would leave Shopify's save bar mid-save with nothing to show for
+         * it. The merchant already has the reason on screen — the banner under
+         * the name is computed as they type.
          */}
         <Form method="post" data-save-bar ref={formRef}>
           <s-stack direction="block" gap="large">
             <s-section heading="Sending names to MetaKocka">
               <s-stack direction="block" gap="base">
                 <s-paragraph>
-                  Shopify owns the customer-facing name and MetaKocka owns
-                  everything else about a product. With this on, the app writes
-                  the name below into MetaKocka. It never changes a price, a tax
-                  rate or stock on a product that already exists.
+                  Shopify owns the customer-facing title; MetaKocka owns
+                  everything else about a product.
                 </s-paragraph>
                 <s-checkbox
                   name="enabled"
@@ -450,13 +621,24 @@ export default function ProductSyncSettings() {
                     { value: "never", label: "Leave it alone" },
                   ]}
                 />
+                {/* Part 1 of the overwrite pattern: always present, names what
+                    is overwritten and how often. */}
                 <s-text color="subdued">
                   {state.namePolicy === "always"
-                    ? "Every sync sets the name from the pattern. Names edited in MetaKocka will be overwritten."
+                    ? "Every sync replaces the name in MetaKocka. A name edited there is overwritten on the next run."
                     : state.namePolicy === "when_empty"
-                      ? "A product that already has a name keeps it. Only nameless products are filled in."
-                      : "Existing products are never renamed. Only new ones get a name, and only if creating them is turned on below."}
+                      ? "A MetaKocka product that already has a name keeps it. Only nameless ones are filled in."
+                      : "Existing MetaKocka products are never renamed. Only newly created ones get a name."}
                 </s-text>
+                {/* Part 2: only in the unsaved state, only newly on. */}
+                <OverwriteWarning
+                  saved={settings.namePolicy === "always"}
+                  current={state.namePolicy === "always"}
+                  heading="Shopify becomes the name master"
+                >
+                  Save this and the next sync replaces the name of every matched
+                  MetaKocka product, including names edited in MetaKocka.
+                </OverwriteWarning>
               </s-stack>
             </s-section>
 
@@ -578,19 +760,18 @@ export default function ProductSyncSettings() {
               </s-stack>
             </s-section>
 
-            <s-section heading="Products MetaKocka does not have">
+            <s-section heading="Creating products MetaKocka does not have">
               <s-stack direction="block" gap="base">
                 <s-paragraph>
-                  A Shopify SKU with no MetaKocka product cannot have its stock
-                  synced and cannot appear on an order sent to the ERP. The app
-                  can create the product for you, using the SKU as the code.
+                  A SKU with no MetaKocka product cannot have its stock synced
+                  and cannot appear on an order.
                 </s-paragraph>
 
                 <s-checkbox
                   name="createMissing"
                   value="on"
                   label="Create missing products in MetaKocka"
-                  details="Creates a product with the SKU as its code, the name above, and the barcode."
+                  details="Creates a MetaKocka product with the SKU as its code, the name above, and the barcode."
                   checked={state.createMissing}
                   onChange={(e) =>
                     set({ createMissing: e.currentTarget.checked })
@@ -600,79 +781,197 @@ export default function ProductSyncSettings() {
                 <s-checkbox
                   name="sendPricing"
                   value="on"
-                  label="Also send the Shopify price and tax rate"
-                  details="Sent when a product is created. Products MetaKocka already has keep their price unless you turn on the setting below."
+                  label="Give a new product its Shopify price"
+                  details="Applies only as a product is created. Nothing is written to a MetaKocka product that already exists."
                   checked={state.sendPricing}
                   onChange={(e) =>
                     set({ sendPricing: e.currentTarget.checked })
                   }
                 />
 
-                {state.sendPricing ? (
-                  <s-stack direction="block" gap="base">
-                    {/*
-                     * Its own switch, and off by default. MetaKocka is master
-                     * for price, so overwriting a price it already holds is a
-                     * decision the merchant takes deliberately — but without
-                     * this the pricing switch did nothing at all for a
-                     * catalogue that already exists, which read as broken.
-                     */}
-                    <s-checkbox
-                      name="updatePricing"
-                      value="on"
-                      label="Keep prices up to date on products MetaKocka already has"
-                      details="Every sync writes the Shopify price into the pricelist below. Prices edited in MetaKocka will be overwritten."
-                      checked={state.updatePricing}
-                      onChange={(e) =>
-                        set({ updatePricing: e.currentTarget.checked })
-                      }
+                <Dropdown
+                  name="unit"
+                  label="Unit of measure for new products"
+                  details="MetaKocka needs a unit on every product and only accepts one from its own register."
+                  value={state.unit}
+                  onChange={(next) => set({ unit: next })}
+                  options={METAKOCKA_UNITS.map((unit) => ({
+                    value: unit,
+                    label: unit,
+                  }))}
+                  {...(errorFor("unit") ? { error: errorFor("unit") } : {})}
+                />
+              </s-stack>
+            </s-section>
+
+            {/*
+             * Its own section, because it is not about products MetaKocka is
+             * missing — it is about every product it already has. Filed under
+             * "products MetaKocka does not have" it read as a footnote to
+             * creating articles, which is the opposite of its blast radius.
+             */}
+            <s-section heading="Replacing prices on products MetaKocka already has">
+              <s-stack direction="block" gap="base">
+                <s-checkbox
+                  name="updatePricing"
+                  value="on"
+                  label="Keep prices up to date from Shopify"
+                  details="Every sync writes the Shopify price into the pricelist below, replacing the price MetaKocka holds."
+                  checked={state.updatePricing}
+                  disabled={!state.sendPricing}
+                  onChange={(e) =>
+                    set({ updatePricing: e.currentTarget.checked })
+                  }
+                />
+                {state.sendPricing ? null : (
+                  <s-text color="subdued">
+                    Turn on &ldquo;Give a new product its Shopify price&rdquo;
+                    above to use this. Prices are sent by one code path, and it
+                    is off.
+                  </s-text>
+                )}
+                {/*
+                 * Gated on sending prices as well, because that is what the
+                 * action stores: with it off nothing is overwritten, and a
+                 * warning about a write that cannot happen is noise.
+                 */}
+                <OverwriteWarning
+                  saved={settings.updatePricing}
+                  current={state.updatePricing && state.sendPricing}
+                  heading="Shopify becomes the price master"
+                >
+                  Save this and the next sync replaces the price of every
+                  matched MetaKocka product, including prices edited in
+                  MetaKocka.
+                </OverwriteWarning>
+              </s-stack>
+            </s-section>
+
+            <s-section heading="Where prices and tax are filed in MetaKocka">
+              <s-stack direction="block" gap="base">
+                <s-paragraph>
+                  Every sales order this app writes carries these, whether or
+                  not product prices are synced.
+                </s-paragraph>
+
+                {loadingPricelists && pricelists.length === 0 ? (
+                  <s-stack
+                    direction="inline"
+                    gap="small-300"
+                    alignItems="center"
+                  >
+                    <s-spinner
+                      size="base"
+                      accessibilityLabel="Reading your pricelists"
                     />
-                    {state.updatePricing ? (
-                      <s-banner
-                        tone="warning"
-                        heading="Shopify becomes the price master"
-                      >
-                        <s-paragraph>
-                          While this is on, MetaKocka no longer decides prices
-                          for products this app syncs. Anyone editing a price in
-                          MetaKocka will see it replaced on the next sync.
-                        </s-paragraph>
-                      </s-banner>
-                    ) : null}
+                    <s-text color="subdued">
+                      Reading your pricelists from MetaKocka.
+                    </s-text>
                   </s-stack>
                 ) : null}
 
-                {/*
-                 * Outside the pricing switch on purpose. Every sales order this
-                 * app writes carries this pricelist as `sales_pricelist_code`,
-                 * so it is needed whether or not product prices are being
-                 * synced — a document filed against no pricelist gives whoever
-                 * opens it in MetaKocka no way to see which prices applied.
-                 */}
-                <s-text-field
-                  name="pricelistCode"
-                  label="MetaKocka pricelist code"
-                  details="Used on every sales order sent to MetaKocka, and for product prices if you turn those on. It must already exist in MetaKocka; the API cannot create one."
-                  value={state.pricelistCode}
-                  onChange={(e) =>
-                    set({ pricelistCode: e.currentTarget.value })
-                  }
-                  {...(result && !result.ok && result.field === "pricelistCode"
-                    ? { error: result.message }
-                    : {})}
-                />
+                {reloadFailed ? (
+                  <s-banner
+                    tone="warning"
+                    heading="Could not read your pricelists"
+                  >
+                    <s-paragraph>{reloader.data?.message}</s-paragraph>
+                    <s-button
+                      slot="primary-action"
+                      type="button"
+                      onClick={() =>
+                        reloader.submit(
+                          { intent: "load-pricelists" },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Try again
+                    </s-button>
+                  </s-banner>
+                ) : null}
+
+                {pricelistByHand || pricelistOptions.length === 0 ? (
+                  <s-text-field
+                    name="pricelistCode"
+                    label="MetaKocka pricelist code"
+                    details="The code exactly as it appears in MetaKocka. The API cannot create a pricelist."
+                    value={state.pricelistCode}
+                    onChange={(e) =>
+                      set({ pricelistCode: e.currentTarget.value })
+                    }
+                    {...(errorFor("pricelistCode")
+                      ? { error: errorFor("pricelistCode") }
+                      : {})}
+                  />
+                ) : (
+                  <Dropdown
+                    name="pricelistCode"
+                    label="MetaKocka pricelist"
+                    details="Found on your own priced products. A pricelist with nothing priced on it does not appear here."
+                    value={state.pricelistCode}
+                    onChange={(next) => set({ pricelistCode: next })}
+                    options={pricelistOptions}
+                    {...(errorFor("pricelistCode")
+                      ? { error: errorFor("pricelistCode") }
+                      : {})}
+                  />
+                )}
+
+                <s-stack direction="inline" gap="small-300" alignItems="center">
+                  {pricelistOptions.length > 0 ? (
+                    <s-button
+                      type="button"
+                      variant="tertiary"
+                      onClick={() => setPricelistByHand((now) => !now)}
+                    >
+                      {pricelistByHand
+                        ? "Choose from your pricelists"
+                        : "Type a code instead"}
+                    </s-button>
+                  ) : null}
+                  {connected ? (
+                    <s-button
+                      type="button"
+                      variant="tertiary"
+                      {...(loadingPricelists ? { loading: true } : {})}
+                      onClick={() =>
+                        reloader.submit(
+                          { intent: "load-pricelists" },
+                          { method: "post" },
+                        )
+                      }
+                    >
+                      Read pricelists from MetaKocka
+                    </s-button>
+                  ) : null}
+                </s-stack>
+
+                {state.pricelistCode !== "" && !chosen ? (
+                  <s-text color="subdued">
+                    No priced product uses this code, so it could not be
+                    confirmed. That is expected for a pricelist you have just
+                    made.
+                  </s-text>
+                ) : null}
+
                 {/*
                  * A MetaKocka pricelist is created net or gross and cannot be
                  * either. Sending the wrong one is not a format error — the
                  * price lands wrong by the VAT rate — so the app restates the
-                 * amount rather than only renaming the field. MetaKocka names
-                 * the type it wants when this is wrong, and the sync corrects
-                 * itself from that.
+                 * amount rather than only renaming the field. When a priced
+                 * product told us which it is, that answer is offered here.
                  */}
                 <Dropdown
                   name="pricelistBasis"
                   label="Prices on that pricelist are"
-                  details="Check the pricelist in MetaKocka. If this is wrong, the first sync says so and corrects itself."
+                  details={
+                    chosen?.includesTax === null || chosen === undefined
+                      ? "If this is wrong, the first sync says so and corrects itself."
+                      : chosen.includesTax
+                        ? "Your priced products say this pricelist is gross."
+                        : "Your priced products say this pricelist is net."
+                  }
                   value={state.pricelistBasis}
                   onChange={(next) => set({ pricelistBasis: next })}
                   options={[
@@ -680,47 +979,38 @@ export default function ProductSyncSettings() {
                     { value: "net", label: "Excluding tax (net)" },
                   ]}
                 />
-                {/*
-                 * Needed for orders, not just for prices. MetaKocka refuses a
-                 * document line with no tax attribute and will not infer one
-                 * from the catalogue, so when Shopify does not supply a rate —
-                 * any shop with no tax registration for that market — this is
-                 * what the line carries. Sending zero instead files the right
-                 * gross against a net that matches no pricelist, and understates
-                 * the VAT.
-                 */}
+
                 <s-text-field
                   name="taxPercent"
                   label="Default VAT rate (%)"
-                  details="For example 22. Used on order lines when Shopify does not give a rate, and to convert between net and gross prices. Set it to the rate your pricelist uses."
+                  details="Used on order lines when Shopify gives no rate, and to convert between net and gross prices."
                   value={state.taxPercent}
                   onChange={(e) => set({ taxPercent: e.currentTarget.value })}
-                  {...(result && !result.ok && result.field === "taxPercent"
-                    ? { error: result.message }
+                  {...(errorFor("taxPercent")
+                    ? { error: errorFor("taxPercent") }
                     : {})}
                 />
-
-                {state.sendPricing ? null : (
-                  <s-text color="subdued">
-                    Product prices are not being written to MetaKocka. Turn on
-                    sending prices above if you want them synced as well.
-                  </s-text>
-                )}
-
-                <Dropdown
-                  name="unit"
-                  label="Unit of measure for new products"
-                  details="MetaKocka needs a unit on every product, and only accepts one from its own register. Most Slovenian companies sell in kos."
-                  value={state.unit}
-                  onChange={(next) => set({ unit: next })}
-                  options={METAKOCKA_UNITS.map((unit) => ({
-                    value: unit,
-                    label: unit,
-                  }))}
-                  {...(result && !result.ok && result.field === "unit"
-                    ? { error: result.message }
-                    : {})}
-                />
+                {taxRates.length > 0 ? (
+                  <s-stack direction="block" gap="small-400">
+                    <s-text color="subdued">
+                      Rates on your own MetaKocka products:
+                    </s-text>
+                    <s-stack
+                      direction="inline"
+                      gap="small-400"
+                      alignItems="center"
+                    >
+                      {taxRates.map((rate) => (
+                        <s-clickable-chip
+                          key={rate}
+                          onClick={() => set({ taxPercent: rate })}
+                        >
+                          {`${rate}%`}
+                        </s-clickable-chip>
+                      ))}
+                    </s-stack>
+                  </s-stack>
+                ) : null}
               </s-stack>
             </s-section>
           </s-stack>

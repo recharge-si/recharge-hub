@@ -54,20 +54,22 @@ model Shop {
   createdAt     DateTime         @default(now()) @map("created_at")
   updatedAt     DateTime         @updatedAt @map("updated_at")
 
-  eventLogs             EventLog[]
-  metakockaCredential   MetakockaCredential?
-  supplySources         SupplySource[]
-  metakockaWarehouses   MetakockaWarehouse[]
-  metakockaPaymentTypes MetakockaPaymentType[]
+  eventLogs              EventLog[]
+  metakockaCredential    MetakockaCredential?
+  supplySources          SupplySource[]
+  metakockaWarehouses    MetakockaWarehouse[]
+  metakockaPaymentTypes  MetakockaPaymentType[]
   metakockaProfitCenters MetakockaProfitCenter[]
-  skus                  Sku[]
-  paymentTypeMaps       PaymentTypeMap[]
-  paymentSetting        PaymentSetting?
-  supplySetting         SupplySetting?
-  productSyncSetting    ProductSyncSetting?
-  orders                Order[]
-  metakockaDocuments    MetakockaDocument[]
-  exceptions            Exception[]
+  metakockaPricelists    MetakockaPricelist[]
+  metakockaTaxRates      MetakockaTaxRate[]
+  skus                   Sku[]
+  paymentTypeMaps        PaymentTypeMap[]
+  paymentSetting         PaymentSetting?
+  supplySetting          SupplySetting?
+  productSyncSetting     ProductSyncSetting?
+  orders                 Order[]
+  metakockaDocuments     MetakockaDocument[]
+  exceptions             Exception[]
 
   @@map("shop")
 }
@@ -185,28 +187,28 @@ model SupplySource {
   name String
   kind SupplySourceKind @default(own)
 
-  shopifyLocationId String?         @map("shopify_location_id")
-  inventoryWriter   InventoryWriter @default(external) @map("inventory_writer")
-  stockDirection    StockDirection  @default(none) @map("stock_direction")
+  shopifyLocationId       String?         @map("shopify_location_id")
+  inventoryWriter         InventoryWriter @default(external) @map("inventory_writer")
+  stockDirection          StockDirection  @default(none) @map("stock_direction")
   /// True when `stockDirection` above was copied from the shop default
   /// rather than chosen for this source (CLAUDE.md §7). The effective value
   /// stays materialised so the sync engine reads one column and no caller has
   /// to resolve a default; this records only where that value came from, and
   /// is what lets a change to the default flow through to the sources that
   /// never overrode it.
-  stockDirectionInherited Boolean @default(false) @map("stock_direction_inherited")
+  stockDirectionInherited Boolean         @default(false) @map("stock_direction_inherited")
 
   /// The `mark` of a MetaKocka warehouse. MetaKocka accepts an unknown value
   /// silently (§3), so this is validated against warehouse_list on save.
-  metakockaWarehouse    String? @map("metakocka_warehouse")
+  metakockaWarehouse     String? @map("metakocka_warehouse")
   /// Stable MetaKocka id of that warehouse. Documents are addressed by mark, so
   /// the mark is what gets sent, but the mark changes when a warehouse is
   /// renamed. Following the id lets a reload update the mark in place instead
   /// of retiring a source that never went anywhere.
   metakockaWarehouseMkId String? @map("metakocka_warehouse_mk_id")
-  metakockaProfitCenter String? @map("metakocka_profit_center")
+  metakockaProfitCenter  String? @map("metakocka_profit_center")
   /// As `stockDirectionInherited`, for the profit centre.
-  profitCenterInherited Boolean @default(false) @map("profit_center_inherited")
+  profitCenterInherited  Boolean @default(false) @map("profit_center_inherited")
 
   /// Lower runs first in allocation.
   priority            Int     @default(100)
@@ -342,6 +344,71 @@ model MetakockaProfitCenter {
   @@map("metakocka_profit_center")
 }
 
+/// Pricelists this company has, as far as we can see them.
+///
+/// CLAUDE.md 3: MetaKocka neither lists pricelists nor creates one, and the
+/// rejection that names a pricelist's net-or-gross type only comes back from a
+/// catalogue *write*. So this register is filled from the read-only side
+/// (adapters/metakocka/pricelists.ts): every pricelist that has a price on a
+/// product shows up there with its code, its title and its basis.
+///
+/// A row is a suggestion backed by evidence, not an authority. A pricelist with
+/// no product priced on it is invisible to that read, so a merchant may
+/// legitimately enter a code this table has never seen -- `observedAt` is null
+/// for those, and the screen says the code could not be confirmed rather than
+/// refusing it.
+model MetakockaPricelist {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  /// The `count_code` a price is filed under.
+  code  String
+  /// MetaKocka's own name for it, when the read gave one.
+  title String?
+
+  /// True when prices on it include tax. Null when the read could not tell.
+  ///
+  /// A pricelist's type is fixed when it is created and unrelated to Shopify's
+  /// tax setting. Sending the wrong basis is not a format error, it is a price
+  /// wrong by the VAT rate that MetaKocka stores without complaint (3).
+  includesTax Boolean? @map("includes_tax")
+
+  /// When this code was last seen on a product. Null for a code the merchant
+  /// entered that no priced product uses.
+  observedAt DateTime? @map("observed_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, code])
+  @@map("metakocka_pricelist")
+}
+
+/// VAT rates seen on the company's own priced products.
+///
+/// Suggestions for the default VAT rate, never the source of truth: a rate a
+/// merchant has not used yet is still a rate they may need. MetaKocka has no
+/// endpoint that lists tax rates, so this is read from `tax_desc` on pricelist
+/// entries alongside the pricelists themselves.
+model MetakockaTaxRate {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  /// A percentage as a plain decimal string: "22", "9.5".
+  percent String
+
+  observedAt DateTime @default(now()) @map("observed_at")
+  createdAt  DateTime @default(now()) @map("created_at")
+  updatedAt  DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, percent])
+  @@map("metakocka_tax_rate")
+}
+
 enum SkuStatus {
   /// Present in Shopify, matched to a MetaKocka article by code.
   matched
@@ -459,7 +526,7 @@ model ProductSyncSetting {
 
   /// Pricelist a price is written into. It must already exist in MetaKocka;
   /// the API cannot create one (§3).
-  pricelistCode String? @map("pricelist_code")
+  pricelistCode        String? @map("pricelist_code")
   /// Whether that pricelist holds gross prices.
   ///
   /// A MetaKocka pricelist has its own net-or-gross type, fixed when it was
@@ -469,9 +536,9 @@ model ProductSyncSetting {
   /// names the field it wants in the rejection.
   pricelistIncludesTax Boolean @default(true) @map("pricelist_includes_tax")
   /// Tax rate as a percentage, for example "22". Sent as `tax_factor`.
-  taxPercent    String? @map("tax_percent")
+  taxPercent           String? @map("tax_percent")
   /// MetaKocka unit of measure for created articles.
-  unit          String  @default("kos")
+  unit                 String  @default("kos")
 
   lastRunAt DateTime? @map("last_run_at")
 
@@ -483,9 +550,15 @@ model ProductSyncSetting {
   @@map("product_sync_setting")
 }
 
-/* -------------------------------------------------------------------------- */
-/* Orders (CLAUDE.md section 6 and section 8)                                  */
-/* -------------------------------------------------------------------------- */
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Orders (CLAUDE.md section 6 and section 8)
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
 
 enum OrderStatus {
   received
@@ -559,8 +632,8 @@ model Order {
   /// from this app instead.
   shopifyDeletedAt DateTime? @map("shopify_deleted_at")
 
-  createdAt  DateTime @default(now()) @map("created_at")
-  updatedAt  DateTime @updatedAt @map("updated_at")
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
 
   shop       Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
   lines      OrderLine[]
