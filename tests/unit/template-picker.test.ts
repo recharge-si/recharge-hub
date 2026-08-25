@@ -205,9 +205,12 @@ describe("suggesting fields for what is being typed", () => {
     });
   });
 
-  it("waits for a second letter rather than opening on every word", () => {
-    expect(triggerAt("Acme v", 6)).toBeNull();
-    expect(triggerAt("Acme ve", 7)).not.toBeNull();
+  it("suggests from the very first letter", () => {
+    expect(triggerAt("Acme v", 6)).toEqual({
+      start: 5,
+      query: "v",
+      explicit: false,
+    });
   });
 
   it("says nothing after a space, a dash or an empty field", () => {
@@ -226,5 +229,29 @@ describe("suggesting fields for what is being typed", () => {
 
   it("treats a brace as deliberate even when nothing follows it", () => {
     expect(triggerAt("{", 1)).toEqual({ start: 0, query: "", explicit: true });
+  });
+});
+
+describe("what a short query matches", () => {
+  const ids = (query: string) =>
+    flattenGroups(pickerGroups(registry, query, sail)).map(
+      (row) => row.field.id,
+    );
+
+  it("matches the start of a word, not any part of one", () => {
+    // "d" is in Vendor, Handle, Barcode and most of the option fields. Offering
+    // all of them for one letter is a list of nearly everything.
+    expect(ids("d")).toEqual([]);
+    expect(ids("ven")).toEqual(["vendor"]);
+  });
+
+  it("finds a field by the second word of its label", () => {
+    expect(ids("option")).toContain("option1");
+    expect(ids("title")).toContain("title");
+  });
+
+  it("finds a metafield by its key as well as its name", () => {
+    expect(ids("area")).toContain("metafield.specs.area");
+    expect(ids("sail")).toContain("metafield.specs.area");
   });
 });

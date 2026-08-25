@@ -565,10 +565,18 @@ export function PatternEditor({
                 border="base"
                 borderRadius="base"
                 padding="small-200"
+                overflow="hidden"
               >
-                <s-scroll-box
-                  maxBlockSize="260px"
-                  accessibilityLabel="Fields you can add"
+                {/*
+                 * The cap and the scrolling are done here rather than with
+                 * `s-scroll-box`, which did not hold the rows in: a long list
+                 * ran straight out of the bottom of the panel and over the
+                 * page behind it. Height and overflow are layout, which is
+                 * this component's business anyway.
+                 */}
+                <div
+                  style={{ maxHeight: "260px", overflowY: "auto" }}
+                  role="presentation"
                 >
                   <s-stack direction="block" gap="small-400">
                     {rows.length === 0 ? (
@@ -632,7 +640,7 @@ export function PatternEditor({
                       ))
                     )}
                   </s-stack>
-                </s-scroll-box>
+                </div>
               </s-box>
             </div>
           ) : null}

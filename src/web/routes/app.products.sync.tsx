@@ -793,55 +793,65 @@ export default function ProductSyncSettings() {
        * only reason to show a pattern at all (docs/ui-conventions.md).
        */}
       <s-modal id={PATTERNS_MODAL_ID} heading="Ready patterns">
-        <s-stack direction="block" gap="base">
-          <s-grid
-            gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))"
-            gap="small-300"
-          >
-            {NAME_PATTERNS.map((option) => {
-              const inUse = option.pattern === state.nameTemplate;
-              const produced = patternSample
-                ? nameFor(
-                    settingsFromTemplate(option.pattern),
-                    patternSample as VariantFacts,
-                  ).name
-                : null;
+        {/*
+         * One column of full-width rows, not a grid of tiles. Four boxes of
+         * different heights side by side made a merchant read across as well
+         * as down for something they pick once, and the names they produce —
+         * the only reason to show a pattern at all — were the part that
+         * wrapped. A row is the shape the field list beside it already uses.
+         */}
+        <s-stack direction="block" gap="small-300">
+          {NAME_PATTERNS.map((option) => {
+            const inUse = option.pattern === state.nameTemplate;
+            const produced = patternSample
+              ? nameFor(
+                  settingsFromTemplate(option.pattern),
+                  patternSample as VariantFacts,
+                ).name
+              : null;
 
-              return (
-                <s-clickable
-                  key={option.id}
-                  accessibilityLabel={
-                    produced
-                      ? `${option.label}. Would produce ${produced}.`
-                      : option.label
-                  }
-                  onClick={() => {
-                    setTouched(true);
-                    set({ nameTemplate: option.pattern });
-                  }}
+            return (
+              <s-clickable
+                key={option.id}
+                inlineSize="100%"
+                accessibilityLabel={
+                  produced
+                    ? `${option.label}. Would produce ${produced}.`
+                    : option.label
+                }
+                onClick={() => {
+                  setTouched(true);
+                  set({ nameTemplate: option.pattern });
+                }}
+              >
+                <s-box
+                  background="subdued"
+                  borderRadius="base"
+                  padding="base"
+                  inlineSize="100%"
                 >
-                  <s-box
-                    background="subdued"
-                    borderRadius="base"
-                    padding="small-200"
-                  >
-                    <s-stack direction="block" gap="small-500">
+                  <s-stack direction="block" gap="small-500">
+                    <s-stack
+                      direction="inline"
+                      gap="small-300"
+                      alignItems="center"
+                    >
                       <s-text type="strong">{option.label}</s-text>
-                      {/*
-                       * The name this pattern gives one of the merchant's
-                       * own products. A shop with an empty catalogue gets
-                       * the pattern's name and no invented example.
-                       */}
-                      {produced ? (
-                        <s-text color="subdued">{produced}</s-text>
-                      ) : null}
                       {inUse ? <s-text color="subdued">In use</s-text> : null}
                     </s-stack>
-                  </s-box>
-                </s-clickable>
-              );
-            })}
-          </s-grid>
+                    {/*
+                     * The name this pattern gives one of the merchant's own
+                     * products. A shop with an empty catalogue gets the
+                     * pattern's name and no invented example.
+                     */}
+                    {produced ? (
+                      <s-text color="subdued">{produced}</s-text>
+                    ) : null}
+                  </s-stack>
+                </s-box>
+              </s-clickable>
+            );
+          })}
         </s-stack>
         <s-button
           slot="primary-action"
@@ -979,14 +989,21 @@ export default function ProductSyncSettings() {
                   </s-banner>
                 ) : null}
 
-                <s-button
-                  type="button"
-                  variant="tertiary"
-                  command="--show"
-                  commandFor={PATTERNS_MODAL_ID}
-                >
-                  Start from a ready pattern
-                </s-button>
+                {/*
+                 * Bordered. A tertiary button is text with a click handler,
+                 * and sitting on its own between two cards it read as a
+                 * heading nobody could press.
+                 */}
+                <s-stack direction="inline">
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={PATTERNS_MODAL_ID}
+                  >
+                    Start from a ready pattern
+                  </s-button>
+                </s-stack>
 
                 {/*
                  * The detail is behind a button, like the locations page puts a

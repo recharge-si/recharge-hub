@@ -151,12 +151,25 @@ export interface PickerGroup {
   rows: PickerRow[];
 }
 
+/**
+ * Matches the start of a word, not any part of one.
+ *
+ * "d" matched Vendor, Handle, Barcode and half the option fields, because all
+ * of them contain the letter somewhere — a list of nearly everything, offered
+ * for a letter the merchant was probably just typing. Anchoring to word starts
+ * makes a short query mean something: "ven" finds Vendor, "opt" finds the
+ * options, and "d" finds nothing, which is the honest answer.
+ */
 function matchesQuery(field: FieldDef, query: string): boolean {
   if (query === "") return true;
-  return (
-    field.id.toLowerCase().includes(query) ||
-    field.label.toLowerCase().includes(query)
-  );
+
+  const words = [
+    field.id,
+    ...field.id.split(/[._]/),
+    ...field.label.toLowerCase().split(/\s+/),
+  ];
+
+  return words.some((word) => word.startsWith(query));
 }
 
 /**
@@ -198,10 +211,11 @@ export function canAddField(nodes: TemplateNode[]): boolean {
 /**
  * How short a word can be and still be worth suggesting fields for.
  *
- * One letter matches most of the register and would open a list on the first
- * keystroke of every word a merchant types.
+ * One, so the list is there as soon as there is anything to match against.
+ * Waiting for a second letter meant the first keystroke did nothing visible
+ * and the field looked inert for exactly as long as it takes to doubt it.
  */
-export const MIN_SUGGEST = 2;
+export const MIN_SUGGEST = 1;
 
 export interface Trigger extends PickerQuery {
   /**
