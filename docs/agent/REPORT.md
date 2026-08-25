@@ -89,3 +89,41 @@ out of order.
   the DLQ job carries the original `data`, `output`, and `source_name`, which
   is exactly what the consumer reads. Live double-check against a real Postgres
   is in TODO-HUMAN.md T-04.
+
+### [P1] Shipping and order-level discount never reach the MetaKocka document
+- **Where:** `src/jobs/order-shares.ts`, `src/adapters/metakocka/documents.ts`
+  (`buildSalesOrderBody`), `src/jobs/handlers/write-metakocka-order.ts`
+- **What:** `computeDocumentShares` folds shipping, COD surcharge and
+  order-level discount into the primary document's *share* - which is what the
+  payment is recorded for (`mark_paid.amount = share.totalMinor`) - but
+  `buildSalesOrderBody` sends only the product lines. The primary document in
+  MetaKocka therefore totals to its lines while carrying a payment for lines
+  plus shipping minus discount: on every order with shipping, the ERP shows a
+  document over-paid by the shipping amount, and an invoice raised from that
+  sales order bills the customer nothing for shipping.
+- **Why it matters:** Real money: a merchant invoicing from the sales order
+  under-bills shipping on every order. And the section 8.10 nightly assertion
+  "document totals sum to the Shopify order total" can never hold.
+- **Spec:** CLAUDE.md section 8.6 says shipping and order-level discount "go on
+  the primary document only" - the code puts them on the primary *payment*
+  only. The spec names no mechanism; the official put_document docs (fetched
+  this run) show **no shipping field at all**, and an order-level
+  `discount_value` field that this app has never verified live.
+- **Status:** needs human - not fixable tonight without inventing MetaKocka
+  semantics (rule 8). Proposed design below.
+- **Verified by:** reading both files; official docs
+  documents_put_document_sales_order.md field list (no delivery/postage field;
+  `discount_value` exists).
+
+Proposed design (for review, not built):
+```text
+1. sales_order_setting gains shipping_product_code (merchant-chosen, validated
+   against the catalogue like any SKU, empty = keep today's behaviour).
+2. buildSalesOrderBody, primary document only: append a line
+   { code: shipping_product_code, amount: "1", price_with_tax/price: shippingMinor }
+   with the order's shipping tax factor (Shopify supplies shipping_lines tax).
+3. Order-level discount: probe discount_value on company 6789 first (gross or
+   net? does it change sum_all? per-line spread?). Until verified, keep
+   discount inside the payment share only and raise an exception when
+   discountMinor > 0 and a document is written, naming the difference.
+```

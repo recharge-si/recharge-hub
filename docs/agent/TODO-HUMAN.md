@@ -35,3 +35,14 @@ behaviour are only verifiable against Postgres. Add a vitest project that runs
 against the compose `postgres` service (prisma migrate deploy + per-test
 truncation) and assert: two concurrent `write-metakocka-order` runs for one
 source produce exactly one document row and one MetaKocka call.
+
+## T-05 - Shipping line and discount_value probes (test company only)
+Needed before the section 8.6 gap (shipping never on the document) can close:
+1. Create a service product (e.g. code POSTNINA) on company 6789, then
+   put_document a sales order with a normal line plus
+   `{ "code": "POSTNINA", "amount": "1", "price_with_tax": "4.90", "tax_factor": "0.22" }`
+   and read it back: does sum_all include it, does the warehouse ignore a
+   service line's stock?
+2. put_document with `"discount_value": "5.00"` and read back sum_basic /
+   sum_all to learn its basis and whether it spreads per line.
+Record both under tests/fixtures/metakocka/.
