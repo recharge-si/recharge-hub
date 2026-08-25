@@ -451,6 +451,43 @@ export async function claimDocument(
 }
 
 /**
+ * Marks an order written only when every source its allocation names holds a
+ * written document.
+ *
+ * The old check counted document *rows* that were not yet written, which reads
+ * as complete the moment the last existing row succeeds — but a sibling write
+ * job that died before claiming its row never created one, so a split order
+ * lost half its documents and still turned green. Completeness is a claim
+ * about the allocation, so it is measured against the allocation.
+ */
+export async function markOrderWrittenIfComplete(
+  orderId: string,
+): Promise<void> {
+  const allocated = await prisma.allocation.findMany({
+    where: { orderLine: { orderId }, supplySourceId: { not: null } },
+    select: { supplySourceId: true },
+    distinct: ["supplySourceId"],
+  });
+  if (allocated.length === 0) return;
+
+  const written = await prisma.metakockaDocument.findMany({
+    where: { orderId, status: "written" },
+    select: { supplySourceId: true },
+  });
+  const have = new Set(written.map((doc) => doc.supplySourceId));
+
+  const missing = allocated.some(
+    (allocation) => !have.has(allocation.supplySourceId),
+  );
+  if (missing) return;
+
+  await prisma.order.update({
+    where: { id: orderId },
+    data: { status: "written" },
+  });
+}
+
+/**
  * Records the exact body about to be sent, before the call goes out.
  *
  * §8.4 says request and response are recorded regardless of outcome, and this

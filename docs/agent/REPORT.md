@@ -239,3 +239,39 @@ Proposed patch once T-06 answers:
 - **Verified by:** `vitest run` (recovery tests extended: unknown code "1" is
   not definitive); `tsc`, `eslint` green. True concurrent-writer assertion
   needs the Postgres harness (T-04).
+
+### [P1] Every orders/edited webhook resolved to "unknown order" and was dropped
+- **Where:** `src/jobs/handlers/orders-event.ts` (identitySchema)
+- **What:** The identity schema read only top-level `id`/`order_id`, but the
+  orders/edited payload is an order *edit* - `{ order_edit: { id, order_id,
+  ... } }` - whose own `id` is the id of the edit. Every edit therefore matched
+  no order and was logged as "Event for unknown order". Section 8.8's whole
+  edit pipeline was reachable only through the reconciler's updated_at sweep -
+  which the schedule-collision P0 meant never ran either. In production, edits
+  were simply invisible.
+- **Why it matters:** A merchant edits a line from 1 to 2, MetaKocka keeps
+  shipping 1, and nothing anywhere says so.
+- **Spec:** CLAUDE.md section 8.8. Spec right, code wrong.
+- **Status:** fixed - `orderIdOfEvent` reads `order_edit.order_id` first
+  (the edit envelope outranks the top level, where `id` means the edit).
+- **Verified by:** new tests in tests/unit/orders-event-identity.test.ts
+  covering the edit envelope, refunds, deletes and junk; suite green.
+
+### [P1] A split order turned "written" when its first document landed
+- **Where:** `src/jobs/handlers/write-metakocka-order.ts` (two sites),
+  now `markOrderWrittenIfComplete` in the order repository
+- **What:** Completion was measured as "no document row is unwritten", but a
+  sibling write job that died before claiming its row never created one - so
+  a 5/3 split whose second job was lost counted zero unwritten rows and marked
+  the order written after the first document. Half the goods were never
+  ordered from the ERP and every screen said done.
+- **Why it matters:** The demo scenario of M4 (an 8-unit order split 5/3) is
+  exactly the shape that breaks; the missing half is silent, which is the
+  worst kind of missing.
+- **Spec:** CLAUDE.md sections 8.2/8.4 imply per-source documents; the
+  completeness claim is about the allocation, so it is now measured against
+  the allocation: written only when every allocated source holds a written
+  document.
+- **Status:** fixed in both the create-success and recovery-adoption paths.
+- **Verified by:** `tsc`, `eslint`, `vitest run` green. A DB-backed
+  two-source assertion belongs to the T-04 harness.

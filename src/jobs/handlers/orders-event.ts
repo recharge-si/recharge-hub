@@ -23,8 +23,40 @@ const identitySchema = z
       .union([z.string(), z.number()])
       .transform(String)
       .optional(),
+    /**
+     * `orders/edited` does not carry the order at any top level: its payload
+     * is an *order edit*, `{ order_edit: { id, order_id, ... } }`, where the
+     * top-level-adjacent `id` is the id of the edit. Reading only the top
+     * level meant every edit resolved to "event for unknown order" and was
+     * dropped on the floor.
+     */
+    order_edit: z
+      .object({
+        order_id: z
+          .union([z.string(), z.number()])
+          .transform(String)
+          .optional(),
+      })
+      .passthrough()
+      .optional(),
   })
   .passthrough();
+
+/**
+ * The Shopify order id an order event is about, whatever envelope it arrived
+ * in. The edit envelope wins over the top level: on `orders/edited` the
+ * top-level `id` is the id of the edit, not of the order.
+ */
+export function orderIdOfEvent(payload: unknown): string | null {
+  const identity = identitySchema.safeParse(payload);
+  if (!identity.success) return null;
+  return (
+    identity.data.order_edit?.order_id ??
+    identity.data.order_id ??
+    identity.data.id ??
+    null
+  );
+}
 
 /**
  * The order topics whose payload is not an order (CLAUDE.md §8.8).
@@ -51,10 +83,7 @@ export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
   const principal = serviceToken(shopDomain, "orders-event");
   const log = getLogger();
 
-  const identity = identitySchema.safeParse(payload);
-  const shopifyOrderId = identity.success
-    ? (identity.data.order_id ?? identity.data.id ?? null)
-    : null;
+  const shopifyOrderId = orderIdOfEvent(payload);
 
   const order = shopifyOrderId
     ? await prisma.order.findFirst({

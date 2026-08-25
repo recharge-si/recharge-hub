@@ -14,6 +14,7 @@ import {
   applyPrimaryDocument,
   claimDocument,
   getOrderDetail,
+  markOrderWrittenIfComplete,
   recordDocumentRequest,
   recordDocumentResult,
   recordPaymentMark,
@@ -655,15 +656,7 @@ export async function handleWriteMetakockaOrder(
         },
       });
 
-      const remaining = await prisma.metakockaDocument.count({
-        where: { orderId, status: { not: "written" } },
-      });
-      if (remaining === 0) {
-        await prisma.order.update({
-          where: { id: orderId },
-          data: { status: "written" },
-        });
-      }
+      await markOrderWrittenIfComplete(orderId);
 
       log.info(
         { shop: shopDomain, orderId, countCode, mkId: found.mkId },
@@ -781,16 +774,10 @@ export async function handleWriteMetakockaOrder(
       });
     }
 
-    // Once every source has a document, the order is done.
-    const remaining = await prisma.metakockaDocument.count({
-      where: { orderId, status: { not: "written" } },
-    });
-    if (remaining === 0) {
-      await prisma.order.update({
-        where: { id: orderId },
-        data: { status: "written" },
-      });
-    }
+    // Once every source the allocation names has a written document, the
+    // order is done. Measured against the allocation, not against the rows
+    // that happen to exist (see markOrderWrittenIfComplete).
+    await markOrderWrittenIfComplete(orderId);
 
     log.info(
       { shop: shopDomain, orderId, countCode, mkId: result.mkId },
