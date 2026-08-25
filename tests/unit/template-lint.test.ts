@@ -186,6 +186,33 @@ describe("warnings are worth reading but do not block", () => {
   });
 });
 
+describe("counts are out of what was checked, never out of the catalogue", () => {
+  it("says so when every checked product is affected", () => {
+    // Both shirts have the same title, so "{title}" names them identically.
+    const found = lint("{title}", [shirt, shirtSmall]);
+
+    expect(found.find((d) => d.code === "duplicate_name")?.message).toContain(
+      "all 2 products checked",
+    );
+  });
+
+  it("says so when only some of them are", () => {
+    const mast: VariantFacts = {
+      ...shirt,
+      productTitle: "Mast",
+      sku: "M-1",
+      optionValues: ["490"],
+    };
+    const found = lint("{title}", [shirt, shirtSmall, mast]);
+
+    // A shop with twelve thousand products previewing three of them must not
+    // read this as a statement about the twelve thousand.
+    expect(found.find((d) => d.code === "duplicate_name")?.message).toContain(
+      "2 of the 3 products checked",
+    );
+  });
+});
+
 describe("every diagnostic is actionable", () => {
   it("carries a count, samples and a message that says what to do", () => {
     const found = lint("{title}", [shirt, shirtSmall]);

@@ -17,8 +17,10 @@ import {
 import { metakockaNamesFor } from "~/adapters/db/repositories/sku.server";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
 import {
+  countVariants,
   listMetafieldDefinitions,
   listVariantDetails,
+  type VariantCount,
 } from "~/adapters/shopify/products";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
@@ -85,10 +87,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [settings, samples, definitions] = await Promise.all([
+  const [settings, samples, definitions, catalogue] = await Promise.all([
     getProductSyncSetting(principal),
     listVariantDetails(admin, previewOptions),
     listMetafieldDefinitions(admin),
+    // How big the catalogue actually is, so the preview can say what fraction
+    // of it the merchant is looking at. Twelve rows out of twelve thousand
+    // products is a sample; twelve out of twelve is the whole catalogue, and
+    // the screen must not let those read the same.
+    countVariants(admin),
   ]);
 
   // What MetaKocka calls these products now, read from our own registry. No
@@ -108,6 +115,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
     samples,
     definitions,
+    catalogue,
     currentNames: [...currentNames.entries()],
   };
 };
@@ -266,6 +274,32 @@ function toState(settings: {
   };
 }
 
+/** Fixed locale so the server and the browser render the same string. */
+const NUMBER = new Intl.NumberFormat("en-GB");
+
+/**
+ * What the preview covers, said plainly.
+ *
+ * The one thing this must never do is let a sample read as the catalogue. A
+ * merchant with twelve thousand variants seeing twelve rows has been shown
+ * roughly a thousandth of what a sync would touch, and every count on this
+ * screen — the table and the lint alike — is out of those twelve.
+ */
+function previewScope(shown: number, catalogue: VariantCount | null): string {
+  if (shown === 0) return "";
+  if (!catalogue) {
+    return `Checked against ${shown} of your product variants. Anything not shown here has not been checked.`;
+  }
+  if (catalogue.exact && catalogue.count <= shown) {
+    return `Checked against all ${NUMBER.format(catalogue.count)} of your product variants.`;
+  }
+
+  const total = catalogue.exact
+    ? NUMBER.format(catalogue.count)
+    : `more than ${NUMBER.format(catalogue.count)}`;
+  return `Checked against ${shown} of your ${total} product variants. Anything not shown here has not been checked.`;
+}
+
 /** Errors first: they are what stops the merchant, and they say why. */
 function bySeverity(diagnostics: Diagnostic[]): Diagnostic[] {
   return [...diagnostics].sort((a, b) =>
@@ -274,7 +308,7 @@ function bySeverity(diagnostics: Diagnostic[]): Diagnostic[] {
 }
 
 export default function ProductSyncSettings() {
-  const { settings, samples, definitions, currentNames } =
+  const { settings, samples, definitions, catalogue, currentNames } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const formRef = useRef<HTMLFormElement>(null);
@@ -532,8 +566,9 @@ export default function ProductSyncSettings() {
                 </s-stack>
 
                 <s-stack direction="block" gap="small-300">
-                  <s-text type="strong">
-                    {`What changes in MetaKocka (${preview.totals.rows} of your products)`}
+                  <s-text type="strong">A sample of your products</s-text>
+                  <s-text color="subdued">
+                    {previewScope(preview.totals.rows, catalogue)}
                   </s-text>
                   <NamePreviewTable
                     rows={preview.rows}

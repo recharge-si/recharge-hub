@@ -274,6 +274,50 @@ export async function listMetafieldDefinitions(
   ];
 }
 
+/**
+ * How many variants the shop has, so the settings screen can say what fraction
+ * of the catalogue its preview covers.
+ *
+ * `precision` matters. The count stops at 10,000 by default and then reports
+ * itself as an estimate rather than an exact figure, so a large catalogue must
+ * be described as "more than" rather than given a number that is not one. The
+ * limit is left at the default: an unbounded count on a large shop is a slow
+ * query on a page load (CLAUDE.md 2.5), and "more than 10,000" answers the
+ * question the merchant is actually asking.
+ */
+const VARIANT_COUNT_QUERY = `#graphql
+  query OrchestratorVariantCount {
+    productVariantsCount { count precision }
+  }
+`;
+
+const variantCountSchema = z.object({
+  data: z.object({
+    productVariantsCount: z
+      .object({ count: z.number(), precision: z.string() })
+      .nullable(),
+  }),
+});
+
+export interface VariantCount {
+  count: number;
+  /** False when the count stopped at its limit, so `count` is a floor. */
+  exact: boolean;
+}
+
+export async function countVariants(
+  admin: AdminApiContext,
+): Promise<VariantCount | null> {
+  const response = await admin.graphql(VARIANT_COUNT_QUERY);
+  const { data } = variantCountSchema.parse(await response.json());
+  if (!data.productVariantsCount) return null;
+
+  return {
+    count: data.productVariantsCount.count,
+    exact: data.productVariantsCount.precision === "EXACT",
+  };
+}
+
 const TAXES_QUERY = `#graphql
   query OrchestratorTaxSettings {
     shop {

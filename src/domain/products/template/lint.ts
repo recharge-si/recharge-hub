@@ -24,8 +24,19 @@ function sample(ids: string[]): string[] {
   return ids.slice(0, SAMPLES);
 }
 
-function plural(count: number): string {
-  return count === 1 ? "product" : "products";
+/**
+ * How many of the products that were checked a finding covers.
+ *
+ * Every count here is out of the sample, never out of the catalogue, and the
+ * message has to say so. A shop with twelve thousand products previewing twelve
+ * of them must not read "2 products would share a name" as a statement about
+ * the twelve thousand -- it is a statement about the twelve, and the two mean
+ * very different things when deciding whether to sync.
+ */
+function scope(count: number, total: number): string {
+  if (total === 1) return "the one product checked";
+  if (count >= total) return `all ${total} products checked`;
+  return `${count} of the ${total} products checked`;
 }
 
 /** Punctuation hanging off either end of a word, which is not part of it. */
@@ -112,7 +123,7 @@ export function lintTemplate({
     diagnostics.push({
       code: "duplicate_name",
       severity: "error",
-      message: `${affected.length} products would share a name with another product. MetaKocka matches products by name, so these would be impossible to tell apart. Add a field that differs between variants, such as the SKU or an option.`,
+      message: `${scope(affected.length, traces.length)} would share a name with another. MetaKocka matches products by name, so these would be impossible to tell apart. Add a field that differs between variants, such as the SKU or an option.`,
       count: affected.length,
       sampleIds: sample(affected),
     });
@@ -130,7 +141,7 @@ export function lintTemplate({
     diagnostics.push({
       code: "empty_name",
       severity: "warning",
-      message: `Every field is empty for ${empty.length} ${plural(empty.length)}, so the product title would be used as the name instead. Add a field that always has a value, such as the product title.`,
+      message: `Every field is empty for ${scope(empty.length, traces.length)}, so the product title would be used as the name instead. Add a field that always has a value, such as the product title.`,
       count: empty.length,
       sampleIds: sample(empty),
     });
@@ -145,7 +156,7 @@ export function lintTemplate({
     diagnostics.push({
       code: "repeated_word",
       severity: "warning",
-      message: `The name repeats a word for ${repeating.length} ${plural(repeating.length)}: "${firstRepeat.trace.name}" says "${repeatsIn(firstRepeat.trace.name)[0]}" twice. Remove the field that duplicates it, or narrow it with a filter.`,
+      message: `The name repeats a word for ${scope(repeating.length, traces.length)}: "${firstRepeat.trace.name}" says "${repeatsIn(firstRepeat.trace.name)[0]}" twice. Remove the field that duplicates it, or narrow it with a filter.`,
       count: repeating.length,
       sampleIds: sample(repeating.map(({ facts }) => facts.sku)),
     });
@@ -160,7 +171,7 @@ export function lintTemplate({
     diagnostics.push({
       code: "name_too_long",
       severity: "warning",
-      message: `The name is longer than ${MAX_NAME_LENGTH} characters for ${tooLong.length} ${plural(tooLong.length)} and would be shortened to fit. MetaKocka publishes no length limit, so ${MAX_NAME_LENGTH} is this app's own cap rather than the ERP's.`,
+      message: `The name is longer than ${MAX_NAME_LENGTH} characters for ${scope(tooLong.length, traces.length)} and would be shortened to fit. MetaKocka publishes no length limit, so ${MAX_NAME_LENGTH} is this app's own cap rather than the ERP's.`,
       count: tooLong.length,
       sampleIds: sample(tooLong.map(({ facts }) => facts.sku)),
     });
@@ -185,7 +196,7 @@ export function lintTemplate({
       diagnostics.push({
         code: "redundant_token",
         severity: "warning",
-        message: `The value of {${token.field}} already appears in the product title for ${repeated.length} ${repeated.length === 1 ? "product" : "products"}, so the name repeats itself.`,
+        message: `The value of {${token.field}} already appears in the product title for ${scope(repeated.length, traces.length)}, so the name repeats itself.`,
         count: repeated.length,
         sampleIds: sample(repeated),
       });
@@ -203,7 +214,7 @@ export function lintTemplate({
       diagnostics.push({
         code: "always_empty",
         severity: "warning",
-        message: `{${token.field}} is empty for every product previewed, so it adds nothing to the name.`,
+        message: `{${token.field}} is empty for ${scope(traces.length, traces.length)}, so it adds nothing to the name.`,
         count: traces.length,
         sampleIds: sample(traces.map(({ facts }) => facts.sku)),
       });
@@ -226,7 +237,7 @@ export function lintTemplate({
       diagnostics.push({
         code: "no_variant_field",
         severity: "warning",
-        message: `${multi.length} ${multi.length === 1 ? "product has" : "products have"} more than one variant, but the template uses no field that differs between variants. Every variant would get the same name.`,
+        message: `${scope(multi.length, traces.length)} have more than one variant, but the name uses no field that differs between variants. Every variant would get the same name.`,
         count: multi.length,
         sampleIds: sample(multi),
       });
