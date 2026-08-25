@@ -952,6 +952,9 @@ enum ExceptionKind {
   metakocka_document_changed
   /// The payment could not be recorded against the MetaKocka document.
   payment_write_failed
+  /// A background job ran out of retries. Raised from the dead-letter queue so
+  /// work stopping is something a merchant can see, not a log line.
+  job_failed
 
   @@map("exception_kind")
 }

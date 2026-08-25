@@ -7,6 +7,9 @@ import type { Queue } from "pg-boss";
  * In pg-boss 12 retry settings belong to the queue, not to the individual send.
  */
 export const QUEUES = {
+  // First on purpose: `ensureQueues` creates queues in this order, and the
+  // dead-letter target has to exist before any queue that names it.
+  deadJobs: "dead-jobs",
   appUninstalled: "app-uninstalled",
   customersDataRequest: "customers-data-request",
   customersRedact: "customers-redact",
@@ -37,6 +40,21 @@ export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 type QueueOptions = Omit<Queue, "name">;
 
 /**
+ * Where a job goes when its last retry fails.
+ *
+ * §11 promises that a retryable failure needs no human *because the queue is
+ * dealing with it* — a job that has run out of retries is no longer being
+ * dealt with, and without this it vanished into pg-boss's failed state with
+ * nothing telling the merchant. The dead-letter consumer raises an exception
+ * instead (jobs/handlers/dead-job.ts).
+ *
+ * The scheduled ticks and the nightly register reloads are deliberately not
+ * dead-lettered: the next tick re-runs them regardless, so their failure is
+ * a Sentry event rather than a merchant-facing condition.
+ */
+const DEAD_LETTER = QUEUES.deadJobs;
+
+/**
  * Retryable failures back off exponentially and are never surfaced to a human
  * (CLAUDE.md section 11). Compliance work retries for well over a day because
  * failing to redact is not an option we get to take.
@@ -48,10 +66,23 @@ const COMPLIANCE_POLICY: QueueOptions = {
   retryDelayMax: 3600,
   expireInSeconds: 300,
   retentionSeconds: 60 * 60 * 24 * 30,
+  // Failing to redact is a legal promise broken; it must never fail silently.
+  deadLetter: DEAD_LETTER,
 };
 
 export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
+  // Consumes what every other queue dead-letters. Raising the exception is a
+  // single insert, so a failure here is almost always the database being
+  // briefly unavailable — worth a few retries, kept long enough to inspect.
+  [QUEUES.deadJobs]: {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 300,
+    retentionSeconds: 60 * 60 * 24 * 14,
+  },
   [QUEUES.appUninstalled]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 6,
     retryDelay: 30,
     retryBackoff: true,
@@ -64,12 +95,14 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // than on an existing one. Stacking is prevented at send time instead, with
   // `enqueueThrottled`.
   [QUEUES.syncCatalogue]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 3,
     retryDelay: 60,
     retryBackoff: true,
     expireInSeconds: 1800,
   },
   [QUEUES.syncInventory]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 3,
     retryDelay: 60,
     retryBackoff: true,
@@ -78,6 +111,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // One MetaKocka call per product and no bulk endpoint (§8.9), so a full
   // catalogue push is measured in minutes, not seconds.
   [QUEUES.syncProducts]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 2,
     retryDelay: 120,
     retryBackoff: true,
@@ -87,12 +121,14 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // transaction, so this queue exists for the events that only raise an
   // exception (refunds, cancellations, edits) and for re-parsing.
   [QUEUES.ordersCreate]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 5,
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 300,
   },
   [QUEUES.ordersEvent]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 5,
     retryDelay: 30,
     retryBackoff: true,
@@ -102,6 +138,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // — the diff does nothing for an order that has not moved — so it retries
   // freely.
   [QUEUES.syncOrderState]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 5,
     retryDelay: 30,
     retryBackoff: true,
@@ -111,6 +148,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // is claimed before the call and `payment_marked_at` is written after
   // (§8.7: mark_paid on an update replaces the previous payment).
   [QUEUES.markMetakockaPaid]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 4,
     retryDelay: 60,
     retryBackoff: true,
@@ -146,6 +184,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // Pure and fast: it reads stock and rules and decides. Worth retrying, since
   // a failure here is almost always the database being briefly unavailable.
   [QUEUES.allocateOrder]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 5,
     retryDelay: 15,
     retryBackoff: true,
@@ -155,6 +194,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // claimed before the call goes out (section 8.4): MetaKocka would otherwise
   // happily create a second document.
   [QUEUES.writeMetakockaOrder]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 4,
     retryDelay: 60,
     retryBackoff: true,
@@ -163,6 +203,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     expireInSeconds: 300,
   },
   [QUEUES.writeShopifyFulfilment]: {
+    deadLetter: DEAD_LETTER,
     retryLimit: 4,
     retryDelay: 30,
     retryBackoff: true,

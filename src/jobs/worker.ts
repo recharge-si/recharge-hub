@@ -9,6 +9,7 @@ import { createBoss, ensureQueues } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { makeAppUninstalledHandler } from "~/jobs/handlers/app-uninstalled";
 import { handleCustomersDataRequest } from "~/jobs/handlers/customers-data-request";
+import { handleDeadJob } from "~/jobs/handlers/dead-job";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
 import { handleAllocateOrder } from "~/jobs/handlers/allocate-order";
 import { handleMarkMetakockaPaid } from "~/jobs/handlers/mark-metakocka-paid";
@@ -48,6 +49,17 @@ async function main(): Promise<void> {
 
   await boss.start();
   await ensureQueues(boss);
+
+  // §11: a job that has run out of retries is no longer being dealt with by
+  // the queue, so it stops being invisible. Metadata is needed for the queue
+  // the job died in (`sourceName`) and the failure it recorded (`output`).
+  await boss.work(
+    QUEUES.deadJobs,
+    { includeMetadata: true },
+    async (jobs) => {
+      for (const job of jobs) await handleDeadJob(job);
+    },
+  );
 
   // Every handler runs at most once per Shopify webhook id, however many times
   // the event is delivered (CLAUDE.md section 6, idempotency_key).

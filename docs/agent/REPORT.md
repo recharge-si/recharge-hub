@@ -61,3 +61,31 @@ out of order.
   cannot-find → null, any-other-error → throw); `tsc --noEmit` and `eslint .`
   clean. Handler-level double-run needs a database harness that does not exist —
   recorded in TODO-HUMAN.md.
+
+### [P2] A job that ran out of retries vanished silently
+- **Where:** `src/adapters/queue/queues.ts` (no `deadLetter` anywhere), `src/jobs/worker.ts`
+- **What:** pg-boss moved a job that exhausted its retry budget to its `failed`
+  state and nothing consumed that. An order could sit allocated-but-unsent
+  forever with a green dashboard; a compliance redaction could fail its 12
+  retries and nobody would hear. (The 15-minute order reconciler re-drives
+  stalled *order* writes, which is why this is P2 and not P0 - but compliance,
+  sync and uninstall work had no such net.)
+- **Why it matters:** Section 11 promises retryable failures need no human
+  because the queue is dealing with them. Once retries are exhausted the queue
+  has stopped dealing with them, and the promise inverts.
+- **Spec:** run prompt Pass 1 ("a dead job must raise an exception row"); not
+  explicit in CLAUDE.md section 11 - recorded in DRIFT.md as a spec gap.
+- **Status:** fixed. New `dead-jobs` queue; `deadLetter` set on every
+  order-flow, sync, uninstall and compliance queue (scheduled ticks and nightly
+  register reloads deliberately excluded - the next tick re-runs them, so their
+  failure stays a Sentry event). Consumer raises a `job_failed` exception
+  (new enum value, additive migration 20260826010000) attributed to the shop
+  and order where the payload names them, deduplicated per queue for
+  queue-level jobs. Exceptions UI copy and the retry mapping know the new kind;
+  the re-check sweep leaves it open (safe default confirmed at
+  recheck-exceptions.ts:485).
+- **Verified by:** `tsc --noEmit`, `eslint .`, `npx vitest run` (428 tests) all
+  clean. pg-boss dead-letter SQL read in node_modules (plans.js:1866-1890):
+  the DLQ job carries the original `data`, `output`, and `source_name`, which
+  is exactly what the consumer reads. Live double-check against a real Postgres
+  is in TODO-HUMAN.md T-04.

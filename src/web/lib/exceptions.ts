@@ -123,6 +123,12 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "The order has no tax lines to derive a rate from. Set the rate in MetaKocka, or check the tax settings for that market.",
   },
+  job_failed: {
+    label: "Background work stopped",
+    short: "whose background work stopped",
+    guidance:
+      "A job ran out of retries and will not run again on its own. The recorded failure is on the exception. Fix what it names, then retry.",
+  },
 };
 
 const FALLBACK: ExceptionCopy = {

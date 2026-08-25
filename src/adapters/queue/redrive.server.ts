@@ -82,6 +82,12 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
    * it may already be invoiced, and sending another would make two.
    */
   metakocka_document_changed: "none",
+  /*
+   * A dead-lettered job. Where the work was about an order, its own state says
+   * which step to re-drive; a queue-level job (a sync, a reload) is re-run
+   * from its page rather than from here.
+   */
+  job_failed: "auto",
 };
 
 export interface RedriveResult {
