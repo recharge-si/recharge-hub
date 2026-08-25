@@ -27,7 +27,11 @@ import {
   listVariantDetails,
 } from "~/adapters/shopify/products";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
-import { nameFor, settingsFromTemplate } from "~/domain/products/template";
+import {
+  nameFor,
+  settingsFromTemplate,
+  usesMetafields,
+} from "~/domain/products/template";
 import { serviceToken } from "~/domain/types";
 
 export const syncProductsJobSchema = z.object({
@@ -97,8 +101,15 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
   });
   const { admin } = await unauthenticated.admin(shopDomain);
 
+  // The naming settings the preview screen resolves against, built from the
+  // stored row. Rules are not stored yet, so this is the default pattern
+  // alone; when they are, only this line changes.
+  const naming = settingsFromTemplate(settings.nameTemplate);
+
   const [variants, pricing, mkProducts] = await Promise.all([
-    listVariantDetails(admin),
+    // Metafields are read only when a pattern uses one. They cost query points
+    // on every page, and a name built without them must not pay for them.
+    listVariantDetails(admin, { metafields: usesMetafields(naming) }),
     getShopPricing(admin),
     listProducts(client),
   ]);
@@ -118,11 +129,6 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
   let missingPrice = 0;
   /** SKUs whose price cannot be restated on the pricelist's basis. */
   let unpriceable = 0;
-
-  // The naming settings the preview screen resolves against, built from the
-  // stored row. Rules are not stored yet, so this is the default template
-  // alone; when they are, only this line changes.
-  const naming = settingsFromTemplate(settings.nameTemplate);
 
   /**
    * Whether the target pricelist holds gross prices.

@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   Form,
   useActionData,
@@ -14,22 +14,34 @@ import {
   getProductSyncSetting,
   saveProductSyncSetting,
 } from "~/adapters/db/repositories/product-sync-setting.server";
+import { metakockaNamesFor } from "~/adapters/db/repositories/sku.server";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
-import { listVariantDetails } from "~/adapters/shopify/products";
+import {
+  listMetafieldDefinitions,
+  listVariantDetails,
+} from "~/adapters/shopify/products";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
-  EXAMPLE_VARIANT,
-  NAME_TOKENS,
-  renderName,
-  TEMPLATE_PRESETS,
+  buildPreview,
+  fieldRegistry,
+  hasBlockingError,
+  lintTemplate,
+  NAME_PATTERNS,
+  nameFor,
+  parseTemplate,
+  settingsFromTemplate,
+  type Diagnostic,
+  type MetafieldDefinition,
   type VariantFacts,
-} from "~/domain/products/name-template";
+} from "~/domain/products/template";
 import {
   DEFAULT_UNIT,
   METAKOCKA_UNITS,
   isKnownUnit,
 } from "~/domain/products/units";
 import { Dropdown } from "~/web/components/dropdown";
+import { NamePatternField } from "~/web/components/name-pattern-field";
+import { NamePreviewTable } from "~/web/components/name-preview-table";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -37,33 +49,71 @@ import { principalFromSession } from "~/web/lib/principal.server";
  *
  * Every switch here defaults to off. This is the only place in the app that
  * writes into the ERP's catalogue, so nothing happens until the merchant says
- * it should, and the preview shows exactly what a name will look like before a
- * single call is made.
+ * it should, and the preview shows what every name becomes before a single
+ * call is made.
+ *
+ * The preview, the lint and the save check all run through
+ * `domain/products/template`, which is the same entry point the sync job uses.
+ * `tests/unit/template-agreement.test.ts` holds them to each other: a preview
+ * that can disagree with the job is a promise the job then breaks across the
+ * whole catalogue.
  *
  * Grouped sections and the contextual save bar, per §2.6.
  */
+
+/**
+ * How many of the merchant's products the preview covers.
+ *
+ * Enough rows to see a pattern behave on more than one shape of product, few
+ * enough that a settings page reads one small page of the catalogue rather
+ * than all of it (§2.5). The lint runs over the same set, so what blocks saving
+ * is exactly what the merchant can see.
+ */
+const PREVIEW_SIZE = 12;
+
+const previewOptions = { first: PREVIEW_SIZE, maxPages: 1, metafields: true };
+
+function knownMetafieldPaths(definitions: MetafieldDefinition[]): Set<string> {
+  return new Set(
+    definitions.map(
+      (definition) => `${definition.namespace}.${definition.key}`,
+    ),
+  );
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [settings, samples] = await Promise.all([
+  const [settings, samples, definitions] = await Promise.all([
     getProductSyncSetting(principal),
-    // One page of a few variants: enough to preview a template against real
-    // products without reading the whole catalogue on a settings page (§2.5).
-    listVariantDetails(admin, { first: 5, maxPages: 1 }),
+    listVariantDetails(admin, previewOptions),
+    listMetafieldDefinitions(admin),
   ]);
+
+  // What MetaKocka calls these products now, read from our own registry. No
+  // page load waits on a MetaKocka call (§2.5), so a SKU we have never matched
+  // comes back absent and one matched before the name was recorded comes back
+  // null — the preview reports those as "created" and "not read yet" rather
+  // than inventing a rename.
+  const currentNames = await metakockaNamesFor(
+    principal,
+    samples.map((sample) => sample.sku),
+  );
 
   return {
     settings: {
       ...settings,
       lastRunAt: settings.lastRunAt?.toISOString() ?? null,
     },
-    samples: samples.slice(0, 3),
+    samples,
+    definitions,
+    currentNames: [...currentNames.entries()],
   };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
   const formData = await request.formData();
@@ -89,6 +139,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (!isKnownUnit(unit)) {
     return {
       ok: false,
+      field: "unit",
       message: `"${unit}" is not a unit in MetaKocka's register. Choose one from the list.`,
     };
   }
@@ -96,9 +147,42 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (nameTemplate === "") {
     return {
       ok: false,
+      field: "nameTemplate",
       message:
-        "The name template cannot be empty. Use at least one token, for example {title}.",
+        "The name cannot be empty. Add at least one field, for example the product title.",
     };
+  }
+
+  const parsed = parseTemplate(nameTemplate);
+  const parseError = parsed.errors[0];
+  if (parseError) {
+    return { ok: false, field: "nameTemplate", message: parseError.message };
+  }
+
+  /*
+   * The same check the screen shows, run again where it cannot be skipped.
+   *
+   * This reads a page of variants, which a page load may not do for MetaKocka
+   * but an action may do for Shopify: it is one small GraphQL call on an
+   * explicit save, not on every render. Two names that collide would become one
+   * product in the ERP, so it is worth the call.
+   */
+  const [samples, definitions] = await Promise.all([
+    listVariantDetails(admin, previewOptions),
+    listMetafieldDefinitions(admin),
+  ]);
+
+  const diagnostics = lintTemplate({
+    nodes: parsed.nodes,
+    variants: samples,
+    knownMetafields: knownMetafieldPaths(definitions),
+  });
+
+  const blocking = diagnostics.find(
+    (diagnostic) => diagnostic.severity === "error",
+  );
+  if (blocking) {
+    return { ok: false, field: "nameTemplate", message: blocking.message };
   }
 
   // §3: a pricelist cannot be created through the API, so a price with no
@@ -106,6 +190,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (sendPricing && pricelistCode === "") {
     return {
       ok: false,
+      field: "pricelistCode",
       message:
         "Sending prices needs the code of a pricelist that already exists in MetaKocka. Add the pricelist code, or turn prices off.",
     };
@@ -114,6 +199,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   if (taxPercent !== "" && taxFactorFromPercent(taxPercent) === null) {
     return {
       ok: false,
+      field: "taxPercent",
       message:
         "The tax rate must be a percentage between 0 and 100, for example 22. Leave it empty to let MetaKocka decide the tax.",
     };
@@ -138,7 +224,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     detail: { enabled: checked("enabled"), namePolicy },
   });
 
-  return { ok: true, message: "Saved product sync settings." };
+  return { ok: true, field: null, message: "Saved product sync settings." };
 };
 
 interface FormState {
@@ -180,57 +266,100 @@ function toState(settings: {
   };
 }
 
+/** Errors first: they are what stops the merchant, and they say why. */
+function bySeverity(diagnostics: Diagnostic[]): Diagnostic[] {
+  return [...diagnostics].sort((a, b) =>
+    a.severity === b.severity ? 0 : a.severity === "error" ? -1 : 1,
+  );
+}
+
 export default function ProductSyncSettings() {
-  const { settings, samples } = useLoaderData<typeof loader>();
+  const { settings, samples, definitions, currentNames } =
+    useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const formRef = useRef<HTMLFormElement>(null);
 
   const [state, setState] = useState<FormState>(() => toState(settings));
+  // §2.8: no error before the merchant has had a chance to answer.
+  const [touched, setTouched] = useState(false);
 
-  // Type-ahead: the merchant types the name in the field and the tokens are
-  // suggested as they go. Typing "{" (or any word after it) filters the list,
-  // and choosing one drops it into the field. No syntax to learn, and no
-  // separate builder to keep in step with the text.
-  const template = state.nameTemplate;
-  const partial = /\{([A-Za-z0-9_]*)$/.exec(template);
-  const typed = (partial?.[1] ?? "").toLowerCase();
+  const set = (patch: Partial<FormState>) =>
+    setState((current) => ({ ...current, ...patch }));
 
-  const suggestions = NAME_TOKENS.filter((token) => {
-    if (partial === null) return true;
-    return (
-      token.token.slice(1, -1).toLowerCase().startsWith(typed) ||
-      token.label.toLowerCase().includes(typed)
-    );
-  }).slice(0, 8);
+  const registry = useMemo(() => fieldRegistry(definitions), [definitions]);
+  const knownMetafields = useMemo(
+    () => knownMetafieldPaths(definitions),
+    [definitions],
+  );
+  const names = useMemo(
+    () => new Map<string, string | null>(currentNames),
+    [currentNames],
+  );
 
-  const insertToken = (token: string) => {
-    const next =
-      partial === null
-        ? `${template}${template === "" || template.endsWith(" ") ? "" : " "}${token}`
-        : `${template.slice(0, partial.index)}${token}`;
-    set({ nameTemplate: next });
-  };
+  const naming = useMemo(
+    () => settingsFromTemplate(state.nameTemplate),
+    [state.nameTemplate],
+  );
+
+  const parsed = useMemo(
+    () => parseTemplate(state.nameTemplate),
+    [state.nameTemplate],
+  );
+
+  /*
+   * Computed as the merchant types, from their own products, through the same
+   * function the sync job calls. Nothing here reaches MetaKocka: the current
+   * names came from our registry with the page, and the new ones are worked out
+   * in the browser.
+   */
+  const preview = useMemo(
+    () =>
+      buildPreview({
+        settings: naming,
+        variants: samples as VariantFacts[],
+        currentNames: names,
+        knownMetafields,
+      }),
+    [naming, samples, names, knownMetafields],
+  );
+
+  const diagnostics = useMemo(
+    () => bySeverity(preview.diagnostics),
+    [preview.diagnostics],
+  );
+  const parseError = parsed.errors[0];
+  const blocked = Boolean(parseError) || hasBlockingError(preview.diagnostics);
+
+  // The field's own message. A parse error is about the character under the
+  // caret, so it wins over a lint rule about the resulting names.
+  const fieldError =
+    touched && parseError
+      ? parseError.message
+      : touched && blocked
+        ? (diagnostics.find((d) => d.severity === "error")?.message ??
+          undefined)
+        : result && !result.ok && result.field === "nameTemplate"
+          ? result.message
+          : undefined;
+
+  const patternSample = samples[0] ?? null;
 
   useEffect(() => {
     const form = formRef.current;
     if (!form) return;
-    const handleReset = () => setState(toState(settings));
+    const handleReset = () => {
+      setState(toState(settings));
+      setTouched(false);
+    };
     form.addEventListener("reset", handleReset);
     return () => form.removeEventListener("reset", handleReset);
   }, [settings]);
 
   useEffect(() => {
     if (!result?.ok) return;
+    setTouched(false);
     if (typeof shopify !== "undefined") shopify.toast.show(result.message);
   }, [result]);
-
-  const set = (patch: Partial<FormState>) =>
-    setState((current) => ({ ...current, ...patch }));
-
-  // The preview runs the same pure function the job runs, in the browser, so
-  // what the merchant sees here is exactly what MetaKocka will be sent.
-  const previewFrom: VariantFacts[] =
-    samples.length > 0 ? samples : [EXAMPLE_VARIANT];
 
   return (
     <s-page heading="Product sync settings">
@@ -239,12 +368,19 @@ export default function ProductSyncSettings() {
       </s-link>
 
       <s-stack direction="block" gap="large">
-        {result && !result.ok ? (
+        {result && !result.ok && !result.field ? (
           <s-banner tone="critical" heading="That did not work">
             <s-paragraph>{result.message}</s-paragraph>
           </s-banner>
         ) : null}
 
+        {/*
+         * Saving is blocked in the action, not here. Cancelling the submit
+         * would leave Shopify's save bar mid-save with nothing to show for it,
+         * and the merchant already has the reason on screen: the banner below
+         * is computed as they type, so a blocking rule is visible well before
+         * they reach for Save.
+         */}
         <Form method="post" data-save-bar ref={formRef}>
           <s-stack direction="block" gap="large">
             <s-section heading="Sending names to MetaKocka">
@@ -282,7 +418,7 @@ export default function ProductSyncSettings() {
                 />
                 <s-text color="subdued">
                   {state.namePolicy === "always"
-                    ? "Every sync sets the name from the template. Names edited in MetaKocka will be overwritten."
+                    ? "Every sync sets the name from the pattern. Names edited in MetaKocka will be overwritten."
                     : state.namePolicy === "when_empty"
                       ? "A product that already has a name keeps it. Only nameless products are filled in."
                       : "Existing products are never renamed. Only new ones get a name, and only if creating them is turned on below."}
@@ -293,81 +429,116 @@ export default function ProductSyncSettings() {
             <s-section heading="How the name is built">
               <s-stack direction="block" gap="base">
                 <s-paragraph>
-                  Type the name as you want it to read. Type {"{"} to bring up
-                  what Shopify can fill in, or pick from the suggestions under
-                  the field. A piece that has no value on a product disappears
-                  from that product's name.
+                  Type the name as it should read, and type {"{"} to add
+                  something Shopify knows. A field with no value on a product
+                  disappears from that product&rsquo;s name.
                 </s-paragraph>
 
-                <s-text-field
+                <NamePatternField
                   name="nameTemplate"
                   label="Product name in MetaKocka"
-                  placeholder="{title} {options}"
                   value={state.nameTemplate}
-                  onChange={(e) => set({ nameTemplate: e.currentTarget.value })}
+                  onChange={(next) => {
+                    setTouched(true);
+                    set({ nameTemplate: next });
+                  }}
+                  registry={registry}
+                  sample={patternSample ?? null}
+                  {...(fieldError ? { error: fieldError } : {})}
                 />
 
-                <s-stack direction="block" gap="small-300">
-                  <s-text color="subdued">
-                    {partial === null
-                      ? "Add to the name:"
-                      : `Matching "${typed}":`}
-                  </s-text>
-                  {suggestions.length === 0 ? (
-                    <s-text color="subdued">
-                      Nothing matches what you typed. Clear it to see the whole
-                      list.
-                    </s-text>
-                  ) : (
-                    <s-grid
-                      gridTemplateColumns="repeat(auto-fill, minmax(190px, 1fr))"
-                      gap="small-300"
-                    >
-                      {suggestions.map((token) => (
-                        <s-clickable-chip
-                          key={token.token}
-                          onClick={() => insertToken(token.token)}
+                {/*
+                 * One banner, never two next to each other (§2.8). Errors sort
+                 * first and set the tone; the warnings ride along in the same
+                 * block rather than in a second banner underneath it.
+                 */}
+                {touched && diagnostics.length > 0 ? (
+                  <s-banner
+                    tone={blocked ? "critical" : "warning"}
+                    heading={
+                      blocked
+                        ? "This name cannot be saved yet"
+                        : "Worth checking before you save"
+                    }
+                  >
+                    <s-unordered-list>
+                      {diagnostics.map((diagnostic) => (
+                        <s-list-item
+                          key={`${diagnostic.code}-${diagnostic.message}`}
                         >
-                          {`${token.label} — ${token.example}`}
-                        </s-clickable-chip>
+                          {diagnostic.message}
+                          {diagnostic.sampleIds.length > 0
+                            ? ` For example: ${diagnostic.sampleIds.join(", ")}.`
+                            : ""}
+                        </s-list-item>
                       ))}
-                    </s-grid>
-                  )}
-                </s-stack>
+                    </s-unordered-list>
+                  </s-banner>
+                ) : null}
 
                 <s-stack direction="block" gap="small-300">
-                  <s-text color="subdued">
-                    Or start from a ready pattern:
-                  </s-text>
-                  <s-stack
-                    direction="inline"
+                  <s-text type="strong">Start from a ready pattern</s-text>
+                  <s-grid
+                    gridTemplateColumns="repeat(auto-fill, minmax(220px, 1fr))"
                     gap="small-300"
-                    alignItems="center"
                   >
-                    {TEMPLATE_PRESETS.map((preset) => (
-                      <s-button
-                        key={preset.id}
-                        type="button"
-                        variant="tertiary"
-                        onClick={() => set({ nameTemplate: preset.template })}
-                      >
-                        {preset.label}
-                      </s-button>
-                    ))}
-                  </s-stack>
+                    {NAME_PATTERNS.map((option) => {
+                      const inUse = option.pattern === state.nameTemplate;
+                      const produced = patternSample
+                        ? nameFor(
+                            settingsFromTemplate(option.pattern),
+                            patternSample as VariantFacts,
+                          ).name
+                        : null;
+
+                      return (
+                        <s-clickable
+                          key={option.id}
+                          accessibilityLabel={
+                            produced
+                              ? `${option.label}. Would produce ${produced}.`
+                              : option.label
+                          }
+                          onClick={() => {
+                            setTouched(true);
+                            set({ nameTemplate: option.pattern });
+                          }}
+                        >
+                          <s-box
+                            background="subdued"
+                            borderRadius="base"
+                            padding="small-200"
+                          >
+                            <s-stack direction="block" gap="small-500">
+                              <s-text type="strong">{option.label}</s-text>
+                              {/*
+                               * The name this pattern gives one of the
+                               * merchant's own products. A shop with an empty
+                               * catalogue gets the pattern's name and no
+                               * invented example beside it.
+                               */}
+                              {produced ? (
+                                <s-text color="subdued">{produced}</s-text>
+                              ) : null}
+                              {inUse ? (
+                                <s-text color="subdued">In use</s-text>
+                              ) : null}
+                            </s-stack>
+                          </s-box>
+                        </s-clickable>
+                      );
+                    })}
+                  </s-grid>
                 </s-stack>
 
                 <s-stack direction="block" gap="small-300">
                   <s-text type="strong">
-                    {samples.length > 0
-                      ? "Your products would be called"
-                      : "An example product would be called"}
+                    {`What changes in MetaKocka (${preview.totals.rows} of your products)`}
                   </s-text>
-                  {previewFrom.map((variant, index) => (
-                    <s-text key={index}>
-                      {`${variant.sku} — ${renderName(template, variant)}`}
-                    </s-text>
-                  ))}
+                  <NamePreviewTable
+                    rows={preview.rows}
+                    empty="No Shopify variant has a SKU yet, so there is nothing to name."
+                  />
                 </s-stack>
               </s-stack>
             </s-section>
@@ -451,6 +622,9 @@ export default function ProductSyncSettings() {
                   onChange={(e) =>
                     set({ pricelistCode: e.currentTarget.value })
                   }
+                  {...(result && !result.ok && result.field === "pricelistCode"
+                    ? { error: result.message }
+                    : {})}
                 />
                 {/*
                  * A MetaKocka pricelist is created net or gross and cannot be
@@ -486,6 +660,9 @@ export default function ProductSyncSettings() {
                   details="For example 22. Used on order lines when Shopify does not give a rate, and to convert between net and gross prices. Set it to the rate your pricelist uses."
                   value={state.taxPercent}
                   onChange={(e) => set({ taxPercent: e.currentTarget.value })}
+                  {...(result && !result.ok && result.field === "taxPercent"
+                    ? { error: result.message }
+                    : {})}
                 />
 
                 {state.sendPricing ? null : (
@@ -505,6 +682,9 @@ export default function ProductSyncSettings() {
                     value: unit,
                     label: unit,
                   }))}
+                  {...(result && !result.ok && result.field === "unit"
+                    ? { error: result.message }
+                    : {})}
                 />
               </s-stack>
             </s-section>

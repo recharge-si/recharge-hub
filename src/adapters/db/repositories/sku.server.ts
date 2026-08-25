@@ -65,6 +65,8 @@ export async function upsertVariants(
 export interface MatchSnapshot {
   code: string;
   mkId: string;
+  /** The name MetaKocka holds, so the settings screen can show what changes. */
+  name: string | null;
 }
 
 /**
@@ -96,6 +98,7 @@ export async function applyMetakockaMatches(
       if (
         row.metakockaCode !== product.code ||
         row.metakockaMkId !== product.mkId ||
+        row.metakockaName !== product.name ||
         row.status !== "matched"
       ) {
         await prisma.sku.update({
@@ -103,6 +106,7 @@ export async function applyMetakockaMatches(
           data: {
             metakockaCode: product.code,
             metakockaMkId: product.mkId,
+            metakockaName: product.name,
             status: "matched",
           },
         });
@@ -115,6 +119,7 @@ export async function applyMetakockaMatches(
           data: {
             metakockaCode: null,
             metakockaMkId: null,
+            metakockaName: null,
             status: "unmatched",
           },
         });
@@ -163,4 +168,30 @@ export async function setSkuStatus(
     where: { id, shop: { domain: shopDomainOf(principal) } },
     data: { status },
   });
+}
+
+/**
+ * What MetaKocka currently calls these SKUs, for the "Now" column on the
+ * settings screen.
+ *
+ * Read from our own registry rather than from MetaKocka: no page load may wait
+ * on an ERP call (CLAUDE.md 2.5), and the catalogue read already has this.
+ *
+ * The three states of the result are the three the preview needs. A SKU that is
+ * matched but whose name predates this column comes back as null, meaning "we
+ * do not know", and is reported as unknown rather than as a rename.
+ */
+export async function metakockaNamesFor(
+  principal: Principal,
+  skus: string[],
+): Promise<Map<string, string | null>> {
+  if (skus.length === 0) return new Map();
+  const shopId = await shopIdFor(principal);
+
+  const rows = await prisma.sku.findMany({
+    where: { shopId, sku: { in: skus }, status: "matched" },
+    select: { sku: true, metakockaName: true },
+  });
+
+  return new Map(rows.map((row) => [row.sku, row.metakockaName]));
 }

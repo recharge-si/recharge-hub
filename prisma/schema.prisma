@@ -367,6 +367,13 @@ model Sku {
 
   metakockaCode String?   @map("metakocka_code")
   metakockaMkId String?   @map("metakocka_mk_id")
+  /// The name MetaKocka currently holds, recorded when the catalogue is read.
+  ///
+  /// Stored so the settings screen can show what a name pattern would change
+  /// without calling MetaKocka on a page load (CLAUDE.md 2.5). Null means the
+  /// catalogue has not been read since this column existed, which the screen
+  /// reports as unknown rather than as an empty name.
+  metakockaName String?   @map("metakocka_name")
   status        SkuStatus @default(unmatched)
 
   createdAt DateTime @default(now()) @map("created_at")

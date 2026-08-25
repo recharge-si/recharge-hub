@@ -53,6 +53,12 @@ export {
 export { hasBlockingError, lintTemplate, type LintInput } from "./lint";
 
 export {
+  DEFAULT_NAME_PATTERN,
+  NAME_PATTERNS,
+  type NamePattern,
+} from "./presets";
+
+export {
   applyPick,
   canAddField,
   flattenGroups,
@@ -85,10 +91,27 @@ export {
   type RuleCondition,
 } from "./settings";
 
-import { parseTemplate } from "./parse";
+import { METAFIELD_PREFIX } from "./fields";
+import { parseTemplate, tokensOf } from "./parse";
 import { renderTemplate } from "./render";
-import { resolveTemplate, type NameSettings } from "./settings";
+import { allTemplates, resolveTemplate, type NameSettings } from "./settings";
 import type { VariantFacts } from "./types";
+
+/**
+ * Whether any pattern in these settings reads a metafield.
+ *
+ * Reading metafields costs query points on every page of the catalogue, so the
+ * sync job asks for them only when a pattern actually uses one. That decision
+ * belongs here rather than in the job: the job is not allowed to know what a
+ * pattern looks like inside, which is what keeps preview and sync in step.
+ */
+export function usesMetafields(settings: NameSettings): boolean {
+  return allTemplates(settings).some((template) =>
+    tokensOf(parseTemplate(template).nodes).some((token) =>
+      token.field.startsWith(METAFIELD_PREFIX),
+    ),
+  );
+}
 
 /**
  * The one entry point that names a variant.

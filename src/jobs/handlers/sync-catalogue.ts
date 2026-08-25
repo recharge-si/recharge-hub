@@ -57,7 +57,11 @@ export async function handleSyncCatalogue(job: Job<unknown>): Promise<void> {
     const products = await listProducts(client);
     const result = await applyMetakockaMatches(
       principal,
-      products.map((product) => ({ code: product.code, mkId: product.mkId })),
+      products.map((product) => ({
+        code: product.code,
+        mkId: product.mkId,
+        name: product.name,
+      })),
     );
     matched = result.matched;
     unmatched = result.unmatched;

@@ -1,7 +1,7 @@
 import type { ProductNamePolicy, ProductSyncSetting } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
-import { DEFAULT_NAME_TEMPLATE } from "~/domain/products/name-template";
+import { DEFAULT_NAME_PATTERN } from "~/domain/products/template";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -30,7 +30,7 @@ export interface ProductSyncSettings {
 
 export const PRODUCT_SYNC_DEFAULTS: ProductSyncSettings = {
   enabled: false,
-  nameTemplate: DEFAULT_NAME_TEMPLATE,
+  nameTemplate: DEFAULT_NAME_PATTERN,
   namePolicy: "always",
   createMissing: false,
   sendPricing: false,

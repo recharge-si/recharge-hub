@@ -1,39 +1,76 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 
-import type { VariantFacts } from "~/domain/products/name-template";
+import type {
+  MetafieldDefinition,
+  VariantFacts,
+} from "~/domain/products/template";
 
 /**
  * Everything about a Shopify variant that a MetaKocka product name can be built
- * from (CLAUDE.md §8.9, `domain/products/name-template.ts`).
+ * from (CLAUDE.md §8.9, `domain/products/template`).
  *
  * Separate from `listVariants` in inventory.ts on purpose: the stock path wants
  * the smallest possible query on every sync, and this one is only read when the
  * merchant syncs product names.
  *
  * GraphQL Admin API only (§2.1.5), paginated, never a query in a loop (§2.5).
+ *
+ * Metafields and the variant count are optional because they are not free. A
+ * name pattern referencing no metafield should not pay to read every metafield
+ * in the catalogue, and the variant count only feeds a lint rule that runs on
+ * the settings screen over a handful of products. The sync job asks for them
+ * only when a pattern actually uses one.
  */
-const VARIANT_DETAILS_QUERY = `#graphql
-  query OrchestratorVariantDetails($first: Int!, $cursor: String) {
-    productVariants(first: $first, after: $cursor) {
-      pageInfo { hasNextPage endCursor }
-      nodes {
-        id
-        sku
-        title
-        barcode
-        price
-        selectedOptions { name value }
-        product {
+const METAFIELD_PAGE = 50;
+
+/**
+ * The settings preview and the sync job read through one query with the
+ * expensive parts switched off by default, so the two cannot drift in what a
+ * name is built from.
+ */
+function variantDetailsQuery(withMetafields: boolean): string {
+  const metafields = withMetafields
+    ? `metafields(first: ${METAFIELD_PAGE}) { nodes { namespace key value } }`
+    : "";
+  const variantsCount = withMetafields ? "variantsCount { count }" : "";
+
+  return `#graphql
+    query OrchestratorVariantDetails($first: Int!, $cursor: String) {
+      productVariants(first: $first, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes {
+          id
+          sku
           title
-          vendor
-          productType
-          handle
+          barcode
+          price
+          selectedOptions { name value }
+          ${metafields}
+          product {
+            id
+            title
+            vendor
+            productType
+            handle
+            ${variantsCount}
+            ${metafields}
+          }
         }
       }
     }
-  }
-`;
+  `;
+}
+
+const metafieldsSchema = z.object({
+  nodes: z.array(
+    z.object({
+      namespace: z.string(),
+      key: z.string(),
+      value: z.string().nullable(),
+    }),
+  ),
+});
 
 const detailsSchema = z.object({
   data: z.object({
@@ -52,12 +89,19 @@ const detailsSchema = z.object({
           selectedOptions: z.array(
             z.object({ name: z.string(), value: z.string() }),
           ),
+          metafields: metafieldsSchema.optional(),
           product: z
             .object({
+              id: z.string(),
               title: z.string(),
               vendor: z.string().nullable(),
               productType: z.string().nullable(),
               handle: z.string().nullable(),
+              variantsCount: z
+                .object({ count: z.number() })
+                .nullable()
+                .optional(),
+              metafields: metafieldsSchema.optional(),
             })
             .nullable(),
         }),
@@ -73,25 +117,64 @@ export interface VariantDetail extends VariantFacts {
 /** Shopify's placeholder option on a product that has no real options. */
 const PLACEHOLDER = "Default Title";
 
+/**
+ * One flat `namespace.key` map, which is the shape a name pattern reads.
+ *
+ * The product's metafields go in first and the variant's over the top: where
+ * both define the same key, the variant is the more specific answer, and it is
+ * what a merchant naming a variant means.
+ */
+function metafieldMap(
+  product: z.infer<typeof metafieldsSchema> | undefined,
+  variant: z.infer<typeof metafieldsSchema> | undefined,
+): Record<string, string> | undefined {
+  if (!product && !variant) return undefined;
+
+  const map: Record<string, string> = {};
+  for (const source of [product, variant]) {
+    for (const node of source?.nodes ?? []) {
+      if (node.value === null) continue;
+      map[`${node.namespace}.${node.key}`] = node.value;
+    }
+  }
+  return map;
+}
+
 export interface VariantDetailOptions {
   /** Page size. The settings screen asks for a handful, the job for the lot. */
   first?: number;
-  /** Stop after this many pages. One page is enough to preview a template. */
+  /** Stop after this many pages. One page is enough to preview a pattern. */
   maxPages?: number;
+  /**
+   * Read metafields and the product's variant count as well. Off by default:
+   * both cost query points on every page, and most shops name products from
+   * fields that are already free.
+   */
+  metafields?: boolean;
 }
+
+/**
+ * A smaller page when metafields are on. The Admin API prices a query by what
+ * one node costs times the page size, and the node selection roughly doubles.
+ */
+const PAGE_WITH_METAFIELDS = 100;
+const PAGE_PLAIN = 250;
 
 export async function listVariantDetails(
   admin: AdminApiContext,
   options: VariantDetailOptions = {},
 ): Promise<VariantDetail[]> {
-  const first = options.first ?? 250;
+  const withMetafields = options.metafields ?? false;
+  const first =
+    options.first ?? (withMetafields ? PAGE_WITH_METAFIELDS : PAGE_PLAIN);
   const maxPages = options.maxPages ?? 200;
+  const query = variantDetailsQuery(withMetafields);
   const variants: VariantDetail[] = [];
   let cursor: string | null = null;
 
   // Bounded so a runaway cursor cannot spin forever.
   for (let page = 0; page < maxPages; page += 1) {
-    const response = await admin.graphql(VARIANT_DETAILS_QUERY, {
+    const response = await admin.graphql(query, {
       variables: { first, cursor },
     });
     // §4: every external boundary is parsed, including Shopify's.
@@ -106,6 +189,10 @@ export async function listVariantDetails(
       const options = node.selectedOptions.filter(
         (option) => option.value !== PLACEHOLDER,
       );
+      const metafields = metafieldMap(
+        node.product?.metafields,
+        node.metafields,
+      );
 
       variants.push({
         variantId: node.id,
@@ -119,6 +206,11 @@ export async function listVariantDetails(
         productType: node.product?.productType ?? null,
         handle: node.product?.handle ?? null,
         price: node.price,
+        ...(metafields ? { metafields } : {}),
+        ...(node.product?.id ? { productId: node.product.id } : {}),
+        ...(node.product?.variantsCount
+          ? { variantCount: node.product.variantsCount.count }
+          : {}),
       });
     }
 
@@ -127,6 +219,59 @@ export async function listVariantDetails(
   }
 
   return variants;
+}
+
+/**
+ * The metafields this shop defines, so the picker can offer them by name.
+ *
+ * Definitions, not values: which metafields exist is the shop's business and is
+ * never hardcoded (`domain/products/template/fields.ts`). A shop with none gets
+ * an empty list and no Metafields group in the picker.
+ */
+const METAFIELD_DEFINITIONS_QUERY = `#graphql
+  query OrchestratorMetafieldDefinitions($first: Int!) {
+    productDefs: metafieldDefinitions(first: $first, ownerType: PRODUCT) {
+      nodes { namespace key name }
+    }
+    variantDefs: metafieldDefinitions(first: $first, ownerType: PRODUCTVARIANT) {
+      nodes { namespace key name }
+    }
+  }
+`;
+
+const definitionNodes = z.object({
+  nodes: z.array(
+    z.object({ namespace: z.string(), key: z.string(), name: z.string() }),
+  ),
+});
+
+const definitionsSchema = z.object({
+  data: z.object({
+    productDefs: definitionNodes,
+    variantDefs: definitionNodes,
+  }),
+});
+
+const DEFINITION_PAGE = 250;
+
+export async function listMetafieldDefinitions(
+  admin: AdminApiContext,
+): Promise<MetafieldDefinition[]> {
+  const response = await admin.graphql(METAFIELD_DEFINITIONS_QUERY, {
+    variables: { first: DEFINITION_PAGE },
+  });
+  const { data } = definitionsSchema.parse(await response.json());
+
+  return [
+    ...data.productDefs.nodes.map((node) => ({
+      ...node,
+      ownerType: "PRODUCT",
+    })),
+    ...data.variantDefs.nodes.map((node) => ({
+      ...node,
+      ownerType: "PRODUCTVARIANT",
+    })),
+  ];
 }
 
 const TAXES_QUERY = `#graphql

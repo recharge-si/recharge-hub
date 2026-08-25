@@ -49,9 +49,18 @@ export interface PreviewInput {
   settings: NameSettings;
   variants: VariantFacts[];
   /**
-   * MetaKocka's current name per SKU. Omit it for the live preview, where the
-   * question is "what would this template produce" rather than "what would
-   * change" — and where a MetaKocka read per keystroke would be absurd.
+   * MetaKocka's current name per SKU.
+   *
+   * Three states, and they are not the same thing:
+   *   - a string: MetaKocka holds this name, so the row is changed or unchanged
+   *   - null: MetaKocka has the product but we have not recorded its name, so
+   *     the row is unknown. Never treated as an empty name — that would report
+   *     every such product as being renamed
+   *   - absent: MetaKocka has no product for this SKU, so it would be created
+   *
+   * Omit the map entirely for the live preview, where the question is "what
+   * would this pattern produce" rather than "what would change", and where a
+   * MetaKocka read per keystroke would be absurd.
    */
   currentNames?: Map<string, string | null>;
   knownMetafields?: Set<string>;
@@ -72,9 +81,11 @@ export function buildPreview({
       status =
         current === undefined
           ? "new"
-          : (current ?? "") === name
-            ? "unchanged"
-            : "changed";
+          : current === null
+            ? "unknown"
+            : current === name
+              ? "unchanged"
+              : "changed";
     }
 
     return {
