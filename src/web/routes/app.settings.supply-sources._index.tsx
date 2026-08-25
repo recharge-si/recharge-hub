@@ -608,7 +608,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         entityType: "supply_source",
         entityId: atLocation.id,
         event: "warehouse_mapping.saved",
-        detail: { mark: atLocation.metakockaWarehouse, warehouse: atLocation.name, location: null },
+        detail: {
+          mark: atLocation.metakockaWarehouse,
+          warehouse: atLocation.name,
+          location: null,
+        },
       });
     }
     return {
@@ -992,7 +996,8 @@ export default function Locations() {
   /* --- Derived ----------------------------------------------------------- */
 
   const edited = locations.find((row) => row.id === editing) ?? null;
-  const connectingWarehouse = unconnected.find((w) => w.mark === connecting) ?? null;
+  const connectingWarehouse =
+    unconnected.find((w) => w.mark === connecting) ?? null;
 
   const defaultDirectionLabel =
     DIRECTION_LABEL[savedDefaults.direction] ?? DIRECTION_LABEL.none!;
@@ -1017,7 +1022,12 @@ export default function Locations() {
     // The one this location already holds is not in `unconnected`, so it has to
     // be added back or the dialog would open showing nothing chosen.
     ...(edited?.warehouseMark
-      ? [{ value: edited.warehouseMark, label: edited.warehouseName ?? edited.warehouseMark }]
+      ? [
+          {
+            value: edited.warehouseMark,
+            label: edited.warehouseName ?? edited.warehouseMark,
+          },
+        ]
       : []),
   ];
 
@@ -1049,7 +1059,8 @@ export default function Locations() {
 
       return {
         value: row.id,
-        label: notes.length > 0 ? `${row.name} (${notes.join(", ")})` : row.name,
+        label:
+          notes.length > 0 ? `${row.name} (${notes.join(", ")})` : row.name,
       };
     }),
   ];
@@ -1330,7 +1341,11 @@ export default function Locations() {
 
       <s-modal
         id={CONNECT_MODAL_ID}
-        heading={connectingWarehouse ? `Connect ${connectingWarehouse.name}` : "Connect"}
+        heading={
+          connectingWarehouse
+            ? `Connect ${connectingWarehouse.name}`
+            : "Connect"
+        }
         ref={(element: Overlay | null) => {
           connector.current = element;
         }}
@@ -1561,19 +1576,32 @@ export default function Locations() {
         {/* --- Stock sync -------------------------------------------------- */}
 
         <s-section heading="Stock sync">
+          {/*
+           * The count sits in the section's own header slot, beside the
+           * heading, rather than as the first thing in the body. It describes
+           * the card; reading it as a line of content meant reading past it to
+           * reach the two buttons that actually do something.
+           *
+           * Neutral, not green. It is the normal state, and colour marks
+           * exceptions (docs/ui-conventions.md). Not being connected is an
+           * exception, so that one keeps its tone.
+           */}
+          <s-badge slot="secondary-actions" tone="neutral">
+            {syncing === 1
+              ? "1 location syncing"
+              : `${syncing} locations syncing`}
+          </s-badge>
+          {connected ? null : (
+            <s-badge slot="secondary-actions" tone="caution">
+              MetaKocka not connected
+            </s-badge>
+          )}
+
           <s-stack direction="block" gap="base">
             <s-paragraph>
               Syncing copies quantities in the background. It also runs on a
               schedule.
             </s-paragraph>
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-badge tone={syncing > 0 ? "success" : "neutral"}>
-                {syncing === 1 ? "1 location syncing" : `${syncing} locations syncing`}
-              </s-badge>
-              {connected ? null : (
-                <s-badge tone="caution">MetaKocka not connected</s-badge>
-              )}
-            </s-stack>
             <s-stack direction="inline" gap="base" alignItems="center">
               <s-button
                 variant="primary"

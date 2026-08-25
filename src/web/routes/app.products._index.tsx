@@ -190,9 +190,10 @@ export default function Products() {
             synced or appear on an order sent to MetaKocka.
           </s-paragraph>
           <s-paragraph>
-            Syncing reads both catalogues and matches them. If sending names is
-            on, it then writes your names into MetaKocka and can create a
-            product for a SKU MetaKocka does not have.
+            Syncing reads both catalogues and matches them. If product sync is
+            on, it then writes your names into MetaKocka, and can create a
+            product for a SKU MetaKocka does not have and keep prices up to
+            date.
           </s-paragraph>
           <s-paragraph>
             To fix an unmatched SKU, either add the product in MetaKocka with a
@@ -311,7 +312,7 @@ export default function Products() {
               </s-stack>
             ) : (
               <s-text>
-                Names are not sent to MetaKocka. Matching still runs.
+                Nothing is written to MetaKocka. Matching still runs.
               </s-text>
             )}
 

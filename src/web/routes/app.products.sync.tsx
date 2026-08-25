@@ -695,8 +695,8 @@ export default function ProductSyncSettings() {
         <s-stack direction="block" gap="base">
           <s-paragraph>
             Shopify owns the customer-facing title. MetaKocka owns everything
-            else about a product, so this app only writes the name — and the
-            price, if you turn that on.
+            else about a product, so product sync writes the name — and creates
+            products, and writes prices, if you turn those on.
           </s-paragraph>
           <s-paragraph>
             The name is built from pieces of your Shopify product. Type the name
@@ -754,28 +754,29 @@ export default function ProductSyncSettings() {
           </s-banner>
         ) : null}
 
-        <s-section heading="Sending names to MetaKocka">
-          <s-stack direction="block" gap="base">
-            <s-checkbox
-              name="enabled"
-              value="on"
-              label="Send product names to MetaKocka"
-              details="Nothing is written while this is off."
-              checked={state.enabled}
-              onChange={(e) => set({ enabled: e.currentTarget.checked })}
-            />
+        {/*
+         * The master switch, and the only thing in its own card.
+         *
+         * It was called "Send product names to MetaKocka", which understated
+         * it: the job it gates writes names, creates products and writes
+         * prices, so a merchant reading the old label could turn on price
+         * overwriting believing they had only agreed to names.
+         */}
+        <s-section heading="Product sync">
+          <s-checkbox
+            name="enabled"
+            value="on"
+            label="Sync products to MetaKocka"
+            details="Names, new products and prices. Nothing is written to MetaKocka while this is off."
+            checked={state.enabled}
+            onChange={(e) => set({ enabled: e.currentTarget.checked })}
+          />
+        </s-section>
 
-            {/*
-             * Everything below the switch depends on it. The sync job returns
-             * immediately when it is off, so a name policy, a pattern, a
-             * creation rule and a price rule are all inert -- and a screen full
-             * of settings that do nothing is a screen that has to be read
-             * before it can be dismissed. Only what is still true stays: the
-             * switch, and the pricelist and VAT below, which every sales order
-             * carries whether or not products are synced.
-             */}
-            {!state.enabled ? null : (
-              <>
+        {state.enabled ? (
+          <>
+            <s-section heading="Product names">
+              <s-stack direction="block" gap="base">
                 <Dropdown
                   name="namePolicy"
                   label="When MetaKocka already has a name"
@@ -811,15 +812,7 @@ export default function ProductSyncSettings() {
                   Save this and the next sync replaces the name of every matched
                   MetaKocka product, including names edited in MetaKocka.
                 </OverwriteWarning>
-              </>
-            )}
-          </s-stack>
-        </s-section>
 
-        {state.enabled ? (
-          <>
-            <s-section heading="How the name is built">
-              <s-stack direction="block" gap="base">
                 <NamePatternField
                   name="nameTemplate"
                   label="Product name in MetaKocka"
@@ -1022,17 +1015,28 @@ export default function ProductSyncSettings() {
                     name="updatePricing"
                     value="on"
                     label="Keep prices up to date from Shopify"
-                    details={
-                      pricelistName
-                        ? `Every sync overwrites the price in ${pricelistName} with the Shopify price.`
-                        : "Every sync overwrites the price in the pricelist below with the Shopify price. Choose one first."
-                    }
                     checked={state.updatePricing}
                     disabled={!state.sendPricing}
                     onChange={(e) =>
                       set({ updatePricing: e.currentTarget.checked })
                     }
                   />
+                  {/*
+                   * Part 1 of the overwrite pattern, as a line beneath the
+                   * control rather than as the checkbox's own `details`.
+                   *
+                   * Two reasons, and they agree. The name policy states its
+                   * part 1 exactly this way, and the doc asks for one pattern
+                   * applied identically — using `details` here made them two.
+                   * And `details` hangs a second line off the label, which
+                   * leaves the tick sitting against the top of a two-line
+                   * block instead of level with a one-line one.
+                   */}
+                  <s-text color="subdued">
+                    {pricelistName
+                      ? `Every sync overwrites the price in ${pricelistName} with the Shopify price.`
+                      : "Every sync overwrites the price in the pricelist below with the Shopify price. Choose one first."}
+                  </s-text>
                   {state.sendPricing ? null : (
                     <s-text color="subdued">
                       Turn on &ldquo;Give a new product its Shopify price&rdquo;
