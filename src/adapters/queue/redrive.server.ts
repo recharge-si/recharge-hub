@@ -108,7 +108,17 @@ export async function redriveOrder(
   principal: Principal,
   orderId: string,
   target: RedriveTarget = "auto",
+  options: {
+    /**
+     * Who is asking. A person re-allocating is allowed to overrule a
+     * hand-made allocation — that is them changing their mind. The
+     * background re-check is not a person, and must never quietly revert a
+     * choice someone made by hand.
+     */
+    actor?: "person" | "background";
+  } = {},
 ): Promise<RedriveResult> {
+  const actor = options.actor ?? "person";
   const shopDomain = principal.shopDomain;
 
   const order = await prisma.order.findFirst({
@@ -179,9 +189,17 @@ export async function redriveOrder(
      *
      * The lock exists to stop background jobs quietly reverting a decision a
      * person made. Someone asking for allocation again is that person changing
-     * their mind, which is a different thing.
+     * their mind, which is a different thing — and the fifteen-minute
+     * re-check is not someone. It respects the lock and says so.
      */
     if (order.allocationLockedAt) {
+      if (actor !== "person") {
+        return {
+          queued: [],
+          reason:
+            "The supply sources for this order were chosen by hand, and the automatic re-check does not overrule that. Re-allocate from the order page if you want the choice made again.",
+        };
+      }
       await prisma.order.update({
         where: { id: orderId },
         data: { allocationLockedAt: null },

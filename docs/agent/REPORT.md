@@ -329,3 +329,30 @@ Proposed patch once T-06 answers:
   override.
 - **Verified by:** `tsc`, `eslint`, `vitest run` green; verdict logic read
   against every order_diverged raiser and against the accept-shopify action.
+
+### [P2] The reconciler advanced its watermark past orders that failed to apply
+- **Where:** `src/jobs/handlers/reconcile-orders.ts`
+- **What:** A per-order failure was logged and skipped, and the watermark then
+  advanced to the run's start time - so the failed order's change was never
+  read again unless something else touched it. The comment beside the catch
+  claimed "whatever is wrong with that order is still wrong next time", which
+  was true of the order and false of the sweep.
+- **Spec:** CLAUDE.md section 8.10 ("the watermark only advances over work
+  that was actually done" is the stated design).
+- **Status:** fixed - the watermark is clamped just below the earliest failed
+  order's `updated_at` (never below the window start), failures are counted in
+  the audit event, and each failure reaches Sentry. A permanently failing
+  order now costs re-reads instead of silence.
+
+### [P2] The background re-check could quietly revert a hand-made allocation
+- **Where:** `src/adapters/queue/redrive.server.ts`, recheck-exceptions caller
+- **What:** `redriveOrder("allocate")` cleared `allocation_locked_at`
+  unconditionally, on the theory that whoever asks for allocation is a person
+  changing their mind. The fifteen-minute re-check also asks, and it is not a
+  person: an `insufficient_stock` exception whose stock arrived would have its
+  hand-picked sources silently re-decided.
+- **Spec:** CLAUDE.md section 11 ("a hand-made allocation is locked so the
+  next stock sync does not silently revert it") - the lock existed, the
+  re-check walked around it.
+- **Status:** fixed - `redriveOrder` takes an actor; the re-check passes
+  `background` and is refused with a reason, people keep the override.

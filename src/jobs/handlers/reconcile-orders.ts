@@ -8,6 +8,7 @@ import { QUEUES } from "~/adapters/queue/queues";
 import { fetchOrdersUpdatedSince } from "~/adapters/shopify/orders";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
 import { getLogger } from "~/adapters/observability/logger.server";
+import { captureException } from "~/adapters/observability/sentry.server";
 import { syncOrderState } from "~/jobs/handlers/sync-order-state";
 import { serviceToken, type Principal } from "~/domain/types";
 
@@ -113,6 +114,8 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
   let ingested = 0;
   let updated = 0;
   let lastSeenUpdatedAt: Date | null = null;
+  let earliestFailureAt: Date | null = null;
+  let failures = 0;
   let complete = true;
 
   for (;;) {
@@ -128,12 +131,17 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
       }
 
       /*
-       * One order failing does not stop the pass.
+       * One order failing does not stop the pass, but it does hold the
+       * watermark back.
        *
-       * A single unparsable or unusual order would otherwise block every order
-       * behind it in the page and, because the watermark would not advance,
-       * block them again on the next run. The failure is logged and the sweep
-       * carries on; whatever is wrong with that order is still wrong next time.
+       * A single unusual order must not block every order behind it in the
+       * page, so the sweep carries on. The old comment claimed "whatever is
+       * wrong with that order is still wrong next time" — which was only true
+       * of the order, not of the sweep: the watermark advanced past it, so
+       * the next run never read it again and its change was silently lost.
+       * The watermark is now clamped below the earliest failure, so the next
+       * run re-reads it; everything already applied behind it re-reads as a
+       * comparison that finds nothing.
        */
       try {
         const outcome = await syncOrderState(principal, payload, {
@@ -143,10 +151,18 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
         if (outcome.result === "ingested") ingested += 1;
         if (outcome.result === "updated") updated += 1;
       } catch (error) {
+        failures += 1;
+        if (typeof updatedAt === "string") {
+          const at = new Date(updatedAt);
+          if (!earliestFailureAt || at < earliestFailureAt) {
+            earliestFailureAt = at;
+          }
+        }
         log.error(
           { err: error, shop: shopDomain, order: payload.id },
           "Could not reconcile one order",
         );
+        captureException(error, { shop: shopDomain, order: payload.id });
       }
     }
 
@@ -171,7 +187,12 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
    * far as the last order it read, so that is the mark instead. Neither ever
    * moves forward past work that was not done.
    */
-  const through = complete ? startedAt : (lastSeenUpdatedAt ?? since);
+  let through = complete ? startedAt : (lastSeenUpdatedAt ?? since);
+  if (earliestFailureAt && earliestFailureAt < through) {
+    // Held just below the earliest failure so the next run reads it again.
+    through = new Date(earliestFailureAt.getTime() - 1000);
+  }
+  if (through < since) through = since;
 
   await prisma.shop.update({
     where: { id: shop.id },
@@ -191,6 +212,7 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
         since: since.toISOString(),
         through: through.toISOString(),
         complete,
+        failures,
       },
     });
   }

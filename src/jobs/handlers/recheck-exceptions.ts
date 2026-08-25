@@ -576,7 +576,9 @@ export async function handleRecheckExceptions(job: Job<unknown>): Promise<void> 
     }
 
     if (verdict.kind === "unblocked") {
-      await redriveOrder(principal, facts.order.id, verdict.retry);
+      await redriveOrder(principal, facts.order.id, verdict.retry, {
+        actor: "background",
+      });
 
       await prisma.exception.update({
         where: { id: exception.id },
