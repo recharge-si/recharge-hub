@@ -308,3 +308,24 @@ Proposed patch once T-06 answers:
   the person, because the event log outlives the payloads.
 - **Verified by:** `tsc`, `eslint`, `vitest run` green; DB assertion needs
   T-04.
+
+### [P1] The re-check auto-closed divergence exceptions its raisers never armed
+- **Where:** `src/jobs/handlers/recheck-exceptions.ts` (order_diverged verdict)
+- **What:** The verdict closed `order_diverged` whenever `order.divergedAt` was
+  null - but three raisers never set `divergedAt` (the orphaned-document case
+  in allocate-order and mark-metakocka-paid, and the update-blocked/refused
+  cases in write-metakocka-order). Their exceptions were auto-closed on the
+  next quarter-hour sweep with the note "The order matches what MetaKocka
+  holds again", which was false: a stale, possibly paid ERP document still
+  stood, and the person told to fix it watched the instruction vanish.
+- **Why it matters:** Section 11's own rule - "leave it: the safe direction to
+  be wrong in" - inverted for exactly the cases whose remedy is human work in
+  the ERP this app cannot observe.
+- **Spec:** CLAUDE.md section 11.
+- **Status:** fixed - those cases already mark the document (`mkStatus` of
+  "no longer allocated", "behind Shopify", "update refused"), so the verdict
+  now stays open while any such marker stands. Markers are cleared by the
+  successful update path, and "Mark as sorted in MetaKocka" remains the human
+  override.
+- **Verified by:** `tsc`, `eslint`, `vitest run` green; verdict logic read
+  against every order_diverged raiser and against the accept-shopify action.

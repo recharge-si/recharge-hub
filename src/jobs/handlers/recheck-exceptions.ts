@@ -104,6 +104,7 @@ async function factsFor(principal: Principal, orderId: string) {
         select: {
           id: true,
           status: true,
+          mkStatus: true,
           supplySourceId: true,
           paymentMarkedAt: true,
         },
@@ -452,10 +453,27 @@ async function verdictFor(
         : FIXED("The order is no longer cancelled in Shopify.");
 
     case "order_diverged":
-    case "order_edited":
-      return order.divergedAt
+    case "order_edited": {
+      /*
+       * Divergence has more than one shape, and `divergedAt` records only the
+       * diff-visible one (Shopify moved and the document was not updated).
+       * The others are marked on the documents themselves: a document for a
+       * source the order no longer takes anything from, or an update
+       * MetaKocka refused. Those are repaired by a person in the ERP, which
+       * this app cannot see — so while any such marker stands, the exception
+       * stands. Closing on `divergedAt` alone declared a stale, possibly paid
+       * document "in step" fifteen minutes after a person was told to fix it.
+       */
+      const marked = order.documents.some(
+        (document) =>
+          document.mkStatus === "no longer allocated" ||
+          document.mkStatus === "behind Shopify" ||
+          document.mkStatus === "update refused",
+      );
+      return order.divergedAt || marked
         ? OPEN
         : FIXED("The order matches what MetaKocka holds again.");
+    }
 
     /*
      * Deleted in MetaKocka. Closed only by the document existing again, which
