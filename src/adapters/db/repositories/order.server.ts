@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
+import { VALIDATION_REJECTION_CODES } from "~/adapters/metakocka/errors";
 import { enqueueInTransaction } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import {
@@ -317,17 +318,18 @@ const CLAIM_LEASE_MS = 5 * 60 * 1000;
  * The write handler records what a failed attempt got back: a business
  * rejection is stored with its `oprCode`, while a timeout, a 5xx, a connection
  * reset or a crash between the call and the record has none. The distinction
- * matters because only the first is proof no document was created — MetaKocka
- * answered, and the answer was a refusal before anything was filed. Everything
- * else is ambiguous: the request may have landed and the answer been lost, and
- * §3 says re-sending the same `count_code` then creates a second document. An
- * ambiguous prior attempt must be resolved by lookup before anything is sent
- * again.
+ * matters because only a *validation* refusal is proof no document was created
+ * — MetaKocka answered, and the answer was a rejection before anything was
+ * filed. Everything else is ambiguous: a transport failure may have landed,
+ * and an unrecognised code is an answer whose consequences nobody has
+ * observed. §3 says re-sending the same `count_code` after a document was
+ * created makes a second one, so anything short of a known refusal is resolved
+ * by lookup before anything is sent again.
  */
 export function isDefinitiveRejection(responseBody: unknown): boolean {
   if (responseBody === null || typeof responseBody !== "object") return false;
   const oprCode = (responseBody as { oprCode?: unknown }).oprCode;
-  return typeof oprCode === "string" && oprCode.length > 0;
+  return typeof oprCode === "string" && VALIDATION_REJECTION_CODES.has(oprCode);
 }
 
 export interface DocumentClaim {
@@ -361,8 +363,20 @@ export async function claimDocument(
   });
 
   if (existing) {
-    // A previous attempt failed outright; let the caller try again on that row.
+    // A previous attempt failed outright; let the caller try again on that
+    // row. The re-claim is a conditional update, not a read followed by a
+    // write: two jobs looking at the same failed row — the merchant's retry
+    // beside the re-check sweep, say — must not both walk away believing they
+    // hold it, because both would then call MetaKocka and §3 says that makes
+    // two documents. The database settles who won; the loser is told nobody's
+    // work is theirs to do.
     if (existing.status === "failed") {
+      const taken = await prisma.metakockaDocument.updateMany({
+        where: { id: existing.id, status: "failed" },
+        data: { status: "pending" },
+      });
+      if (taken.count === 0) return null;
+
       return {
         id: existing.id,
         alreadyWritten: false,
@@ -378,12 +392,23 @@ export async function claimDocument(
     //
     // Reclaiming is safe once the lease has run out, because that is longer
     // than the queue lets a job live: by then pg-boss has abandoned it and
-    // nobody is still writing. Safe to *claim* — not safe to send: the dead job
-    // may have died after its call reached MetaKocka, so `previousRejection`
-    // stays false and the caller resolves by lookup first.
+    // nobody is still writing. The same conditional update settles a race
+    // between two would-be takers, and touching the row renews the lease so a
+    // third arrival a moment later reads it as freshly held. Safe to *claim* —
+    // not safe to send: the dead job may have died after its call reached
+    // MetaKocka, so `previousRejection` stays false and the caller resolves by
+    // lookup first.
     if (existing.status === "pending") {
-      const age = Date.now() - existing.updatedAt.getTime();
-      if (age > CLAIM_LEASE_MS) {
+      const staleBefore = new Date(Date.now() - CLAIM_LEASE_MS);
+      const taken = await prisma.metakockaDocument.updateMany({
+        where: {
+          id: existing.id,
+          status: "pending",
+          updatedAt: { lt: staleBefore },
+        },
+        data: { status: "pending" },
+      });
+      if (taken.count === 1) {
         return {
           id: existing.id,
           alreadyWritten: false,

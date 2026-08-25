@@ -159,21 +159,42 @@ async function main(): Promise<void> {
   // One cron entry per cadence, fanned out per shop by the tick handler.
   // Everything it sends is throttled, so a slow run is never lapped.
   //
+  // **Each schedule carries its own `key`, and the app is dead without them.**
+  // pg-boss upserts schedules on `ON CONFLICT (name, key)` with `key`
+  // defaulting to the empty string, so three keyless schedules on one queue
+  // are one row written three times: only the last call survived, and the
+  // last call was the nightly one. Every five-minute stock sync, the
+  // fifteen-minute reconciler and the exception re-check silently never ran.
+  //
   // Stock gets its own five-minute cycle: MetaKocka's webhook gives up after
   // two retries (§3), and stock is the one figure where being behind means
   // selling something that is not there.
-  await boss.schedule(QUEUES.scheduledTick, "*/5 * * * *", {
-    cadence: "fast",
-  });
+  // Removes the keyless row the buggy version left behind on an existing
+  // database — without this the nightly tick would fire twice, once from the
+  // old row and once from the keyed one. A no-op on a fresh database.
+  await boss.unschedule(QUEUES.scheduledTick);
 
-  await boss.schedule(QUEUES.scheduledTick, "*/15 * * * *", {
-    cadence: "quarter_hourly",
-  });
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "*/5 * * * *",
+    { cadence: "fast" },
+    { key: "fast" },
+  );
+
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "*/15 * * * *",
+    { cadence: "quarter_hourly" },
+    { key: "quarter_hourly" },
+  );
 
   // Nightly work: the section 2.4 retention promise, kept at a quiet hour.
-  await boss.schedule(QUEUES.scheduledTick, "20 3 * * *", {
-    cadence: "nightly",
-  });
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "20 3 * * *",
+    { cadence: "nightly" },
+    { key: "nightly" },
+  );
 
   log.info({ queues: Object.values(QUEUES) }, "Worker started");
 

@@ -192,3 +192,50 @@ Proposed patch once T-06 answers:
   (order-payload.test.ts). The full insert-fire-assert-empty test needs the
   Postgres harness (TODO-HUMAN T-04) - said plainly: the handler logic is
   reviewed and typed, not executed against a database in this run.
+
+### [P0] Three cron schedules collided on one upsert key - only the nightly one ever ran
+- **Where:** `src/jobs/worker.ts` (the three `boss.schedule` calls)
+- **What:** pg-boss upserts schedules `ON CONFLICT (name, key)` with `key`
+  defaulting to the empty string (timekeeper.js: `const { tz = 'UTC', key = ''
+  ... }`; plans.js:825-833). All three cadences were scheduled on the same
+  queue with no key, so each call overwrote the previous row and only the
+  last - nightly - survived. The five-minute stock sync, the fifteen-minute
+  order reconciler, the exception re-check and the document poller never
+  fired. Every guarantee in section 8.10 that "runs on a schedule regardless"
+  was quietly not running; webhooks were the only thing keeping the app alive.
+- **Why it matters:** The whole self-healing layer - the answer to MetaKocka's
+  two-retry webhook, missed Shopify deliveries, stale stock - existed only in
+  code. A missed orders/paid webhook would never be recovered; published stock
+  could stay wrong for a day.
+- **Spec:** CLAUDE.md sections 8.10, 3. The spec is right; the code was wrong.
+- **Status:** fixed - each schedule now carries its cadence as `key`, and the
+  worker first `unschedule`s the keyless row so an existing database does not
+  fire the nightly tick twice.
+- **Verified by:** pg-boss source read (upsert key confirmed); `tsc`, `eslint`,
+  `vitest run` green. A live scheduler observation needs the compose stack
+  (T-04 harness).
+
+### [P0] Re-claiming a failed document row was check-then-act - two concurrent jobs could both pass the duplicate guard
+- **Where:** `src/adapters/db/repositories/order.server.ts` (claimDocument)
+- **What:** A `failed` row was re-claimed by reading it and returning
+  `alreadyWritten: false` to the caller, with no write. Two jobs arriving
+  together - the merchant's Retry beside the re-check sweep's re-drive, or a
+  pg-boss retry racing either - both read `failed`, both proceeded, and both
+  called `put_document` with the same count_code. Section 3 (Finding C,
+  verified): that creates two ERP documents. The stale-pending takeover had
+  the same shape.
+- **Why it matters:** The duplicate guard is the *only* thing preventing
+  duplicate ERP sales orders, and it had a hole exactly on the retry path
+  where duplicates are most likely.
+- **Spec:** CLAUDE.md section 8.4; run prompt Pass 1 ("relies on the
+  constraint, not on a prior SELECT").
+- **Status:** fixed - the re-claim is now a conditional `updateMany` flipping
+  `failed` back to `pending` (the loser sees count 0 and walks away), and the
+  stale-pending takeover is the same conditional update with the lease in the
+  WHERE clause, which also renews the lease for third arrivals. Alongside it,
+  `isDefinitiveRejection` was tightened to the observed validation codes
+  {2, 6, 8}: an unrecognised opr_code no longer licenses a blind re-send and
+  routes through the buyer_order lookup instead.
+- **Verified by:** `vitest run` (recovery tests extended: unknown code "1" is
+  not definitive); `tsc`, `eslint` green. True concurrent-writer assertion
+  needs the Postgres harness (T-04).

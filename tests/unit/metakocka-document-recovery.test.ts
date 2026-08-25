@@ -93,13 +93,22 @@ describe("lookupSalesOrderByBuyerOrder", () => {
 });
 
 describe("isDefinitiveRejection", () => {
-  it("is true only for a recorded MetaKocka opr_code", () => {
-    // The write handler records {oprCode, oprDesc} for a rejection…
+  it("is true only for a recorded validation refusal", () => {
+    // The write handler records {oprCode, oprDesc} for a rejection, and the
+    // observed validation codes (2, 6, 8) are the ones that prove MetaKocka
+    // refused before filing anything.
     expect(
       isDefinitiveRejection({ oprCode: "6", oprDesc: "Profit center..." }),
     ).toBe(true);
+    expect(isDefinitiveRejection({ oprCode: "2" })).toBe(true);
+    expect(isDefinitiveRejection({ oprCode: "8" })).toBe(true);
 
-    // …and everything ambiguous carries none: a timeout ({} after undefined
+    // An unrecognised code is an answer whose consequences nobody has observed
+    // — "1 Internal server error" says nothing about whether a document was
+    // filed — so it must route through the lookup, not license a re-send.
+    expect(isDefinitiveRejection({ oprCode: "1" })).toBe(false);
+
+    // And everything ambiguous carries none: a timeout ({} after undefined
     // keys are dropped), a crash ({error}), or nothing recorded at all.
     expect(isDefinitiveRejection({})).toBe(false);
     expect(isDefinitiveRejection({ error: "AbortError: timeout" })).toBe(false);
