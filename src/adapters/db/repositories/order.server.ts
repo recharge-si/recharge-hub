@@ -311,6 +311,39 @@ export async function setOrderStatus(
  */
 const CLAIM_LEASE_MS = 5 * 60 * 1000;
 
+/**
+ * Whether a recorded failure was MetaKocka saying no.
+ *
+ * The write handler records what a failed attempt got back: a business
+ * rejection is stored with its `oprCode`, while a timeout, a 5xx, a connection
+ * reset or a crash between the call and the record has none. The distinction
+ * matters because only the first is proof no document was created — MetaKocka
+ * answered, and the answer was a refusal before anything was filed. Everything
+ * else is ambiguous: the request may have landed and the answer been lost, and
+ * §3 says re-sending the same `count_code` then creates a second document. An
+ * ambiguous prior attempt must be resolved by lookup before anything is sent
+ * again.
+ */
+export function isDefinitiveRejection(responseBody: unknown): boolean {
+  if (responseBody === null || typeof responseBody !== "object") return false;
+  const oprCode = (responseBody as { oprCode?: unknown }).oprCode;
+  return typeof oprCode === "string" && oprCode.length > 0;
+}
+
+export interface DocumentClaim {
+  id: string;
+  alreadyWritten: boolean;
+  /** True when this claim re-takes a row a previous attempt left behind. */
+  reclaimed: boolean;
+  /**
+   * True when the previous attempt ended in an explicit MetaKocka rejection,
+   * which is the one outcome that proves no document was created. False on a
+   * fresh claim, and false when the previous failure was ambiguous — the
+   * caller must then look before sending (§3, §8.4).
+   */
+  previousRejection: boolean;
+}
+
 export async function claimDocument(
   principal: Principal,
   input: {
@@ -319,18 +352,23 @@ export async function claimDocument(
     countCode: string;
     isPrimary: boolean;
   },
-): Promise<{ id: string; alreadyWritten: boolean } | null> {
+): Promise<DocumentClaim | null> {
   const shopId = await shopIdFor(principal);
 
   const existing = await prisma.metakockaDocument.findUnique({
     where: { shopId_countCode: { shopId, countCode: input.countCode } },
-    select: { id: true, status: true, updatedAt: true },
+    select: { id: true, status: true, updatedAt: true, responseBody: true },
   });
 
   if (existing) {
     // A previous attempt failed outright; let the caller try again on that row.
     if (existing.status === "failed") {
-      return { id: existing.id, alreadyWritten: false };
+      return {
+        id: existing.id,
+        alreadyWritten: false,
+        reclaimed: true,
+        previousRejection: isDefinitiveRejection(existing.responseBody),
+      };
     }
 
     // Written is the only status that means "MetaKocka has this". Pending means
@@ -340,15 +378,27 @@ export async function claimDocument(
     //
     // Reclaiming is safe once the lease has run out, because that is longer
     // than the queue lets a job live: by then pg-boss has abandoned it and
-    // nobody is still writing.
+    // nobody is still writing. Safe to *claim* — not safe to send: the dead job
+    // may have died after its call reached MetaKocka, so `previousRejection`
+    // stays false and the caller resolves by lookup first.
     if (existing.status === "pending") {
       const age = Date.now() - existing.updatedAt.getTime();
       if (age > CLAIM_LEASE_MS) {
-        return { id: existing.id, alreadyWritten: false };
+        return {
+          id: existing.id,
+          alreadyWritten: false,
+          reclaimed: true,
+          previousRejection: false,
+        };
       }
     }
 
-    return { id: existing.id, alreadyWritten: true };
+    return {
+      id: existing.id,
+      alreadyWritten: true,
+      reclaimed: false,
+      previousRejection: false,
+    };
   }
 
   try {
@@ -363,11 +413,34 @@ export async function claimDocument(
       },
       select: { id: true },
     });
-    return { id: created.id, alreadyWritten: false };
+    return {
+      id: created.id,
+      alreadyWritten: false,
+      reclaimed: false,
+      previousRejection: false,
+    };
   } catch {
     // Lost the race against a concurrent claim. That is the guard working.
     return null;
   }
+}
+
+/**
+ * Records the exact body about to be sent, before the call goes out.
+ *
+ * §8.4 says request and response are recorded regardless of outcome, and this
+ * is the half that has to happen first: after a timeout the response is exactly
+ * what nobody has, and the recorded request is what tells the next attempt —
+ * and the drift poller (§8.11) — what MetaKocka may be holding.
+ */
+export async function recordDocumentRequest(
+  documentId: string,
+  requestBody: unknown,
+): Promise<void> {
+  await prisma.metakockaDocument.update({
+    where: { id: documentId },
+    data: { requestBody: requestBody as Prisma.InputJsonValue },
+  });
 }
 
 export async function recordDocumentResult(

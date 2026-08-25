@@ -14,6 +14,7 @@ import {
   applyPrimaryDocument,
   claimDocument,
   getOrderDetail,
+  recordDocumentRequest,
   recordDocumentResult,
   recordPaymentMark,
 } from "~/adapters/db/repositories/order.server";
@@ -22,6 +23,7 @@ import { MetakockaClient } from "~/adapters/metakocka/client";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
 import {
   buildSalesOrderBody,
+  lookupSalesOrderByBuyerOrder,
   putSalesOrder,
   updateSalesOrder,
   type SalesOrderInput,
@@ -574,12 +576,155 @@ export async function handleWriteMetakockaOrder(
     }
   }
 
+  /**
+   * Resolves a previous attempt whose outcome nobody knows.
+   *
+   * §3, verified as Finding C: MetaKocka does not treat `count_code` as unique
+   * — re-sending one creates a *second* document under MetaKocka's own
+   * numbering. So a `put_document` that timed out, hit a 5xx, or whose job died
+   * before recording the answer must never be blindly re-sent. The reference
+   * that *is* searchable is `buyer_order` (Finding B), so the question is asked
+   * before anything goes out: does MetaKocka already hold our document?
+   *
+   * Three answers, three directions:
+   *
+   *  - "Cannot find document" — the definitive no. Nothing with this order's
+   *    reference exists, so the earlier call never landed and sending is safe.
+   *    Returns false and the create path proceeds.
+   *  - Our `count_code` answers — the earlier call landed. The document is
+   *    adopted as written, nothing is sent, and the hourly drift poller
+   *    (§8.11) checks its content against the recorded request like any other
+   *    written document.
+   *  - A *sibling* answers — a split order where another source's document
+   *    exists. `get_document` by `buyer_order` returns one document and which
+   *    one is not documented, so this says nothing about ours. The safe
+   *    direction is to stop and ask: an exception names the count code for the
+   *    merchant to check in MetaKocka, because the alternative — assuming
+   *    absence — is exactly the duplicate §3 warns about.
+   */
+  async function resolveAmbiguousAttempt(): Promise<boolean> {
+    const found = await lookupSalesOrderByBuyerOrder(
+      client,
+      order!.customerOrderRef,
+    );
+
+    if (found === null) return false;
+
+    if (found.countCode === countCode) {
+      await recordDocumentResult(claim!.id, {
+        status: "written",
+        mkId: found.mkId,
+        responseBody: {
+          recovered: true,
+          mkId: found.mkId,
+          docNumber: found.docNumber,
+        },
+      });
+
+      await prisma.allocation.updateMany({
+        where: { supplySourceId, orderLine: { orderId } },
+        data: { status: "written_to_metakocka" },
+      });
+
+      await closeExceptionsFor(principal, orderId, [...WRITE_FAILURE_KINDS]);
+
+      // The body that landed carried `mark_paid`, and MetaKocka confirms a
+      // payment on the document — record it so `mark-metakocka-paid` does not
+      // send a second one (§8.7: exactly once). When MetaKocka does not
+      // confirm one, nothing is recorded: the later payment path then records
+      // it properly, and re-marking an identical payment is the harmless
+      // direction to be wrong in.
+      if (payment && found.hasPayment === true) {
+        await recordPaymentMark(claim!.id, {
+          at: new Date(),
+          paymentType: payment.paymentType,
+          amountMinor: payment.amountMinor,
+        });
+      }
+
+      await appendEvent(principal, {
+        entityType: "order",
+        entityId: orderId,
+        event: "order.document_recovered",
+        detail: {
+          countCode,
+          mkId: found.mkId,
+          source: source!.name,
+          reason:
+            "an earlier attempt had no recorded outcome, and the document was found in MetaKocka by its order reference",
+        },
+      });
+
+      const remaining = await prisma.metakockaDocument.count({
+        where: { orderId, status: { not: "written" } },
+      });
+      if (remaining === 0) {
+        await prisma.order.update({
+          where: { id: orderId },
+          data: { status: "written" },
+        });
+      }
+
+      log.info(
+        { shop: shopDomain, orderId, countCode, mkId: found.mkId },
+        "Sales order recovered from MetaKocka after an ambiguous failure",
+      );
+      return true;
+    }
+
+    await recordDocumentResult(claim!.id, {
+      status: "failed",
+      responseBody: {
+        lookupInconclusive: true,
+        answeredCountCode: found.countCode,
+      },
+    });
+
+    await raiseException(principal, {
+      orderId,
+      kind: "metakocka_write_failed",
+      message: `An earlier attempt to send ${countCode} to MetaKocka got no answer, so it may or may not exist there — and because this order has more than one document, the lookup could not tell. Check in MetaKocka whether a sales order ${countCode} exists: if it does not, retry this order; if it does, mark this as resolved.`,
+      detail: { countCode, answeredCountCode: found.countCode },
+    });
+
+    await prisma.allocation.updateMany({
+      where: { supplySourceId, orderLine: { orderId } },
+      data: { status: "failed" },
+    });
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { status: "needs_attention" },
+    });
+
+    return true;
+  }
+
   if (claim.alreadyWritten) {
     await updateExistingDocument();
     return;
   }
 
   try {
+    /*
+     * The request is recorded before the call goes out (§8.4: "records request
+     * and response bodies regardless of outcome"). After a timeout the
+     * response is exactly what nobody has, and the recorded request is what
+     * tells the drift poller — and anyone reading the row — what MetaKocka may
+     * be holding.
+     */
+    await recordDocumentRequest(claim.id, desired);
+
+    /*
+     * A re-taken claim whose previous attempt was not an explicit MetaKocka
+     * rejection is ambiguous, and §3 forbids resolving ambiguity by sending:
+     * look first. Only a definitive rejection (`opr_code` recorded) proves no
+     * document was created and lets the retry go straight to the write.
+     */
+    if (claim.reclaimed && !claim.previousRejection) {
+      const resolved = await resolveAmbiguousAttempt();
+      if (resolved) return;
+    }
+
     const { body, result } = await putSalesOrder(client, salesOrder);
 
     await recordDocumentResult(claim.id, {

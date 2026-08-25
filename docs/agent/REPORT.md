@@ -27,3 +27,37 @@ out of order.
 ## Findings
 
 (appended as passes complete)
+
+### [P0] Ambiguous put_document failure was blindly retried — duplicate ERP sales orders
+- **Where:** `src/jobs/handlers/write-metakocka-order.ts` (create path), `src/adapters/metakocka/errors.ts:94-96`, `src/adapters/db/repositories/order.server.ts` (claimDocument), `src/adapters/metakocka/documents.ts` (dead `findDocumentByBuyerOrder`)
+- **What:** A `put_document` timeout/5xx/reset was classified `retryable`, the
+  document row marked `failed`, and the error rethrown; pg-boss retried (limit 4);
+  `claimDocument` re-claims a `failed` row with `alreadyWritten: false`; the
+  handler then re-sent `put_document` with the same `count_code` — with no lookup
+  first. The stale-`pending` reclaim (job died between claim and record) took the
+  same blind path. The resolve-by-lookup function existed
+  (`findDocumentByBuyerOrder`) but had **zero callers**, and its response schema
+  expected a `result_list` array that neither the official docs nor the live
+  verification show — it could never have parsed a real response.
+- **Why it matters:** §3 Finding C (verified live): re-sending an existing
+  `count_code` silently creates a **second** sales order under MetaKocka's own
+  numbering. One timed-out order becomes two ERP documents, both real to the
+  merchant's books.
+- **Spec:** CLAUDE.md §3 ("an ambiguous timeout must be resolved by lookup, never
+  by blind retry"), §8.4.
+- **Status:** fixed. `claimDocument` now reports `reclaimed` and
+  `previousRejection` (only a recorded `opr_code` — MetaKocka answering "no" —
+  proves no document was created); the handler resolves any other re-claim by
+  `get_document` with `buyer_order` (the verified searchable reference, Finding
+  B) before sending: our `count_code` answers → adopt as written (payment mark
+  recorded only when MetaKocka confirms one); "Cannot find document" → definitive
+  absent → safe to send; a *sibling* answers (split order, response shape for
+  multiple matches undocumented) → exception naming the count code, never a
+  send. The request body is also now recorded **before** the call (§8.4), so a
+  timeout leaves behind what MetaKocka may be holding. Also rewrote the lookup on
+  the verified single-document response shape.
+- **Verified by:** `npx vitest run` — 30 files, 428 tests pass (4 new in
+  `tests/unit/metakocka-document-recovery.test.ts`: request shape, adopt parse,
+  cannot-find → null, any-other-error → throw); `tsc --noEmit` and `eslint .`
+  clean. Handler-level double-run needs a database harness that does not exist —
+  recorded in TODO-HUMAN.md.

@@ -498,16 +498,9 @@ function lineQuantities(
   return lines;
 }
 
-export async function getSalesOrder(
-  client: MetakockaClient,
-  docId: string,
-): Promise<DocumentSnapshot> {
-  const response = await client.call(
-    ENDPOINTS.getDocument,
-    { doc_type: "sales_order", doc_id: docId },
-    singleDocumentSchema,
-  );
-
+function toDocumentSnapshot(
+  response: z.infer<typeof singleDocumentSchema>,
+): DocumentSnapshot {
   return {
     mkId: response.mk_id ?? null,
     countCode: response.count_code ?? null,
@@ -525,6 +518,19 @@ export async function getSalesOrder(
     buyerOrder: response.buyer_order ?? null,
     lines: lineQuantities(response.product_list),
   };
+}
+
+export async function getSalesOrder(
+  client: MetakockaClient,
+  docId: string,
+): Promise<DocumentSnapshot> {
+  const response = await client.call(
+    ENDPOINTS.getDocument,
+    { doc_type: "sales_order", doc_id: docId },
+    singleDocumentSchema,
+  );
+
+  return toDocumentSnapshot(response);
 }
 
 /**
@@ -711,48 +717,45 @@ export async function markDocumentPaid(
   return { body, verified };
 }
 
-const searchResponseSchema = mkEnvelopeSchema.and(
-  z
-    .object({
-      result_list: z
-        .array(
-          z
-            .object({
-              mk_id: z.union([z.string(), z.number()]).transform(String),
-              count_code: z.string().optional(),
-              doc_number: z.string().optional(),
-            })
-            .passthrough(),
-        )
-        .default([]),
-    })
-    .passthrough(),
-);
-
 /**
- * Looks a document up by the reference we sent.
+ * Looks up the sales order MetaKocka holds for one `buyer_order` reference.
  *
  * This exists for one situation and it is important: a `put_document` that
- * times out is ambiguous. §3 says re-sending the same `count_code` creates a
- * *second* document rather than failing, so a blind retry is how one Shopify
- * order becomes two sales orders in the ERP. An ambiguous write is resolved by
+ * times out — or a job that dies between the call and the record of it — is
+ * ambiguous. §3 says re-sending the same `count_code` creates a *second*
+ * document rather than failing, so a blind retry is how one Shopify order
+ * becomes two sales orders in the ERP. An ambiguous write is resolved by
  * looking, never by sending again.
+ *
+ * The request shape is the verified one: Finding B
+ * (docs/metakocka-verification.md) established live that `get_document` with
+ * `doc_type` and `buyer_order` finds the document, and the official docs show
+ * it answering with the whole document at the top level, exactly like a
+ * `doc_id` query — there is no list wrapper. (An earlier version here expected
+ * a `result_list` array; that shape belongs to the separate `/search`
+ * endpoint, whose array is in fact named `result`, and had never been
+ * verified. It could not have parsed a single real response.)
+ *
+ * When several sibling documents share the reference — a split order — which
+ * sibling answers is not documented. The caller must compare `countCode` and
+ * treat "some other sibling answered" as "could not tell", never as "absent".
+ * Only the explicit "Cannot find document" rejection means absent.
  */
-export async function findDocumentByBuyerOrder(
+export async function lookupSalesOrderByBuyerOrder(
   client: MetakockaClient,
   buyerOrder: string,
-): Promise<DocumentResult[]> {
-  const response = await client.call(
-    ENDPOINTS.getDocument,
-    { doc_type: "sales_order", buyer_order: buyerOrder },
-    searchResponseSchema,
-  );
-
-  return response.result_list.map((row) => ({
-    mkId: row.mk_id,
-    countCode: row.count_code ?? null,
-    docNumber: row.doc_number ?? null,
-  }));
+): Promise<DocumentSnapshot | null> {
+  try {
+    const response = await client.call(
+      ENDPOINTS.getDocument,
+      { doc_type: "sales_order", buyer_order: buyerOrder },
+      singleDocumentSchema,
+    );
+    return toDocumentSnapshot(response);
+  } catch (error) {
+    if (isDocumentMissing(error)) return null;
+    throw error;
+  }
 }
 
 /**
