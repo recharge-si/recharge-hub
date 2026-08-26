@@ -4,7 +4,7 @@ import {
   Outlet,
   Scripts,
   ScrollRestoration,
-  useRouteLoaderData,
+  useLoaderData,
   type LoaderFunctionArgs,
 } from "react-router";
 
@@ -34,14 +34,9 @@ export const loader = ({ request }: LoaderFunctionArgs) => {
 };
 
 export function Layout({ children }: { children: React.ReactNode }) {
-  const data = useRouteLoaderData<typeof loader>("root");
-
   return (
     <html lang="en">
       <head>
-        {data?.embedded ? (
-          <script src={APP_BRIDGE_SRC} data-api-key={data.apiKey} />
-        ) : null}
         <script src={POLARIS_SRC} />
         <meta charSet="utf-8" />
         <meta name="viewport" content="width=device-width,initial-scale=1" />
@@ -63,5 +58,14 @@ export function Layout({ children }: { children: React.ReactNode }) {
 }
 
 export default function Root() {
-  return <Outlet />;
+  const data = useLoaderData<typeof loader>();
+
+  return (
+    <>
+      {data?.embedded ? (
+        <script src={APP_BRIDGE_SRC} data-api-key={data.apiKey} />
+      ) : null}
+      <Outlet />
+    </>
+  );
 }
