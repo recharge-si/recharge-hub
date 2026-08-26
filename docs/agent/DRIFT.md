@@ -1,7 +1,7 @@
-# Where CLAUDE.md and the code disagree
+# Where the build specification and the code disagree
 
-CLAUDE.md is the source of truth, and it says so: "Where this file is wrong or
-stale, say so rather than working around it." This is that saying-so.
+`docs/BUILD_SPEC.md` is the source of truth, and it says so: "Where this file is
+wrong or stale, say so rather than working around it." This is that saying-so.
 
 Each entry names the section, what the code actually does, and which of the two
 should move. Nothing here was silently reconciled in either direction — a spec

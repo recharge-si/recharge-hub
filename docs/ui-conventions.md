@@ -78,5 +78,6 @@ differs it is given, because the code is not going to be renamed to match.
 | **Name sync** | Writing names into MetaKocka, and creating products for unmatched SKUs when that is on. | job `sync-products` |
 | **Pricelist** | A MetaKocka pricelist, referenced by the `count_code` it already has there. Net or gross is a property of the pricelist, not of Shopify. | `pricelistCode` |
 
-Words that must not appear in merchant-facing copy: **article** (CLAUDE.md's word for a
-MetaKocka product), **token**, **template**, **code** meaning a SKU.
+Words that must not appear in merchant-facing copy: **article** (the build
+specification's word for a MetaKocka product), **token**, **template**, **code**
+meaning a SKU.

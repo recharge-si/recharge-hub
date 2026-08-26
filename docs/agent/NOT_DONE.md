@@ -20,15 +20,15 @@ Ground rules for whoever picks this up, unchanged:
 Everything remaining falls into one of three shapes, and none of them is
 "a bug somebody can just correct":
 
-1. **Features CLAUDE.md describes and the code does not have** — §8.3
-   fulfilment orders, §8.5 tracking sync, §8.9's MetaKocka-to-Shopify
+1. **Features `docs/BUILD_SPEC.md` describes and the code does not have** —
+   §8.3 fulfilment orders, §8.5 tracking sync, §8.9's MetaKocka-to-Shopify
    direction, §8.10's nightly cross-checks. Each changes what a merchant sees.
    They are `TODO-HUMAN.md` T-08 to T-11.
 2. **Decisions with real trade-offs** — which access scopes to ship (T-07),
    how partner matching should behave when only a name matches (T-12), how PII
    in jsonb should be encrypted without breaking `customers/redact` (T-13).
-3. **Places CLAUDE.md and the code disagree** about what was decided. All nine
-   are in `DRIFT.md`, each with which of the two should move.
+3. **Places `docs/BUILD_SPEC.md` and the code disagree** about what was decided.
+   All nine are in `DRIFT.md`, each with which of the two should move.
 
 ---
 
@@ -41,7 +41,7 @@ subsystem, which is a day's work and mostly duplicates what the file-level
 doc comments already say — several of them are essay-length and current.
 
 **Suggestion before doing it:** decide what a map would be *for*. If it is
-onboarding, `CLAUDE.md` §5 plus the doc comments may already be it.
+onboarding, `docs/BUILD_SPEC.md` §5 plus the doc comments may already be it.
 
 ### UX.md (Pass 3)
 Never written. The observations it was to be built from are recorded here so
@@ -111,5 +111,5 @@ Coverage is still unmeasured (`DECISIONS.md` D-02, `TODO-HUMAN.md` T-01).
 - `REPORT.md` — every finding from both passes, with where, what, which spec
   section, and what was done about it.
 - `TODO-HUMAN.md` — T-01 to T-14, each with the exact next action.
-- `DRIFT.md` — the nine places CLAUDE.md and the code disagree.
+- `DRIFT.md` — the nine places `docs/BUILD_SPEC.md` and the code disagree.
 - `DECISIONS.md` — decisions taken without asking, and how to reverse them.

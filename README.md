@@ -4,16 +4,19 @@ A public Shopify app that sits between a merchant's Shopify store and their
 MetaKocka ERP, and owns two decisions no existing connector makes: which supply
 source fulfils each order line, and how much stock is safe to publish.
 
-`CLAUDE.md` is the build specification and the source of truth. This file only
-covers how to run what exists.
+`docs/BUILD_SPEC.md` is the build specification and the source of truth. This
+file only covers how to run what exists.
 
 ## Status
 
-**M1, skeleton, complete.** Token exchange, App Bridge, compliance webhooks,
-Postgres and pg-boss under Compose, health endpoint, error reporting.
+The app includes the embedded Shopify shell, MetaKocka connection and settings,
+the SKU registry and catalogue sync, order intake and allocation, MetaKocka
+sales-order writes, payment/order-state synchronization, inventory sync,
+reconciliation jobs, the operations dashboard, and the exceptions workflow.
 
-Not built yet: the MetaKocka connection (M2), the SKU registry (M3), order
-intake and allocation (M4). See `CLAUDE.md` section 13 for the build order.
+Some specification items and design decisions remain open. The current list is
+in `docs/agent/NOT_DONE.md`; items that require a human decision or a test-company
+probe are in `docs/agent/TODO-HUMAN.md`.
 
 ## Requirements
 
@@ -115,7 +118,7 @@ npm run lint
 npm test
 ```
 
-`npm run lint` enforces the import direction from `CLAUDE.md` section 5:
+`npm run lint` enforces the import direction from `docs/BUILD_SPEC.md` section 5:
 `domain/` imports nothing from the other tiers, `web/` never imports `jobs/`.
 It also fails on a clock read inside `domain/`.
 

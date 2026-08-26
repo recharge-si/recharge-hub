@@ -1,11 +1,12 @@
 # MetaKocka verification results
 
-CLAUDE.md section 14 requires these checks against a MetaKocka **test company**
-before anything is built on top of them. Run on 2026-08-24 against test company
-`6789`. Every claim below is an observed response, not a reading of the docs.
+`docs/BUILD_SPEC.md` section 14 requires these checks against a MetaKocka **test
+company** before anything is built on top of them. Run on 2026-08-24 against
+test company `6789`. Every claim below is an observed response, not a reading of
+the docs.
 
-Where a finding contradicts CLAUDE.md, the finding wins and the section is
-flagged for correction.
+Where a finding contradicts `docs/BUILD_SPEC.md`, the finding wins and the
+section is flagged for correction.
 
 ---
 
@@ -68,9 +69,11 @@ when the mapping is edited. We cannot rely on MetaKocka to reject it.
 
 ---
 
-## Finding B — `customer_order` is ignored; the field is `buyer_order` **(corrects CLAUDE.md)**
+## Finding B — `customer_order` is ignored; the field is `buyer_order`
 
-CLAUDE.md section 3 and section 8.4 both say `customer_order` links sibling
+This finding corrects the build specification.
+
+`docs/BUILD_SPEC.md` section 3 and section 8.4 both say `customer_order` links sibling
 documents. It does not: the value is silently discarded.
 
 Sent `customer_order: "CUSTOMER-ORDER-VALUE"` and `buyer_order:
@@ -84,7 +87,7 @@ customer_order   undefined
 `get_document` by `buyer_order` finds the document. By `customer_order` it
 returns `opr_code 2`.
 
-**Correction needed in CLAUDE.md sections 3 and 8.4:** the field is
+**Correction needed in `docs/BUILD_SPEC.md` sections 3 and 8.4:** the field is
 `buyer_order`, on both write and read. Every sibling document from one Shopify
 order shares it, and it is how the split order is found again.
 

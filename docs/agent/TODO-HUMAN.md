@@ -60,8 +60,8 @@ line-discount fix in REPORT.md.
 # Documented but unbuilt
 
 Added 26 August 2026, from the second hardening pass. Each of these is either a
-feature CLAUDE.md describes and the code does not have, or a decision that
-changes what a merchant sees. None was built unattended.
+feature `docs/BUILD_SPEC.md` describes and the code does not have, or a decision
+that changes what a merchant sees. None was built unattended.
 
 ## T-07 — Unused access scopes, before App Store review
 `shopify.app.toml` and `.env` request
@@ -102,7 +102,8 @@ barcode are mastered in MetaKocka and flow MK to Shopify. Nothing in the code
 writes any of them to Shopify: `sync-products` writes *into* MetaKocka and
 `sync-catalogue` reads *from* Shopify.
 
-Next action: decide whether v1 ships without it (and say so in CLAUDE.md), or
+Next action: decide whether v1 ships without it (and say so in
+`docs/BUILD_SPEC.md`), or
 build it. It is the only reason `write_products` is requested (T-07).
 
 ## T-10 — Section 8.5 tracking sync back to Shopify is absent
