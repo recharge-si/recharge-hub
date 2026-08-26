@@ -9,6 +9,14 @@ import {
   parseOrderSafe,
   type ParsedOrder,
 } from "~/adapters/shopify/order-payload";
+import {
+  effectiveCustomerOrderTemplate,
+  getSalesOrderSettings,
+} from "~/adapters/db/repositories/sales-order-setting.server";
+import {
+  DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+  orderReferenceFor,
+} from "~/domain/orders/reference";
 import { partyFingerprint } from "~/domain/orders/state";
 import { shopDomainOf, type Principal } from "~/domain/types";
 import type { OrderSnapshot } from "~/domain/orders/types";
@@ -49,6 +57,13 @@ export async function saveIncomingOrder(
 ): Promise<{ orderId: string; created: boolean }> {
   const shopId = await shopIdFor(principal);
 
+  /*
+   * The merchant's *Customer's order* template, resolved before the
+   * transaction because it is a read of another table and the transaction
+   * below is deliberately short.
+   */
+  const settings = await getSalesOrderSettings(principal);
+
   return prisma.$transaction(async (tx) => {
     const existing = await tx.order.findUnique({
       where: {
@@ -61,9 +76,43 @@ export async function saveIncomingOrder(
     });
     if (existing) return { orderId: existing.id, created: false };
 
-    // The reference every MetaKocka document from this order shares (§3:
-    // `buyer_order`, which is the field that actually links siblings).
-    const customerOrderRef = `SH-${parsed.orderNumber}`;
+    /*
+     * The reference every MetaKocka document from this order shares (§3:
+     * `buyer_order`, which is the field that actually links siblings, and what
+     * MetaKocka shows as *Customer's order*).
+     *
+     * Rendered here, once, and never recomputed. Changing the template later
+     * must not change what an existing order carries: this string is what the
+     * ambiguous-write recovery searches MetaKocka by, so re-rendering it would
+     * orphan documents the ERP already holds.
+     *
+     * The uniqueness check is not cosmetic either. `count_code` is derived from
+     * this and `(shop_id, count_code)` is the app's only duplicate guard, so a
+     * template that renders the same string for two orders — `{{customer.email}}`
+     * for a repeat customer — would have the second order's write silently
+     * refused as already claimed. Falling back to the default template for the
+     * collision keeps both orders sendable and keeps the reference meaningful.
+     */
+    const rendered = orderReferenceFor(effectiveCustomerOrderTemplate(settings), {
+      name: parsed.orderName,
+      number: parsed.orderNumber,
+      id: parsed.shopifyOrderId,
+      customerEmail: parsed.customerEmail,
+    });
+
+    const taken = await tx.order.findFirst({
+      where: { shopId, customerOrderRef: rendered.reference },
+      select: { id: true },
+    });
+
+    const customerOrderRef = taken
+      ? orderReferenceFor(DEFAULT_CUSTOMER_ORDER_TEMPLATE, {
+          name: parsed.orderName,
+          number: parsed.orderNumber,
+          id: parsed.shopifyOrderId,
+          customerEmail: parsed.customerEmail,
+        }).reference
+      : rendered.reference;
 
     const skus = parsed.lines.map((line) => line.sku).filter(Boolean);
     const known = await tx.sku.findMany({
@@ -133,9 +182,9 @@ export async function saveIncomingOrder(
     if (!settled) {
       await enqueueInTransaction(
         tx,
-        QUEUES.allocateOrder,
-        { shopDomain: shopDomainOf(principal), orderId: order.id },
-        { singletonKey: `allocate:${order.id}` },
+        QUEUES.reconcileOrder,
+        { shopDomain: shopDomainOf(principal), orderId: order.id, reason: "intake" },
+        { singletonKey: `reconcile:${order.id}:intake` },
       );
     }
 
@@ -239,6 +288,19 @@ export interface AllocationRecord {
   supplySourceId: string | null;
   quantity: number;
   reason: unknown;
+  /**
+   * Who decided this. `shopify` means the merchant assigned a fulfilment order
+   * to a location, which outranks anything the stock rules would have chosen.
+   */
+  source?: "rules" | "shopify" | "manual";
+  /**
+   * The Shopify location behind it, kept even when no supply source maps it.
+   *
+   * That combination — a location, no source — is what lets the exception say
+   * *which* location is unmapped instead of "part of this order could not be
+   * allocated", which is a sentence a merchant cannot act on.
+   */
+  shopifyLocationId?: string | null;
 }
 
 /**
@@ -274,6 +336,8 @@ export async function replaceAllocations(
           quantity: record.quantity,
           status: record.supplySourceId ? "planned" : "manual",
           reason: record.reason as Prisma.InputJsonValue,
+          source: record.source ?? "rules",
+          shopifyLocationId: record.shopifyLocationId ?? null,
         },
       });
     }
@@ -561,6 +625,18 @@ export async function getOrderState(
       paymentGateway: true,
       partnerOverride: true,
       receivedAt: true,
+      /*
+       * The ledger summary, so the sync path can tell a settled order from an
+       * unsettled one.
+       *
+       * `financial_status` cannot: a second capture on a partly paid order
+       * leaves it partly paid, changes no total and no line, and would
+       * otherwise produce a diff of nothing at all — so the money would arrive
+       * in Shopify and never reach the ERP.
+       */
+      paymentState: true,
+      outstandingMinor: true,
+      paymentsReadAt: true,
       // Read so the snapshot can tell whether the customer details moved. They
       // live nowhere else — §2.4 keeps them out of columns of our own.
       rawPayload: true,
@@ -1220,6 +1296,199 @@ export async function applyPrimaryDocument(
         ]
       : []),
   ]);
+}
+
+/* -------------------------------------------------------------------------- */
+/* Reconciling one order                                                      */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * How long one reconciliation may hold an order before another may take over.
+ *
+ * Matched to the reconcile queue's `expireInSeconds`: past that point pg-boss
+ * has abandoned the job, so nobody is still working. Shorter than the document
+ * claim's lease would let a second pass start while the first is mid-write;
+ * longer would leave an order stuck behind a worker that was killed.
+ */
+const RECONCILE_LEASE_MS = 10 * 60 * 1000;
+
+/**
+ * Takes the per-order reconciliation lock.
+ *
+ * **This is the guard the connector was missing.** Everything else is defended
+ * per document — the `count_code` claim — or per payment, and neither stops two
+ * reconciliations of the same order running together. Two passes reading the
+ * same "no document for this source yet", each deciding a different warehouse
+ * split because a fulfilment order moved between the two reads, is how one
+ * Shopify order ends up with documents nobody asked for.
+ *
+ * A conditional update, so the database settles the race rather than whichever
+ * job happened to look first. Returns false when somebody else holds it, which
+ * the caller must treat as "not mine to do", never as an error: the holder is
+ * reconciling the same order from the same Shopify state and will reach the
+ * same answer.
+ */
+export async function claimOrderReconciliation(
+  principal: Principal,
+  orderId: string,
+  now: Date,
+): Promise<boolean> {
+  const staleBefore = new Date(now.getTime() - RECONCILE_LEASE_MS);
+
+  const claimed = await prisma.order.updateMany({
+    where: {
+      id: orderId,
+      shop: { domain: shopDomainOf(principal) },
+      OR: [
+        { reconcileClaimedAt: null },
+        { reconcileClaimedAt: { lt: staleBefore } },
+      ],
+    },
+    data: { reconcileClaimedAt: now },
+  });
+
+  return claimed.count === 1;
+}
+
+/**
+ * Releases the lock.
+ *
+ * Deliberately unconditional and always called from a `finally`. A lock left
+ * behind by a crash does expire on its own, but ten minutes of an order being
+ * un-reconcilable because a MetaKocka call threw is ten minutes of the ERP
+ * being wrong for no reason.
+ */
+export async function releaseOrderReconciliation(
+  orderId: string,
+): Promise<void> {
+  await prisma.order.updateMany({
+    where: { id: orderId },
+    data: { reconcileClaimedAt: null },
+  });
+}
+
+export type OrderSyncVerdict = "pending" | "in_sync" | "inconsistent" | "blocked";
+
+/** Records what the verification pass concluded, with the numbers behind it. */
+export async function recordSyncVerdict(
+  orderId: string,
+  input: { state: OrderSyncVerdict; detail: unknown; at: Date },
+): Promise<void> {
+  await prisma.order.update({
+    where: { id: orderId },
+    data: {
+      syncState: input.state,
+      syncDetail: (input.detail ?? null) as Prisma.InputJsonValue,
+      reconciledAt: input.at,
+    },
+  });
+}
+
+/** Everything the document planner needs about what already exists. */
+export async function listDocumentsForReconciliation(
+  principal: Principal,
+  orderId: string,
+) {
+  return prisma.metakockaDocument.findMany({
+    where: { orderId, shop: { domain: shopDomainOf(principal) } },
+    select: {
+      id: true,
+      supplySourceId: true,
+      countCode: true,
+      status: true,
+      mkId: true,
+      isPrimary: true,
+      paymentMarkedAt: true,
+      paymentAmountMinor: true,
+      retiredAt: true,
+      retiredReason: true,
+      requestBody: true,
+      supplySource: { select: { id: true, name: true, code: true } },
+    },
+    orderBy: { countCode: "asc" },
+  });
+}
+
+/**
+ * Marks a document as one this order no longer takes anything from.
+ *
+ * Retiring is a statement about *this app's intent*, not about MetaKocka: the
+ * document is still there, and whatever it still holds is exactly what the
+ * quantity invariant has to report. What retiring changes is that the document
+ * stops being paid, stops counting as primary, and stops being treated as a
+ * live part of the order.
+ */
+export async function retireDocument(
+  documentId: string,
+  input: { at: Date; reason: string; mkStatus?: string },
+): Promise<void> {
+  await prisma.metakockaDocument.update({
+    where: { id: documentId },
+    data: {
+      retiredAt: input.at,
+      retiredReason: input.reason,
+      isPrimary: false,
+      ...(input.mkStatus ? { mkStatus: input.mkStatus } : {}),
+    },
+  });
+}
+
+/**
+ * Brings a retired document back into the order.
+ *
+ * A line that moved to another warehouse and back. Reviving the row is what
+ * stops the second move creating a second document: the `count_code` is already
+ * claimed by this row, so the write path updates rather than creates.
+ */
+export async function reviveDocument(documentId: string): Promise<void> {
+  await prisma.metakockaDocument.update({
+    where: { id: documentId },
+    data: { retiredAt: null, retiredReason: null },
+  });
+}
+
+/** Notes that a reconciliation pass looked at this document. */
+export async function touchDocumentReconciled(
+  documentId: string,
+  at: Date,
+): Promise<void> {
+  await prisma.metakockaDocument.update({
+    where: { id: documentId },
+    data: { lastReconciledAt: at },
+  });
+}
+
+/**
+ * Records the payment total a document now carries, or that it carries none.
+ *
+ * `paymentMarkedAt` keeps its original meaning — "a payment is recorded against
+ * this document" — and is cleared when the desired ledger for the document
+ * becomes empty, which happens when a receipt is reallocated to another
+ * document after a warehouse move. Leaving it set would make the order look
+ * paid twice: once here and once wherever the money actually went.
+ */
+export async function recordDocumentPayments(
+  documentId: string,
+  input: {
+    at: Date | null;
+    paymentType: string | null;
+    amountMinor: number;
+    requestBody?: unknown;
+  },
+): Promise<void> {
+  await prisma.metakockaDocument.update({
+    where: { id: documentId },
+    data: {
+      paymentMarkedAt: input.at,
+      paymentType: input.paymentType,
+      paymentAmountMinor: input.amountMinor,
+      // Released with the write it guarded, so the next pass can take it.
+      paymentClaimedAt: null,
+      ...(input.requestBody !== undefined
+        ? { requestBody: input.requestBody as Prisma.InputJsonValue }
+        : {}),
+    },
+  });
 }
 
 /**

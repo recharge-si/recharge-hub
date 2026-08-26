@@ -125,7 +125,7 @@ export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
     await raiseException(principal, {
       orderId: order.id,
       kind: "refund_received",
-      message: `Order ${order.shopifyOrderNumber} was refunded in Shopify. Refunds are not sent to MetaKocka automatically. ${documentNote} Issue the credit note in MetaKocka, then resolve this.`,
+      message: `Order ${order.shopifyOrderNumber} was refunded in Shopify. The refund is recorded in this app's payment ledger, so what the customer has actually paid stays right — but a refund is never written onto a MetaKocka sales order, because the only way to do that would be to shrink the payment already recorded and destroy the record of what was received. ${documentNote} Issue the credit note in MetaKocka, then resolve this.`,
       detail: { topic },
     });
 
@@ -209,11 +209,19 @@ export async function handleOrdersEvent(job: Job<unknown>): Promise<void> {
 }
 
 /**
- * Queues a read of one order from the Admin API.
+ * Queues a reconciliation of one order.
  *
  * Separate from the exception above rather than replacing it: a refund still
- * needs a human, and what the order looks like afterwards is a different
- * question from what somebody has to do about it.
+ * needs a human to issue the credit note, and what the order *is* afterwards is
+ * a different question from what somebody has to do about it. The
+ * reconciliation answers the first — it re-reads the order, the fulfilment
+ * assignment and the payment transactions, and brings MetaKocka to whatever
+ * they now say.
+ *
+ * A refund is exactly the case that makes reading rather than trusting worth
+ * it: the `refunds/create` payload describes a refund, not an order, so the
+ * only way to know what the order now contains and what has now been received
+ * is to look.
  */
 async function refreshOrder(
   shopDomain: string,
@@ -222,8 +230,8 @@ async function refreshOrder(
   if (!shopifyOrderId) return;
 
   await enqueue(
-    QUEUES.syncOrderState,
-    { shopDomain, shopifyOrderId },
-    { singletonKey: `refresh:${shopDomain}:${shopifyOrderId}` },
+    QUEUES.reconcileOrder,
+    { shopDomain, shopifyOrderId, reason: "webhook" },
+    { singletonKey: `reconcile:${shopDomain}:${shopifyOrderId}:event` },
   );
 }

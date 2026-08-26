@@ -332,6 +332,14 @@ function taxFactorOf(
 export interface ParsedOrder {
   shopifyOrderId: string;
   orderNumber: string;
+  /**
+   * Shopify's display name, `#1050`. Kept apart from `orderNumber` because the
+   * merchant's *Customer's order* template can use either, and they are not the
+   * same string (`domain/orders/reference`).
+   */
+  orderName: string | null;
+  /** The address the order was placed with, for the same template. */
+  customerEmail: string | null;
   currency: string;
   financialStatus: FinancialStatus;
   totalMinor: number;
@@ -407,6 +415,8 @@ export function parseOrder(payload: unknown): ParsedOrder {
   return {
     shopifyOrderId: order.id,
     orderNumber,
+    orderName: order.name ?? null,
+    customerEmail: contact.email,
     currency,
     financialStatus: toFinancialStatus(order.financial_status),
     totalMinor: toMinorUnits(total),

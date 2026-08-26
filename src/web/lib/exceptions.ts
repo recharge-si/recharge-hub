@@ -49,7 +49,25 @@ const COPY: Record<string, ExceptionCopy> = {
     label: "Partially paid",
     short: "partially paid",
     guidance:
-      "The order was created but not marked paid, because a part payment cannot be guessed. Record the payment in MetaKocka.",
+      "Each payment Shopify has recorded is sent to MetaKocka as it arrives. This is here so you can see the order is not settled yet.",
+  },
+  sync_inconsistent: {
+    label: "MetaKocka does not add up",
+    short: "where MetaKocka does not add up",
+    guidance:
+      "What the sales orders hold is not what Shopify says the order contains. Nothing extra was created — another document would make the difference bigger. The order page states the difference for each SKU.",
+  },
+  payment_unallocated: {
+    label: "Payment could not be recorded",
+    short: "with a payment that could not be recorded",
+    guidance:
+      "Money arrived that has no MetaKocka document to go on. Nothing was written anywhere else. Check the order, then reconcile it again.",
+  },
+  unmapped_location: {
+    label: "Location not mapped",
+    short: "fulfilled from an unmapped location",
+    guidance:
+      "Shopify is fulfilling part of the order from a location with no MetaKocka warehouse, so those lines were not sent. Map it on the Supply sources page, then reconcile the order again.",
   },
   voided_payment: {
     label: "Payment voided",

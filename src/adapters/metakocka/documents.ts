@@ -95,6 +95,21 @@ export interface DocumentLine {
   name?: string | null;
 }
 
+/**
+ * One entry of a document's `mark_paid` array.
+ *
+ * Shaped as a payment rather than as "the payment", because a Shopify order can
+ * receive money more than once — a deposit and a balance, two instalments, a
+ * split tender — and collapsing those into a single figure loses which gateway
+ * each came from and when. The MetaKocka field is an array; this is one member.
+ */
+export interface DocumentPayment {
+  /** A value from the merchant's own MetaKocka payment-type register (§3). */
+  paymentType: string;
+  paidAt: Date;
+  amountMinor: number;
+}
+
 export interface SalesOrderInput {
   countCode: string;
   /** Shared by every document from one Shopify order. */
@@ -137,12 +152,38 @@ export interface SalesOrderInput {
    *
    * Deliberately part of the create rather than a follow-up update. See
    * `markDocumentPaid` for why an update is dangerous.
+   *
+   * A single payment. Kept as a distinct field from `payments` below because
+   * every existing caller and every recorded fixture uses it, and because the
+   * one-payment case is the overwhelmingly common one. When both are set,
+   * `payments` wins: it is the reconciled ledger and this is a shorthand.
    */
   markPaid?: {
     paymentType: string;
     paidAt: Date;
     amountMinor?: number;
   } | null;
+  /**
+   * The complete set of payments this document should carry (§8.7).
+   *
+   * **This is the reconciliation form of `mark_paid`, and MetaKocka's own
+   * replacement semantics are what make it correct.** §3 verified that
+   * `put_document` with an `mk_id` replaces the document rather than patching
+   * it, and §8.7 that `mark_paid` on an update deletes the previous payment
+   * and replaces it. Sent one payment at a time that is a trap — the second
+   * capture of a two-part payment erases the first. Sent as the whole desired
+   * ledger it is exactly the property this connector wants: whatever
+   * MetaKocka held before, it now holds precisely these payments, and sending
+   * the same list again changes nothing.
+   *
+   * An empty array is meaningful and is sent: it means "this document should
+   * carry no payment", which is what a document whose only receipt was
+   * reallocated elsewhere needs.
+   *
+   * Entries are sent in the order given; the caller sorts them by transaction
+   * time so a re-run produces a byte-identical body.
+   */
+  payments?: DocumentPayment[] | null;
   /** Currency minor-unit exponent. Two everywhere this app currently ships. */
   currencyDecimals?: number;
 }
@@ -296,6 +337,55 @@ function party(input: DocumentParty) {
   };
 }
 
+/**
+ * The `mark_paid` key, or no key at all.
+ *
+ * Three distinct states, and conflating any two of them loses money:
+ *
+ *  - **`payments` given** — the reconciled ledger, sent verbatim. An empty
+ *    array is included on purpose: on an update it is what clears a payment.
+ *  - **`markPaid` given** — the single-payment shorthand every existing caller
+ *    uses, kept working unchanged.
+ *  - **Neither** — the key is omitted. On a *create* that means an unpaid
+ *    document; on an update it means "leave whatever payment is there", which
+ *    is what the update path relies on when it replays a recorded body.
+ */
+function paymentField(
+  input: SalesOrderInput,
+  decimals: number,
+): Record<string, unknown> {
+  const entries = input.payments;
+
+  if (entries) {
+    return {
+      mark_paid: entries.map((payment) => ({
+        payment_type: payment.paymentType,
+        date: toPaymentDate(payment.paidAt, input.timeZone),
+        amount: minorToDecimalString(payment.amountMinor, decimals),
+      })),
+    };
+  }
+
+  if (!input.markPaid) return {};
+
+  return {
+    mark_paid: [
+      {
+        payment_type: input.markPaid.paymentType,
+        date: toPaymentDate(input.markPaid.paidAt, input.timeZone),
+        ...(input.markPaid.amountMinor !== undefined
+          ? {
+              amount: minorToDecimalString(
+                input.markPaid.amountMinor,
+                decimals,
+              ),
+            }
+          : {}),
+      },
+    ],
+  };
+}
+
 /** The exact body sent, built separately so it can be recorded and asserted. */
 export function buildSalesOrderBody(input: SalesOrderInput) {
   const decimals = input.currencyDecimals ?? 2;
@@ -321,24 +411,15 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
       ? { method_of_payment: input.methodOfPayment }
       : {}),
     ...(input.notes ? { notes: input.notes } : {}),
-    ...(input.markPaid
-      ? {
-          mark_paid: [
-            {
-              payment_type: input.markPaid.paymentType,
-              date: toPaymentDate(input.markPaid.paidAt, input.timeZone),
-              ...(input.markPaid.amountMinor !== undefined
-                ? {
-                    amount: minorToDecimalString(
-                      input.markPaid.amountMinor,
-                      decimals,
-                    ),
-                  }
-                : {}),
-            },
-          ],
-        }
-      : {}),
+    /*
+     * The payments, as one array.
+     *
+     * `payments` is the reconciled ledger and wins when present, including
+     * when it is empty — an empty `mark_paid` is how a document stops carrying
+     * a payment that has been reallocated elsewhere, and omitting the key
+     * instead would leave the old one in place on an update.
+     */
+    ...paymentField(input, decimals),
     product_list: input.lines.map((line) => ({
       code: line.code,
       amount: String(line.amount),
@@ -715,6 +796,122 @@ export async function markDocumentPaid(
   }
 
   return { body, verified };
+}
+
+/**
+ * Replaces the whole set of payments on a document with the desired ledger.
+ *
+ * The reconciliation form of `markDocumentPaid`, and the difference is the
+ * whole point. `markDocumentPaid` records *a* payment, exactly once, and is
+ * guarded by a claim so it can never be sent twice — which is correct for an
+ * order paid in one go and useless for one paid twice: the second call would
+ * delete the first payment and replace it, silently, because that is what
+ * §8.7 says `mark_paid` on an update does.
+ *
+ * Turning that into an advantage is the design. The caller computes what the
+ * document *should* carry — every settled Shopify receipt allocated to it — and
+ * this sends the complete list. MetaKocka's replacement then converges rather
+ * than accumulating:
+ *
+ *  - two captures arrive as two entries and the document shows both;
+ *  - the same ledger sent again produces an identical body and changes nothing;
+ *  - a receipt reallocated to a different document disappears from this one
+ *    without a delete call, because it is simply no longer in the array.
+ *
+ * The same two safety rules as every other update apply and are enforced here:
+ * **the whole document goes with the payments** (`body` is the complete
+ * recorded body, never a patch, or the lines are deleted), and **the result is
+ * read back**, because MetaKocka has been observed reporting success for an
+ * update that emptied a document.
+ */
+export async function replaceDocumentPayments(
+  client: MetakockaClient,
+  input: {
+    mkId: string;
+    /** The complete document body, as originally sent. Never a subset. */
+    body: Record<string, unknown>;
+    /** The desired ledger. An empty array clears the document's payments. */
+    payments: DocumentPayment[];
+    timeZone?: string;
+    currencyDecimals?: number;
+  },
+): Promise<{ body: Record<string, unknown>; verified: DocumentSnapshot }> {
+  const decimals = input.currencyDecimals ?? 2;
+
+  const expectedLines = Array.isArray(input.body.product_list)
+    ? input.body.product_list.length
+    : 0;
+
+  const body: Record<string, unknown> = {
+    ...input.body,
+    mk_id: input.mkId,
+    mark_paid: input.payments.map((payment) => ({
+      payment_type: payment.paymentType,
+      date: toPaymentDate(payment.paidAt, input.timeZone),
+      amount: minorToDecimalString(payment.amountMinor, decimals),
+    })),
+  };
+
+  await client.call(ENDPOINTS.putDocument, body, documentResponseSchema);
+
+  const verified = await getSalesOrder(client, input.mkId);
+
+  /*
+   * Only an answer counts as a failure — the same rule as `markDocumentPaid`.
+   * A null line count means `get_document` did not return a `product_list`,
+   * which says nothing about the document and everything about a response
+   * shape this app has not verified (§14).
+   */
+  if (
+    expectedLines > 0 &&
+    verified.lineCount !== null &&
+    verified.lineCount < expectedLines
+  ) {
+    throw new MetakockaError(
+      `MetaKocka accepted the payments but the document now holds ${verified.lineCount} of ${expectedLines} lines`,
+      {
+        endpoint: ENDPOINTS.putDocument,
+        kind: "exception",
+        oprDesc: `Document ${input.mkId} lost lines when its payments were recorded. MetaKocka treats an update as a replacement and reported success regardless. Check the document in MetaKocka before doing anything else with this order.`,
+      },
+    );
+  }
+
+  return { body, verified };
+}
+
+/**
+ * Deletes a sales order MetaKocka holds.
+ *
+ * **The one call in this app that destroys an ERP record, and it is never made
+ * on this app's own initiative.** §8.8's standing rule is that a MetaKocka
+ * document is never deleted automatically, because it may already be invoiced
+ * and deleting it removes an accounting entry. The rule holds; what changed is
+ * that a merchant may now *opt in* to having obsolete, unpaid documents removed
+ * rather than left as orphans (`obsolete_document_policy: delete_unpaid`), and
+ * this is what that setting reaches.
+ *
+ * The caller is responsible for having established every one of: the document
+ * carries no payment, the order no longer takes anything from its warehouse,
+ * and the merchant chose this. Nothing here re-checks them, so nothing here
+ * should ever be called speculatively.
+ */
+export async function deleteSalesOrder(
+  client: MetakockaClient,
+  mkId: string,
+): Promise<{ deleted: boolean }> {
+  try {
+    await client.call(
+      ENDPOINTS.deleteDocument,
+      { doc_id: mkId },
+      mkEnvelopeSchema,
+    );
+    return { deleted: true };
+  } catch (error) {
+    // Already gone is the outcome we wanted. Anything else is the caller's.
+    if (isDocumentMissing(error)) return { deleted: false };
+    throw error;
+  }
 }
 
 /**

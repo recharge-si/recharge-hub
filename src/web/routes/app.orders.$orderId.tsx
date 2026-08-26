@@ -20,6 +20,7 @@ import {
   UnknownSupplySourceError,
   stockForOrder,
 } from "~/adapters/db/repositories/order.server";
+import { listLedger } from "~/adapters/db/repositories/order-payment.server";
 import { metakockaDocumentUrl } from "~/adapters/metakocka/documents";
 import { redriveOrder } from "~/adapters/queue/redrive.server";
 import {
@@ -40,6 +41,9 @@ import {
   describePayment,
   describeProgress,
   formatTaxRate,
+  describeSyncState,
+  describeTransactionKind,
+  describeTransactionStatus,
 } from "~/web/lib/orders";
 import { principalFromSession } from "~/web/lib/principal.server";
 
@@ -63,7 +67,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Both only exist so the two things that used to be impossible on this page
   // are possible: choosing a source by hand, and giving MetaKocka a customer
   // for an order Shopify has no address on.
-  const [sources, stock, products] = await Promise.all([
+  const [sources, stock, products, ledger] = await Promise.all([
     listAllocatableSources(principal),
     stockForOrder(principal, order.id),
     /*
@@ -78,9 +82,38 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       principal,
       order.lines.map((line) => line.sku),
     ),
+    /*
+     * The payment ledger.
+     *
+     * Read here rather than derived from `financial_status`, because the
+     * question this section answers — how much has actually arrived, and when —
+     * is one that status cannot answer. An order that is half paid and an order
+     * that is paid look identical in a badge.
+     */
+    listLedger(principal, order.id),
   ]);
 
   const override = parsePartnerOverride(order.partnerOverride);
+
+  /*
+   * Every transaction, not only the settled ones.
+   *
+   * An authorisation nobody captured is the explanation for an order Shopify
+   * calls authorised and MetaKocka calls unpaid, and a failed charge is the
+   * explanation for an order that looks like it should have been paid and was
+   * not. Hiding them would leave the merchant with the puzzle and none of the
+   * evidence.
+   */
+  const payments = ledger.map((row) => ({
+    id: row.id,
+    transactionId: row.shopifyTransactionId,
+    kind: row.kind,
+    status: row.status,
+    amountMinor: row.amountMinor,
+    gateway: row.gateway,
+    processedAt: row.processedAt?.toISOString() ?? null,
+    metakockaPaymentType: row.metakockaPaymentType,
+  }));
 
   // Parsed once. Past the 90-day redaction there is no payload left, which
   // reads here as "Shopify has no address" — and by then it is true of anything
@@ -95,6 +128,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       kind: source.kind,
     })),
     partnerOverride: override,
+    payments,
     /** Whether Shopify gave us anything to file the order against at all. */
     hasShopifyAddress: Boolean(
       shopifyParty?.partner ?? shopifyParty?.receiver,
@@ -106,6 +140,22 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       status: order.status,
       financialStatus: order.financialStatus,
       paymentGateway: order.paymentGateway,
+      /*
+       * The connector's own verdict, from the last reconciliation.
+       *
+       * Distinct from `status`, which says how far the pipeline got. This says
+       * whether the result is *correct*: an order can be written and
+       * inconsistent at the same time, and before this there was no way to
+       * say so on this page.
+       */
+      syncState: order.syncState,
+      reconciledAt: order.reconciledAt?.toISOString() ?? null,
+      paymentState: order.paymentState,
+      grossReceivedMinor: order.grossReceivedMinor,
+      refundedMinor: order.refundedMinor,
+      netPaidMinor: order.netPaidMinor,
+      outstandingMinor: order.outstandingMinor,
+      paymentsReadAt: order.paymentsReadAt?.toISOString() ?? null,
       lastSyncedAt: order.lastSyncedAt?.toISOString() ?? null,
       divergedAt: order.divergedAt?.toISOString() ?? null,
       cancelledAt: order.cancelledAt?.toISOString() ?? null,
@@ -358,22 +408,26 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
      * that proves it.
      */
     await enqueue(
-      QUEUES.syncOrderState,
-      { shopDomain: session.shop, shopifyOrderId: order.shopifyOrderId },
-      { singletonKey: `refresh:${session.shop}:${order.shopifyOrderId}` },
+      QUEUES.reconcileOrder,
+      {
+        shopDomain: session.shop,
+        orderId,
+        reason: "manual",
+      },
+      { singletonKey: `reconcile:${orderId}:manual:${Date.now()}` },
     );
     return {
       ok: true,
       message:
-        "Reading this order back from Shopify. Reload the page in a moment to see what changed.",
+        "Reading this order back from Shopify and bringing MetaKocka in step with it. Reload the page in a moment to see what changed.",
     };
   }
 
   if (intent === "record-payment") {
     await enqueue(
-      QUEUES.markMetakockaPaid,
-      { shopDomain: session.shop, orderId },
-      { singletonKey: `paid:${orderId}:retry:${Date.now()}` },
+      QUEUES.reconcileOrder,
+      { shopDomain: session.shop, orderId, reason: "payment" },
+      { singletonKey: `reconcile:${orderId}:payment:${Date.now()}` },
     );
     return {
       ok: true,
@@ -444,7 +498,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function OrderDetail() {
-  const { order, sources, partnerOverride, hasShopifyAddress } =
+  const { order, sources, partnerOverride, hasShopifyAddress, payments } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
@@ -545,6 +599,22 @@ export default function OrderDetail() {
 
             <s-text color="subdued">
               {`Received ${formatDateTime(order.receivedAt)}. MetaKocka reference ${order.reference}.`}
+            </s-text>
+
+            {/*
+              * What the last reconciliation concluded.
+              *
+              * Deliberately a sentence rather than a badge: the two badges
+              * above are the order's progress and its payment, and a third pill
+              * saying "in sync" would be colour for a normal state, which the
+              * UI conventions rule out. When it is *not* in step there is an
+              * exception banner at the top of this page already saying so with
+              * the numbers.
+              */}
+            <s-text color="subdued">
+              {order.reconciledAt
+                ? `${describeSyncState(order.syncState)} Last reconciled ${formatDateTime(order.reconciledAt)}.`
+                : "This order has not been reconciled against MetaKocka yet."}
             </s-text>
 
             {/*
@@ -1044,6 +1114,105 @@ export default function OrderDetail() {
           </s-section>
         ) : null}
 
+        {/*
+          * The payment ledger.
+          *
+          * The one thing a payment badge cannot say: how much has arrived, on
+          * what, and when. §8.7 records individual Shopify transactions
+          * precisely so this question has an answer for an order paid twice, an
+          * order half paid, and an order refunded — none of which
+          * `financial_status` can distinguish.
+          */}
+        <s-section heading="Payments">
+          <s-stack direction="block" gap="base">
+            <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="base">
+              <s-stack direction="block" gap="small-500">
+                <s-text color="subdued">Received</s-text>
+                <s-text type="strong">
+                  {formatMoney(order.grossReceivedMinor, order.currency)}
+                </s-text>
+              </s-stack>
+              <s-stack direction="block" gap="small-500">
+                <s-text color="subdued">Refunded</s-text>
+                <s-text>
+                  {formatMoney(order.refundedMinor, order.currency)}
+                </s-text>
+              </s-stack>
+              <s-stack direction="block" gap="small-500">
+                <s-text color="subdued">Outstanding</s-text>
+                <s-text>
+                  {formatMoney(order.outstandingMinor, order.currency)}
+                </s-text>
+              </s-stack>
+            </s-grid>
+
+            {payments.length === 0 ? (
+              <s-paragraph>
+                {order.paymentsReadAt
+                  ? "Shopify has recorded no payment transactions for this order."
+                  : "The payments for this order have not been read from Shopify yet."}
+              </s-paragraph>
+            ) : (
+              <s-stack direction="block" gap="small-300">
+                {payments.map((payment) => (
+                  <s-grid
+                    key={payment.id}
+                    gridTemplateColumns="1fr auto"
+                    gap="base"
+                    alignItems="center"
+                  >
+                    <s-stack direction="block" gap="small-500">
+                      <s-text type="strong">
+                        {`${describeTransactionKind(payment.kind)} ${formatMoney(payment.amountMinor, order.currency)}`}
+                      </s-text>
+                      <s-text color="subdued">
+                        {[
+                          payment.gateway,
+                          payment.processedAt
+                            ? formatDateTime(payment.processedAt)
+                            : null,
+                          payment.metakockaPaymentType
+                            ? `recorded as ${payment.metakockaPaymentType}`
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </s-text>
+                    </s-stack>
+                    {/*
+                      * Only a failure is coloured. §UI: colour marks
+                      * exceptions, never "normal" — a successful payment is
+                      * the expected case and gets no pill at all.
+                      */}
+                    {payment.status === "success" ? null : (
+                      <s-badge
+                        tone={
+                          payment.status === "pending" ||
+                          payment.status === "awaiting_response"
+                            ? "info"
+                            : "critical"
+                        }
+                      >
+                        {describeTransactionStatus(payment.status)}
+                      </s-badge>
+                    )}
+                  </s-grid>
+                ))}
+              </s-stack>
+            )}
+
+            {order.grossReceivedMinor > 0 &&
+            order.refundedMinor > 0 ? (
+              <s-text color="subdued">
+                Refunds are never written onto a MetaKocka sales order: the
+                payment already recorded there is what was actually received,
+                and shrinking it would destroy that record. Issue a credit note
+                in MetaKocka instead.
+              </s-text>
+            ) : null}
+          </s-stack>
+        </s-section>
+
         <s-section heading="MetaKocka documents">
           {order.documents.length === 0 ? (
             <s-paragraph>
@@ -1183,7 +1352,7 @@ export default function OrderDetail() {
                 Check with Shopify
               </s-button>
             </Form>
-            {order.financialStatus === "paid" && !allDocumentsPaid ? (
+            {order.grossReceivedMinor > 0 && !allDocumentsPaid ? (
               <Form method="post">
                 <input type="hidden" name="intent" value="record-payment" />
                 <s-button

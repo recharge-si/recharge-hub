@@ -93,6 +93,7 @@ model Shop {
   supplySetting          SupplySetting?
   productSyncSetting     ProductSyncSetting?
   orders                 Order[]
+  orderPayments          OrderPayment[]
   metakockaDocuments     MetakockaDocument[]
   exceptions             Exception[]
 
@@ -673,6 +674,128 @@ enum OrderFinancialStatus {
   @@map("order_financial_status")
 }
 
+/// How close the connector believes MetaKocka is to Shopify for one order.
+///
+/// Distinct from `OrderStatus`, which describes how far the pipeline has got.
+/// This describes whether the result is *correct*: an order can be `written`
+/// and `inconsistent` at the same time, and before this existed there was no
+/// way to say so.
+enum OrderSyncState {
+  /// Never reconciled, or reconciled before this column existed.
+  pending
+  /// Desired and actual agreed on the last pass, quantities and value checked.
+  in_sync
+  /// The quantity or value invariant is broken. **Never repaired by writing
+  /// another document** — see domain/orders/invariants.
+  inconsistent
+  /// Convergence is waiting on a person: a locked document, an unmapped
+  /// location, a gateway with no payment type.
+  blocked
+
+  @@map("order_sync_state")
+}
+
+/// The connector's own payment verdict, computed from individual transactions
+/// rather than from Shopify's display status (domain/payments/transactions).
+enum OrderPaymentState {
+  unpaid
+  authorized
+  partially_paid
+  paid
+  overpaid
+  partially_refunded
+  refunded
+
+  @@map("order_payment_state")
+}
+
+/// Who decided that a line comes from a particular supply source.
+enum AllocationSource {
+  /// This app's stock allocator (`domain/allocation`).
+  rules
+  /// Shopify's own fulfilment-order assignment, which is authoritative when
+  /// it exists: a merchant moving a line between locations in the Shopify
+  /// admin is stating where it ships from.
+  shopify
+  /// A person chose it on the order page.
+  manual
+
+  @@map("allocation_source")
+}
+
+/// Where the warehouse split of an order comes from.
+enum AllocationMode {
+  /// Follow Shopify's fulfilment orders, falling back to stock rules for the
+  /// part of an order Shopify has not assigned to a location.
+  shopify_locations
+  /// Ignore Shopify's assignment and allocate purely from cached stock.
+  stock_rules
+
+  @@map("allocation_mode")
+}
+
+/// What to do with a MetaKocka document this order no longer takes anything
+/// from (docs/BUILD_SPEC.md §8.8, `domain/orders/reconcile`).
+enum ObsoleteDocumentPolicy {
+  /// Leave it exactly as it is and raise an exception. The cautious original.
+  report
+  /// Rewrite it with no Shopify-linked lines so it stops carrying quantity,
+  /// then raise the exception anyway. The default.
+  empty
+  /// Delete it, but only when no payment has been recorded against it.
+  delete_unpaid
+
+  @@map("obsolete_document_policy")
+}
+
+/// How one Shopify payment is spread over the several MetaKocka documents of
+/// a split order (`domain/payments/allocation`).
+enum PaymentAllocationStrategy {
+  /// In proportion to what each document is worth. The default.
+  proportional
+  /// All of it on the one primary document.
+  primary
+
+  @@map("payment_allocation_strategy")
+}
+
+/// How the allocated payments are expressed in `mark_paid`.
+enum PaymentEntryMode {
+  /// One `mark_paid` entry per Shopify transaction, which is what the array
+  /// shape exists for and what keeps two captures visible as two receipts.
+  per_transaction
+  /// One entry carrying the sum. The escape hatch, for a company whose
+  /// MetaKocka configuration refuses a multi-entry array.
+  aggregate
+
+  @@map("payment_entry_mode")
+}
+
+/// Shopify's `OrderTransactionKind`, narrowed (`domain/payments/transactions`).
+enum OrderPaymentKind {
+  authorization
+  capture
+  sale
+  void
+  refund
+  change
+  other
+
+  @@map("order_payment_kind")
+}
+
+/// Shopify's `OrderTransactionStatus`, narrowed. Only `success` is money.
+enum OrderPaymentStatus {
+  success
+  pending
+  failure
+  error
+  awaiting_response
+  unknown
+
+  @@map("order_payment_status")
+}
+
 model Order {
   id     String @id @default(cuid())
   shopId String @map("shop_id")
@@ -771,6 +894,43 @@ model Order {
   /// re-drove the order. Cleared by allocating again on purpose.
   allocationLockedAt DateTime? @map("allocation_locked_at")
 
+  /// Single-flight guard around one order's reconciliation (§13 of the order
+  /// reconciliation brief).
+  ///
+  /// Everything else in this app is guarded per *document* — the `count_code`
+  /// claim — or per *payment*. That is enough to stop two writes of the same
+  /// document and not enough to stop two reconciliations of the same order:
+  /// two passes reading the same "no document yet" and then claiming two
+  /// different `count_code`s for two different warehouses is a split that
+  /// never happened. Taken as a conditional update with a lease, in the mould
+  /// of `payment_claimed_at`, so the database settles the race rather than
+  /// whichever job looked first.
+  reconcileClaimedAt DateTime? @map("reconcile_claimed_at")
+  /// When a reconciliation last completed, whatever verdict it reached.
+  reconciledAt       DateTime? @map("reconciled_at")
+
+  /// Whether MetaKocka currently agrees with Shopify, and why not.
+  ///
+  /// `syncDetail` holds the last verification result — per-SKU expected,
+  /// actual and difference — because "this order is inconsistent" without the
+  /// numbers is a banner nobody can act on.
+  syncState  OrderSyncState @default(pending) @map("sync_state")
+  syncDetail Json?          @map("sync_detail")
+
+  /// The payment ledger, summarised (`domain/payments/transactions`).
+  ///
+  /// Materialised onto the order because every screen and every scheduled
+  /// cross-check needs it and none of them may re-derive it from the
+  /// transactions themselves — two derivations of the same money is how the
+  /// dashboard and the order page come to disagree.
+  paymentState       OrderPaymentState? @map("payment_state")
+  grossReceivedMinor Int                @default(0) @map("gross_received_minor")
+  refundedMinor      Int                @default(0) @map("refunded_minor")
+  netPaidMinor       Int                @default(0) @map("net_paid_minor")
+  outstandingMinor   Int                @default(0) @map("outstanding_minor")
+  /// When the transaction ledger was last read from Shopify.
+  paymentsReadAt     DateTime?          @map("payments_read_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
@@ -778,8 +938,10 @@ model Order {
   lines      OrderLine[]
   documents  MetakockaDocument[]
   exceptions Exception[]
+  payments   OrderPayment[]
 
   @@unique([shopId, shopifyOrderId])
+  @@index([shopId, syncState])
   @@index([shopId, status])
   @@index([shopId, receivedAt])
   @@index([shopId, financialStatus])
@@ -840,6 +1002,17 @@ model Allocation {
 
   /// Which rule fired and why. The audit trail is a product feature.
   reason Json?
+
+  /// Who decided this, and which Shopify location it came from.
+  ///
+  /// `shopify` means the merchant said so by assigning a fulfilment order, and
+  /// that outranks anything this app's stock rules would have chosen. Keeping
+  /// the location id alongside the supply source matters for the case the
+  /// mapping cannot answer: a location with no supply source has an allocation
+  /// row naming it, so the exception can say *which* location is unmapped
+  /// instead of "part of this order could not be allocated".
+  source            AllocationSource @default(rules)
+  shopifyLocationId String?          @map("shopify_location_id")
 
   /// Set once the fulfilment order has been moved or split (section 8.3).
   shopifyFulfillmentOrderId String? @map("shopify_fulfillment_order_id")
@@ -918,16 +1091,114 @@ model MetakockaDocument {
   requestBody  Json? @map("request_body")
   responseBody Json? @map("response_body")
 
+  /// Set when this order stopped taking anything from the document's warehouse.
+  ///
+  /// A retired document is **excluded from payment allocation** and from the
+  /// order's desired state, and included in the *actual* quantity total —
+  /// which is the whole point: whatever MetaKocka still holds on it is exactly
+  /// what the quantity invariant has to report. It is never deleted merely for
+  /// being retired (§8.8: it may already be invoiced); the merchant's obsolete
+  /// document policy decides whether it is emptied first.
+  retiredAt     DateTime? @map("retired_at")
+  retiredReason String?   @map("retired_reason")
+
+  /// When a reconciliation last brought this document in line, or confirmed it
+  /// already was. Distinct from `mkCheckedAt`, which is the read-back poll.
+  lastReconciledAt DateTime? @map("last_reconciled_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop         Shop          @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  order        Order         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  supplySource SupplySource? @relation(fields: [supplySourceId], references: [id])
+  shop                Shop                      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  order               Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  supplySource        SupplySource?             @relation(fields: [supplySourceId], references: [id])
+  paymentApplications OrderPaymentApplication[]
 
   @@unique([shopId, countCode])
   @@index([orderId])
   @@map("metakocka_document")
+}
+
+/// One Shopify payment movement, as a durable ledger entry (§8.7).
+///
+/// The identity that makes payment synchronisation idempotent. Shopify
+/// redelivers `orders/paid`, the reconciler re-reads paid orders every quarter
+/// of an hour, and a retried job re-reads them again — and none of it can
+/// record the same money twice, because a transaction is a row with a unique
+/// Shopify id rather than an event that happened to arrive.
+///
+/// Every transaction is stored, not only the settled ones. An authorization
+/// that was never captured is the explanation for an order that Shopify calls
+/// authorized and the ERP calls unpaid, and a failed transaction is the
+/// explanation for an order that looks like it should have been paid and was
+/// not. Which of them count as money is `domain/payments/transactions`, and
+/// nothing here decides it.
+model OrderPayment {
+  id      String @id @default(cuid())
+  shopId  String @map("shop_id")
+  orderId String @map("order_id")
+
+  shopifyTransactionId String             @map("shopify_transaction_id")
+  kind                 OrderPaymentKind
+  status               OrderPaymentStatus
+
+  /// Always the magnitude, never signed: direction is `kind`'s job. Minor
+  /// units, presentment currency, like everything else on the order (§8.6).
+  amountMinor Int    @map("amount_minor")
+  currency    String
+
+  gateway     String?
+  processedAt DateTime? @map("processed_at")
+  /// The authorization a capture belongs to, or the sale a refund reverses.
+  parentTransactionId String? @map("parent_transaction_id")
+
+  /// The MetaKocka payment type this receipt resolved to, from the gateway
+  /// mapping. Recorded per transaction because a single order can be paid
+  /// partly by card and partly by transfer, and the two are different types.
+  metakockaPaymentType String? @map("metakocka_payment_type")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  createdAt   DateTime @default(now()) @map("created_at")
+  updatedAt   DateTime @updatedAt @map("updated_at")
+
+  shop         Shop                      @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  order        Order                     @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  applications OrderPaymentApplication[]
+
+  /// The whole point. A retry cannot create a second row for one transaction.
+  @@unique([shopId, shopifyTransactionId])
+  @@index([orderId])
+  @@map("order_payment")
+}
+
+/// A ledger entry's share of one MetaKocka document.
+///
+/// The join that keeps the multi-document payment rule honest: a Shopify
+/// payment belongs to the *order*, and this records how much of it each
+/// document was told about. The sum of one transaction's applications is that
+/// transaction's amount — never the whole payment on every document, which for
+/// a 300 order split 100/200 would put 600 in the merchant's books.
+model OrderPaymentApplication {
+  id             String @id @default(cuid())
+  orderPaymentId String @map("order_payment_id")
+  documentId     String @map("document_id")
+
+  amountMinor Int    @map("amount_minor")
+  paymentType String @map("payment_type")
+
+  /// When MetaKocka confirmed the document carrying this share. Null while the
+  /// share is planned but not yet written.
+  appliedAt DateTime? @map("applied_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  orderPayment OrderPayment      @relation(fields: [orderPaymentId], references: [id], onDelete: Cascade)
+  document     MetakockaDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@unique([orderPaymentId, documentId])
+  @@index([documentId])
+  @@map("order_payment_application")
 }
 
 /// A business condition needing a human (section 11). Not a retryable failure,
@@ -959,6 +1230,15 @@ enum ExceptionKind {
   /// A background job ran out of retries. Raised from the dead-letter queue so
   /// work stopping is something a merchant can see, not a log line.
   job_failed
+  /// The quantity or value invariant is broken: what MetaKocka holds for this
+  /// order is not what Shopify says it should. Deliberately its own kind
+  /// rather than an `order_diverged`, because the response is different —
+  /// divergence means "Shopify moved", this means "the two do not add up".
+  sync_inconsistent
+  /// Money arrived that could not be placed on any MetaKocka document.
+  payment_unallocated
+  /// Shopify assigned part of an order to a location with no supply source.
+  unmapped_location
 
   @@map("exception_kind")
 }
@@ -1052,6 +1332,38 @@ model SalesOrderSetting {
   /// order raises an exception instead — the same behaviour as turning updates
   /// off entirely, applied only where the stakes are highest.
   updateAfterPaid Boolean @default(false) @map("update_after_paid")
+
+  /// What MetaKocka shows as *Customer's order*, as a template.
+  ///
+  /// Rendered once at intake into `order.customer_order_ref` and never
+  /// recomputed: that string is also the `buyer_order` every sibling document
+  /// carries and the only reference an ambiguous write can be recovered by
+  /// (§3), so re-rendering it after a template change would orphan documents
+  /// MetaKocka already holds. Null means the default, `SH-{{order.number}}`.
+  /// See `domain/orders/reference` for the placeholders.
+  customerOrderTemplate String? @map("customer_order_template")
+
+  /// Where the warehouse split comes from.
+  ///
+  /// `shopify_locations` by default: a merchant moving a line to another
+  /// location in the Shopify admin is stating where it ships from, and the ERP
+  /// should follow. Stock rules still fill in whatever Shopify has not
+  /// assigned — a digital line, a third-party fulfilment this app cannot read.
+  allocationMode AllocationMode @default(shopify_locations) @map("allocation_mode")
+
+  /// What happens to a document this order stops taking anything from.
+  obsoleteDocumentPolicy ObsoleteDocumentPolicy @default(empty) @map("obsolete_document_policy")
+
+  /// Whether the connector records payments in MetaKocka at all.
+  ///
+  /// On by default. Off is for a merchant who settles in the ERP by hand and
+  /// wants the connector to describe the order and nothing else; the ledger is
+  /// still read and shown either way, because "what has this customer paid" is
+  /// worth answering whoever writes it down.
+  syncPayments Boolean @default(true) @map("sync_payments")
+
+  paymentAllocation PaymentAllocationStrategy @default(proportional) @map("payment_allocation")
+  paymentEntryMode  PaymentEntryMode          @default(per_transaction) @map("payment_entry_mode")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

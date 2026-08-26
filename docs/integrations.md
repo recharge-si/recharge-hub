@@ -8,8 +8,10 @@ probe evidence belong in `docs/metakocka-verification.md`.
 
 | Data                                     | Direction today             | Owner / implementation                                      |
 | ---------------------------------------- | --------------------------- | ----------------------------------------------------------- |
-| Orders and order changes                 | Shopify → app → MetaKocka   | Webhooks plus scheduled Shopify reconciliation              |
-| Sales-order payment state                | Shopify → app → MetaKocka   | Gateway mapping and per-document payment claims             |
+| Orders and order changes                 | Shopify → app → MetaKocka   | Per-order reconciliation loop, triggered by webhooks and a schedule |
+| Warehouse allocation                     | Shopify → app → MetaKocka   | Fulfilment-order assigned location through the existing location mapping |
+| Payment transactions                     | Shopify → app → MetaKocka   | `order_payment` ledger, allocated across documents, sent as a complete `mark_paid` |
+| Refunds                                  | Shopify → app (reported)    | Recorded in the ledger; a credit note stays a merchant decision |
 | SKU catalogue match                      | Shopify + MetaKocka → app   | `sync-catalogue` registry read                              |
 | MetaKocka product names/prices on opt-in | Shopify → MetaKocka         | `sync-products`; merchant-controlled and off by default     |
 | Inventory for `mk_to_shopify` locations  | MetaKocka → Shopify         | Physical `amount` to Shopify `on_hand`                      |
@@ -46,6 +48,27 @@ order create/update/paid/cancel/delete/edit, and refunds. Shopify order webhooks
 are supplemented by a 15-minute Admin API reconciliation because delivery is
 best-effort.
 
+**An order webhook is a trigger, never a source of truth.** Every order topic
+ends in a `reconcile-order` job, which re-reads the order, its fulfilment
+assignment and its transactions from the Admin API before deciding anything.
+That is what makes a duplicate, late or out-of-order delivery cost one
+comparison instead of a duplicated document.
+
+### Order reads
+
+Three Admin API reads make up an order's desired state, and each has its own
+adapter so the parsers cannot drift:
+
+- `src/adapters/shopify/orders.ts` — the order itself, mapped into the webhook
+  shape so one parser serves both paths.
+- `src/adapters/shopify/fulfillment-orders.ts` — which location is fulfilling
+  what. Cancelled and incomplete fulfilment orders are excluded, several
+  fulfilment orders for one location are folded into one entry, and a location
+  this app's scopes cannot resolve is reported rather than dropped. Needs
+  `read_merchant_managed_fulfillment_orders`.
+- `src/adapters/shopify/transactions.ts` — the payment ledger, in presentment
+  money, with amounts kept positive and direction carried by the kind.
+
 ### Inventory safety
 
 `src/adapters/shopify/inventory.ts` owns inventory queries and mutations. It
@@ -78,6 +101,16 @@ third base URL and a dedicated adapter.
   mappings are validated against the cached warehouse register.
 - Document updates replace the whole document. Payment and edit paths replay a
   complete recorded body and read it back.
+- `mark_paid` is an array and an update replaces it entirely. The connector uses
+  that deliberately: each document is sent the complete set of payments it
+  should carry, so re-sending an unchanged ledger is a no-op and a second
+  capture does not erase the first. Whether a MetaKocka company accepts a
+  multi-entry array has **not** been live-verified — see
+  `docs/metakocka-verification.md` — so `sales_order_setting.payment_entry_mode`
+  offers an aggregate fallback.
+- `delete_document` is called from exactly one place
+  (`deleteSalesOrder`, reached only by `obsolete_document_policy:
+  delete_unpaid`) and never for a document carrying a payment.
 - Product lines are catalogue references. Sending `unit` can create a product
   accidentally, so order lines deliberately omit it.
 - Stock `sync_stock` removes omitted products and can report success for a

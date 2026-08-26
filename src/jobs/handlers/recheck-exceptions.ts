@@ -87,6 +87,8 @@ async function factsFor(principal: Principal, orderId: string) {
       paymentGateway: true,
       cancelledAt: true,
       divergedAt: true,
+      syncState: true,
+      grossReceivedMinor: true,
       partnerOverride: true,
       rawPayload: true,
       lines: {
@@ -96,7 +98,12 @@ async function factsFor(principal: Principal, orderId: string) {
           quantity: true,
           taxFactor: true,
           allocations: {
-            select: { supplySourceId: true, quantity: true, status: true },
+            select: {
+              supplySourceId: true,
+              quantity: true,
+              status: true,
+              shopifyLocationId: true,
+            },
           },
         },
       },
@@ -499,6 +506,84 @@ async function verdictFor(
      */
     case "fulfillment_split_failed":
       return OPEN;
+
+    /*
+     * The quantities in MetaKocka do not add up to the order.
+     *
+     * Closed only by a reconciliation pass that verified them — `sync_state`
+     * is written by that pass and by nothing else, so it cannot be closed by
+     * inference. While it is still broken, the useful move is another
+     * reconciliation: the repair is updating the documents that exist, never
+     * adding one, and the loop is the only thing that does that.
+     */
+    case "sync_inconsistent":
+      return order.syncState === "in_sync"
+        ? FIXED("MetaKocka now holds exactly what Shopify says this order is.")
+        : {
+            kind: "unblocked",
+            note: "Reconciling the order again to see whether the difference can be repaired.",
+            retry: "reconcile",
+          };
+
+    /*
+     * Money that could not be placed on any document.
+     *
+     * Two things fix it and both are somebody else's work: a gateway getting a
+     * payment type, or the order getting a document that still describes it.
+     * So this re-drives rather than closing — the reconciliation closes it when
+     * the payment actually lands.
+     */
+    case "payment_unallocated":
+      return order.grossReceivedMinor === 0
+        ? FIXED("Shopify no longer reports any money received for this order.")
+        : {
+            kind: "unblocked",
+            note: "Reconciling the order again to place the payment.",
+            retry: "reconcile",
+          };
+
+    /*
+     * Shopify is fulfilling from a location no supply source maps.
+     *
+     * The merchant maps it on the supply sources page, which this can see: the
+     * allocation rows record the location even when nothing mapped it, so a
+     * mapping that now exists is a real change of state.
+     */
+    case "unmapped_location": {
+      const unmapped = [
+        ...new Set(
+          order.lines.flatMap((line) =>
+            line.allocations
+              .filter(
+                (allocation) =>
+                  allocation.supplySourceId === null &&
+                  allocation.shopifyLocationId !== null,
+              )
+              .map((allocation) => allocation.shopifyLocationId!),
+          ),
+        ),
+      ];
+
+      if (unmapped.length === 0) {
+        return FIXED("Every location on this order maps to a warehouse.");
+      }
+
+      const mapped = await prisma.supplySource.count({
+        where: {
+          shop: { domain: principal.shopDomain },
+          enabled: true,
+          shopifyLocationId: { in: unmapped },
+        },
+      });
+
+      return mapped > 0
+        ? {
+            kind: "unblocked",
+            note: "The location is mapped to a MetaKocka warehouse now.",
+            retry: "reconcile",
+          }
+        : OPEN;
+    }
 
     default:
       return OPEN;

@@ -37,7 +37,18 @@ export type RedriveTarget =
   /** Record the payment against documents MetaKocka already holds. */
   | "payment"
   /** Ask Shopify what the order is now. */
-  | "refresh";
+  | "refresh"
+  /**
+   * Run the whole reconciliation loop for this order.
+   *
+   * The answer to almost everything now: read Shopify, work out what MetaKocka
+   * should hold, change only the difference, verify. It subsumes "allocate" and
+   * "write" — those remain because a merchant asking specifically to re-choose
+   * supply sources is a narrower request — and it is the only thing that can
+   * repair an inconsistency, because repairing one means updating documents
+   * rather than adding any.
+   */
+  | "reconcile";
 
 /**
  * Which job answers which problem.
@@ -88,6 +99,25 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
    * from its page rather than from here.
    */
   job_failed: "auto",
+  /*
+   * An order whose MetaKocka documents do not add up to what Shopify says.
+   *
+   * The repair is the reconciliation itself — update what exists — and it is
+   * emphatically *not* "write", which under a broken invariant would be asking
+   * for another document on top of the ones already holding too much.
+   */
+  sync_inconsistent: "reconcile",
+  /*
+   * Money with nowhere to go. Reconciling re-reads the ledger and the
+   * documents, which is what will place it once the merchant has fixed the
+   * mapping or the allocation behind it.
+   */
+  payment_unallocated: "reconcile",
+  /*
+   * Shopify is fulfilling from a location no supply source maps. The merchant
+   * maps it on the supply sources page; reconciling then picks it up.
+   */
+  unmapped_location: "reconcile",
 };
 
 export interface RedriveResult {
@@ -260,6 +290,15 @@ export async function redriveOrder(
       { singletonKey: `refresh:${shopDomain}:${order.shopifyOrderId}:${stamp}` },
     );
     queued.push("reading the order back from Shopify");
+  }
+
+  if (chosen === "reconcile") {
+    await enqueue(
+      QUEUES.reconcileOrder,
+      { shopDomain, orderId, reason: actor === "person" ? "manual" : "recheck" },
+      { singletonKey: `reconcile:${orderId}:retry:${stamp}` },
+    );
+    queued.push("reconciling the order against MetaKocka");
   }
 
   return { queued, reason: null };

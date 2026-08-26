@@ -12,7 +12,6 @@ import {
 } from "~/adapters/db/repositories/order.server";
 import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
-import { redriveOrder } from "~/adapters/queue/redrive.server";
 import { parseOrder, toSnapshot } from "~/adapters/shopify/order-payload";
 import { fetchOrderById } from "~/adapters/shopify/orders";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
@@ -95,7 +94,20 @@ export interface SyncOutcome {
 export async function syncOrderState(
   principal: Principal,
   rawPayload: unknown,
-  options: { source: SyncSource; now?: Date },
+  options: {
+    source: SyncSource;
+    now?: Date;
+    /**
+     * Whether to queue the work this change implies.
+     *
+     * False when the per-order reconciler is calling: it holds the order's
+     * lock and is about to do that work itself, in the same pass, from the
+     * same Shopify state. Queueing a second job would either duplicate the
+     * work or — worse — do it after the lock was released, which is the window
+     * the lock exists to close.
+     */
+    followUp?: boolean;
+  },
 ): Promise<SyncOutcome> {
   const log = getLogger();
   const now = options.now ?? new Date();
@@ -218,7 +230,33 @@ export async function syncOrderState(
    */
   const shouldSettle = payment.kind === "mark_paid" && written.length > 0;
 
-  if (!diff.changed && !shouldSettle) {
+  /*
+   * Money may have moved without the order looking any different.
+   *
+   * `financial_status` is a summary: a second capture on a partly paid order
+   * leaves it "partially_paid", changes no line and no total, and produces a
+   * diff of nothing. The transactions are the only place that movement shows,
+   * and they are read by the reconciliation rather than here — so an order that
+   * is not settled is re-reconciled whenever Shopify says it changed at all.
+   *
+   * Deliberately narrow. It is limited to orders that actually have an
+   * outstanding balance or have never had their payments read, so a fully paid
+   * order gaining a tag still costs one comparison and no Admin API calls.
+   */
+  const unsettled =
+    existing.paymentsReadAt === null ||
+    existing.outstandingMinor > 0 ||
+    existing.paymentState === "partially_paid" ||
+    existing.paymentState === "authorized";
+
+  const shopifyMoved =
+    parsed.updatedAt !== null &&
+    (existing.shopifyUpdatedAt === null ||
+      parsed.updatedAt.getTime() !== existing.shopifyUpdatedAt.getTime());
+
+  const mayHaveNewPayments = unsettled && shopifyMoved;
+
+  if (!diff.changed && !shouldSettle && !mayHaveNewPayments) {
     /*
      * Nothing to act on, but the payload is stored anyway.
      *
@@ -311,30 +349,42 @@ export async function syncOrderState(
    * somebody in Shopify, and now there is one, so the useful thing is to send
    * it rather than to re-run a decision that was never the problem.
    */
-  if (diff.partyArrived && policy.kind !== "diverged") {
-    // Through the shared re-drive, which knows the write job needs one job per
-    // supply source (§8.4) and falls back to allocating when there are none.
-    await redriveOrder(principal, existing.id, "write");
+  /*
+   * Everything this change implies is one job now.
+   *
+   * Before the reconciler existed this branched three ways — allocate again,
+   * send again, record the payment — and each branch queued its own job, which
+   * meant three jobs could be in flight for one order at once, each reading a
+   * different moment of Shopify. The reconciler does all three under one
+   * per-order lock, from one read, so the only decision left here is whether
+   * anything needs doing at all.
+   */
+  const needsReconcile =
+    (diff.partyArrived && policy.kind !== "diverged") ||
+    policy.kind === "resend" ||
+    policy.kind === "reallocate" ||
+    shouldSettle ||
+    diff.contentChanged ||
+    diff.paymentChanged ||
+    mayHaveNewPayments;
+
+  if (needsReconcile && options.followUp !== false) {
+    await enqueue(
+      QUEUES.reconcileOrder,
+      {
+        shopDomain: principal.shopDomain,
+        orderId: existing.id,
+        reason: options.source,
+      },
+      {
+        // Carries the Shopify version, so a second edit is a second run rather
+        // than being collapsed into the first one's pending job.
+        singletonKey: `reconcile:${existing.id}:${parsed.updatedAt?.getTime() ?? now.getTime()}`,
+      },
+    );
   }
 
   if (policy.kind === "resend") {
-    /*
-     * Allocate again, then send again.
-     *
-     * Allocation comes first because a quantity change can move a line to a
-     * different source — five units where the own warehouse has three is a
-     * different split from four. The writes that follow update the documents
-     * that already exist rather than creating new ones, so the `count_code`
-     * guard is never in play (§8.4).
-     */
-    await enqueue(
-      QUEUES.allocateOrder,
-      { shopDomain: principal.shopDomain, orderId: existing.id },
-      {
-        singletonKey: `allocate:${existing.id}:${parsed.updatedAt?.getTime() ?? now.getTime()}`,
-      },
-    );
-
     await appendEvent(principal, {
       entityType: "order",
       entityId: existing.id,
@@ -344,22 +394,6 @@ export async function syncOrderState(
   }
 
   if (policy.kind === "reallocate") {
-    /*
-     * Nothing has reached MetaKocka, so an edit is simply what the order is.
-     * The lines have already been rewritten above; allocating again decides the
-     * sources for the new quantities and re-queues the writes.
-     *
-     * The singleton key carries the version, so a second edit is a second run
-     * rather than being collapsed into the first one's pending job.
-     */
-    await enqueue(
-      QUEUES.allocateOrder,
-      { shopDomain: principal.shopDomain, orderId: existing.id },
-      {
-        singletonKey: `allocate:${existing.id}:${parsed.updatedAt?.getTime() ?? now.getTime()}`,
-      },
-    );
-
     await appendEvent(principal, {
       entityType: "order",
       entityId: existing.id,
@@ -371,20 +405,6 @@ export async function syncOrderState(
   /* ---------------------------------------------------------------------- */
   /* The payment moved                                                      */
   /* ---------------------------------------------------------------------- */
-
-  if (shouldSettle) {
-    await enqueue(
-      QUEUES.markMetakockaPaid,
-      {
-        shopDomain: principal.shopDomain,
-        orderId: existing.id,
-        // When Shopify says the order changed into paid — the closest thing
-        // to the transaction date this pipeline sees (§8.7).
-        ...(parsed.updatedAt ? { paidAt: parsed.updatedAt.toISOString() } : {}),
-      },
-      { singletonKey: `paid:${existing.id}` },
-    );
-  }
 
   /*
    * Exceptions only on an actual change.

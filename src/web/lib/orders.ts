@@ -89,3 +89,68 @@ export function formatTaxRate(taxFactor: string | null): string {
   const percent = rate * 100;
   return `${percent.toFixed(Number.isInteger(percent) ? 0 : 1)}%`;
 }
+
+/**
+ * A Shopify payment transaction, in the merchant's words.
+ *
+ * The code's vocabulary is Shopify's `OrderTransactionKind`, which is precise
+ * and not a phrase anyone says. "Payment" covers a sale and a capture together
+ * because the difference between them — whether the money was taken in one step
+ * or two — is a payment-gateway detail and not something a merchant reading
+ * their order needs to distinguish. What they do need to distinguish is money
+ * from a card hold, which is why an authorisation keeps its own word.
+ */
+export function describeTransactionKind(kind: string): string {
+  switch (kind) {
+    case "sale":
+    case "capture":
+      return "Payment";
+    case "authorization":
+      return "Card hold";
+    case "refund":
+      return "Refund";
+    case "void":
+      return "Voided";
+    case "change":
+      return "Adjustment";
+    default:
+      return "Transaction";
+  }
+}
+
+/** The same, for a status. Only ever shown when it is not `success`. */
+export function describeTransactionStatus(status: string): string {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "awaiting_response":
+      return "Awaiting response";
+    case "failure":
+      return "Failed";
+    case "error":
+      return "Error";
+    default:
+      return "Unknown";
+  }
+}
+
+/**
+ * What the connector's own reconciliation verdict means.
+ *
+ * Distinct from the order's *progress* — an order can be fully written and
+ * still not add up, which is precisely the failure `sync_state` exists to make
+ * visible. The wording says what is true rather than what to do; what to do is
+ * on the exception, which carries the per-SKU numbers.
+ */
+export function describeSyncState(state: string | null): string {
+  switch (state) {
+    case "in_sync":
+      return "MetaKocka holds exactly what Shopify says this order is.";
+    case "inconsistent":
+      return "What MetaKocka holds does not add up to this order.";
+    case "blocked":
+      return "Something has to be decided before MetaKocka can be brought in step.";
+    default:
+      return "Not reconciled against MetaKocka yet.";
+  }
+}

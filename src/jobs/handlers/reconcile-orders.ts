@@ -264,7 +264,7 @@ const STUCK_AFTER_MS = 30 * 60 * 1000;
 /**
  * Re-queues orders that were allocated and then went quiet.
  *
- * The gap this closes is narrow and real: `allocate-order` enqueues one write
+ * The gap this closes is narrow and real: a reconciliation writes one document
  * per supply source, and if the worker dies after pg-boss has exhausted a job's
  * retries, nothing else in the system will ever look at that order again. It
  * would sit at "Allocated" forever, with no exception, because nothing failed
@@ -311,19 +311,28 @@ async function recoverStuckOrders(
     ];
     if (sourceIds.length === 0) continue;
 
-    for (const supplySourceId of sourceIds) {
-      await enqueue(
-        QUEUES.writeMetakockaOrder,
-        { shopDomain: principal.shopDomain, orderId: order.id, supplySourceId },
-        { singletonKey: `mk:${order.id}:${supplySourceId}:recover` },
-      );
-    }
+    /*
+     * One reconciliation, not one write per source.
+     *
+     * The write jobs would send whatever the stale allocation happens to say,
+     * and this order has been sitting for half an hour — long enough for the
+     * merchant to have moved a line to another location in Shopify. Reconciling
+     * re-reads that first, so recovery cannot resurrect a superseded split.
+     */
+    await enqueue(
+      QUEUES.reconcileOrder,
+      { shopDomain: principal.shopDomain, orderId: order.id, reason: "recovery" },
+      { singletonKey: `reconcile:${order.id}:recover` },
+    );
 
     await appendEvent(principal, {
       entityType: "order",
       entityId: order.id,
       event: "order.write_requeued",
-      detail: { sources: sourceIds.length, reason: "no document after 30 minutes" },
+      detail: {
+        sources: sourceIds.length,
+        reason: "no document after 30 minutes",
+      },
     });
 
     log.warn(

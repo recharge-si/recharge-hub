@@ -44,22 +44,79 @@ randomness; callers inject time and inputs.
 
 ## Important flows
 
-### Order intake and ERP write
+### Order intake and the reconciliation loop
+
+Order synchronization is a convergence loop, not an event-to-document mapper. A
+webhook is a trigger to recompute desired state; it is never itself the state.
 
 1. Shopify order webhook routes authenticate through
    `src/web/lib/webhook.server.ts`.
-2. `orders/create` persists the order and queues `allocate-order` in one
-   transaction.
-3. `src/jobs/handlers/allocate-order.ts` maps persisted state into the pure
-   allocator under `src/domain/allocation/` and stores the plan.
-4. One `write-metakocka-order` job per supply source builds and claims a
-   deterministic document before calling MetaKocka.
-5. Later order events and the scheduled reconciler converge payment and order
-   state through `sync-order-state`.
+2. `orders/create` persists the order and queues `reconcile-order` in one
+   transaction. Every other order topic reaches the same queue through
+   `orders-event` or `sync-order-state`.
+3. `src/jobs/handlers/reconcile-order.ts` is the single authority. Under a
+   per-order lock (`order.reconcile_claimed_at`) it reads the order, its
+   fulfilment assignment and its payment transactions from Shopify, builds
+   desired state, diffs it against the recorded MetaKocka state, applies only
+   the difference, and verifies the result.
+4. `write-metakocka-order` remains the executor for one document, claiming a
+   deterministic `count_code` before calling MetaKocka. It is called inline by
+   the loop and remains a queue for retries.
+5. `allocate-order` and `mark-metakocka-paid` are doorways into the same loop,
+   kept so queued jobs and merchant-facing retries keep working.
 
-MetaKocka has no idempotency key and accepts duplicate `count_code` values. The
-database claim in `src/adapters/db/repositories/order.server.ts` is therefore a
-financial safety boundary.
+The loop's supporting services live under `src/jobs/orders/`:
+`allocation-planner`, `document-reconciler`, `payment-reconciler`, and
+`verification`. The decisions they make are pure functions in
+`src/domain/orders/` (`canonical`, `reconcile`, `invariants`, `reference`) and
+`src/domain/payments/` (`transactions`, `allocation`).
+
+Three safety boundaries hold this together:
+
+- MetaKocka has no idempotency key and accepts duplicate `count_code` values,
+  so the database claim in `src/adapters/db/repositories/order.server.ts` is a
+  financial safety boundary.
+- The per-order reconciliation lock is the only thing preventing two passes
+  deciding two different warehouse splits for one order.
+- After every pass the quantity and value invariants are checked
+  (`domain/orders/invariants`). A broken invariant is recorded as
+  `order.sync_state = inconsistent` with the per-SKU difference and **never**
+  repaired by writing another document.
+
+### Warehouse allocation
+
+`sales_order_setting.allocation_mode` decides where an order's warehouse split
+comes from:
+
+- `shopify_locations` (default): Shopify's fulfilment orders are authoritative.
+  `src/adapters/shopify/fulfillment-orders.ts` reads the assigned location per
+  line; the existing `supply_source.shopify_location_id` mapping resolves it to
+  a MetaKocka warehouse. Anything Shopify has not assigned falls back to (2).
+- `stock_rules`: the pure allocator under `src/domain/allocation/` decides from
+  cached `supply_level` rows, as it always did.
+
+A location with no supply source is reported (`unmapped_location`), never
+guessed at. A document whose supply source leaves the allocation is *retired*
+according to `sales_order_setting.obsolete_document_policy`; it is never deleted
+except under the explicit `delete_unpaid` opt-in, and only when unpaid.
+
+### Payments
+
+Payments are a ledger of individual Shopify transactions, not a flag.
+`src/adapters/shopify/transactions.ts` reads `order.transactions`;
+`order_payment` stores one row per transaction under
+`UNIQUE (shop_id, shopify_transaction_id)`, which is what makes payment
+synchronization idempotent. `domain/payments/transactions` decides what counts
+as money — successful `SALE`/`CAPTURE` only, never an authorization — and
+`domain/payments/allocation` divides receipts across a split order's documents
+so they sum to exactly what was received.
+
+MetaKocka's verified replacement semantics are used deliberately rather than
+worked around: each document is sent the **complete** `mark_paid` array it
+should carry (`replaceDocumentPayments`), so two captures are two entries and
+re-sending an unchanged ledger changes nothing. Refunds are recorded in the
+ledger and never projected onto a sales order; they remain a credit-note
+exception.
 
 ### Inventory
 
@@ -111,6 +168,8 @@ history under `prisma/migrations/`. Major groups are:
   warehouse/profit-centre registers;
 - catalogue: `Sku`, `ProductSyncSetting`, observed pricelists and tax rates;
 - orders: `Order`, `OrderLine`, `Allocation`, `MetakockaDocument`, `Exception`;
+- payments: `OrderPayment` (one row per Shopify transaction) and
+  `OrderPaymentApplication` (that transaction's share of one document);
 - merchant mappings/settings: payment types, payment fallback, and sales-order
   update policy.
 
@@ -125,6 +184,8 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Shopify payload/query/mutation | `src/adapters/shopify/`                                                      |
 | MetaKocka endpoint or schema   | `src/adapters/metakocka/`, after verified API evidence                       |
 | Database query                 | `src/adapters/db/repositories/`; keep tenant scope at the boundary           |
+| Order reconciliation rule      | `src/domain/orders/` and `src/jobs/orders/`, then `reconcile-order`          |
+| Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
 | Webhook                        | Thin route in `src/web/routes/`, shared verification helper, queue handler   |

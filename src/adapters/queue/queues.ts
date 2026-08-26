@@ -21,6 +21,7 @@ export const QUEUES = {
   reloadPaymentTypes: "reload-payment-types",
   reloadProfitCenters: "reload-profit-centers",
   reloadPricelists: "reload-pricelists",
+  reconcileOrder: "reconcile-order",
   allocateOrder: "allocate-order",
   writeMetakockaOrder: "write-metakocka-order",
   writeShopifyFulfilment: "write-shopify-fulfilment",
@@ -169,6 +170,27 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 120,
     retryBackoff: true,
     expireInSeconds: 1800,
+  },
+  /*
+   * The reconciliation loop for one order (the order-reconciliation brief
+   * §12, §13).
+   *
+   * Everything an order event can mean funnels through here: read Shopify,
+   * work out what MetaKocka should hold, change only the difference, verify.
+   * It is safe to run at any time and as often as it likes — a pass over an
+   * unchanged order writes nothing — so it retries freely.
+   *
+   * `expireInSeconds` is kept in step with RECONCILE_LEASE_MS in the order
+   * repository: the per-order lock may only be taken over once pg-boss has
+   * abandoned the job holding it. Ten minutes is generous because one pass can
+   * make several MetaKocka calls and MetaKocka is slow (§3).
+   */
+  [QUEUES.reconcileOrder]: {
+    deadLetter: DEAD_LETTER,
+    retryLimit: 4,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
   },
   // Pure and fast: it reads stock and rules and decides. Worth retrying, since
   // a failure here is almost always the database being briefly unavailable.

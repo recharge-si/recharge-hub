@@ -176,6 +176,27 @@ That a complete replay preserves every field is strongly inferred and used by
 the implementation, but a controlled multi-line replay/payment-survival probe
 is still outstanding.
 
+### `mark_paid` as an array — documented, not live-verified
+
+`mark_paid` is documented as a list, and a **single-element** array has been
+accepted repeatedly by the test company. The connector now depends on something
+one step past that: it sends the *complete set* of payments a document should
+carry, so that MetaKocka's replacement semantics converge rather than destroy —
+an order paid twice becomes two entries, and re-sending an unchanged ledger is a
+no-op.
+
+Two things about that have not been checked against a real company:
+
+- whether a **multi-element** `mark_paid` array is accepted at all, and whether
+  the document then reports two payments;
+- whether re-sending an identical array leaves the document unchanged rather
+  than appending to it. (Update-is-replacement makes this near-certain and it is
+  the assumption the whole payment path rests on, so it is worth proving.)
+
+Until both are recorded, `sales_order_setting.payment_entry_mode` offers
+`aggregate`, which collapses a document's payments to one entry per payment type
+— it loses when each part arrived and keeps how much and under which type.
+
 ### Payment types
 
 `payment_type` accepts the register's value column, not its description. An
@@ -269,6 +290,13 @@ pair under `tests/fixtures/metakocka/`.
    the request entirely, as its documentation implies — the reverse-sync
    handler now sends every cached warehouse on that assumption and this has
    not been checked live.
+9. A two-entry `mark_paid` on a sales order: accepted or refused, and what
+   `get_document` reports afterwards. Then the same array again, to prove a
+   repeated send replaces rather than appends. The payment ledger depends on
+   both (project status T-17).
+10. `delete_document` against a sales order the app wrote, to confirm the
+    response shape the `delete_unpaid` obsolete-document policy classifies. It
+    is currently exercised only through the shared client's error handling.
 
 ## Known test-company artifacts
 

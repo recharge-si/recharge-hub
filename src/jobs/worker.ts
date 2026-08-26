@@ -16,6 +16,7 @@ import { handleMarkMetakockaPaid } from "~/jobs/handlers/mark-metakocka-paid";
 import { handleOrdersEvent } from "~/jobs/handlers/orders-event";
 import { handlePollMetakockaDocuments } from "~/jobs/handlers/poll-metakocka-documents";
 import { handleRecheckExceptions } from "~/jobs/handlers/recheck-exceptions";
+import { handleReconcileOrder } from "~/jobs/handlers/reconcile-order";
 import { handleReconcileOrders } from "~/jobs/handlers/reconcile-orders";
 import { handleSyncOrderState } from "~/jobs/handlers/sync-order-state";
 import { handleReloadPaymentTypes } from "~/jobs/handlers/reload-payment-types";
@@ -92,8 +93,19 @@ async function main(): Promise<void> {
   await boss.work(QUEUES.syncProducts, async (jobs) => {
     for (const job of jobs) await handleSyncProducts(job);
   });
-  // Order flow. Allocation is pure and cheap; the MetaKocka write is the one
-  // that must never run twice, which the count_code claim guarantees (§8.4).
+  /*
+   * Order flow.
+   *
+   * `reconcile-order` is the authority: it holds the per-order lock, reads
+   * Shopify, decides what MetaKocka should hold and changes only the
+   * difference. `allocate-order` and `mark-metakocka-paid` are doorways into
+   * it, kept so jobs already queued at deployment still run.
+   * `write-metakocka-order` is the executor for one document, and the one that
+   * must never run twice — which the count_code claim guarantees (§8.4).
+   */
+  await boss.work(QUEUES.reconcileOrder, async (jobs) => {
+    for (const job of jobs) await handleReconcileOrder(job);
+  });
   await boss.work(QUEUES.allocateOrder, async (jobs) => {
     for (const job of jobs) await handleAllocateOrder(job);
   });

@@ -98,6 +98,7 @@ describe("which job answers which problem", () => {
         "write",
         "payment",
         "refresh",
+        "reconcile",
       ]).toContain(target);
     }
   });
