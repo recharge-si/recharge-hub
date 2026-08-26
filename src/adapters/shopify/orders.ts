@@ -28,6 +28,27 @@ import { z } from "zod";
  * would mean asking for `read_customers` on top (§2.3, minimum necessary).
  */
 
+/**
+ * How many line items one page carries.
+ *
+ * Shopify allows more, but this is nested inside a page of fifty orders and
+ * the query's calculated cost multiplies out — fifty orders of two hundred and
+ * fifty lines is a document Shopify throttles rather than answers.
+ */
+const LINE_ITEM_PAGE = 100;
+
+const LINE_ITEM_FIELDS = `#graphql
+  id
+  sku
+  title
+  name
+  quantity
+  taxable
+  originalUnitPriceSet { presentmentMoney { amount } shopMoney { amount } }
+  totalDiscountSet { presentmentMoney { amount } shopMoney { amount } }
+  taxLines { rate ratePercentage priceSet { presentmentMoney { amount } } }
+`;
+
 const ORDER_FIELDS = `#graphql
   id
   name
@@ -55,17 +76,26 @@ const ORDER_FIELDS = `#graphql
   shippingAddress {
     firstName lastName name company address1 address2 zip city province country countryCodeV2 phone
   }
-  lineItems(first: 100) {
-    nodes {
-      id
-      sku
-      title
-      name
-      quantity
-      taxable
-      originalUnitPriceSet { presentmentMoney { amount } shopMoney { amount } }
-      totalDiscountSet { presentmentMoney { amount } shopMoney { amount } }
-      taxLines { rate ratePercentage priceSet { presentmentMoney { amount } } }
+  lineItems(first: ${LINE_ITEM_PAGE}) {
+    pageInfo { hasNextPage endCursor }
+    nodes { ${LINE_ITEM_FIELDS} }
+  }
+`;
+
+/**
+ * The rest of the lines, for an order with more than one page of them.
+ *
+ * Only ever issued for an order that reported `hasNextPage`, which is a
+ * handful of B2B orders in a catalogue's lifetime — not a query in a loop
+ * (§2.5), which is what asking for every order's lines separately would be.
+ */
+const ORDER_LINE_ITEMS_QUERY = `#graphql
+  query OrchestratorOrderLineItems($id: ID!, $cursor: String) {
+    order(id: $id) {
+      lineItems(first: ${LINE_ITEM_PAGE}, after: $cursor) {
+        pageInfo { hasNextPage endCursor }
+        nodes { ${LINE_ITEM_FIELDS} }
+      }
     }
   }
 `;
@@ -131,6 +161,14 @@ const orderNode = z.object({
   billingAddress: address,
   shippingAddress: address,
   lineItems: z.object({
+    // Optional so a fixture recorded before this existed still parses; absent
+    // reads as "there is only one page", which is what it was.
+    pageInfo: z
+      .object({
+        hasNextPage: z.boolean(),
+        endCursor: z.string().nullish(),
+      })
+      .nullish(),
     nodes: z.array(
       z.object({
         id: z.string(),
@@ -309,9 +347,113 @@ export function toWebhookShape(node: OrderNode): Record<string, unknown> {
   };
 }
 
+/**
+ * The most line-item pages this will read for one order.
+ *
+ * Twenty-five pages is two and a half thousand lines, which is far past any
+ * real order and still bounded — an unbounded follow-up loop on a pathological
+ * order would hold the worker for the rest of the day.
+ */
+const MAX_LINE_ITEM_PAGES = 25;
+
+/** An order with more lines than this app is willing to read in one pass. */
+export class OrderTooManyLinesError extends Error {
+  constructor(
+    readonly orderId: string,
+    readonly readSoFar: number,
+  ) {
+    super(
+      `Order ${orderId} has more than ${readSoFar} line items, which is more than one reconciliation pass will read. Nothing was changed.`,
+    );
+    this.name = "OrderTooManyLinesError";
+  }
+}
+
+const lineItemsPageSchema = z.object({
+  data: z.object({
+    order: z
+      .object({
+        lineItems: z.object({
+          pageInfo: z.object({
+            hasNextPage: z.boolean(),
+            endCursor: z.string().nullish(),
+          }),
+          nodes: z.array(orderNode.shape.lineItems.shape.nodes.element),
+        }),
+      })
+      .nullable(),
+  }),
+});
+
+/**
+ * An order node whose `lineItems.nodes` really are all of them.
+ *
+ * The list query asks for one page of lines per order, and an order with more
+ * used to arrive silently truncated. That is not a display problem: the
+ * reconciler compares the payload against the stored order line by line, so
+ * every line past the first page read as **removed** — the order was rewritten
+ * without them, allocated again, and the MetaKocka document diverged from an
+ * order nobody had edited.
+ *
+ * Orders that need this are rare, so the follow-up is issued only for the ones
+ * that say they have more, and never for the rest.
+ */
+async function withAllLineItems(
+  admin: AdminApiContext,
+  node: OrderNode,
+): Promise<OrderNode> {
+  if (!node.lineItems.pageInfo?.hasNextPage) return node;
+
+  const nodes = [...node.lineItems.nodes];
+  let cursor = node.lineItems.pageInfo.endCursor ?? null;
+
+  for (let page = 0; page < MAX_LINE_ITEM_PAGES; page += 1) {
+    const response = await admin.graphql(ORDER_LINE_ITEMS_QUERY, {
+      variables: { id: node.id, cursor },
+    });
+
+    const parsed = lineItemsPageSchema.parse(await response.json());
+    const lineItems = parsed.data.order?.lineItems;
+    // The order disappeared between the two reads. What was read is what
+    // there is; the next pass will find it gone and say so.
+    if (!lineItems) break;
+
+    nodes.push(...lineItems.nodes);
+
+    if (!lineItems.pageInfo.hasNextPage) {
+      return {
+        ...node,
+        lineItems: { pageInfo: lineItems.pageInfo, nodes },
+      };
+    }
+    cursor = lineItems.pageInfo.endCursor ?? null;
+  }
+
+  /*
+   * Past the cap, refusing is the only safe answer.
+   *
+   * Returning what was read would hand the reconciler a truncated order and it
+   * would delete the rest — the exact failure this function exists to prevent,
+   * arrived at by a different route. The caller catches this per order, holds
+   * its watermark, and leaves the order alone.
+   */
+  throw new OrderTooManyLinesError(numericId(node.id), nodes.length);
+}
+
 export interface OrdersPage {
   /** Webhook-shaped payloads, ready for `parseOrder`. */
   orders: Record<string, unknown>[];
+  /**
+   * Orders in this page that could not be read whole, and so were not read at
+   * all. Reported rather than thrown: one pathological order must not stop the
+   * sweep, and it must not be skipped quietly either.
+   */
+  oversized: {
+    shopifyOrderId: string;
+    linesRead: number;
+    /** Shopify's `updatedAt`, so the caller can hold its watermark behind it. */
+    updatedAt: string;
+  }[];
   cursor: string | null;
   hasNextPage: boolean;
 }
@@ -344,8 +486,31 @@ export async function fetchOrdersUpdatedSince(
   const parsed = ordersSinceSchema.parse(await response.json());
   const { nodes, pageInfo } = parsed.data.orders;
 
+  const orders: Record<string, unknown>[] = [];
+  const oversized: OrdersPage["oversized"] = [];
+
+  for (const node of nodes) {
+    // Sequential on purpose: only the rare over-long order does any work here,
+    // and firing its follow-ups alongside everything else would spend the
+    // shop's leaky bucket on the one order that needs it least urgently.
+    try {
+      orders.push(toWebhookShape(await withAllLineItems(admin, node)));
+    } catch (error) {
+      if (error instanceof OrderTooManyLinesError) {
+        oversized.push({
+          shopifyOrderId: error.orderId,
+          linesRead: error.readSoFar,
+          updatedAt: node.updatedAt,
+        });
+        continue;
+      }
+      throw error;
+    }
+  }
+
   return {
-    orders: nodes.map(toWebhookShape),
+    orders,
+    oversized,
     cursor: pageInfo.endCursor ?? null,
     hasNextPage: pageInfo.hasNextPage,
   };
@@ -361,5 +526,6 @@ export async function fetchOrderById(
   });
 
   const parsed = orderByIdSchema.parse(await response.json());
-  return parsed.data.order ? toWebhookShape(parsed.data.order) : null;
+  if (!parsed.data.order) return null;
+  return toWebhookShape(await withAllLineItems(admin, parsed.data.order));
 }

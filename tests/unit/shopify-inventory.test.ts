@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import {
+  InventoryLocationMismatchError,
   InventoryOwnershipError,
   activateOnHand,
   writeOnHand,
@@ -148,5 +149,53 @@ describe("one writer per location (§7)", () => {
     expect(keys[0]).toBe(keys[1]);
     expect(keys[2]).not.toBe(keys[0]);
     expect(keys[3]).not.toBe(keys[0]);
+  });
+});
+
+/*
+ * The ownership check reads `options.locationId` once while each item names
+ * its own, so a batch that mixed locations would write every item on the
+ * strength of a check that covered only one of them — the partner or manual
+ * location §7 says never to write.
+ */
+describe("a batch that mixes locations", () => {
+  const OTHER = "gid://shopify/Location/999";
+
+  it("writeOnHand refuses it and never calls Shopify", async () => {
+    const { admin, graphql } = fakeAdmin(OK_SET_RESULT);
+
+    await expect(
+      writeOnHand(admin, [WRITE, { ...WRITE, locationId: OTHER }], {
+        inventoryWriter: "metakocka",
+        locationId: WRITE.locationId,
+        runId: "job-1",
+      }),
+    ).rejects.toBeInstanceOf(InventoryLocationMismatchError);
+
+    expect(graphql).not.toHaveBeenCalled();
+  });
+
+  it("activateOnHand refuses it, because it stocks every item at the checked location", async () => {
+    const { admin, graphql } = fakeAdmin({ data: {} });
+
+    await expect(
+      activateOnHand(
+        admin,
+        [
+          {
+            inventoryItemId: WRITE.inventoryItemId,
+            locationId: OTHER,
+            quantity: 1,
+          },
+        ],
+        {
+          inventoryWriter: "metakocka",
+          locationId: WRITE.locationId,
+          runId: "job-1",
+        },
+      ),
+    ).rejects.toBeInstanceOf(InventoryLocationMismatchError);
+
+    expect(graphql).not.toHaveBeenCalled();
   });
 });

@@ -1,7 +1,13 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import { parseOrder, toSnapshot } from "~/adapters/shopify/order-payload";
-import { numericId, toWebhookShape } from "~/adapters/shopify/orders";
+import {
+  fetchOrdersUpdatedSince,
+  numericId,
+  toWebhookShape,
+} from "~/adapters/shopify/orders";
 
 /**
  * The Admin API's view of an order, translated into the webhook's shape.
@@ -170,5 +176,135 @@ describe("toWebhookShape", () => {
     node.displayFinancialStatus = "EXPIRED";
 
     expect(parseOrder(toWebhookShape(node)).financialStatus).toBe("unknown");
+  });
+});
+
+/*
+ * An order with more line items than one page holds.
+ *
+ * This is not a display problem. `syncOrderState` compares the payload against
+ * the stored order line by line, so a truncated read makes every line past the
+ * page boundary look **removed**: the order is rewritten without them,
+ * allocated again, and the MetaKocka document diverges from an order nobody
+ * touched.
+ */
+describe("an order with more lines than one page", () => {
+  function line(id: number) {
+    return {
+      id: `gid://shopify/LineItem/${id}`,
+      sku: `SKU-${id}`,
+      title: `Item ${id}`,
+      name: `Item ${id}`,
+      quantity: 1,
+      taxable: true,
+      originalUnitPriceSet: { presentmentMoney: { amount: "1.00" } },
+      totalDiscountSet: { presentmentMoney: { amount: "0.00" } },
+      taxLines: [],
+    };
+  }
+
+  /** An order whose first page of lines says there is another. */
+  const TRUNCATED = {
+    ...NODE,
+    lineItems: {
+      pageInfo: { hasNextPage: true, endCursor: "cursor-0" },
+      nodes: [line(1), line(2)],
+    },
+  };
+
+  /**
+   * An admin that answers the order listing once and then serves line-item
+   * follow-ups, chosen by which query it was handed.
+   */
+  function fakeAdmin(followUps: { nodes: unknown[]; next: boolean }[]) {
+    let followUp = 0;
+
+    const graphql = vi.fn(async (query: string) => {
+      const body = query.includes("OrchestratorOrderLineItems")
+        ? {
+            data: {
+              order: {
+                lineItems: {
+                  pageInfo: {
+                    hasNextPage: followUps[followUp]?.next ?? false,
+                    endCursor: `cursor-${followUp + 1}`,
+                  },
+                  nodes: followUps[followUp++]?.nodes ?? [],
+                },
+              },
+            },
+          }
+        : {
+            data: {
+              orders: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [TRUNCATED],
+              },
+            },
+          };
+
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      });
+    });
+
+    return { admin: { graphql } as unknown as AdminApiContext, graphql };
+  }
+
+  it("reads the rest rather than treating them as removed", async () => {
+    const { admin } = fakeAdmin([{ nodes: [line(3), line(4)], next: false }]);
+
+    const page = await fetchOrdersUpdatedSince(admin, new Date(0));
+
+    expect(page.oversized).toEqual([]);
+    expect(
+      (page.orders[0] as { line_items: unknown[] }).line_items,
+    ).toHaveLength(4);
+  });
+
+  it("asks for no follow-up when the first page is all of them", async () => {
+    const { admin, graphql } = fakeAdmin([]);
+    // The listing itself reports one complete page.
+    graphql.mockImplementationOnce(
+      async () =>
+        new Response(
+          JSON.stringify({
+            data: {
+              orders: {
+                pageInfo: { hasNextPage: false, endCursor: null },
+                nodes: [
+                  {
+                    ...NODE,
+                    lineItems: {
+                      pageInfo: { hasNextPage: false, endCursor: null },
+                      nodes: [line(1)],
+                    },
+                  },
+                ],
+              },
+            },
+          }),
+          { status: 200 },
+        ),
+    );
+
+    await fetchOrdersUpdatedSince(admin, new Date(0));
+
+    expect(graphql).toHaveBeenCalledTimes(1);
+  });
+
+  it("skips an order it cannot read whole rather than truncating it", async () => {
+    // Every follow-up still says there is more, so the page cap is reached.
+    const { admin } = fakeAdmin(
+      Array.from({ length: 40 }, () => ({ nodes: [line(9)], next: true })),
+    );
+
+    const page = await fetchOrdersUpdatedSince(admin, new Date(0));
+
+    expect(page.orders).toHaveLength(0);
+    expect(page.oversized).toEqual([
+      { shopifyOrderId: "5001", linesRead: 27, updatedAt: NODE.updatedAt },
+    ]);
   });
 });

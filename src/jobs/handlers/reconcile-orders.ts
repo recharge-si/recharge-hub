@@ -121,6 +121,35 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
   for (;;) {
     const page = await fetchOrdersUpdatedSince(admin, since, { cursor });
 
+    /*
+     * An order with more lines than one pass will read.
+     *
+     * It is not applied, because applying a truncated order is what this
+     * guards against: the diff compares line by line, so every line past the
+     * last page read would be treated as removed and the order rewritten
+     * without them. It counts as a failure so the watermark stays behind it
+     * and the next run tries again, and it is loud rather than silent.
+     */
+    for (const skipped of page.oversized) {
+      failures += 1;
+      const at = new Date(skipped.updatedAt);
+      if (!earliestFailureAt || at < earliestFailureAt) earliestFailureAt = at;
+      log.error(
+        {
+          shop: shopDomain,
+          order: skipped.shopifyOrderId,
+          linesRead: skipped.linesRead,
+        },
+        "Order has more line items than one reconciliation pass will read",
+      );
+      captureException(
+        new Error(
+          `Order ${skipped.shopifyOrderId} has more than ${skipped.linesRead} line items`,
+        ),
+        { shop: shopDomain, order: skipped.shopifyOrderId },
+      );
+    }
+
     for (const payload of page.orders) {
       read += 1;
 

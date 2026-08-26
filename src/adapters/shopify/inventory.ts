@@ -274,6 +274,46 @@ export class InventoryOwnershipError extends Error {
   }
 }
 
+/**
+ * A batch whose items are not all for the location that was ownership-checked.
+ *
+ * Its own type because it means something different from the ownership
+ * refusal: not "this location belongs to somebody else" but "this batch was
+ * assembled wrongly, and the check that ran does not cover all of it".
+ */
+export class InventoryLocationMismatchError extends Error {
+  constructor(expected: string, found: string[]) {
+    super(
+      `Refusing to write inventory: the batch was checked for location ${expected} but also carries ${found.join(", ")}. The one-writer rule is enforced per location (CLAUDE.md section 7).`,
+    );
+    this.name = "InventoryLocationMismatchError";
+  }
+}
+
+/**
+ * Every item in a batch has to be for the location that was checked.
+ *
+ * The ownership check reads `options.locationId`, once, while each item names
+ * its own — so a batch that mixed locations would have every item written on
+ * the strength of a check that only covered one of them, which is exactly the
+ * partner or manual location §7 says never to write.
+ */
+function assertOneLocation(
+  items: readonly OnHandActivation[],
+  locationId: string,
+): void {
+  const other = [
+    ...new Set(
+      items
+        .map((item) => item.locationId)
+        .filter((id) => id !== locationId),
+    ),
+  ];
+  if (other.length > 0) {
+    throw new InventoryLocationMismatchError(locationId, other);
+  }
+}
+
 export interface OnHandActivation {
   inventoryItemId: string;
   locationId: string;
@@ -323,6 +363,8 @@ export async function writeOnHand(
   }
 
   if (writes.length === 0) return;
+
+  assertOneLocation(writes, options.locationId);
 
   for (let start = 0; start < writes.length; start += WRITE_CHUNK) {
     const chunk = writes.slice(start, start + WRITE_CHUNK);
@@ -385,6 +427,11 @@ export async function activateOnHand(
   }
 
   if (writes.length === 0) return;
+
+  // Activation sends `options.locationId` for every alias rather than each
+  // item's own, so a mixed batch would silently stock items at the wrong
+  // location instead of the one they name.
+  assertOneLocation(writes, options.locationId);
 
   for (let start = 0; start < writes.length; start += ACTIVATE_CHUNK) {
     const chunk = writes.slice(start, start + ACTIVATE_CHUNK);
