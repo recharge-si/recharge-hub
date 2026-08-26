@@ -2,7 +2,7 @@ import { randomBytes } from "node:crypto";
 
 /**
  * Tests never reach a live Shopify store or a live MetaKocka company
- * (CLAUDE.md section 12). These values exist only so `getEnv()` validates.
+ * (docs/BUILD_SPEC.md section 12). These values exist only so `getEnv()` validates.
  */
 process.env.NODE_ENV = "test";
 process.env.SHOPIFY_API_KEY ??= "test-api-key";

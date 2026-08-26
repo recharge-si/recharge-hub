@@ -23,7 +23,7 @@ export default tseslint.config(
       },
     },
     rules: {
-      // CLAUDE.md section 15: no `any`, no `as` across a boundary.
+      // docs/BUILD_SPEC.md section 15: no `any`, no `as` across a boundary.
       "@typescript-eslint/no-explicit-any": "error",
       "@typescript-eslint/consistent-type-imports": [
         "error",
@@ -34,7 +34,7 @@ export default tseslint.config(
         { argsIgnorePattern: "^_", varsIgnorePattern: "^_" },
       ],
 
-      // CLAUDE.md section 5: enforced import direction.
+      // docs/BUILD_SPEC.md section 5: enforced import direction.
       // domain/ imports nothing from the other tiers.
       // adapters/ may import domain/.
       // jobs/ may import domain/ and adapters/.
@@ -97,7 +97,7 @@ export default tseslint.config(
     },
   },
   {
-    // CLAUDE.md section 15: no Date.now() in domain code; inject the clock.
+    // docs/BUILD_SPEC.md section 15: no Date.now() in domain code; inject the clock.
     files: ["src/domain/**/*.ts"],
     rules: {
       "no-restricted-globals": [

@@ -1,4 +1,4 @@
-# CLAUDE.md section 4: Node 22 LTS, two processes from one image.
+# docs/BUILD_SPEC.md section 4: Node 22 LTS, two processes from one image.
 # The image is built once and run as `web` or `worker` depending on the command.
 #
 # `prisma/` is copied before `npm ci` because the postinstall script generates

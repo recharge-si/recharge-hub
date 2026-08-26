@@ -196,7 +196,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
    *
    * **This queue has no consumer yet.** `allocate-order` sends to it and
    * nothing works it, so the jobs sit in `created` for ever. That is a feature
-   * gap, recorded in docs/agent/TODO-HUMAN.md rather than quietly filled in:
+   * gap, recorded in docs/project-status.md T-08 rather than quietly filled in:
    * `fulfillmentOrderMove` and `fulfillmentOrderSplit` change what a merchant's
    * staff see in the Shopify admin, and that is not a decision to make
    * unattended.

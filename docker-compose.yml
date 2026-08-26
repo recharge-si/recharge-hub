@@ -1,4 +1,4 @@
-# CLAUDE.md section 4: Docker Compose on one Linux VM.
+# docs/BUILD_SPEC.md section 4: Docker Compose on one Linux VM.
 # `docker compose up` brings up a working system in one command (section 12).
 
 name: fulfilment-orchestrator

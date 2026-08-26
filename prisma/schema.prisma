@@ -1,7 +1,6 @@
-// Fulfilment Orchestrator. See CLAUDE.md section 6 for the target data model.
-// M1 creates only what the skeleton needs: the Shopify session store, the shop
-// record, and the append-only event log. Later milestones add their own tables
-// in their own migrations (CLAUDE.md section 15: one migration per logical change).
+// Fulfilment Orchestrator's current physical data model. See
+// docs/architecture.md for the persistence map and docs/BUILD_SPEC.md section 6
+// for the conceptual target. Migration history is additive and immutable.
 
 generator client {
   provider = "prisma-client-js"
@@ -14,7 +13,8 @@ datasource db {
 
 /// Shopify offline session. The shape is dictated by PrismaSessionStorage, so the
 /// field names cannot be changed. `accessToken` and `refreshToken` are written
-/// encrypted by adapters/db/encrypted-session-storage.ts (CLAUDE.md section 2.2).
+/// encrypted by adapters/db/encrypted-session-storage.server.ts
+/// (docs/BUILD_SPEC.md section 2.2).
 model Session {
   id                  String    @id
   shop                String
@@ -61,11 +61,11 @@ model Shop {
   /// deleted in MetaKocka, or every price taken off — updates no row at all,
   /// so without a timestamp of its own the screen reports the last sighting as
   /// the last read, and goes on offering pricelists that no longer exist.
-  /// MetaKocka cannot list pricelists (CLAUDE.md §3), so the absence of a code
+  /// MetaKocka cannot list pricelists (docs/BUILD_SPEC.md §3), so the absence of a code
   /// from a read is the only signal there is.
   pricelistsReadAt DateTime? @map("pricelists_read_at")
 
-  /// How far the order reconciler has read (CLAUDE.md section 8.10).
+  /// How far the order reconciler has read (docs/BUILD_SPEC.md section 8.10).
   ///
   /// Shopify webhooks are best-effort: they are retried for a while and then
   /// dropped, and an app that is down for an afternoon simply never hears about
@@ -99,7 +99,7 @@ model Shop {
   @@map("shop")
 }
 
-/// Append-only audit trail. CLAUDE.md section 6: the audit trail is a product
+/// Append-only audit trail. docs/BUILD_SPEC.md section 6: the audit trail is a product
 /// feature, not debug output. Never updated, never deleted outside the section 2.4
 /// retention job.
 model EventLog {
@@ -121,7 +121,7 @@ model EventLog {
 }
 
 /// Exactly-once guard for work triggered by an at-least-once source
-/// (CLAUDE.md section 6). Shopify redelivers webhooks and MetaKocka offers no
+/// (docs/BUILD_SPEC.md section 6). Shopify redelivers webhooks and MetaKocka offers no
 /// idempotency keys of its own, so duplicate prevention is entirely ours.
 ///
 /// Deviation from section 6, deliberate: the tenant is held as a domain string
@@ -142,7 +142,7 @@ model IdempotencyKey {
   @@map("idempotency_key")
 }
 
-/// MetaKocka connection for one shop (CLAUDE.md section 6).
+/// MetaKocka connection for one shop (docs/BUILD_SPEC.md section 6).
 ///
 /// The secret key grants full write access to the merchant's ERP and there is no
 /// read-only mode and no rotation (section 3), so it is treated as a production
@@ -170,7 +170,7 @@ model MetakockaCredential {
 }
 
 /// Which system holds the correct stock for a warehouse, and therefore which
-/// way stock is copied. CLAUDE.md §7 only modelled MetaKocka to Shopify; some
+/// way stock is copied. docs/BUILD_SPEC.md §7 only modelled MetaKocka to Shopify; some
 /// warehouses are counted in Shopify instead, and those write back to the ERP.
 enum StockDirection {
   /// MetaKocka is the truth. Its `amount` becomes Shopify on hand.
@@ -190,7 +190,7 @@ enum SupplySourceKind {
   @@map("supply_source_kind")
 }
 
-/// Who is allowed to write inventory into the Shopify location (CLAUDE.md §7).
+/// Who is allowed to write inventory into the Shopify location (docs/BUILD_SPEC.md §7).
 /// Enforced as a throw in the inventory adapter, not as a convention.
 enum InventoryWriter {
   /// This app writes it, from MetaKocka stock. Own warehouses only.
@@ -203,7 +203,7 @@ enum InventoryWriter {
   @@map("inventory_writer")
 }
 
-/// One place stock can come from: an own warehouse or a partner (CLAUDE.md §6).
+/// One place stock can come from: an own warehouse or a partner (docs/BUILD_SPEC.md §6).
 model SupplySource {
   id     String @id @default(cuid())
   shopId String @map("shop_id")
@@ -216,7 +216,7 @@ model SupplySource {
   inventoryWriter         InventoryWriter @default(external) @map("inventory_writer")
   stockDirection          StockDirection  @default(none) @map("stock_direction")
   /// True when `stockDirection` above was copied from the shop default
-  /// rather than chosen for this source (CLAUDE.md §7). The effective value
+  /// rather than chosen for this source (docs/BUILD_SPEC.md §7). The effective value
   /// stays materialised so the sync engine reads one column and no caller has
   /// to resolve a default; this records only where that value came from, and
   /// is what lets a change to the default flow through to the sources that
@@ -269,7 +269,7 @@ model SupplySource {
   @@map("supply_source")
 }
 
-/// Shopify payment gateway to MetaKocka payment type (CLAUDE.md §6, §8.7).
+/// Shopify payment gateway to MetaKocka payment type (docs/BUILD_SPEC.md §6, §8.7).
 /// No MetaKocka endpoint lists the accepted strings, so this is merchant-entered
 /// and an unmapped gateway raises an exception rather than being guessed.
 model PaymentTypeMap {
@@ -290,13 +290,13 @@ model PaymentTypeMap {
 /// Local copy of the MetaKocka warehouse list.
 ///
 /// Two reasons this is cached rather than fetched when a screen renders:
-/// CLAUDE.md §2.5 forbids any page load awaiting MetaKocka, and §3 (verified)
+/// docs/BUILD_SPEC.md §2.5 forbids any page load awaiting MetaKocka, and §3 (verified)
 /// says MetaKocka silently accepts a warehouse mark that does not exist. Holding
 /// the list locally lets the supply source form offer a choice instead of a free
 /// text field, so an invalid mark cannot be saved in the first place.
 ///
-/// Refreshed explicitly by the merchant, and by the nightly reconciliation once
-/// that exists.
+/// Refreshed explicitly by the merchant and by the quarter-hourly scheduled
+/// reconciliation fan-out.
 model MetakockaWarehouse {
   id     String @id @default(cuid())
   shopId String @map("shop_id")
@@ -324,7 +324,7 @@ model MetakockaWarehouse {
 
 /// Payment types this company accepts, discovered from MetaKocka.
 ///
-/// CLAUDE.md §8.7 says no endpoint lists them. Verified: sending an invalid
+/// docs/BUILD_SPEC.md §8.7 says no endpoint lists them. Verified: sending an invalid
 /// `payment_type` returns the whole valid set in the error description, and the
 /// request is rejected before a document is created. That list is cached here so
 /// the settings screen can offer a choice instead of a free text field, without
@@ -347,7 +347,7 @@ model MetakockaPaymentType {
 
 /// Profit centres this company accepts, as a merchant-maintained register.
 ///
-/// Unlike the warehouse list there is no endpoint behind this. CLAUDE.md §3
+/// Unlike the warehouse list there is no endpoint behind this. docs/BUILD_SPEC.md §3
 /// says MetaKocka cannot list profit centres, and unlike payment types the
 /// rejection does not enumerate the valid set either: it only ever says
 /// `"Profit center 'X' doesn't exist."`. So the register is what the merchant
@@ -385,7 +385,7 @@ model MetakockaProfitCenter {
 
 /// Pricelists this company has, as far as we can see them.
 ///
-/// CLAUDE.md 3: MetaKocka neither lists pricelists nor creates one, and the
+/// docs/BUILD_SPEC.md §3: MetaKocka neither lists pricelists nor creates one, and the
 /// rejection that names a pricelist's net-or-gross type only comes back from a
 /// catalogue *write*. So this register is filled from the read-only side
 /// (adapters/metakocka/pricelists.ts): every pricelist that has a price on a
@@ -459,7 +459,7 @@ enum SkuStatus {
   @@map("sku_status")
 }
 
-/// The SKU registry (CLAUDE.md §6): one row per Shopify variant, carrying the
+/// The SKU registry (docs/BUILD_SPEC.md §6): one row per Shopify variant, carrying the
 /// identifiers both systems need. Matching is by code, Shopify `sku` against
 /// MetaKocka `count_code`/`code`.
 model Sku {
@@ -484,7 +484,7 @@ model Sku {
   ///
   /// A list of bare codes is not a product list — it is a database table with a
   /// heading. These come from the catalogue read, which already walks every
-  /// variant, so showing them costs nothing at page load (CLAUDE.md 2.5).
+  /// variant, so showing them costs nothing at page load (docs/BUILD_SPEC.md §2.5).
   imageUrl    String? @map("image_url")
   priceMinor  Int?    @map("price_minor")
   currency    String?
@@ -496,7 +496,7 @@ model Sku {
   /// The name MetaKocka currently holds, recorded when the catalogue is read.
   ///
   /// Stored so the settings screen can show what a name pattern would change
-  /// without calling MetaKocka on a page load (CLAUDE.md 2.5). Null means the
+  /// without calling MetaKocka on a page load (docs/BUILD_SPEC.md §2.5). Null means the
   /// catalogue has not been read since this column existed, which the screen
   /// reports as unknown rather than as an empty name.
   metakockaName String?   @map("metakocka_name")
@@ -514,12 +514,12 @@ model Sku {
   @@map("sku")
 }
 
-/// Stock for one SKU at one supply source (CLAUDE.md §6).
+/// Stock for one SKU at one supply source (docs/BUILD_SPEC.md §6).
 ///
 /// `quantity` is MetaKocka's `amount`, which §7 (verified) publishes as Shopify
 /// on hand. `lastPushedQuantity` is what we last wrote to Shopify, so a no-op
-/// write can be skipped and so an inventory_levels/update webhook caused by our
-/// own write can be recognised and dropped (§7, loop prevention).
+/// write can be skipped. There is no inventory-level webhook subscription
+/// today; the five-minute scheduled pass is the convergence mechanism.
 model SupplyLevel {
   id             String @id @default(cuid())
   supplySourceId String @map("supply_source_id")
@@ -555,7 +555,7 @@ enum ProductNamePolicy {
   @@map("product_name_policy")
 }
 
-/// How Shopify products are pushed into MetaKocka (CLAUDE.md §8.9).
+/// How Shopify products are pushed into MetaKocka (docs/BUILD_SPEC.md §8.9).
 ///
 /// §8.9 gives Shopify the customer-facing title and MetaKocka everything else,
 /// which is why every write here is off until the merchant turns it on, and why
@@ -569,7 +569,7 @@ model ProductSyncSetting {
   /// Master switch. Nothing is written to MetaKocka while this is false.
   enabled Boolean @default(false)
 
-  /// Token template rendered by domain/products/name-template.ts.
+  /// Token template rendered by domain/products/template/.
   nameTemplate String            @default("{title}[ {options}]") @map("name_template")
   namePolicy   ProductNamePolicy @default(always) @map("name_policy")
 
@@ -615,6 +615,8 @@ model ProductSyncSetting {
   /// Separate and off by default for the reason `updatePricing` is: §8.9 makes
   /// MetaKocka master for what its own catalogue holds, so changing an article
   /// the ERP already owns is a decision the merchant takes deliberately.
+  updateProductType Boolean @default(false) @map("update_product_type")
+
   /// Whether the catalogue is re-read and re-matched on a schedule.
   ///
   /// A manual sync is a promise the merchant has to remember to keep. Products
@@ -622,10 +624,8 @@ model ProductSyncSetting {
   /// as fresh as the last time somebody pressed a button is a registry that
   /// silently stops matching.
   scheduleEnabled         Boolean @default(false) @map("schedule_enabled")
-  /// How often, in minutes. Labelled with its unit in the UI (CLAUDE.md 2.8).
+  /// How often, in minutes. Labelled with its unit in the UI (docs/BUILD_SPEC.md §2.8).
   scheduleIntervalMinutes Int     @default(720) @map("schedule_interval_minutes")
-
-  updateProductType Boolean @default(false) @map("update_product_type")
 
   lastRunAt DateTime? @map("last_run_at")
 
@@ -641,7 +641,7 @@ model ProductSyncSetting {
  * --------------------------------------------------------------------------
  */
 /**
- * Orders (CLAUDE.md section 6 and section 8)
+ * Orders (docs/BUILD_SPEC.md sections 6 and 8)
  */
 /**
  * --------------------------------------------------------------------------
@@ -797,7 +797,9 @@ model OrderLine {
   title    String
   quantity Int
 
-  /// Section 8.4: webshop orders always send price_with_tax. Minor units.
+  /// Shopify presentment unit price in minor units. The document adapter sends
+  /// it as `price` or `price_with_tax` according to the order's tax setting.
+  /// The historical column name is retained to avoid a cosmetic migration.
   unitPriceWithTaxMinor Int     @map("unit_price_with_tax_minor")
   /// Section 8.6: derived from the Shopify tax lines, never a product default.
   taxFactor             String? @map("tax_factor")
@@ -868,8 +870,9 @@ model MetakockaDocument {
   orderId        String  @map("order_id")
   supplySourceId String? @map("supply_source_id")
 
-  /// Section 8.6: shipping, COD surcharge and order-level discount go here and
-  /// nowhere else. Exactly one document per order carries them.
+  /// Exactly one document per order is the primary money share. Shipping and
+  /// order-level discounts are assigned to that share, although their
+  /// MetaKocka request representation remains an open verified-API gap.
   isPrimary Boolean @default(false) @map("is_primary")
 
   docType String @default("sales_order") @map("doc_type")
@@ -893,17 +896,14 @@ model MetakockaDocument {
   paymentType        String? @map("payment_type")
   paymentAmountMinor Int?    @map("payment_amount_minor")
 
-  /// What MetaKocka reports about the document now, and when it was asked.
-  ///
-  /// A document is not finished when it is written. It is confirmed, picked,
-  /// delivered and given a tracking code inside the ERP, and MetaKocka has no
-  /// webhook for any of it (CLAUDE.md section 3: the only event is stock). So
-  /// the documents this app wrote are polled, and what comes back is shown on
-  /// the order rather than leaving the merchant to guess from "written".
+  /// The app's latest read-back verdict and when MetaKocka was asked. Verified
+  /// sales-order responses expose neither workflow status nor tracking, so the
+  /// poller records `in step`, `edited in MetaKocka`, or `missing` here.
   mkStatus        String?   @map("mk_status")
   mkDocNumber     String?   @map("mk_doc_number")
   mkCheckedAt     DateTime? @map("mk_checked_at")
-  /// Tracking codes MetaKocka holds, ready for the M5 fulfilment write-back.
+  /// Reserved for a future verified tracking source; sales-order read-back does
+  /// not currently populate it.
   trackingNumbers Json?     @map("tracking_numbers")
 
   /// Taken before the payment call goes out, released by paymentMarkedAt.
@@ -1048,7 +1048,7 @@ model SalesOrderSetting {
   @@map("sales_order_setting")
 }
 
-/// Shop-level payment settings (CLAUDE.md section 8.7).
+/// Shop-level payment settings (docs/BUILD_SPEC.md section 8.7).
 ///
 /// Separate from `payment_type_map`, which is one row per gateway: this is the
 /// single answer for gateways that have no row at all. Section 8.7 says never to
@@ -1069,7 +1069,7 @@ model PaymentSetting {
   @@map("payment_setting")
 }
 
-/// Shop-level stock and profit centre defaults (CLAUDE.md §7).
+/// Shop-level stock and profit centre defaults (docs/BUILD_SPEC.md §7).
 ///
 /// Most merchants answer "where is stock counted" once for the whole store,
 /// and the warehouse screen used to ask it again for every warehouse. These

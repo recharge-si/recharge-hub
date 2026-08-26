@@ -1,7 +1,7 @@
 /**
  * Runs the web server and the job worker together.
  *
- * They are two processes by design (CLAUDE.md §4), but in development both have
+ * They are two processes by design (docs/BUILD_SPEC.md §4), but in development both have
  * to be up or nothing works: every sync button queues a job, and with no worker
  * the jobs pile up in Postgres looking like a broken button.
  *
