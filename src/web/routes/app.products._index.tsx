@@ -217,7 +217,7 @@ export default function Products() {
           <s-paragraph>
             Stock is not set here. Each location decides which side is counted.
           </s-paragraph>
-          <s-link href="/app/settings/supply-sources">Go to Locations</s-link>
+          <s-link href="/app/locations">Go to Locations</s-link>
         </s-stack>
         <s-button
           slot="primary-action"

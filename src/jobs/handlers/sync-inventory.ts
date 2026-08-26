@@ -5,6 +5,7 @@ import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { raiseException } from "~/adapters/db/repositories/exception.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import { isSyncActivated } from "~/adapters/db/repositories/shop.server";
 import {
   listCachedWarehouses,
   listSupplySources,
@@ -68,6 +69,27 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
   const runId = job.id;
   const principal = serviceToken(shopDomain, "sync-inventory");
   const log = getLogger();
+
+  /*
+   * The activation boundary (the product UX brief, section 11).
+   *
+   * Guided setup saves credentials and location mappings as the merchant works
+   * through it, so a shop can be connected and half-configured at the same
+   * time. Publishing stock off a half-configured store writes an inventory
+   * document into the merchant's ERP (section 7) against warehouse mappings
+   * they have not finished choosing. Finish setup is what says "start", and it
+   * enqueues the first sync itself.
+   *
+   * Shops that were synchronizing before this existed were back-filled by
+   * `20260826080000_setup_state`, so nothing stops for them.
+   */
+  if (!(await isSyncActivated(principal))) {
+    log.info(
+      { shop: shopDomain },
+      "Inventory sync skipped, setup has not been finished",
+    );
+    return;
+  }
 
   const credential = await getCredential(principal);
   if (!credential) {

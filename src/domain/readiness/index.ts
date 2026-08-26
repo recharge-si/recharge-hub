@@ -1,0 +1,450 @@
+/**
+ * One answer to "is this integration configured", shared by every screen that
+ * asks (the product UX brief, section 23).
+ *
+ * Before this existed each screen decided for itself: the home page called a
+ * shop set up when it had a verified credential, one ready supply source and
+ * any payment mapping at all; the locations page had its own idea; the order
+ * settings page had a third. Three definitions of "configured" is three
+ * different answers to the same merchant question, and the one thing a setup
+ * state has to be is consistent.
+ *
+ * Pure on purpose (docs/BUILD_SPEC.md section 5). Every fact below is something
+ * our own database already holds, so readiness can be computed on any page load
+ * without waiting for MetaKocka (section 2.5) and can be tested without a
+ * database.
+ */
+
+export type StockDirectionValue = "mk_to_shopify" | "shopify_to_mk" | "none";
+
+export type ReadinessStatus =
+  /** Configured and working as far as our own records can tell. */
+  | "ready"
+  /** Something a merchant has to do. Only this one is ever coloured. */
+  | "needs_attention"
+  /** Deliberately switched off. Not a problem. */
+  | "disabled"
+  /** Never required. Products is the only one today. */
+  | "optional";
+
+export type ReadinessKey =
+  "metakocka" | "warehouses" | "stock" | "orders" | "payments" | "products";
+
+export interface ReadinessAction {
+  label: string;
+  href: string;
+}
+
+export interface ReadinessComponent {
+  key: ReadinessKey;
+  /** The merchant's word for this area. */
+  title: string;
+  status: ReadinessStatus;
+  /** What it currently is, in one line. Always present, healthy or not. */
+  summary: string;
+  /** Why it needs attention, and what to do. Null when nothing is wrong. */
+  reason: string | null;
+  /** Where the merchant can act on it. */
+  action: ReadinessAction | null;
+  /**
+   * Whether `needs_attention` here blocks activation. Products never does;
+   * stock only does when a location writes into MetaKocka and cannot.
+   */
+  required: boolean;
+}
+
+export interface Readiness {
+  components: ReadinessComponent[];
+  /** Required components that need attention, in the order shown. */
+  blocking: ReadinessComponent[];
+  /** True when nothing required needs attention. */
+  overall: "ready" | "needs_attention";
+  /**
+   * Whether the merchant has pressed Finish setup. Separate from `overall` on
+   * purpose (section 29): this is UI state, `overall` is configuration.
+   */
+  activated: boolean;
+}
+
+/**
+ * Where each area is configured. Held here rather than at the call sites so
+ * "the payments component" and "the page that fixes payments" cannot drift.
+ */
+export const READINESS_ROUTES = {
+  connection: "/app/settings/metakocka",
+  locations: "/app/locations",
+  orders: "/app/orders/settings",
+  payments: "/app/orders/settings/payments",
+  products: "/app/products",
+  setup: "/app/setup",
+} as const;
+
+export interface ReadinessFacts {
+  metakocka: {
+    connected: boolean;
+    verified: boolean;
+    companyId: string | null;
+    apiUserEmail: string | null;
+  };
+  warehouses: {
+    /** Supply sources holding both a Shopify location and a MetaKocka warehouse. */
+    connectedCount: number;
+    /** Sources that have a warehouse but no Shopify location, or the reverse. */
+    incompleteNames: string[];
+  };
+  stock: {
+    defaultDirection: StockDirectionValue;
+    /** Connected locations counted in MetaKocka. */
+    intoShopifyCount: number;
+    /** Connected locations counted in Shopify, which need `api_user_email`. */
+    intoMetakockaCount: number;
+    /** Locations whose last stock run failed. */
+    failingNames: string[];
+  };
+  payments: {
+    enabled: boolean;
+    /** Gateways this shop's own orders have actually arrived on. */
+    seenGateways: string[];
+    mappedGateways: string[];
+    fallback: string | null;
+  };
+  orders: {
+    shippingProductCode: string | null;
+    discountRepresentation: "none" | "document_discount_value";
+  };
+  products: {
+    matched: number;
+    unmatched: number;
+  };
+  /** Null until the merchant presses Finish setup. */
+  setupCompletedAt: Date | null;
+}
+
+function list(names: string[], limit = 3): string {
+  if (names.length <= limit) return names.join(", ");
+  return `${names.slice(0, limit).join(", ")} and ${names.length - limit} more`;
+}
+
+function plural(n: number, one: string, many: string): string {
+  return n === 1 ? one : many;
+}
+
+function metakockaOf(facts: ReadinessFacts): ReadinessComponent {
+  const base = {
+    key: "metakocka" as const,
+    title: "MetaKocka",
+    required: true,
+    action: { label: "Open connection", href: READINESS_ROUTES.connection },
+  };
+
+  if (!facts.metakocka.connected) {
+    return {
+      ...base,
+      status: "needs_attention",
+      summary: "Not connected",
+      reason:
+        "Nothing reaches MetaKocka and no stock is published until the company ID and secret key are saved.",
+    };
+  }
+
+  if (!facts.metakocka.verified) {
+    return {
+      ...base,
+      status: "needs_attention",
+      summary: "Not verified",
+      reason:
+        "The credentials are saved but MetaKocka has not answered with them yet. Test the connection.",
+    };
+  }
+
+  return {
+    ...base,
+    status: "ready",
+    summary: facts.metakocka.companyId
+      ? `Connected to company ${facts.metakocka.companyId}`
+      : "Connected",
+    reason: null,
+  };
+}
+
+function warehousesOf(facts: ReadinessFacts): ReadinessComponent {
+  const base = {
+    key: "warehouses" as const,
+    title: "Warehouses",
+    required: true,
+    action: { label: "Open locations", href: READINESS_ROUTES.locations },
+  };
+
+  const { connectedCount, incompleteNames } = facts.warehouses;
+
+  if (connectedCount === 0) {
+    return {
+      ...base,
+      status: "needs_attention",
+      summary: "No locations connected",
+      reason:
+        "A Shopify location has to point at a MetaKocka warehouse before an order can be filed anywhere.",
+    };
+  }
+
+  return {
+    ...base,
+    status: "ready",
+    summary: `${connectedCount} ${plural(connectedCount, "location", "locations")} connected`,
+    reason:
+      incompleteNames.length > 0
+        ? `${list(incompleteNames)} ${plural(incompleteNames.length, "is", "are")} unfinished, so ${plural(incompleteNames.length, "it holds", "they hold")} no stock and take no orders.`
+        : null,
+  };
+}
+
+function stockOf(facts: ReadinessFacts): ReadinessComponent {
+  const {
+    defaultDirection,
+    intoShopifyCount,
+    intoMetakockaCount,
+    failingNames,
+  } = facts.stock;
+  const base = {
+    key: "stock" as const,
+    title: "Stock",
+    action: { label: "Open locations", href: READINESS_ROUTES.locations },
+  };
+
+  const syncing = intoShopifyCount + intoMetakockaCount;
+
+  if (syncing === 0) {
+    return {
+      ...base,
+      required: false,
+      status: defaultDirection === "none" ? "disabled" : "needs_attention",
+      summary: "Not synchronized",
+      reason:
+        defaultDirection === "none"
+          ? null
+          : "No connected location is copying stock, so quantities in Shopify and MetaKocka can drift apart.",
+    };
+  }
+
+  const parts: string[] = [];
+  if (intoShopifyCount > 0) {
+    parts.push(
+      `MetaKocka to Shopify for ${intoShopifyCount} ${plural(intoShopifyCount, "location", "locations")}`,
+    );
+  }
+  if (intoMetakockaCount > 0) {
+    parts.push(
+      `Shopify to MetaKocka for ${intoMetakockaCount} ${plural(intoMetakockaCount, "location", "locations")}`,
+    );
+  }
+  const summary = parts.join(", ");
+
+  /*
+   * `sync_stock` is the one MetaKocka call the secret key alone cannot make
+   * (docs/BUILD_SPEC.md section 7): it needs an API user email. A shop counting
+   * stock in Shopify without one publishes nothing into the ERP, and nothing
+   * else on any screen would say so, which is why this is the one stock
+   * condition that blocks activation.
+   */
+  if (intoMetakockaCount > 0 && !facts.metakocka.apiUserEmail) {
+    return {
+      ...base,
+      required: true,
+      status: "needs_attention",
+      summary,
+      reason:
+        "MetaKocka needs an API user email before it accepts a stock update, and none is saved.",
+      action: { label: "Open connection", href: READINESS_ROUTES.connection },
+    };
+  }
+
+  if (failingNames.length > 0) {
+    return {
+      ...base,
+      required: false,
+      status: "needs_attention",
+      summary,
+      reason: `Stock is not moving for ${list(failingNames)}.`,
+    };
+  }
+
+  return { ...base, required: false, status: "ready", summary, reason: null };
+}
+
+function paymentsOf(facts: ReadinessFacts): ReadinessComponent {
+  const base = {
+    key: "payments" as const,
+    title: "Payments",
+    action: { label: "Open payments", href: READINESS_ROUTES.payments },
+  };
+
+  if (!facts.payments.enabled) {
+    return {
+      ...base,
+      required: false,
+      status: "disabled",
+      summary: "Not recorded in MetaKocka",
+      reason: null,
+    };
+  }
+
+  const mapped = new Set(facts.payments.mappedGateways);
+  const unmapped = facts.payments.seenGateways.filter(
+    (gateway) => !mapped.has(gateway),
+  );
+  const mappedCount = facts.payments.mappedGateways.length;
+
+  /*
+   * A payment type is never guessed (docs/BUILD_SPEC.md section 8.7). The
+   * fallback is the merchant's own answer for every gateway with no row of its
+   * own, so it is what makes an unmapped method safe rather than silent:
+   * without one, an order paid on a method nobody mapped cannot be recorded at
+   * all.
+   */
+  if (!facts.payments.fallback) {
+    return {
+      ...base,
+      required: true,
+      status: "needs_attention",
+      summary:
+        mappedCount === 0
+          ? "No payment methods mapped"
+          : `${mappedCount} ${plural(mappedCount, "method", "methods")} mapped`,
+      reason:
+        unmapped.length > 0
+          ? `${unmapped.length} payment ${plural(unmapped.length, "method this store has used is not", "methods this store has used are not")} mapped and there is no fallback, so ${plural(unmapped.length, "an order", "orders")} paid that way cannot be recorded in MetaKocka.`
+          : "Choose the payment type to use for any method with no mapping of its own.",
+    };
+  }
+
+  return {
+    ...base,
+    required: true,
+    status: "ready",
+    summary: `${mappedCount} ${plural(mappedCount, "method", "methods")} mapped`,
+    reason:
+      unmapped.length > 0
+        ? `${unmapped.length} ${plural(unmapped.length, "method", "methods")} this store has used ${plural(unmapped.length, "falls", "fall")} back to ${facts.payments.fallback}: ${list(unmapped)}.`
+        : null,
+  };
+}
+
+function ordersOf(
+  facts: ReadinessFacts,
+  metakocka: ReadinessComponent,
+  warehouses: ReadinessComponent,
+): ReadinessComponent {
+  const base = {
+    key: "orders" as const,
+    title: "Orders",
+    required: true,
+    action: { label: "Open order settings", href: READINESS_ROUTES.orders },
+  };
+
+  if (metakocka.status !== "ready" || warehouses.status !== "ready") {
+    return {
+      ...base,
+      status: "needs_attention",
+      summary: "Waiting on setup",
+      reason:
+        metakocka.status !== "ready"
+          ? "Orders reach MetaKocka once the connection works."
+          : "Orders are filed once at least one Shopify location points at a MetaKocka warehouse.",
+    };
+  }
+
+  /*
+   * Shipping and a discount have no safe default (docs/project-status.md
+   * T-05/T-06), and an order carrying one is reported rather than sent short.
+   * That is a per-order condition rather than a broken integration, so it is a
+   * note on a working component instead of a red one: the affected orders turn
+   * up under Needs attention with the amount named.
+   */
+  const missing: string[] = [];
+  if (!facts.orders.shippingProductCode) missing.push("Shipping");
+  if (facts.orders.discountRepresentation === "none") missing.push("discounts");
+
+  return {
+    ...base,
+    status: "ready",
+    summary: "Automatic",
+    reason:
+      missing.length > 0
+        ? `${missing.join(" and ")} ${plural(missing.length, "has", "have")} nowhere to go on a MetaKocka sales order yet, so an order carrying ${plural(missing.length, "one", "them")} is reported instead of counted as reconciled.`
+        : null,
+  };
+}
+
+function productsOf(facts: ReadinessFacts): ReadinessComponent {
+  const { matched, unmatched } = facts.products;
+
+  return {
+    key: "products",
+    title: "Products",
+    required: false,
+    status: "optional",
+    summary:
+      matched + unmatched === 0
+        ? "Not matched yet"
+        : `${matched} of ${matched + unmatched} matched`,
+    reason:
+      unmatched > 0
+        ? `${unmatched} Shopify ${plural(unmatched, "SKU has", "SKUs have")} no MetaKocka product, so ${plural(unmatched, "an order", "orders")} containing ${plural(unmatched, "it", "them")} cannot be sent.`
+        : null,
+    action: { label: "Open products", href: READINESS_ROUTES.products },
+  };
+}
+
+export function computeReadiness(facts: ReadinessFacts): Readiness {
+  const metakocka = metakockaOf(facts);
+  const warehouses = warehousesOf(facts);
+  const stock = stockOf(facts);
+  const orders = ordersOf(facts, metakocka, warehouses);
+  const payments = paymentsOf(facts);
+  const products = productsOf(facts);
+
+  const components = [metakocka, warehouses, stock, orders, payments, products];
+
+  const blocking = components.filter(
+    (component) => component.required && component.status === "needs_attention",
+  );
+
+  return {
+    components,
+    blocking,
+    overall: blocking.length === 0 ? "ready" : "needs_attention",
+    activated: facts.setupCompletedAt !== null,
+  };
+}
+
+/** The component a screen wants, by key. */
+export function componentOf(
+  readiness: Readiness,
+  key: ReadinessKey,
+): ReadinessComponent {
+  const found = readiness.components.find((entry) => entry.key === key);
+  // Every key is produced by computeReadiness, so this cannot be missing.
+  if (!found) throw new Error(`No readiness component for ${key}`);
+  return found;
+}
+
+/**
+ * Which way stock moves for a location, in the words the merchant chose it
+ * with. Used by the locations page, onboarding and the dashboard, so the three
+ * never describe one setting three ways.
+ */
+export function describeDirection(direction: StockDirectionValue): {
+  /** "MetaKocka", "Shopify", "Not synchronized". */
+  countedIn: string;
+  /** "MetaKocka to Shopify". Null when nothing is copied. */
+  flow: string | null;
+} {
+  switch (direction) {
+    case "mk_to_shopify":
+      return { countedIn: "MetaKocka", flow: "MetaKocka to Shopify" };
+    case "shopify_to_mk":
+      return { countedIn: "Shopify", flow: "Shopify to MetaKocka" };
+    default:
+      return { countedIn: "Not synchronized", flow: null };
+  }
+}

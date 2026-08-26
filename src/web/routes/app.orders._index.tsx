@@ -195,6 +195,9 @@ export default function Orders() {
         <s-link slot="breadcrumb-actions" href="/app">
           Home
         </s-link>
+        <s-button slot="secondary-actions" href="/app/orders/settings">
+          Settings
+        </s-button>
         <s-section heading="No orders yet">
           <s-paragraph>
             Orders appear here as Shopify sends them. Each one is allocated to a
@@ -215,6 +218,10 @@ export default function Orders() {
        * The explanation behind a header action, the same as the products and
        * payment types pages: it is read once, and after that it is in the way.
        */}
+      <s-button slot="secondary-actions" href="/app/orders/settings">
+        Settings
+      </s-button>
+
       <s-button
         slot="secondary-actions"
         icon="question-circle"

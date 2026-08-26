@@ -30,6 +30,24 @@ maintain elsewhere gets exactly this, and nothing more:
 3. No third statement of the same fact anywhere on the page.
 Applies to name overwrite and price overwrite identically. Neither is special.
 
+## Setup state
+- **One readiness model, one wording.** Whether a shop is configured is answered
+  by `domain/readiness` and nowhere else. A page that needs it renders
+  `ReadinessList` or reads a component from it; it never re-derives "configured"
+  from a credential row and a count.
+- **Healthy is calm.** No green banners and no green badges. A ready component
+  is a neutral badge and a sentence; the one that needs a person is the loudest
+  element on the screen and is the only one carrying a button.
+- **Configured and started are different questions.** Readiness answers the
+  first from the configuration; `shop.setup_completed_at` answers the second and
+  answers nothing else. A screen that reports one must not imply the other.
+- **State what another page owns; do not re-edit it.** A setting that belongs to
+  another screen appears as a line saying what it currently is, plus a link. Two
+  editable copies of one value is how two screens end up disagreeing.
+- **Stated, not switched.** A status that follows from other settings is a line,
+  never a control. A toggle that only ever reflects something else is a lie with
+  a checkbox next to it.
+
 ## Page header
 Every page that owns a background process opens with the same component:
 healthy / needs attention · when it last ran and the outcome · automatic or manual ·
@@ -76,6 +94,9 @@ differs it is given, because the code is not going to be renamed to match.
 | **Field** | One piece of Shopify data a name pattern can insert. Never "token" in copy. | `FieldDef`, `kind: "token"` |
 | **Matching** | Reading both catalogues and pairing them by SKU. Writes nothing to MetaKocka. | job `sync-catalogue` |
 | **Name sync** | Writing names into MetaKocka, and creating products for unmatched SKUs when that is on. | job `sync-products` |
+| **Needs attention** | A condition a person has to deal with, on the exceptions queue and in readiness. Never "exception" in copy. | `Exception`, `exception_kind` |
+| **Setup** | The guided flow, and the state of being configured. Never "onboarding" in copy. | `/app/setup`, `setup_completed_at` |
+| **Payment method** | The Shopify side of a payment mapping, as a merchant reads it. "Gateway" is the handle beneath it and stays where the handle is shown. | `Order.paymentGateway`, `PaymentTypeMap.shopifyGateway` |
 | **Pricelist** | A MetaKocka pricelist, referenced by the `count_code` it already has there. Net or gross is a property of the pricelist, not of Shopify. | `pricelistCode` |
 
 Words that must not appear in merchant-facing copy: **article** (the build

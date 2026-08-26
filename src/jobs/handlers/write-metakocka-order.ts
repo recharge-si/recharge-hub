@@ -23,6 +23,7 @@ import {
   touchDocumentReconciled,
 } from "~/adapters/db/repositories/order.server";
 import { replaceApplicationsForDocument } from "~/adapters/db/repositories/order-payment.server";
+import { isSyncActivated } from "~/adapters/db/repositories/shop.server";
 import { listCachedWarehouses } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
@@ -161,6 +162,30 @@ export async function writeMetakockaOrderFor(
     where: { id: supplySourceId, shop: { domain: shopDomainOf(principal) } },
   });
   if (!source) return;
+
+  /*
+   * The activation boundary (the product UX brief, section 11).
+   *
+   * Guided setup saves the MetaKocka credentials at its second step, so between
+   * there and Finish setup a shop is connected without having chosen its
+   * warehouses or its payment types. A sales order filed then is filed against
+   * answers nobody finished giving, and nothing in this system deletes a
+   * MetaKocka document. So the order is left alone; Finish setup enqueues a
+   * reconciliation sweep that picks up everything that arrived meanwhile.
+   *
+   * No exception is raised, because this is not a failure — it is a merchant
+   * partway through setup, which the home page is already saying.
+   *
+   * Shops that were synchronizing before this existed were back-filled by
+   * `20260826080000_setup_state`, so nothing stops for them.
+   */
+  if (!(await isSyncActivated(principal))) {
+    log.info(
+      { shop: shopDomain, orderId },
+      "Order not written to MetaKocka: setup has not been finished",
+    );
+    return;
+  }
 
   const productSettings = await getProductSyncSetting(principal);
   const credential = await getCredential(principal);

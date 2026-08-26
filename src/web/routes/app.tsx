@@ -26,14 +26,23 @@ export default function AppLayout() {
   return (
     <>
       <AppBridgeNavigation />
+      {/*
+       * Five areas, each of which is a thing a merchant does rather than a
+       * table this app happens to keep (the product UX brief, section 13).
+       *
+       * "Order sync", "Payment types" and "Connection" used to sit here beside
+       * Orders, which asked the merchant to know that order sync and orders
+       * were the same subject and that payment types were part of it. Those are
+       * sub-pages now: order behaviour under Orders, the ERP connection under
+       * Settings. Sub-pages highlight their parent because the path does
+       * (section 2.6).
+       */}
       <s-app-nav>
         <s-link href="/app/orders">Orders</s-link>
         <s-link href="/app/exceptions">Needs attention</s-link>
         <s-link href="/app/products">Products</s-link>
-        <s-link href="/app/settings/supply-sources">Locations</s-link>
-        <s-link href="/app/settings/payments">Payment types</s-link>
-        <s-link href="/app/settings/sales-orders">Order sync</s-link>
-        <s-link href="/app/settings/metakocka">Connection</s-link>
+        <s-link href="/app/locations">Locations</s-link>
+        <s-link href="/app/settings">Settings</s-link>
       </s-app-nav>
       <Outlet />
     </>

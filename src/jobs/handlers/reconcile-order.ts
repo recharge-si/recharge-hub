@@ -426,7 +426,7 @@ async function reconcileUnderLock(
           .map((entry) => entry.locationName ?? entry.shopifyLocationId)
           .join(
             ", ",
-          )}, which is not mapped to a MetaKocka warehouse — so those lines were not sent. Map the location on the Supply sources page, then reconcile this order again.`,
+          )}, which is not mapped to a MetaKocka warehouse — so those lines were not sent. Map the location on the Locations page, then reconcile this order again.`,
         detail: { locations: plan.unmappedLocations },
       });
     } else {
@@ -598,7 +598,7 @@ async function reconcileUnderLock(
     await raiseException(principal, {
       orderId,
       kind: "commercial_representation_missing",
-      message: `Order ${order.shopifyOrderNumber} carries ${missingRepresentation.join(" and ")} that MetaKocka has no way to show, because ${missingRepresentation.length === 1 ? "it has" : "they have"} no representation configured. The sales ${desiredBySource.size === 1 ? "order was" : "orders were"} written with the goods, so the ERP is short by that amount and this order is not reported as fully reconciled. Choose a shipping product and a discount representation on the Order sync settings page, then reconcile this order again.`,
+      message: `Order ${order.shopifyOrderNumber} carries ${missingRepresentation.join(" and ")} that MetaKocka has no way to show, because ${missingRepresentation.length === 1 ? "it has" : "they have"} no representation configured. The sales ${desiredBySource.size === 1 ? "order was" : "orders were"} written with the goods, so the ERP is short by that amount and this order is not reported as fully reconciled. Choose a shipping product and a discount representation on the order settings page, then reconcile this order again.`,
       detail: {
         shippingMinor: order.shippingMinor,
         discountMinor: order.discountMinor,

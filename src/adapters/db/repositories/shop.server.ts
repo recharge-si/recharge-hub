@@ -52,6 +52,78 @@ export async function markUninstalled(principal: Principal): Promise<void> {
   });
 }
 
+/* -------------------------------------------------------------------------- */
+/* Guided setup                                                               */
+/* -------------------------------------------------------------------------- */
+
+export interface SetupState {
+  /** When the merchant pressed Finish setup. Null means they have not. */
+  completedAt: Date | null;
+  /** The step guided setup last reached. Pure UI state. */
+  step: string | null;
+}
+
+export async function getSetupState(principal: Principal): Promise<SetupState> {
+  const row = await prisma.shop.findUnique({
+    where: { domain: shopDomainOf(principal) },
+    select: { setupCompletedAt: true, setupStep: true },
+  });
+
+  return {
+    completedAt: row?.setupCompletedAt ?? null,
+    step: row?.setupStep ?? null,
+  };
+}
+
+/** Remembers where the merchant got to, so closing the tab costs nothing. */
+export async function saveSetupStep(
+  principal: Principal,
+  step: string,
+): Promise<void> {
+  await prisma.shop.updateMany({
+    where: { domain: shopDomainOf(principal) },
+    data: { setupStep: step },
+  });
+}
+
+/**
+ * The activation boundary (the product UX brief, section 11).
+ *
+ * Idempotent by construction: the update only matches a shop whose
+ * `setup_completed_at` is still null, so pressing Finish setup twice completes
+ * once and the second press reports `false` rather than moving the timestamp or
+ * enqueueing a second round of initial work.
+ */
+export async function markSetupComplete(
+  principal: Principal,
+  now: Date,
+): Promise<boolean> {
+  const { count } = await prisma.shop.updateMany({
+    where: { domain: shopDomainOf(principal), setupCompletedAt: null },
+    data: { setupCompletedAt: now, setupStep: null },
+  });
+
+  return count > 0;
+}
+
+/**
+ * Whether this shop has activated synchronization.
+ *
+ * Read by the two places that write into the merchant's ERP, so that opening
+ * guided setup and getting as far as saving credentials never starts filing
+ * documents on its own. Existing shops were back-filled by
+ * `20260826080000_setup_state`, so nothing that was synchronizing before this
+ * existed stops.
+ */
+export async function isSyncActivated(principal: Principal): Promise<boolean> {
+  const row = await prisma.shop.findUnique({
+    where: { domain: shopDomainOf(principal) },
+    select: { setupCompletedAt: true },
+  });
+
+  return row?.setupCompletedAt != null;
+}
+
 /**
  * `shop/redact` must actually delete, not soft-delete (CLAUDE.md section 2.4).
  *

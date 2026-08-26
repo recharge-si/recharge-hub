@@ -31,8 +31,20 @@ Completed work belongs in Git history, not in this file.
   `sync_stock` safeguards
 - Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
   visibility, dashboard, orders, and exceptions UI
-- 491 fixture-driven tests across pure domain, adapters, presentation helpers,
-  and the order-to-MetaKocka vertical slice
+- Five-area information architecture with settings under the thing they
+  configure, and redirects from the three routes that moved
+- Guided setup at `/app/setup`: connect and verify MetaKocka, choose where stock
+  is counted, map locations to warehouses, order reference, profit centre and
+  payment types, then an explicit Finish that activates synchronization
+- One readiness model (`domain/readiness`) shared by Home, the settings hub,
+  guided setup and the order settings page, computed from our own tables
+- An activation boundary (`shop.setup_completed_at`) both MetaKocka writers
+  respect, so opening setup never starts writing
+- 753 fixture-driven tests across pure domain, adapters, presentation helpers,
+  the route table, and the order-to-MetaKocka vertical slice, plus PostgreSQL
+  tests for the reconciliation lock, the `count_code` claim, the payment
+  ledger's unique index, activation idempotency and the one-writer-per-location
+  rule
 
 ## Product and integration gaps
 
@@ -64,6 +76,25 @@ them into `discount_value` alongside the order-level discount is the obvious
 next step and has not been done, because it changes what each *line* appears to
 have cost and that is a merchant-visible accounting decision.
 
+### T-20 — Two deliberate readiness choices worth revisiting
+
+Both are product decisions rather than bugs, and both are visible in
+`domain/readiness`:
+
+- **A payment method this store has used, unmapped, is a caution and not a
+  block.** What blocks Finish setup is the *fallback* being unchosen, because
+  the fallback is the merchant's own answer for every method with no row of its
+  own and is what makes an unmapped one safe rather than silent. A shop can
+  therefore finish setup with, say, cash on delivery falling back to the card
+  type. Readiness names the methods that fall back so it is not invisible.
+  Requiring an explicit row per used gateway is the stricter reading of the
+  brief and would block shops whose register genuinely has one entry.
+- **The API user email is required by guided setup and only required by
+  readiness when a location is counted in Shopify.** `sync_stock` is the only
+  call that needs it, so a shop that never writes stock into MetaKocka is not
+  held up by it after setup — but setup asks for it once, up front, because
+  discovering it later means an inventory sync that silently publishes nothing.
+
 ### T-18 — Existing shops keep stock-rules allocation until they opt in
 
 `sales_order_setting.allocation_mode` defaults to `shopify_locations`, which is
@@ -74,8 +105,8 @@ restructure those documents the next time anything unrelated touched the order.
 
 Migration `20260826050000_existing_shops_keep_stock_rules` therefore pins every
 shop that existed at that moment to `stock_rules`. Shops created afterwards have
-no row and inherit the new default. Switching is one control on the Order sync
-settings page, which shows what will change before it is saved.
+no row and inherit the new default. Switching is one control in the
+advanced order settings, which shows what will change before it is saved.
 
 Nothing is re-sent in bulk either way: an order is only rebuilt when something
 changes it or a merchant checks it by hand.
@@ -255,6 +286,15 @@ The Built for Shopify checklist has not been walked requirement by requirement.
 The 375 px layout, screen-reader table semantics, save-bar behavior, hydration,
 and p75 LCP/CLS/INP budgets need browser measurement. Product loaders currently
 await Shopify catalogue queries; measure before changing them.
+
+This now includes the screens added or reorganized in the product UX pass:
+Home, `/app/setup`, `/app/settings`, and the regrouped order settings. Their
+grids use container queries rather than viewport media queries and their tables
+use `variant="auto"`, which is the same approach the existing screens take, but
+none of it has been measured in a browser. Guided setup's Continue button is a
+step action rather than a contextual save bar; the settings pages it writes to
+keep the save bar. Both readings are defensible and neither has been checked
+against a reviewer.
 
 ### Large modules should be split only along proven responsibilities
 

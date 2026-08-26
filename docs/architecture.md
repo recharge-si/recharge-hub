@@ -42,6 +42,62 @@ ESLint enforces these import directions. External payloads are parsed at their
 adapter boundary, normally with Zod. `domain/` cannot read the clock or use
 randomness; callers inject time and inputs.
 
+## Merchant-facing shape
+
+Five areas in `s-app-nav`, each a job rather than a table. Every settings page
+lives with the thing it configures, so nothing in the navigation is a database
+name:
+
+```text
+Home              /app                  operations dashboard
+Orders            /app/orders           list, and /app/orders/settings
+Needs attention   /app/exceptions
+Products          /app/products         and /app/products/sync
+Locations         /app/locations        warehouses, stock direction, profit centres
+Settings          /app/settings         hub; /app/settings/metakocka is the connection
+```
+
+Guided setup is `/app/setup`, five steps, reachable again from Home and
+Settings. Three routes moved and redirect: `/app/settings/sales-orders` to
+`/app/orders/settings`, `/app/settings/payments` to
+`/app/orders/settings/payments`, `/app/settings/supply-sources` to
+`/app/locations`. `tests/unit/route-table.test.ts` asserts the table, including
+that `/app/orders/settings` out-ranks `/app/orders/:orderId`.
+
+### One readiness model
+
+`src/domain/readiness/` computes six components — MetaKocka, warehouses, stock,
+orders, payments, products — each with a status, a summary, a reason and a place
+to act. It is pure; `adapters/db/repositories/readiness.server.ts` gathers the
+facts from our own tables in one parallel batch, so no screen waits on MetaKocka
+to say whether the shop is configured. Home, the settings hub, guided setup's
+review step and the order settings page all read that one answer.
+
+The gateways a shop has used come from `order.payment_gateway` rather than from
+Shopify, for the same reason.
+
+### The activation boundary
+
+`shop.setup_completed_at` records that a person pressed Finish setup, and
+nothing else. Guided setup saves each answer into the table that already owns it
+as the merchant gives it, so a shop can be connected and half-configured at the
+same moment; both MetaKocka writers — `writeMetakockaOrderFor` and
+`sync-inventory` — return early until that timestamp exists. Finish setup
+re-checks readiness from stored state, sets the timestamp with a conditional
+update, and enqueues the first order, stock and catalogue passes on throttled
+keys, so pressing it twice activates once.
+
+It is deliberately not a second answer to "is this shop configured":
+`domain/readiness` answers that from the configuration, and Finish setup refuses
+while readiness disagrees. `shop.setup_step` is where the wizard left off and
+decides nothing. Shops that already held MetaKocka credentials were back-filled
+by `20260826080000_setup_state`, so nothing that was synchronizing stopped.
+
+`src/web/lib/locations.server.ts` holds the one implementation of connecting a
+Shopify location to a MetaKocka warehouse, shared by the locations page and
+guided setup, because "one writer per location" is not an invariant worth having
+two of.
+
 ## Important flows
 
 ### Order intake and the reconciliation loop
@@ -195,7 +251,9 @@ exception. Schedule/register jobs rely on the next cadence and Sentry instead.
 The authoritative schema is `prisma/schema.prisma`; migrations are immutable
 history under `prisma/migrations/`. Major groups are:
 
-- tenancy and auth: `Shop`, encrypted `Session`, `MetakockaCredential`;
+- tenancy and auth: `Shop` (including `setup_completed_at`, the activation
+  boundary, and `setup_step`, guided setup's own place-keeping), encrypted
+  `Session`, `MetakockaCredential`;
 - audit and delivery: `EventLog`, `IdempotencyKey`, pg-boss queues;
 - supply and inventory: `SupplySource`, `SupplySetting`, `SupplyLevel`, cached
   warehouse/profit-centre registers;
@@ -221,6 +279,8 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
+| What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |
+| Guided setup step              | `src/web/routes/app.setup.tsx`; the settings it writes stay where they are |
 | Webhook                        | Thin route in `src/web/routes/`, shared verification helper, queue handler   |
 | Schema change                  | `prisma/schema.prisma` plus a new additive migration                         |
 | Current behavior or limitation | Owning document under `docs/` and `docs/project-status.md`                   |

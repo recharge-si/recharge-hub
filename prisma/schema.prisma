@@ -78,6 +78,28 @@ model Shop {
   /// How far the MetaKocka document poll has read. See `poll-metakocka-documents`.
   documentsPolledThrough DateTime? @map("documents_polled_through")
 
+  /// When the merchant pressed Finish setup, and nothing else.
+  ///
+  /// This is the **activation boundary**: guided setup collects credentials and
+  /// mappings step by step, and a shop half way through one is a shop whose
+  /// answers are half chosen. Writing an ERP document off a half-configured
+  /// store is not something an undo exists for, so the two MetaKocka writers
+  /// (`write-metakocka-order` and `sync-inventory`) refuse until this is set.
+  ///
+  /// It is deliberately **not** a second source of truth for whether the
+  /// integration is configured — `domain/readiness` answers that from the
+  /// configuration itself, and Finish setup refuses while readiness disagrees.
+  /// This only records that a person said "start".
+  ///
+  /// Back-filled for every shop that already had MetaKocka credentials when
+  /// this column was added, because those shops were already synchronizing and
+  /// this must not stop them.
+  setupCompletedAt DateTime? @map("setup_completed_at")
+
+  /// The guided-setup step this shop last reached, so leaving the page does not
+  /// mean starting again. Pure UI state: it decides nothing.
+  setupStep String? @map("setup_step")
+
   eventLogs              EventLog[]
   metakockaCredential    MetakockaCredential?
   supplySources          SupplySource[]

@@ -152,8 +152,8 @@ press **Check with Shopify** rather than waiting a quarter of an hour.
    verify the same document changed and no second document appeared.
 
 If the order is already paid, this needs *Update it even after the payment has
-been recorded* on the Order sync settings page; without it the app reports the
-difference and deliberately leaves the document alone.
+been recorded* in the advanced order settings (Orders, then Settings); without
+it the app reports the difference and deliberately leaves the document alone.
 
 ### Partial payment
 
