@@ -17,6 +17,7 @@ import {
 import { listWarehouseStock } from "~/adapters/metakocka/stock";
 import {
   buildCompleteStockList,
+  managedAmount,
   syncStockToMetakocka,
 } from "~/adapters/metakocka/sync-stock";
 import { getLogger } from "~/adapters/observability/logger.server";
@@ -489,7 +490,11 @@ async function pushShopifyStockIntoMetakocka(
    */
   let changed = false;
   for (const [code, quantity] of managed) {
-    if ((current.get(code) ?? 0) !== quantity) {
+    // Compared against the value that would actually be sent, not the raw
+    // Shopify one: an oversold location reporting -1 against a held 0 is not
+    // a change, and treating it as one files an inventory document every five
+    // minutes for ever.
+    if ((current.get(code) ?? 0) !== managedAmount(quantity)) {
       changed = true;
       break;
     }

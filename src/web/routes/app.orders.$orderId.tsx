@@ -27,10 +27,7 @@ import {
 } from "~/domain/orders/partner";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { closeExceptionsFor } from "~/adapters/db/repositories/exception.server";
-import {
-  parseOrder,
-  parseOrderSafe,
-} from "~/adapters/shopify/order-payload";
+import { parseOrderSafe } from "~/adapters/shopify/order-payload";
 import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
@@ -385,7 +382,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
      * The document poller is the backstop: it compares MetaKocka against what
      * was actually sent, so a document edited there still surfaces afterwards.
      */
-    if (!order.rawPayload) {
+    /*
+     * `parseOrderSafe`, not `parseOrder`. The §2.4 retention job does not
+     * clear `raw_payload` — it overwrites the personal fields *in place* with
+     * the string "[redacted]", so the column is still there and a schema
+     * expecting an object throws on it. A 500 on this button is the worst
+     * possible answer: the merchant is told nothing, and the divergence they
+     * have already dealt with stays on the queue for ever.
+     */
+    const parsed = parseOrderSafe(order.rawPayload);
+    if (!parsed) {
       return {
         ok: false,
         message:
@@ -394,7 +400,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
     }
 
     await applyOrderSync(principal, orderId, {
-      parsed: parseOrder(order.rawPayload),
+      parsed,
       rawPayload: order.rawPayload,
       replaceLines: true,
       diverged: false,

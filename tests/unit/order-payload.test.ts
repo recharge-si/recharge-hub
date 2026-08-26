@@ -174,6 +174,85 @@ describe("parsing an order", () => {
   });
 });
 
+/*
+ * §8.6: the presentment currency and the presentment amount, or neither.
+ *
+ * The plain `total_price` / `line_items[].price` fields are the *shop* amounts.
+ * Reading those and filing them under `presentment_currency` produces a
+ * document that is internally consistent, plausible, and wrong by the exchange
+ * rate — on every line, with nothing downstream able to notice.
+ */
+describe("a multi-currency order", () => {
+  const MULTI = {
+    ...PAYLOAD,
+    currency: "EUR",
+    presentment_currency: "USD",
+    // Shop currency in the flat fields, presentment in the sets. A real
+    // Shopify payload carries both.
+    total_price: "119.98",
+    current_total_price: "119.98",
+    total_discounts: "10.00",
+    total_tax: "21.63",
+    total_price_set: {
+      shop_money: { amount: "119.98" },
+      presentment_money: { amount: "131.98" },
+    },
+    current_total_price_set: {
+      shop_money: { amount: "119.98" },
+      presentment_money: { amount: "131.98" },
+    },
+    total_discounts_set: {
+      shop_money: { amount: "10.00" },
+      presentment_money: { amount: "11.00" },
+    },
+    total_tax_set: {
+      shop_money: { amount: "21.63" },
+      presentment_money: { amount: "23.79" },
+    },
+    total_shipping_price_set: {
+      shop_money: { amount: "4.99" },
+      presentment_money: { amount: "5.49" },
+    },
+    line_items: [
+      {
+        ...PAYLOAD.line_items[0],
+        price: "59.99",
+        total_discount: "5.00",
+        price_set: {
+          shop_money: { amount: "59.99" },
+          presentment_money: { amount: "65.99" },
+        },
+        total_discount_set: {
+          shop_money: { amount: "5.00" },
+          presentment_money: { amount: "5.50" },
+        },
+      },
+    ],
+  };
+
+  const order = parseOrder(MULTI);
+
+  it("stores the presentment amount under the presentment currency", () => {
+    expect(order.currency).toBe("USD");
+    expect(order.totalMinor).toBe(13198);
+    expect(order.discountMinor).toBe(1100);
+    expect(order.totalTaxMinor).toBe(2379);
+    expect(order.shippingMinor).toBe(549);
+    expect(order.lines[0]?.unitPriceWithTaxMinor).toBe(6599);
+    expect(order.lines[0]?.discountMinor).toBe(550);
+  });
+
+  it("falls back to the flat field when the set is absent", () => {
+    // A single-currency store reports the same number in both, and an older
+    // payload may not carry the set at all.
+    const flat = parseOrder(PAYLOAD);
+    expect(flat.totalMinor).toBe(11998);
+    expect(flat.discountMinor).toBe(1000);
+    expect(flat.lines[0]?.unitPriceWithTaxMinor).toBe(5999);
+    expect(flat.lines[0]?.discountMinor).toBe(500);
+  });
+});
+
 describe("Northern Ireland", () => {
   it("is its own country string, not UK", () => {
     const order = parseOrder({

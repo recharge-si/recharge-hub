@@ -40,6 +40,7 @@ import { ensureOrderPartner } from "~/jobs/resolve-order-partner";
 import { computeDocumentShares } from "~/jobs/order-shares";
 import { resolvePaymentType } from "~/jobs/payment";
 import { parsePartnerOverride } from "~/domain/orders/partner";
+import { negativeShares } from "~/domain/money/split";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -284,6 +285,50 @@ export async function handleWriteMetakockaOrder(
   // and it is computed by the same function the payment job uses, so the two
   // can never disagree about what a document is worth.
   const shares = await computeDocumentShares(orderId);
+
+  /*
+   * A document worth less than nothing is not written.
+   *
+   * §8.6 puts the order-level discount on the primary document alone, so a
+   * split order whose discount is bigger than the primary's own lines produces
+   * a sales order for a negative amount beside a positive one. MetaKocka would
+   * take it without a word — it validates almost nothing (§3) — and the pair
+   * even sums to the Shopify total, so nothing downstream would ever notice.
+   *
+   * There is no arithmetic that rescues it: spreading the discount is
+   * forbidden and moving it only moves the negative. So this stops, and a
+   * person decides (§11).
+   */
+  const negative = negativeShares(shares);
+  if (negative.length > 0) {
+    const worst = negative
+      .map(
+        (entry) =>
+          `${entry.sourceCode} (${(entry.totalMinor / 100).toFixed(2)} ${order.presentmentCurrency})`,
+      )
+      .join(", ");
+
+    await raiseException(principal, {
+      orderId,
+      kind: "metakocka_write_failed",
+      message:
+        `The order-level discount on this order is larger than the lines on the document that carries it, so ${negative.length === 1 ? "one document" : `${negative.length} documents`} would be sent to MetaKocka for a negative amount: ${worst}. ` +
+        "Nothing was written. Adjust the discount in Shopify, or allocate more of the order to that supply source, then retry.",
+      detail: {
+        shares: shares.map((entry) => ({
+          sourceCode: entry.sourceCode,
+          isPrimary: entry.isPrimary,
+          lineTotalMinor: entry.lineTotalMinor,
+          shippingMinor: entry.shippingMinor,
+          discountMinor: entry.discountMinor,
+          totalMinor: entry.totalMinor,
+        })),
+      },
+    });
+    await recordDocumentResult(claim.id, { status: "failed" });
+    return;
+  }
+
   const share = shares.find((entry) => entry.sourceId === supplySourceId);
   const isPrimary = share?.isPrimary ?? false;
 

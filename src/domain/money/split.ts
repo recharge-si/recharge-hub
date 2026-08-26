@@ -18,6 +18,8 @@
  *    Shopify total to the cent.
  */
 
+import { compareCodepoints } from "~/domain/types";
+
 export type SourceKind = "own" | "partner";
 
 export interface SourceLineTotal {
@@ -70,7 +72,9 @@ function primaryIndex(perSource: SourceLineTotal[]): number {
       if (candidate.kind === "own") best = index;
       continue;
     }
-    if (candidate.sourceCode.localeCompare(current.sourceCode) < 0)
+    // Codepoint order, not `localeCompare`: which document carries the
+    // shipping charge must not depend on the host's collation rules.
+    if (compareCodepoints(candidate.sourceCode, current.sourceCode) < 0)
       best = index;
   }
   return best;
@@ -108,6 +112,30 @@ export function splitOrderMoney(input: MoneySplitInput): DocumentShare[] {
   }
 
   return shares;
+}
+
+/**
+ * The shares that would put a negative total on a MetaKocka document.
+ *
+ * §8.6 puts the order-level discount on the primary document alone — never
+ * spread, because it is a single charge and not a per-source cost. On a split
+ * order where that discount is larger than the primary's own lines, obeying
+ * the rule produces a document worth less than nothing: a sales order for
+ * -30.00 beside one for +30.00.
+ *
+ * MetaKocka would accept it. It accepts almost everything (§3), and the two
+ * documents even sum to the right figure — so nothing downstream would ever
+ * notice, and the merchant's ledger would carry a negative sales order it
+ * cannot explain.
+ *
+ * There is no arithmetic that fixes this. Spreading the discount is forbidden,
+ * and moving it to another document only moves the negative. What is left is
+ * to stop and say so, which is what §11 calls an exception: the caller refuses
+ * to write and a person decides. Pure, so the decision is the caller's and the
+ * detection is testable without a database.
+ */
+export function negativeShares(shares: DocumentShare[]): DocumentShare[] {
+  return shares.filter((share) => share.totalMinor < 0);
 }
 
 /**

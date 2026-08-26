@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  negativeShares,
   proportionalSplit,
   splitOrderMoney,
   type SourceLineTotal,
@@ -205,6 +206,55 @@ describe("the documents always sum to the order total", () => {
         discountMinor: 0,
       }),
     ).toEqual([]);
+  });
+});
+
+/*
+ * §8.6 puts the order-level discount on the primary document alone. On a split
+ * order where that discount is bigger than the primary's own lines, obeying
+ * the rule produces a sales order worth less than nothing — and MetaKocka
+ * would file it without a word, because it validates almost nothing (§3).
+ */
+describe("a document that would go negative", () => {
+  const shares = splitOrderMoney({
+    perSource: [
+      part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 5000 }),
+      part({
+        sourceId: "b",
+        sourceCode: "B",
+        kind: "partner",
+        lineTotalMinor: 3000,
+      }),
+    ],
+    orderTotalMinor: 0,
+    shippingMinor: 0,
+    discountMinor: 8000,
+  });
+
+  it("still adds up, which is exactly why nothing downstream notices", () => {
+    expect(sum(shares)).toBe(0);
+  });
+
+  it("is reported rather than sent", () => {
+    const negative = negativeShares(shares);
+    expect(negative).toHaveLength(1);
+    expect(negative[0]?.sourceCode).toBe("A");
+    expect(negative[0]?.isPrimary).toBe(true);
+    expect(negative[0]!.totalMinor).toBeLessThan(0);
+  });
+
+  it("says nothing about an ordinary split", () => {
+    const ordinary = splitOrderMoney({
+      perSource: [
+        part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 5000 }),
+        part({ sourceId: "b", sourceCode: "B", lineTotalMinor: 3000 }),
+      ],
+      orderTotalMinor: 8499,
+      shippingMinor: 499,
+      discountMinor: 0,
+    });
+
+    expect(negativeShares(ordinary)).toEqual([]);
   });
 });
 

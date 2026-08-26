@@ -1,7 +1,10 @@
 import { z } from "zod";
 
 import { getLogger } from "~/adapters/observability/logger.server";
-import { MetakockaError } from "~/adapters/metakocka/errors";
+import {
+  MetakockaError,
+  classifyHttpStatus,
+} from "~/adapters/metakocka/errors";
 import { mkDecimal } from "~/adapters/metakocka/values";
 import type { MetakockaCredentials } from "~/adapters/metakocka/client";
 
@@ -65,11 +68,31 @@ export interface CompleteListInput {
 }
 
 /**
+ * Shopify's number, in the form MetaKocka can be told to hold.
+ *
+ * Shopify counts in whole units and can report a negative on-hand (an
+ * oversold location), which is a statement about Shopify's ledger rather than
+ * a quantity a warehouse can contain. Exported so the caller deciding whether
+ * anything changed compares the value that would actually be sent, not the
+ * raw one — otherwise an on-hand of -1 against a held 0 looks like a change
+ * for ever and files an inventory document every five minutes.
+ */
+export function managedAmount(amount: number): number {
+  return Math.max(0, Math.trunc(amount));
+}
+
+/**
  * The full stock list for one warehouse.
  *
  * Every product MetaKocka currently holds appears in the result. Managed
  * products take Shopify's number; everything else is echoed back unchanged so
  * the endpoint's removal-by-omission behaviour cannot touch it.
+ *
+ * **The echo is verbatim, clamp included.** Rounding or flooring a held value
+ * on the way past is the very write this list exists to prevent: a product
+ * this app does not manage, standing at 3.5 or at -2 in the merchant's ERP,
+ * would be silently restated as 3 or 0 by the act of protecting it. Only the
+ * managed branch clamps, because only there is the number ours to state.
  */
 export function buildCompleteStockList(input: CompleteListInput): StockLine[] {
   const lines: StockLine[] = [];
@@ -79,7 +102,7 @@ export function buildCompleteStockList(input: CompleteListInput): StockLine[] {
     lines.push({
       warehouseId: input.warehouseId,
       productCode,
-      amount: Math.max(0, Math.trunc(amount)),
+      amount: managedAmount(amount),
     });
     seen.add(productCode);
   }
@@ -87,14 +110,37 @@ export function buildCompleteStockList(input: CompleteListInput): StockLine[] {
   for (const [productCode, amount] of input.current) {
     if (seen.has(productCode)) continue;
     // Not ours to change, but it has to be present or MetaKocka removes it.
-    lines.push({
-      warehouseId: input.warehouseId,
-      productCode,
-      amount: Math.max(0, Math.trunc(amount)),
-    });
+    lines.push({ warehouseId: input.warehouseId, productCode, amount });
   }
 
   return lines;
+}
+
+/**
+ * A stock amount as a decimal string MetaKocka will read back as the same
+ * number.
+ *
+ * `String()` switches to exponent notation past 1e21 and below 1e-7, which
+ * MetaKocka would take as a different value entirely. No warehouse holds
+ * either, so this only has to refuse to be silently wrong about it.
+ */
+function amountString(amount: number): string {
+  if (!Number.isFinite(amount)) {
+    throw new MetakockaError(
+      `Refusing to send a stock amount that is not a finite number: ${String(amount)}`,
+      { endpoint: "sync_stock", kind: "exception" },
+    );
+  }
+
+  const text = String(amount);
+  if (text.includes("e") || text.includes("E")) {
+    throw new MetakockaError(
+      `Refusing to send a stock amount MetaKocka would misread: ${text}`,
+      { endpoint: "sync_stock", kind: "exception" },
+    );
+  }
+
+  return text;
 }
 
 export interface SyncStockResult {
@@ -133,7 +179,7 @@ export async function syncStockToMetakocka(
         stock_list: lines.map((line) => ({
           warehouse_id: line.warehouseId,
           product_code: line.productCode,
-          amount: String(line.amount),
+          amount: amountString(line.amount),
         })),
       }),
       signal: AbortSignal.timeout(options.timeoutMs ?? 120_000),
@@ -146,6 +192,20 @@ export async function syncStockToMetakocka(
     });
   }
 
+  // A 429 or a 5xx is worth retrying; a 4xx is a request that will fail the
+  // same way next time. Without this the body of an error page was read as if
+  // it were a result, and the classification the queue needs never happened.
+  if (!response.ok) {
+    throw new MetakockaError(
+      `MetaKocka sync_stock returned HTTP ${response.status}`,
+      {
+        endpoint: "sync_stock",
+        kind: classifyHttpStatus(response.status),
+        httpStatus: response.status,
+      },
+    );
+  }
+
   const text = await response.text();
   if (text.trimStart().startsWith("<")) {
     throw new MetakockaError("MetaKocka sync_stock returned HTML, not JSON", {
@@ -155,7 +215,25 @@ export async function syncStockToMetakocka(
     });
   }
 
-  const parsed = responseSchema.safeParse(JSON.parse(text));
+  // A raw SyntaxError out of here reaches pg-boss as an unclassified throw and
+  // is retried as though it were transient. It is not: a 200 that is not JSON
+  // fails identically on the next attempt.
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch (cause) {
+    throw new MetakockaError(
+      "MetaKocka sync_stock returned a response that is not JSON",
+      {
+        endpoint: "sync_stock",
+        kind: "exception",
+        httpStatus: response.status,
+        cause,
+      },
+    );
+  }
+
+  const parsed = responseSchema.safeParse(raw);
   if (!parsed.success) {
     throw new MetakockaError(
       "MetaKocka sync_stock returned an unrecognised response",
@@ -177,10 +255,24 @@ export async function syncStockToMetakocka(
 
   // "Sync successful" is returned even when nothing was done, so success is
   // only believed if MetaKocka echoed back the lines that were sent.
-  const acknowledged = parsed.data.stock_list?.length ?? 0;
+  const echoed = parsed.data.stock_list ?? [];
+  const acknowledged = echoed.length;
   if (acknowledged !== lines.length) {
     throw new MetakockaError(
       `MetaKocka sync_stock reported success but acknowledged ${acknowledged} of ${lines.length} lines`,
+      {
+        endpoint: "sync_stock",
+        kind: "exception",
+        oprCode: parsed.data.opr_code,
+        oprDesc: parsed.data.opr_desc,
+      },
+    );
+  }
+
+  const mismatch = describeEchoMismatch(lines, echoed);
+  if (mismatch) {
+    throw new MetakockaError(
+      `MetaKocka sync_stock reported success but the stock it echoed back does not match what was sent: ${mismatch}`,
       {
         endpoint: "sync_stock",
         kind: "exception",
@@ -196,4 +288,48 @@ export async function syncStockToMetakocka(
   );
 
   return { sent: lines.length, acknowledged };
+}
+
+type EchoedLine = NonNullable<
+  z.infer<typeof responseSchema>["stock_list"]
+>[number];
+
+/**
+ * The first way the echoed list disagrees with what was sent, or null.
+ *
+ * §7: a no-op reports success, so the count alone is not evidence — a right-
+ * length list of the wrong products would pass it. What is checked is the set
+ * of product codes and, where MetaKocka repeats the amount, the amount too.
+ *
+ * A field MetaKocka simply does not return is not treated as a disagreement.
+ * "Could not tell" is the safe direction to be wrong in here: the alternative
+ * raises an exception on every successful write the moment MetaKocka trims a
+ * field from its response, and a queue full of false alarms is a queue nobody
+ * reads (§11).
+ */
+function describeEchoMismatch(
+  sent: StockLine[],
+  echoed: EchoedLine[],
+): string | null {
+  const named = echoed.filter((line) => line.product_code !== undefined);
+  if (named.length === 0) return null;
+
+  const byCode = new Map<string, EchoedLine>();
+  for (const line of named) byCode.set(String(line.product_code), line);
+
+  for (const line of sent) {
+    const back = byCode.get(line.productCode);
+    if (!back) {
+      return `${line.productCode} was sent but not acknowledged`;
+    }
+    if (back.amount === undefined) continue;
+    // MetaKocka answers in decimal strings; mkDecimal has already made a
+    // number of it. Compare with a tolerance rather than on equality, because
+    // a half-cent of float noise is not a failed write.
+    if (Math.abs(back.amount - line.amount) > 1e-6) {
+      return `${line.productCode} was sent as ${amountString(line.amount)} but came back as ${String(back.amount)}`;
+    }
+  }
+
+  return null;
 }

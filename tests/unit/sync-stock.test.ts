@@ -83,6 +83,79 @@ describe("building the stock list for sync_stock", () => {
 
     expect(lines[0]!.amount).toBe(0);
   });
+
+  /*
+   * The clamp belongs to the managed branch alone. Applying it to the echo
+   * turns the write that exists to protect an unmanaged product into the one
+   * that changes it — 3.5 restated as 3, -2 as 0 — which is precisely the
+   * destructive write §7 is guarding against.
+   */
+  describe("the echo of a product this app does not manage", () => {
+    it("keeps a fractional held value exactly", () => {
+      const lines = buildCompleteStockList({
+        warehouseId: "W1",
+        managed: new Map([["A", 7]]),
+        current: new Map([["LOOSE-CABLE-M", 3.5]]),
+      });
+
+      expect(lines).toContainEqual({
+        warehouseId: "W1",
+        productCode: "LOOSE-CABLE-M",
+        amount: 3.5,
+      });
+    });
+
+    it("keeps a negative held value exactly", () => {
+      const lines = buildCompleteStockList({
+        warehouseId: "W1",
+        managed: new Map([["A", 7]]),
+        current: new Map([["OVERSOLD", -2]]),
+      });
+
+      expect(lines).toContainEqual({
+        warehouseId: "W1",
+        productCode: "OVERSOLD",
+        amount: -2,
+      });
+    });
+
+    it("survives the request body as the same number", async () => {
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              opr_code: "0",
+              stock_list: [
+                { product_code: "A", amount: "7" },
+                { product_code: "LOOSE-CABLE-M", amount: "3.5" },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+
+      await syncStockToMetakocka(
+        CREDENTIALS,
+        buildCompleteStockList({
+          warehouseId: "W1",
+          managed: new Map([["A", 7]]),
+          current: new Map([["LOOSE-CABLE-M", 3.5]]),
+        }),
+        { fetchImpl: fetchImpl as unknown as typeof fetch },
+      );
+
+      const [, init] = fetchImpl.mock.calls[0]! as unknown as [
+        string,
+        RequestInit,
+      ];
+      expect(JSON.parse(String(init.body))).toMatchObject({
+        stock_list: [
+          { product_code: "A", amount: "7" },
+          { product_code: "LOOSE-CABLE-M", amount: "3.5" },
+        ],
+      });
+    });
+  });
 });
 
 describe("syncStockToMetakocka", () => {
@@ -180,6 +253,130 @@ describe("syncStockToMetakocka", () => {
     expect(JSON.parse(String(init.body))).toMatchObject({
       api_user_email: "api@example.test",
       stock_list: [{ warehouse_id: "W1", product_code: "A", amount: "1" }],
+    });
+  });
+
+  /*
+   * §7: a no-op reports success. The count alone does not prove the write
+   * happened — a right-length list of the wrong products passes it.
+   */
+  describe("checking the echo against what was sent", () => {
+    const respondWith = (body: unknown) =>
+      vi.fn(
+        async () =>
+          new Response(JSON.stringify(body), {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+    const LINES = [
+      { warehouseId: "W1", productCode: "A", amount: 1 },
+      { warehouseId: "W1", productCode: "B", amount: 2 },
+    ];
+
+    it("rejects a right-length echo naming the wrong products", async () => {
+      const fetchImpl = respondWith({
+        opr_code: "0",
+        stock_list: [
+          { product_code: "A", amount: "1" },
+          { product_code: "SOMETHING-ELSE", amount: "2" },
+        ],
+      });
+
+      const error = await syncStockToMetakocka(CREDENTIALS, LINES, {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(MetakockaError);
+      expect((error as MetakockaError).message).toContain(
+        "B was sent but not acknowledged",
+      );
+    });
+
+    it("rejects an echo that came back at a different amount", async () => {
+      const fetchImpl = respondWith({
+        opr_code: "0",
+        stock_list: [
+          { product_code: "A", amount: "1" },
+          { product_code: "B", amount: "0" },
+        ],
+      });
+
+      const error = await syncStockToMetakocka(CREDENTIALS, LINES, {
+        fetchImpl: fetchImpl as unknown as typeof fetch,
+      }).catch((e: unknown) => e);
+
+      expect((error as MetakockaError).message).toContain(
+        "B was sent as 2 but came back as 0",
+      );
+    });
+
+    it("does not invent a mismatch out of a field MetaKocka omits", async () => {
+      // "Could not tell" is the safe direction to be wrong in: the
+      // alternative raises an exception on every successful write.
+      const fetchImpl = respondWith({
+        opr_code: "0",
+        stock_list: [{ product_code: "A" }, { product_code: "B" }],
+      });
+
+      await expect(
+        syncStockToMetakocka(CREDENTIALS, LINES, {
+          fetchImpl: fetchImpl as unknown as typeof fetch,
+        }),
+      ).resolves.toEqual({ sent: 2, acknowledged: 2 });
+    });
+  });
+
+  describe("a response that is not a result", () => {
+    it("classifies a 5xx as retryable", async () => {
+      const fetchImpl = vi.fn(
+        async () => new Response("upstream is down", { status: 503 }),
+      );
+
+      const error = await syncStockToMetakocka(
+        CREDENTIALS,
+        [{ warehouseId: "W1", productCode: "A", amount: 1 }],
+        { fetchImpl: fetchImpl as unknown as typeof fetch },
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(MetakockaError);
+      expect((error as MetakockaError).kind).toBe("retryable");
+    });
+
+    it("classifies a 4xx as an exception", async () => {
+      const fetchImpl = vi.fn(
+        async () => new Response("no", { status: 403 }),
+      );
+
+      const error = await syncStockToMetakocka(
+        CREDENTIALS,
+        [{ warehouseId: "W1", productCode: "A", amount: 1 }],
+        { fetchImpl: fetchImpl as unknown as typeof fetch },
+      ).catch((e: unknown) => e);
+
+      expect((error as MetakockaError).kind).toBe("exception");
+    });
+
+    it("does not let a body that is not JSON escape as a SyntaxError", async () => {
+      // A raw SyntaxError reaches pg-boss unclassified and is retried as
+      // though it were transient. It is not.
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response("not json at all", {
+            status: 200,
+            headers: { "Content-Type": "application/json" },
+          }),
+      );
+
+      const error = await syncStockToMetakocka(
+        CREDENTIALS,
+        [{ warehouseId: "W1", productCode: "A", amount: 1 }],
+        { fetchImpl: fetchImpl as unknown as typeof fetch },
+      ).catch((e: unknown) => e);
+
+      expect(error).toBeInstanceOf(MetakockaError);
+      expect((error as MetakockaError).kind).toBe("exception");
     });
   });
 

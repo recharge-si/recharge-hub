@@ -28,6 +28,42 @@ import {
 
 const money = z.union([z.string(), z.number()]).transform(String);
 
+/**
+ * A Shopify `*_set` money field.
+ *
+ * Every amount on an order exists twice: once in the shop's own currency and
+ * once in the currency the customer was actually charged. The plain fields
+ * (`total_price`, `line_items[].price`) are the **shop** amounts, while
+ * `presentment_currency` is the customer's — so reading the flat field and
+ * labelling it with the presentment code prices every MetaKocka document in a
+ * currency it was never denominated in (§8.6: never silently convert).
+ *
+ * The set is preferred and the flat field is the fallback, because a
+ * single-currency store reports the same number in both and older payloads
+ * may not carry the set at all.
+ */
+const moneySet = z
+  .object({
+    shop_money: z.object({ amount: money }).nullish(),
+    presentment_money: z.object({ amount: money }).nullish(),
+  })
+  .nullish();
+
+type MoneySet = z.infer<typeof moneySet>;
+
+/** Presentment first, then shop, then the flat field the set replaced. */
+function presentmentAmount(
+  set: MoneySet,
+  flat: string | null | undefined,
+): string {
+  return (
+    set?.presentment_money?.amount ??
+    set?.shop_money?.amount ??
+    flat ??
+    "0"
+  );
+}
+
 const addressSchema = z
   .object({
     first_name: z.string().nullish(),
@@ -57,7 +93,9 @@ const lineItemSchema = z.object({
   name: z.string().nullish(),
   quantity: z.number(),
   price: money,
+  price_set: moneySet,
   total_discount: money.nullish(),
+  total_discount_set: moneySet,
   taxable: z.boolean().nullish(),
   tax_lines: z.array(taxLineSchema).default([]),
 });
@@ -70,16 +108,15 @@ export const orderPayloadSchema = z.object({
   presentment_currency: z.string().nullish(),
   financial_status: z.string().nullish(),
   total_price: money.nullish(),
+  total_price_set: moneySet,
   current_total_price: money.nullish(),
+  current_total_price_set: moneySet,
   total_discounts: money.nullish(),
+  total_discounts_set: moneySet,
   taxes_included: z.boolean().nullish(),
   total_tax: money.nullish(),
-  total_shipping_price_set: z
-    .object({
-      shop_money: z.object({ amount: money }).nullish(),
-      presentment_money: z.object({ amount: money }).nullish(),
-    })
-    .nullish(),
+  total_tax_set: moneySet,
+  total_shipping_price_set: moneySet,
   payment_gateway_names: z.array(z.string()).default([]),
   gateway: z.string().nullish(),
   note: z.string().nullish(),
@@ -347,23 +384,36 @@ export function parseOrder(payload: unknown): ParsedOrder {
       .join(" ")
       .trim() || `Shopify order ${orderNumber}`;
 
-  const orderTaxMinor = toMinorUnits(order.total_tax ?? "0");
+  // Every amount below is the presentment one, to match `currency` above.
+  // Mixing the two — a shop-currency total under a presentment code — is the
+  // failure this reads around: it prices the whole MetaKocka document wrongly
+  // and nothing downstream can tell, because the number is perfectly valid.
+  const orderTaxMinor = toMinorUnits(
+    presentmentAmount(order.total_tax_set, order.total_tax),
+  );
 
-  const shipping =
-    order.total_shipping_price_set?.presentment_money?.amount ??
-    order.total_shipping_price_set?.shop_money?.amount ??
-    "0";
+  const shipping = presentmentAmount(order.total_shipping_price_set, "0");
+
+  // `current_*` reflects edits and refunds, so it wins over the original
+  // whenever Shopify sends it in either shape.
+  const total =
+    order.current_total_price_set || order.current_total_price
+      ? presentmentAmount(
+          order.current_total_price_set,
+          order.current_total_price,
+        )
+      : presentmentAmount(order.total_price_set, order.total_price);
 
   return {
     shopifyOrderId: order.id,
     orderNumber,
     currency,
     financialStatus: toFinancialStatus(order.financial_status),
-    totalMinor: toMinorUnits(
-      order.current_total_price ?? order.total_price ?? "0",
-    ),
+    totalMinor: toMinorUnits(total),
     shippingMinor: toMinorUnits(shipping),
-    discountMinor: toMinorUnits(order.total_discounts ?? "0"),
+    discountMinor: toMinorUnits(
+      presentmentAmount(order.total_discounts_set, order.total_discounts),
+    ),
     gateway: order.payment_gateway_names[0] ?? order.gateway ?? null,
     // Shopify defaults to tax-inclusive pricing, and treating an unstated flag
     // as exclusive would inflate every price by the VAT rate.
@@ -383,8 +433,12 @@ export function parseOrder(payload: unknown): ParsedOrder {
       sku: line.sku?.trim() ?? "",
       title: line.title ?? line.name ?? "",
       quantity: line.quantity,
-      unitPriceWithTaxMinor: toMinorUnits(line.price),
-      discountMinor: toMinorUnits(line.total_discount ?? "0"),
+      unitPriceWithTaxMinor: toMinorUnits(
+        presentmentAmount(line.price_set, line.price),
+      ),
+      discountMinor: toMinorUnits(
+        presentmentAmount(line.total_discount_set, line.total_discount),
+      ),
       taxable: line.taxable ?? true,
       taxFactor: taxFactorOf(line, orderTaxMinor),
     })),
