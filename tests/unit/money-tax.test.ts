@@ -127,4 +127,38 @@ describe("rounding", () => {
     expect(grossToNetMinor(20900, 0)).toBe(20900);
     expect(netToGrossMinor(20900, 0)).toBe(20900);
   });
+
+  /*
+   * A refund is the same sale with the sign flipped, and phase 2 maps refunds
+   * onto MetaKocka credit notes. `Math.round` breaks ties toward +∞, so it
+   * would make the credit note differ from the sale by a cent on exact halves
+   * — a manual reconciliation for a human being (§8.6).
+   */
+  describe("a negative amount", () => {
+    it("is the exact mirror of the positive one", () => {
+      for (let gross = 1; gross <= 5000; gross += 3) {
+        for (const factor of [0.05, 0.095, 0.22, 0.25]) {
+          expect(grossToNetMinor(-gross, factor)).toBe(
+            -grossToNetMinor(gross, factor),
+          );
+          expect(netToGrossMinor(-gross, factor)).toBe(
+            -netToGrossMinor(gross, factor),
+          );
+        }
+      }
+    });
+
+    it("rounds an exact half away from zero, not toward positive", () => {
+      // 3 at 100% is exactly 1.5 net. Math.round would answer 2 and -1.
+      expect(grossToNetMinor(3, 1)).toBe(2);
+      expect(grossToNetMinor(-3, 1)).toBe(-2);
+    });
+
+    it("never answers negative zero", () => {
+      // -0 compares equal to 0 but is a different value to anything using
+      // Object.is, which is how a test or a Map key starts lying. The rate is
+      // extreme only because it takes one to round a single minor unit away.
+      expect(Object.is(grossToNetMinor(-1, 3), 0)).toBe(true);
+    });
+  });
 });

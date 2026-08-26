@@ -11,7 +11,10 @@ import {
 } from "react-router";
 
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
-import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import {
+  isConnected,
+  requireCredential,
+} from "~/adapters/db/repositories/metakocka-credential.server";
 import {
   getFallbackPaymentType,
   listCachedPaymentTypes,
@@ -34,6 +37,7 @@ import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
+import { formatDateTime } from "~/web/lib/datetime";
 import { METAKOCKA_REGISTERS_URL } from "~/web/lib/metakocka-links";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -69,11 +73,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [maps, used, types, credential, fallback] = await Promise.all([
+  const [maps, used, types, connected, fallback] = await Promise.all([
     listPaymentTypeMaps(principal),
     listPaymentGateways(admin),
     listCachedPaymentTypes(principal),
-    getCredential(principal),
+    isConnected(principal),
     getFallbackPaymentType(principal),
   ]);
 
@@ -106,7 +110,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     loadedAt === null || Date.now() - loadedAt.getTime() > STALE_AFTER_MS;
 
   let refreshing = false;
-  if (credential && stale) {
+  if (connected && stale) {
     await enqueueThrottled(
       QUEUES.reloadPaymentTypes,
       { shopDomain: session.shop },
@@ -122,7 +126,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       .map((type) => type.value)
       .sort((a, b) => a.localeCompare(b)),
     typesLoadedAt: loadedAt?.toISOString() ?? null,
-    connected: Boolean(credential),
+    connected,
     refreshing,
     fallback: fallback ?? "",
     mapping: Object.fromEntries(
@@ -152,14 +156,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const intent = String(formData.get("intent") ?? "save");
 
   if (intent === "load-types") {
-    const credential = await getCredential(principal);
-    if (!credential) {
+    const access = await requireCredential(principal);
+    if (!access.ok) {
       return {
         ok: false,
         message:
-          "Connect MetaKocka first. The payment types come from your company's register.",
+          access.reason === "not_permitted"
+            ? access.message
+            : "Connect MetaKocka first. The payment types come from your company's register.",
       };
     }
+    const credential = access.credential;
 
     try {
       const client = new MetakockaClient(
@@ -256,13 +263,6 @@ function normalise(mapping: Record<string, string>): Record<string, string> {
       .filter(([, type]) => type !== "")
       .sort(([a], [b]) => a.localeCompare(b)),
   );
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 /**

@@ -28,10 +28,11 @@ export default function AppLayout() {
       <AppBridgeNavigation />
       <s-app-nav>
         <s-link href="/app/orders">Orders</s-link>
-        <s-link href="/app/exceptions">Exceptions</s-link>
+        <s-link href="/app/exceptions">Needs attention</s-link>
         <s-link href="/app/products">Products</s-link>
         <s-link href="/app/settings/supply-sources">Locations</s-link>
         <s-link href="/app/settings/payments">Payment types</s-link>
+        <s-link href="/app/settings/sales-orders">Order sync</s-link>
         <s-link href="/app/settings/metakocka">Connection</s-link>
       </s-app-nav>
       <Outlet />

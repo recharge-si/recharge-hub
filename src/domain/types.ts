@@ -41,3 +41,23 @@ export function serviceToken(
 ): ServiceToken {
   return { kind: "service", shopDomain, jobName };
 }
+
+/**
+ * A deterministic string order, for anything a decision depends on.
+ *
+ * `localeCompare` is not this. It answers by the runtime's collation rules,
+ * which differ between Node builds, ICU data versions and the host's locale —
+ * so two servers running the same code can disagree about which supply source
+ * comes first. In `domain/` that is not a cosmetic difference: it decides
+ * which source fills a line and which MetaKocka document carries the shipping
+ * charge, and a retry that lands on the other machine moves the money.
+ *
+ * Codepoint order is arbitrary but it is the same everywhere and forever,
+ * which is the only property the tie-breaks need. Display sorting, where a
+ * person is reading the list, is a different question and still belongs to
+ * `localeCompare`.
+ */
+export function compareCodepoints(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}

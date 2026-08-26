@@ -3,15 +3,22 @@ import { z } from "zod";
 
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { raiseException } from "~/adapters/db/repositories/exception.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
 import {
   listCachedWarehouses,
   listSupplySources,
+  type CachedWarehouse,
 } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
+import {
+  MetakockaError,
+  describeForMerchant,
+} from "~/adapters/metakocka/errors";
 import { listWarehouseStock } from "~/adapters/metakocka/stock";
 import {
-  buildCompleteStockList,
+  buildCompleteCompanyStockList,
+  managedAmount,
   syncStockToMetakocka,
 } from "~/adapters/metakocka/sync-stock";
 import { getLogger } from "~/adapters/observability/logger.server";
@@ -28,6 +35,18 @@ import { serviceToken } from "~/domain/types";
 export const syncInventoryJobSchema = z.object({
   shopDomain: z.string().min(1),
 });
+
+/**
+ * How many consecutive failures before a person is told.
+ *
+ * Twelve is an hour of the five-minute cycle. Below it the exceptions queue
+ * fills with things that fixed themselves before anyone read them.
+ */
+const FAILURES_BEFORE_EXCEPTION = 12;
+
+function formatWhen(at: Date): string {
+  return at.toISOString().slice(0, 16).replace("T", " ");
+}
 
 /**
  * Publishes MetaKocka stock into Shopify (CLAUDE.md §7).
@@ -88,7 +107,129 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
   });
   const { admin } = await unauthenticated.admin(shopDomain);
 
+  /**
+   * How this location's sync went, kept on the location itself.
+   *
+   * A count of consecutive failures rather than a flag, because one blip is not
+   * news: the sync runs every five minutes and MetaKocka is not always up. What
+   * deserves a person is a location that has been failing for an hour, and that
+   * is what the threshold below means.
+   */
+  async function recordOutcome(
+    sourceId: string,
+    outcome: { ok: true } | { ok: false; error: unknown },
+  ): Promise<void> {
+    const now = new Date();
+
+    if (outcome.ok) {
+      await prisma.supplySource.update({
+        where: { id: sourceId },
+        data: {
+          lastSyncAt: now,
+          lastSyncOk: true,
+          lastSyncMessage: null,
+          syncFailures: 0,
+        },
+      });
+      /*
+       * A location that started working again has nothing left to answer for.
+       *
+       * Closed by hand rather than through `closeExceptionsFor`, which keys on
+       * an order: this exception belongs to a location, and the detail is the
+       * only thing that says which one.
+       */
+      await prisma.exception.updateMany({
+        where: {
+          shop: { domain: shopDomain },
+          kind: "stock_sync_failed",
+          status: "open",
+          detail: { path: ["sourceId"], equals: sourceId },
+        },
+        data: { status: "resolved", resolvedBy: "app", resolvedAt: now },
+      });
+      return;
+    }
+
+    const { error } = outcome;
+    const message =
+      error instanceof MetakockaError
+        ? describeForMerchant(error)
+        : error instanceof Error
+          ? error.message
+          : String(error);
+
+    const updated = await prisma.supplySource.update({
+      where: { id: sourceId },
+      data: {
+        lastSyncAt: now,
+        lastSyncOk: false,
+        lastSyncMessage: message,
+        syncFailures: { increment: 1 },
+      },
+      select: { id: true, name: true, syncFailures: true, stockDirection: true },
+    });
+
+    log.error(
+      { shop: shopDomain, source: updated.name, failures: updated.syncFailures },
+      "Stock sync failed for a location",
+    );
+
+    /*
+     * Twelve failures is an hour of a five-minute cycle. Below that the queue
+     * would fill with things that fixed themselves before anyone read them;
+     * above it, the merchant is publishing stock nobody has checked since
+     * breakfast and nothing has said so.
+     */
+    if (updated.syncFailures >= FAILURES_BEFORE_EXCEPTION) {
+      await raiseException(principal, {
+        kind: "stock_sync_failed",
+        message: `Stock has not synced for ${updated.name} since ${formatWhen(now)} — ${updated.syncFailures} attempts have failed. ${message} ${
+          updated.stockDirection === "shopify_to_mk"
+            ? "Shopify's counts are not reaching MetaKocka."
+            : "MetaKocka's counts are not reaching Shopify, so what the store is selling may be out of date."
+        }`,
+        detail: {
+          // Keyed on, so the sweep can close exactly this location's exception
+          // when it starts working again.
+          sourceId: updated.id,
+          source: updated.name,
+          failures: updated.syncFailures,
+          direction: updated.stockDirection,
+        },
+      });
+    }
+  }
+
   for (const source of writable) {
+    /*
+     * One location at a time, and one location's failure is its own.
+     *
+     * This loop used to let anything thrown escape the job. The sweep then died
+     * at whichever location failed, every location behind it was skipped, and
+     * pg-boss retried the whole run — so a warehouse MetaKocka was refusing
+     * (verified: `sync_stock` answering `opr_code 1, "Internal server error."`
+     * for nine hours) both hid every other location and re-synced the ones in
+     * front of it three times a minute.
+     *
+     * The outcome is recorded per location either way, because "Syncing" that
+     * cannot be told apart from "failing since this morning" is worse than no
+     * status at all.
+     */
+    try {
+      await syncOneSource(source);
+      await recordOutcome(source.id, { ok: true });
+    } catch (error) {
+      await recordOutcome(source.id, { ok: false, error });
+    }
+  }
+
+  /** Everything for one location. Throws; the caller records the outcome. */
+  async function syncOneSource(
+    source: (typeof writable)[number],
+  ): Promise<void> {
+    // Narrowed above, but the check does not survive into a nested function.
+    if (!credential) return;
+
     const warehouseMkId = warehouseIdByMark.get(source.metakockaWarehouse!);
     if (!warehouseMkId) {
       // The mapping points at a warehouse that is no longer in MetaKocka.
@@ -110,11 +251,10 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
           mark: source.metakockaWarehouse,
         },
       });
-      continue;
+      throw new Error(
+        `MetaKocka has no warehouse with the mark "${source.metakockaWarehouse}". Reload the warehouse list and check this location's mapping.`,
+      );
     }
-
-    const stock = await listWarehouseStock(client, warehouseMkId);
-    const amountByCode = new Map(stock.map((row) => [row.code, row]));
 
     if (source.stockDirection === "shopify_to_mk") {
       await pushShopifyStockIntoMetakocka({
@@ -122,12 +262,16 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         principal,
         source,
         warehouseMkId,
-        metakockaStock: stock,
+        client,
+        warehouses,
         credential,
         admin,
       });
-      continue;
+      return;
     }
+
+    const stock = await listWarehouseStock(client, warehouseMkId);
+    const amountByCode = new Map(stock.map((row) => [row.code, row]));
 
     const skus = await prisma.sku.findMany({
       where: {
@@ -275,7 +419,9 @@ interface ReverseSyncInput {
     metakockaWarehouse: string | null;
   };
   warehouseMkId: string;
-  metakockaStock: Array<{ code: string; amount: number }>;
+  client: MetakockaClient;
+  /** Every warehouse this company has, cached — not only this source's own. */
+  warehouses: CachedWarehouse[];
   credential: {
     companyId: string;
     secretKey: string;
@@ -285,12 +431,17 @@ interface ReverseSyncInput {
 }
 
 /**
- * Shopify is the truth for this warehouse: copy its on-hand into MetaKocka.
+ * Shopify is the truth for one warehouse: copy its on-hand into MetaKocka.
  *
- * `sync_stock` removes anything omitted from the list, so the payload always
- * describes the whole warehouse. Products this app does not manage are sent
- * back at the value MetaKocka already holds, which makes the write incapable of
- * dropping stock it was never asked to touch.
+ * `sync_stock`'s own documentation says the total stock for *all* warehouses
+ * has to be sent in one request, and that anything absent from it is removed
+ * — read plainly, that includes a warehouse missing from the request
+ * altogether, not only a product missing from a warehouse that is present.
+ * So every cached warehouse is read and echoed back, not only this source's:
+ * Shopify's on-hand replaces the managed products at the one warehouse this
+ * source is responsible for, and everything else — every other product at
+ * that warehouse, every product at every other warehouse — is sent back
+ * exactly as MetaKocka already holds it.
  */
 async function pushShopifyStockIntoMetakocka(
   input: ReverseSyncInput,
@@ -308,7 +459,12 @@ async function pushShopifyStockIntoMetakocka(
       event: "inventory.sync_skipped",
       detail: { reason: "missing_api_user_email", source: input.source.code },
     });
-    return;
+    // A skip is not a success: nothing was written, and a source stuck this
+    // way should count toward the failure threshold like any other, not sit
+    // silently marked "ok" while nobody is told.
+    throw new Error(
+      "MetaKocka has no API user email configured. Add it on the Connection page.",
+    );
   }
 
   const skus = await prisma.sku.findMany({
@@ -331,9 +487,57 @@ async function pushShopifyStockIntoMetakocka(
     managed.set(sku.metakockaCode ?? sku.sku, quantity);
   }
 
-  const lines = buildCompleteStockList({
+  // Every cached warehouse's current stock, read up front: the destructive
+  // write below has to abort if any of these reads fails, and a plain throw
+  // out of a `listWarehouseStock` call does exactly that — the caller's
+  // try/catch around `syncOneSource` records it as this source's failure.
+  const currentByWarehouse = new Map<string, Map<string, number>>();
+  for (const warehouse of input.warehouses) {
+    const stock = await listWarehouseStock(input.client, warehouse.mkId);
+    currentByWarehouse.set(
+      warehouse.mkId,
+      new Map(stock.map((row) => [row.code, row.amount])),
+    );
+  }
+
+  const current = currentByWarehouse.get(input.warehouseMkId) ?? new Map();
+
+  /*
+   * Write only on change (§7's own rule for the other direction, and it binds
+   * harder here: every `sync_stock` call files an inventory document in the
+   * merchant's ERP — an accounting action, not a cache refresh. This ran on
+   * the five-minute tick unconditionally, which is 288 stock documents a day
+   * per warehouse for a store where nothing moved.)
+   *
+   * The unmanaged products are echoed back at MetaKocka's own values by
+   * construction, so the only thing that can differ is a managed code —
+   * absence from `warehouse_stock` means zero (the read is fully paginated).
+   * Other warehouses are echoed back verbatim too and so can never be the
+   * reason this is true, whatever else changed in the company meanwhile.
+   */
+  let changed = false;
+  for (const [code, quantity] of managed) {
+    // Compared against the value that would actually be sent, not the raw
+    // Shopify one: an oversold location reporting -1 against a held 0 is not
+    // a change, and treating it as one files an inventory document every five
+    // minutes for ever.
+    if ((current.get(code) ?? 0) !== managedAmount(quantity)) {
+      changed = true;
+      break;
+    }
+  }
+
+  if (!changed) {
+    log.info(
+      { shop: input.shopDomain, source: input.source.code },
+      "MetaKocka stock already matches Shopify, nothing written",
+    );
+    return;
+  }
+
+  const lines = buildCompleteCompanyStockList({
     managed,
-    current: new Map(input.metakockaStock.map((row) => [row.code, row.amount])),
+    currentByWarehouse,
     warehouseId: input.warehouseMkId,
   });
 

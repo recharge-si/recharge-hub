@@ -3,22 +3,34 @@ import { describe, expect, it } from "vitest";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
 
 import {
-  buildTemplate,
-  parseTemplate,
-  DEFAULT_NAME_TEMPLATE,
-  EXAMPLE_VARIANT,
+  DEFAULT_NAME_PATTERN,
   renderName,
   type VariantFacts,
-} from "~/domain/products/name-template";
+} from "~/domain/products/template";
 
 /**
- * The name template decides what a merchant's ERP products are called, and a
- * bad name is only noticed after it has been written. These are the cases that
- * matter: a product with options, one without, and templates that would leave
+ * The name pattern decides what a merchant's ERP products are called, and a bad
+ * name is only noticed after it has been written. These are the cases that
+ * matter: a product with options, one without, and patterns that would leave
  * dangling separators.
+ *
+ * These two are test fixtures, not sample data shown to anyone. The screens
+ * preview against the merchant's own catalogue and never fall back to an
+ * invented product.
  */
 
-const withOptions: VariantFacts = EXAMPLE_VARIANT;
+const withOptions: VariantFacts = {
+  productTitle: "T-Shirt",
+  variantTitle: "L / Blue",
+  optionValues: ["L", "Blue"],
+  optionNames: ["Size", "Colour"],
+  sku: "TS-001-L",
+  barcode: "3830000000001",
+  vendor: "Acme",
+  productType: "Shirts",
+  handle: "t-shirt",
+  price: "19.90",
+};
 
 const single: VariantFacts = {
   productTitle: "Gift card",
@@ -33,15 +45,15 @@ const single: VariantFacts = {
   price: "25.00",
 };
 
-describe("renderName", () => {
+describe("rendering a name", () => {
   it("puts the option values after the title by default", () => {
-    expect(renderName(DEFAULT_NAME_TEMPLATE, withOptions)).toBe(
+    expect(renderName(DEFAULT_NAME_PATTERN, withOptions)).toBe(
       "T-Shirt L Blue",
     );
   });
 
   it("leaves a single-variant product as its title alone", () => {
-    expect(renderName(DEFAULT_NAME_TEMPLATE, single)).toBe("Gift card");
+    expect(renderName(DEFAULT_NAME_PATTERN, single)).toBe("Gift card");
   });
 
   it("drops a bracketed group when every token in it is empty", () => {
@@ -108,46 +120,5 @@ describe("taxFactorFromPercent", () => {
     expect(taxFactorFromPercent("twenty")).toBeNull();
     expect(taxFactorFromPercent("-5")).toBeNull();
     expect(taxFactorFromPercent("120")).toBeNull();
-  });
-});
-
-describe("buildTemplate and parseTemplate", () => {
-  it("builds a template that drops the separator with the empty piece", () => {
-    const template = buildTemplate({
-      pieces: ["{title}", "{options}"],
-      separator: " - ",
-    });
-
-    expect(template).toBe("{title}[ - {options}]");
-    expect(renderName(template, withOptions)).toBe("T-Shirt - L Blue");
-    expect(renderName(template, single)).toBe("Gift card");
-  });
-
-  it("reads its own output back", () => {
-    const pieces = {
-      pieces: ["{vendor}", "{title}", "{sku}"],
-      separator: " / ",
-    };
-    expect(parseTemplate(buildTemplate(pieces))).toEqual(pieces);
-  });
-
-  it("reads the shipped default", () => {
-    expect(parseTemplate(DEFAULT_NAME_TEMPLATE)).toEqual({
-      pieces: ["{title}", "{options}"],
-      separator: " ",
-    });
-  });
-
-  it("keeps a merchant's own words as a piece", () => {
-    const template = buildTemplate({
-      pieces: ["{title}", "sale"],
-      separator: " ",
-    });
-    expect(renderName(template, single)).toBe("Gift card sale");
-  });
-
-  it("refuses a template it cannot represent, rather than rewriting it", () => {
-    expect(parseTemplate("{title} - {options}")).toBeNull();
-    expect(parseTemplate("{title}[ {a}][-{b}]")).toBeNull();
   });
 });

@@ -1,5 +1,5 @@
 # TLS is Caddy's job: it obtains and renews Let's Encrypt certificates
-# automatically for APP_DOMAIN (CLAUDE.md section 4).
+# automatically for APP_DOMAIN (docs/BUILD_SPEC.md section 4).
 #
 # Set APP_DOMAIN in .env to the public hostname. Leaving it as `localhost` makes
 # Caddy serve its own local certificate, which is what you want on a dev machine.

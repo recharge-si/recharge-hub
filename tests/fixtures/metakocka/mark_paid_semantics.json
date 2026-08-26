@@ -1,0 +1,121 @@
+{
+  "_comment": [
+    "Live probe against designated test company 6789 on 2026-08-26, resolving",
+    "project-status T-17. Sanitised: the secret key, the partner details and the",
+    "product price context are omitted; the mk_ids belonged to two probe sales",
+    "orders that were created and deleted by the same run.",
+    "",
+    "The question was whether MetaKocka accepts and retains a multi-entry",
+    "mark_paid array, since the whole payment design sends the complete desired",
+    "ledger on every write and relies on replacement rather than accumulation.",
+    "",
+    "It does. It also revealed that an empty array does NOT clear a payment,",
+    "which the implementation had assumed."
+  ],
+  "endpoint": "put_document / get_document",
+  "docType": "sales_order",
+  "paymentTypeUsed": "Transakcijski račun",
+  "observations": [
+    {
+      "step": "create with two entries",
+      "sent": { "mark_paid": [{ "amount": "100.00" }, { "amount": "50.00" }] },
+      "response": { "opr_code": "0" },
+      "readBack": { "sum_all": "150", "sum_paid": "150" },
+      "conclusion": "A multi-entry mark_paid is accepted and both entries are retained."
+    },
+    {
+      "step": "re-send the identical array",
+      "sent": { "mark_paid": [{ "amount": "100.00" }, { "amount": "50.00" }] },
+      "readBack": { "sum_paid": "150" },
+      "conclusion": "Replacement, not accumulation. 150 rather than 300. This is what makes a repeated reconciliation pass a no-op."
+    },
+    {
+      "step": "grow to three entries",
+      "sent": {
+        "mark_paid": [
+          { "amount": "100.00" },
+          { "amount": "50.00" },
+          { "amount": "25.00" }
+        ]
+      },
+      "readBack": { "sum_paid": "175" },
+      "conclusion": "A second capture arriving later is representable by re-sending the whole ledger."
+    },
+    {
+      "step": "shrink to one entry",
+      "sent": { "mark_paid": [{ "amount": "40.00" }] },
+      "readBack": { "sum_paid": "40" },
+      "conclusion": "Full replacement confirmed in both directions."
+    },
+    {
+      "step": "empty array",
+      "sent": { "mark_paid": [] },
+      "readBack": { "sum_paid": "40" },
+      "conclusion": "AN EMPTY ARRAY CLEARS NOTHING. It behaves exactly like omitting the key."
+    },
+    {
+      "step": "omit mark_paid entirely",
+      "sent": {},
+      "readBack": { "sum_paid": "40" },
+      "conclusion": "Absent means leave the payment alone. Confirms the update path may safely omit it."
+    },
+    {
+      "step": "single zero-amount entry",
+      "sent": { "mark_paid": [{ "amount": "0.00" }] },
+      "readBack": { "sum_paid": "(field absent)" },
+      "conclusion": "This is how a payment is cleared. The field disappears rather than reading 0."
+    },
+    {
+      "step": "negative amount",
+      "sent": { "mark_paid": [{ "amount": "-100.00" }] },
+      "readBack": { "sum_paid": "-100" },
+      "conclusion": "Accepted. Deliberately NOT used: representing a refund this way is an accounting decision this app does not get to invent."
+    },
+    {
+      "step": "empty product_list",
+      "sent": { "product_list": [] },
+      "readBack": { "sum_all": "(field absent)", "product_list": "(unreadable)" },
+      "conclusion": "A document can be emptied of lines, which the obsolete-document policy relies on."
+    }
+  ],
+  "getDocumentKeys": [
+    "bank_ref_number",
+    "buyer_order",
+    "count_code",
+    "created_ts",
+    "currency_code",
+    "doc_created_email",
+    "doc_date",
+    "doc_type",
+    "fulfillment_user",
+    "mk_id",
+    "opr_code",
+    "partner",
+    "product_list",
+    "profit_center",
+    "profit_center_desc",
+    "sum_all",
+    "sum_basic",
+    "sum_paid",
+    "sum_tax_ex4",
+    "warehouse"
+  ],
+  "getDocumentNotes": [
+    "There is NO payment_list field under any name. The app's schema expected one,",
+    "so hasPayment could never be true and the ambiguous-write recovery never",
+    "recorded a payment it had in fact sent. sum_paid is the real field.",
+    "return_payment_list, show_payments and return_mark_paid all change nothing."
+  ],
+  "deleteDocument": {
+    "{ doc_id }": { "opr_code": "2", "opr_desc": "Paramether mk_id must be set" },
+    "{ mk_id }": { "opr_code": "1", "opr_desc": "Internal server error." },
+    "{ mk_id, doc_type }": { "opr_code": "0" },
+    "conclusion": "delete_document needs mk_id AND doc_type. Note get_document takes the same id as doc_id. The app's original { doc_id } shape could never have worked."
+  },
+  "paymentTypeNotes": [
+    "'Prenos preplačila' was refused: opr_code 6, 'The payment instrument needs to",
+    "be tax certified, but you do not have tax cash registers activated.' Only",
+    "'Transakcijski račun' is usable in this company, which is consistent with the",
+    "earlier finding that cash/card values require fiscal cash registers."
+  ]
+}

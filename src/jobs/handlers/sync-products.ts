@@ -16,6 +16,7 @@ import {
   taxFactorFromPercent,
   updateProduct,
   type PriceInput,
+  type ProductTypeFlags,
 } from "~/adapters/metakocka/products";
 import { minorToDecimalString } from "~/adapters/metakocka/documents";
 import { listProducts } from "~/adapters/metakocka/stock";
@@ -27,7 +28,12 @@ import {
   listVariantDetails,
 } from "~/adapters/shopify/products";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
-import { nameFor, settingsFromTemplate } from "~/domain/products/template";
+import { pricingIsTheProblem } from "~/domain/products/pricing-failures";
+import {
+  nameFor,
+  settingsFromTemplate,
+  usesMetafields,
+} from "~/domain/products/template";
 import { serviceToken } from "~/domain/types";
 
 export const syncProductsJobSchema = z.object({
@@ -97,8 +103,15 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
   });
   const { admin } = await unauthenticated.admin(shopDomain);
 
+  // The naming settings the preview screen resolves against, built from the
+  // stored row. Rules are not stored yet, so this is the default pattern
+  // alone; when they are, only this line changes.
+  const naming = settingsFromTemplate(settings.nameTemplate);
+
   const [variants, pricing, mkProducts] = await Promise.all([
-    listVariantDetails(admin),
+    // Metafields are read only when a pattern uses one. They cost query points
+    // on every page, and a name built without them must not pay for them.
+    listVariantDetails(admin, { metafields: usesMetafields(naming) }),
     getShopPricing(admin),
     listProducts(client),
   ]);
@@ -108,9 +121,34 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
   );
   const taxFactor = taxFactorFromPercent(settings.taxPercent);
 
+  /**
+   * What kind of article the merchant says these are: Prodajni, Nabavni,
+   * Storitev. One answer for the whole catalogue, because it is a property of
+   * how this shop sells rather than of one SKU.
+   */
+  const wantedType: ProductTypeFlags = {
+    sales: settings.productSales,
+    purchasing: settings.productPurchasing,
+    service: settings.productService,
+  };
+
+  /**
+   * Whether an article MetaKocka already holds needs its flags rewritten.
+   *
+   * A null current type means `product_list` did not say, so it is sent rather
+   * than assumed to match — assuming would leave the setting doing nothing for
+   * anyone whose catalogue answers differently.
+   */
+  const typeDiffers = (current: ProductTypeFlags | null): boolean =>
+    current === null ||
+    current.sales !== wantedType.sales ||
+    current.purchasing !== wantedType.purchasing ||
+    current.service !== wantedType.service;
+
   let renamed = 0;
   let created = 0;
   let repriced = 0;
+  let retyped = 0;
   let unchanged = 0;
   let skipped = 0;
   let failed = 0;
@@ -119,10 +157,22 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
   /** SKUs whose price cannot be restated on the pricelist's basis. */
   let unpriceable = 0;
 
-  // The naming settings the preview screen resolves against, built from the
-  // stored row. Rules are not stored yet, so this is the default template
-  // alone; when they are, only this line changes.
-  const naming = settingsFromTemplate(settings.nameTemplate);
+  /**
+   * What MetaKocka said, and how many products it said it about.
+   *
+   * A count of failures is not a reason, and "39 products were rejected" told
+   * a merchant who had just deleted their pricelists nothing they could act on.
+   * MetaKocka's own words are the only description of the cause there is (§3:
+   * failures are `opr_desc`, not machine-readable), so they are kept and
+   * reported rather than reduced to a number.
+   */
+  const failureReasons = new Map<string, number>();
+
+  /**
+   * MetaKocka's words for the rejection that stopped prices going out, if one
+   * did. Null while prices are still being sent.
+   */
+  let pricingStopped: string | null = null;
 
   /**
    * Whether the target pricelist holds gross prices.
@@ -136,6 +186,10 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
 
   const priceFor = (variantPrice: string | null): PriceInput | null => {
     if (!settings.sendPricing || !settings.pricelistCode) return null;
+    // MetaKocka has already refused this pricelist once. Sending the same price
+    // to it for every remaining SKU would be one rejected call per product and
+    // one merchant left with a catalogue that looks entirely broken.
+    if (pricingStopped !== null) return null;
     if (!variantPrice) {
       missingPrice += 1;
       return null;
@@ -176,6 +230,18 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
     error instanceof MetakockaError &&
     /price type|price_with_tax|use 'price'/i.test(error.oprDesc ?? "");
 
+  /** MetaKocka's own words for a failure, or ours when it never answered. */
+  const reasonFor = (error: unknown): string =>
+    error instanceof MetakockaError
+      ? error.oprDesc?.trim() || error.message
+      : error instanceof Error
+        ? error.message
+        : String(error);
+
+  /** The last rejection seen on a priced write, and how often in a row. */
+  let priceFailureReason: string | null = null;
+  let priceFailureRun = 0;
+
   // Indexed rather than for-of: a SKU that discovers the pricelist basis is
   // pushed back on, and the loop has to see it.
   const queue = [...variants];
@@ -184,6 +250,9 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
     const variant = queue[index]!;
     const { name } = nameFor(naming, variant);
     const existing = mkByCode.get(variant.sku);
+
+    /** Whether the call that is about to go out carries a price. */
+    let carriedPrice = false;
 
     try {
       if (existing) {
@@ -200,8 +269,19 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
         // this the pricing switch did nothing at all for an existing
         // catalogue — the price only ever went out on creation.
         const price = settings.updatePricing ? priceFor(variant.price) : null;
+        carriedPrice = price !== null;
 
-        if (!nextName && !price) {
+        // Same reasoning as the price above: §8.9 makes MetaKocka master for
+        // its own catalogue, so an article it already holds is only retyped
+        // when the merchant turned that on by name. Sent only when it would
+        // actually change something — a needless flag write on every run risks
+        // MetaKocka's service-change warning for nothing.
+        const nextType =
+          settings.updateProductType && typeDiffers(existing.type)
+            ? wantedType
+            : null;
+
+        if (!nextName && !price && !nextType) {
           // Nothing to send. Distinguish "the merchant froze the name" from
           // "the name already matches", because they mean different things on
           // the settings screen.
@@ -213,11 +293,13 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
         await updateProduct(client, {
           mkId: existing.mkId,
           ...(nextName ? { name: nextName } : {}),
+          ...(nextType ? { type: nextType } : {}),
           price,
         });
 
         if (nextName) renamed += 1;
         if (price) repriced += 1;
+        if (nextType) retyped += 1;
         continue;
       }
 
@@ -227,6 +309,7 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
       }
 
       const price: PriceInput | null = priceFor(variant.price);
+      carriedPrice = price !== null;
 
       const result = await addProduct(client, {
         countCode: variant.sku,
@@ -234,6 +317,7 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
         name,
         barcode: variant.barcode,
         unit: settings.unit,
+        type: wantedType,
         price,
       });
       created += 1;
@@ -258,14 +342,50 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
         continue;
       }
 
+      const reason = reasonFor(error);
+
+      /*
+       * A rejection that belongs to the run rather than to this product.
+       *
+       * Two ways to recognise one, because MetaKocka's wording is not
+       * documented (§3) and neither signal is sufficient alone: it named the
+       * pricelist, or it has now said the same thing about three priced
+       * products in a row. Either way the price is what is wrong, so the price
+       * stops going out and this SKU is put back on the queue to go out with
+       * its name alone. Names keep syncing; nobody has to fix the pricelist
+       * before the rest of the catalogue can be renamed.
+       */
+      if (carriedPrice && pricingStopped === null) {
+        priceFailureRun =
+          priceFailureReason === reason ? priceFailureRun + 1 : 1;
+        priceFailureReason = reason;
+
+        if (
+          pricingIsTheProblem({
+            description:
+              error instanceof MetakockaError ? (error.oprDesc ?? null) : null,
+            identicalRunLength: priceFailureRun,
+          })
+        ) {
+          pricingStopped = reason;
+          queue.push(variant);
+          log.warn(
+            { shop: shopDomain, sku: variant.sku, reason },
+            "Stopped sending prices for the rest of this run",
+          );
+          continue;
+        }
+      } else if (!carriedPrice) {
+        // A failure with no price on it says nothing about the pricelist, so
+        // it must not count towards dropping prices.
+        priceFailureReason = null;
+        priceFailureRun = 0;
+      }
+
       failed += 1;
+      failureReasons.set(reason, (failureReasons.get(reason) ?? 0) + 1);
       log.error(
-        {
-          shop: shopDomain,
-          sku: variant.sku,
-          reason:
-            error instanceof MetakockaError ? error.message : String(error),
-        },
+        { shop: shopDomain, sku: variant.sku, reason },
         "Product sync failed for one SKU",
       );
     }
@@ -282,6 +402,16 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
 
   await markProductSyncRun(principal, new Date());
 
+  /*
+   * Reasons, largest first, so the screen can lead with the one that explains
+   * most of the run. Capped: the audit trail is a product feature (§6), not a
+   * place to store a distinct sentence per SKU.
+   */
+  const reasons = [...failureReasons.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([reason, count]) => ({ reason, count }));
+
   await appendEvent(principal, {
     entityType: "product_sync",
     event: "products.synced",
@@ -289,6 +419,7 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
       renamed,
       created,
       repriced,
+      retyped,
       unchanged,
       skipped,
       failed,
@@ -296,6 +427,9 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
       unpriceable,
       pricelistIncludesTax,
       basisCorrected,
+      reasons,
+      pricingStopped,
+      pricelistCode: settings.pricelistCode,
     },
   });
 
@@ -305,10 +439,12 @@ export async function handleSyncProducts(job: Job<unknown>): Promise<void> {
       renamed,
       created,
       repriced,
+      retyped,
       unchanged,
       skipped,
       failed,
       missingPrice,
+      pricingStopped,
     },
     "Product sync finished",
   );

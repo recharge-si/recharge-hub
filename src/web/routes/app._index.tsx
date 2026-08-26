@@ -15,6 +15,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { OrderChart } from "~/web/components/order-chart";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
+import { formatDateTime } from "~/web/lib/datetime";
 import { describeExceptionKind } from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
 
@@ -84,13 +85,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   };
 };
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
 
 /** How long ago, in the words a person would use. */
 function ago(iso: string | null): string {
@@ -200,7 +194,7 @@ export default function Home() {
               .
             </s-paragraph>
             <s-link slot="primary-action" href="/app/exceptions">
-              Open the exceptions queue
+              Go to Needs attention
             </s-link>
           </s-banner>
         ) : null}
@@ -238,6 +232,25 @@ export default function Home() {
               >
                 {`Last stock sync ${ago(dashboard.lastStockSyncAt)}`}
               </s-badge>
+              {/*
+                * Order sync is the part with no other symptom when it stops: an
+                * order paid in Shopify and unpaid in the ERP looks completely
+                * normal on both screens (§2.7 asks the home page to say whether
+                * syncing is working, not only that it ran).
+                */}
+              <s-badge
+                tone={
+                  dashboard.ordersAwaitingPayment > 0
+                    ? "caution"
+                    : dashboard.lastOrderSyncAt
+                      ? "success"
+                      : "neutral"
+                }
+              >
+                {dashboard.ordersAwaitingPayment > 0
+                  ? `${dashboard.ordersAwaitingPayment} ${dashboard.ordersAwaitingPayment === 1 ? "payment" : "payments"} not yet in MetaKocka`
+                  : `Orders checked ${ago(dashboard.lastOrderSyncAt)}`}
+              </s-badge>
               <s-badge tone={supplySources.syncing > 0 ? "success" : "neutral"}>
                 {`${supplySources.syncing} ${supplySources.syncing === 1 ? "warehouse" : "warehouses"} syncing`}
               </s-badge>
@@ -253,7 +266,7 @@ export default function Home() {
         </s-section>
 
         {openExceptionsByKind.length > 0 ? (
-          <s-section heading="Open exceptions by type">
+          <s-section heading="Needs attention by type">
             <s-stack direction="block" gap="small-300">
               {openExceptionsByKind.map((entry) => (
                 <s-grid

@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { formatDateTime } from "~/web/lib/datetime";
+
 /**
  * The one activity list every page uses.
  *
@@ -21,13 +23,6 @@ export interface ActivityItem {
   text: string;
   /** False when a person has to do something about it. */
   ok: boolean;
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 export function RecentActivity({
@@ -67,10 +62,26 @@ export function RecentActivity({
         </s-stack>
       )}
 
+      {/*
+       * A bordered button, not a tertiary one. At the foot of a card with
+       * nothing under it, a borderless button is a line of text floating in
+       * space however clickable it is — the chevron alone did not fix that.
+       * The divider gives it something to sit against.
+       */}
       {items.length > 1 ? (
-        <s-button variant="tertiary" onClick={() => setShowAll((on) => !on)}>
-          {showAll ? "Show less" : `Show ${items.length - 1} more`}
-        </s-button>
+        <s-stack direction="block" gap="small-300">
+          <s-divider />
+          <s-stack direction="inline">
+            <s-button
+              type="button"
+              variant="secondary"
+              icon={showAll ? "chevron-up" : "chevron-down"}
+              onClick={() => setShowAll((on) => !on)}
+            >
+              {showAll ? "Show less" : `Show ${items.length - 1} more`}
+            </s-button>
+          </s-stack>
+        </s-stack>
       ) : null}
     </s-stack>
   );

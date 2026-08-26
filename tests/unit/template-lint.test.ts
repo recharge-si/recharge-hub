@@ -58,7 +58,26 @@ describe("errors block saving", () => {
     );
   });
 
-  it("catches a template that names nothing", () => {
+  it("catches a field that does not exist, because it lands in the name raw", () => {
+    const found = lint("{title} {titel}", [shirt]);
+    const unknown = found.find((d) => d.code === "unknown_field");
+
+    expect(unknown?.severity).toBe("error");
+    expect(unknown?.message).toContain("{titel}");
+    expect(hasBlockingError(found)).toBe(true);
+  });
+
+  it("does not block on a metafield the shop might simply not define", () => {
+    // A metafield resolves empty rather than unknown: the registry is the
+    // shop's, and we may be looking at a definition list that is out of date.
+    const found = lint("{title} {metafield.specs.area}", [shirt]);
+
+    expect(found.map((d) => d.code)).not.toContain("unknown_field");
+  });
+});
+
+describe("warnings are worth reading but do not block", () => {
+  it("says so when every field is empty and the title stands in", () => {
     const bare: VariantFacts = {
       ...shirt,
       productTitle: "Mast",
@@ -70,12 +89,55 @@ describe("errors block saving", () => {
     const found = lint("{options}", [bare]);
     const empty = found.find((d) => d.code === "empty_name");
 
-    expect(empty?.severity).toBe("error");
+    // A warning, not an error: nothing is corrupted — the name falls back to
+    // the product title — but the merchant did not ask for that name.
+    expect(empty?.severity).toBe("warning");
     expect(empty?.sampleIds).toEqual(["M-1"]);
+    expect(hasBlockingError(found)).toBe(false);
   });
-});
 
-describe("warnings are worth reading but do not block", () => {
+  it("spots a word repeating inside one name", () => {
+    const carbon: VariantFacts = {
+      ...shirt,
+      productTitle: "Carbon mast",
+      optionValues: ["CARBON"],
+      optionNames: ["Material"],
+      sku: "C-1",
+    };
+    const found = lint("{title}[ {option1}]", [carbon]);
+    const repeat = found.find((d) => d.code === "repeated_word");
+
+    expect(repeat?.severity).toBe("warning");
+    expect(repeat?.message).toContain("Carbon mast CARBON");
+    expect(repeat?.message).toContain("carbon");
+  });
+
+  it("does not read two different decimals as a repeat", () => {
+    const sail: VariantFacts = {
+      ...shirt,
+      productTitle: "Sail 5.4",
+      optionValues: ["4.5"],
+      optionNames: ["Size"],
+      sku: "S-1",
+    };
+
+    expect(codes("{title}[ {option1}]", [sail])).not.toContain("repeated_word");
+  });
+
+  it("warns past the cap and says the cap is ours, not MetaKocka's", () => {
+    const long: VariantFacts = { ...shirt, productTitle: "x".repeat(300) };
+    const found = lint("{title}", [long]);
+    const tooLong = found.find((d) => d.code === "name_too_long");
+
+    expect(tooLong?.severity).toBe("warning");
+    expect(tooLong?.message).toContain("MetaKocka publishes no length limit");
+    expect(tooLong?.message).toContain("this app's own cap");
+  });
+
+  it("stays quiet about length for a name that fits", () => {
+    expect(codes("{title}", [shirt])).not.toContain("name_too_long");
+  });
+
   it("spots a token that repeats the title", () => {
     const found = lint("{title}[ {type}]", [
       { ...shirt, productTitle: "Shirts summer tee", productType: "Shirts" },
@@ -121,6 +183,33 @@ describe("warnings are worth reading but do not block", () => {
         new Set(["specs.area"]),
       ),
     ).not.toContain("missing_metafield");
+  });
+});
+
+describe("counts are out of what was checked, never out of the catalogue", () => {
+  it("says so when every checked product is affected", () => {
+    // Both shirts have the same title, so "{title}" names them identically.
+    const found = lint("{title}", [shirt, shirtSmall]);
+
+    expect(found.find((d) => d.code === "duplicate_name")?.message).toContain(
+      "all 2 products checked",
+    );
+  });
+
+  it("says so when only some of them are", () => {
+    const mast: VariantFacts = {
+      ...shirt,
+      productTitle: "Mast",
+      sku: "M-1",
+      optionValues: ["490"],
+    };
+    const found = lint("{title}", [shirt, shirtSmall, mast]);
+
+    // A shop with twelve thousand products previewing three of them must not
+    // read this as a statement about the twelve thousand.
+    expect(found.find((d) => d.code === "duplicate_name")?.message).toContain(
+      "2 of the 3 products checked",
+    );
   });
 });
 

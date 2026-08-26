@@ -1,6 +1,13 @@
 import { z } from "zod";
 
 import { toMinorUnits } from "~/adapters/metakocka/values";
+import { partyFingerprint } from "~/domain/orders/state";
+import {
+  FINANCIAL_STATUSES,
+  type FinancialStatus,
+  type FulfillmentState,
+  type OrderSnapshot,
+} from "~/domain/orders/types";
 
 /**
  * The Shopify `orders/create` payload, narrowed to what this app actually uses.
@@ -20,6 +27,42 @@ import { toMinorUnits } from "~/adapters/metakocka/values";
  */
 
 const money = z.union([z.string(), z.number()]).transform(String);
+
+/**
+ * A Shopify `*_set` money field.
+ *
+ * Every amount on an order exists twice: once in the shop's own currency and
+ * once in the currency the customer was actually charged. The plain fields
+ * (`total_price`, `line_items[].price`) are the **shop** amounts, while
+ * `presentment_currency` is the customer's — so reading the flat field and
+ * labelling it with the presentment code prices every MetaKocka document in a
+ * currency it was never denominated in (§8.6: never silently convert).
+ *
+ * The set is preferred and the flat field is the fallback, because a
+ * single-currency store reports the same number in both and older payloads
+ * may not carry the set at all.
+ */
+const moneySet = z
+  .object({
+    shop_money: z.object({ amount: money }).nullish(),
+    presentment_money: z.object({ amount: money }).nullish(),
+  })
+  .nullish();
+
+type MoneySet = z.infer<typeof moneySet>;
+
+/** Presentment first, then shop, then the flat field the set replaced. */
+function presentmentAmount(
+  set: MoneySet,
+  flat: string | null | undefined,
+): string {
+  return (
+    set?.presentment_money?.amount ??
+    set?.shop_money?.amount ??
+    flat ??
+    "0"
+  );
+}
 
 const addressSchema = z
   .object({
@@ -50,7 +93,9 @@ const lineItemSchema = z.object({
   name: z.string().nullish(),
   quantity: z.number(),
   price: money,
+  price_set: moneySet,
   total_discount: money.nullish(),
+  total_discount_set: moneySet,
   taxable: z.boolean().nullish(),
   tax_lines: z.array(taxLineSchema).default([]),
 });
@@ -63,20 +108,25 @@ export const orderPayloadSchema = z.object({
   presentment_currency: z.string().nullish(),
   financial_status: z.string().nullish(),
   total_price: money.nullish(),
+  total_price_set: moneySet,
   current_total_price: money.nullish(),
+  current_total_price_set: moneySet,
   total_discounts: money.nullish(),
+  total_discounts_set: moneySet,
   taxes_included: z.boolean().nullish(),
   total_tax: money.nullish(),
-  total_shipping_price_set: z
-    .object({
-      shop_money: z.object({ amount: money }).nullish(),
-      presentment_money: z.object({ amount: money }).nullish(),
-    })
-    .nullish(),
+  total_tax_set: moneySet,
+  total_shipping_price_set: moneySet,
   payment_gateway_names: z.array(z.string()).default([]),
   gateway: z.string().nullish(),
   note: z.string().nullish(),
   created_at: z.string().nullish(),
+  /// The ordering key for everything in `jobs/handlers/sync-order-state`.
+  /// Shopify does not promise webhooks arrive in the order they happened, so an
+  /// update older than the one already applied has to be recognisable.
+  updated_at: z.string().nullish(),
+  fulfillment_status: z.string().nullish(),
+  cancelled_at: z.string().nullish(),
   line_items: z.array(lineItemSchema).default([]),
   customer: z
     .object({
@@ -94,32 +144,55 @@ export const orderPayloadSchema = z.object({
 
 export type OrderPayload = z.infer<typeof orderPayloadSchema>;
 
-/** Shopify's financial_status, narrowed to the values §8.7 has a rule for. */
-export type FinancialStatus =
-  | "pending"
-  | "authorized"
-  | "paid"
-  | "partially_paid"
-  | "refunded"
-  | "partially_refunded"
-  | "voided"
-  | "unknown";
+/**
+ * `financial_status`, narrowed to the values §8.7 has a rule for.
+ *
+ * The type itself lives in `domain/orders/types` because the rules that read
+ * it are pure and belong there; this is only the boundary that produces it.
+ * Anything unrecognised — Shopify's `expired`, or a status added after this was
+ * written — becomes `unknown`, which every rule treats as "not a payment this
+ * app records" rather than as a reason to guess.
+ */
+export type { FinancialStatus, FulfillmentState } from "~/domain/orders/types";
 
-const FINANCIAL_STATUSES = new Set<FinancialStatus>([
-  "pending",
-  "authorized",
-  "paid",
-  "partially_paid",
-  "refunded",
-  "partially_refunded",
-  "voided",
-]);
+const KNOWN_FINANCIAL_STATUSES = new Set<string>(
+  FINANCIAL_STATUSES.filter((status) => status !== "unknown"),
+);
 
-export function toFinancialStatus(raw: string | null | undefined) {
-  const value = (raw ?? "").toLowerCase();
-  return FINANCIAL_STATUSES.has(value as FinancialStatus)
+export function toFinancialStatus(
+  raw: string | null | undefined,
+): FinancialStatus {
+  const value = (raw ?? "").toLowerCase().trim();
+  return KNOWN_FINANCIAL_STATUSES.has(value)
     ? (value as FinancialStatus)
-    : ("unknown" as const);
+    : "unknown";
+}
+
+/**
+ * `fulfillment_status`, normalised across the two shapes Shopify reports it in.
+ *
+ * The webhook sends null for an unfulfilled order and "partial", "fulfilled" or
+ * "restocked" otherwise. The Admin API sends `displayFulfillmentStatus`, an
+ * upper-case enum with several more members (`IN_PROGRESS`, `ON_HOLD`,
+ * `SCHEDULED`, `PENDING_FULFILLMENT`, `REQUEST_DECLINED`, `OPEN`). Both reach
+ * this app — the second one through the reconciler — so both collapse into one
+ * small set here rather than leaving every reader to know both vocabularies.
+ *
+ * Nothing in v1 acts on it (tracking back to Shopify is M5). It is read so the
+ * order screen can stop implying an order is waiting when it shipped last week.
+ */
+export function toFulfillmentState(
+  raw: string | null | undefined,
+): FulfillmentState {
+  const value = (raw ?? "").toLowerCase().trim();
+
+  if (value === "" || value === "unfulfilled" || value === "null") {
+    return "unfulfilled";
+  }
+  if (value === "fulfilled") return "fulfilled";
+  if (value === "partial" || value === "partially_fulfilled") return "partial";
+  if (value === "restocked") return "restocked";
+  return "other";
 }
 
 export interface ParsedAddress {
@@ -259,6 +332,14 @@ function taxFactorOf(
 export interface ParsedOrder {
   shopifyOrderId: string;
   orderNumber: string;
+  /**
+   * Shopify's display name, `#1050`. Kept apart from `orderNumber` because the
+   * merchant's *Customer's order* template can use either, and they are not the
+   * same string (`domain/orders/reference`).
+   */
+  orderName: string | null;
+  /** The address the order was placed with, for the same template. */
+  customerEmail: string | null;
   currency: string;
   financialStatus: FinancialStatus;
   totalMinor: number;
@@ -273,8 +354,16 @@ export interface ParsedOrder {
   taxesIncluded: boolean;
   /** Tax charged on the whole order, minor units. */
   totalTaxMinor: number;
+  fulfillmentState: FulfillmentState;
   note: string | null;
   createdAt: Date | null;
+  /**
+   * Shopify's `updated_at`. The high-water mark that keeps an out-of-order
+   * webhook from undoing a newer one.
+   */
+  updatedAt: Date | null;
+  /** Set when Shopify has cancelled the order. */
+  cancelledAt: Date | null;
   /**
    * The timestamp exactly as Shopify sent it, offset included. Kept as a string
    * because parsing it to a Date throws the offset away, and MetaKocka needs it
@@ -303,30 +392,48 @@ export function parseOrder(payload: unknown): ParsedOrder {
       .join(" ")
       .trim() || `Shopify order ${orderNumber}`;
 
-  const orderTaxMinor = toMinorUnits(order.total_tax ?? "0");
+  // Every amount below is the presentment one, to match `currency` above.
+  // Mixing the two — a shop-currency total under a presentment code — is the
+  // failure this reads around: it prices the whole MetaKocka document wrongly
+  // and nothing downstream can tell, because the number is perfectly valid.
+  const orderTaxMinor = toMinorUnits(
+    presentmentAmount(order.total_tax_set, order.total_tax),
+  );
 
-  const shipping =
-    order.total_shipping_price_set?.presentment_money?.amount ??
-    order.total_shipping_price_set?.shop_money?.amount ??
-    "0";
+  const shipping = presentmentAmount(order.total_shipping_price_set, "0");
+
+  // `current_*` reflects edits and refunds, so it wins over the original
+  // whenever Shopify sends it in either shape.
+  const total =
+    order.current_total_price_set || order.current_total_price
+      ? presentmentAmount(
+          order.current_total_price_set,
+          order.current_total_price,
+        )
+      : presentmentAmount(order.total_price_set, order.total_price);
 
   return {
     shopifyOrderId: order.id,
     orderNumber,
+    orderName: order.name ?? null,
+    customerEmail: contact.email,
     currency,
     financialStatus: toFinancialStatus(order.financial_status),
-    totalMinor: toMinorUnits(
-      order.current_total_price ?? order.total_price ?? "0",
-    ),
+    totalMinor: toMinorUnits(total),
     shippingMinor: toMinorUnits(shipping),
-    discountMinor: toMinorUnits(order.total_discounts ?? "0"),
+    discountMinor: toMinorUnits(
+      presentmentAmount(order.total_discounts_set, order.total_discounts),
+    ),
     gateway: order.payment_gateway_names[0] ?? order.gateway ?? null,
     // Shopify defaults to tax-inclusive pricing, and treating an unstated flag
     // as exclusive would inflate every price by the VAT rate.
     taxesIncluded: order.taxes_included ?? true,
     totalTaxMinor: orderTaxMinor,
+    fulfillmentState: toFulfillmentState(order.fulfillment_status),
     note: order.note ?? null,
     createdAt: order.created_at ? new Date(order.created_at) : null,
+    updatedAt: order.updated_at ? new Date(order.updated_at) : null,
+    cancelledAt: order.cancelled_at ? new Date(order.cancelled_at) : null,
     createdAtRaw: order.created_at ?? null,
     lines: order.line_items.map((line) => ({
       shopifyLineItemId: line.id,
@@ -336,12 +443,111 @@ export function parseOrder(payload: unknown): ParsedOrder {
       sku: line.sku?.trim() ?? "",
       title: line.title ?? line.name ?? "",
       quantity: line.quantity,
-      unitPriceWithTaxMinor: toMinorUnits(line.price),
-      discountMinor: toMinorUnits(line.total_discount ?? "0"),
+      unitPriceWithTaxMinor: toMinorUnits(
+        presentmentAmount(line.price_set, line.price),
+      ),
+      discountMinor: toMinorUnits(
+        presentmentAmount(line.total_discount_set, line.total_discount),
+      ),
       taxable: line.taxable ?? true,
       taxFactor: taxFactorOf(line, orderTaxMinor),
     })),
     partner: toParty(order.billing_address, contact, fallbackName),
     receiver: toParty(order.shipping_address, contact, fallbackName),
   };
+}
+
+/**
+ * The part of a parsed order that this app would send differently if it moved
+ * (`domain/orders/state`).
+ *
+ * Kept beside the parser rather than in the domain so there is exactly one
+ * place that knows how a Shopify payload becomes a snapshot, and one place —
+ * the pure `diffOrder` — that knows what a difference between two of them
+ * means.
+ */
+export function toSnapshot(parsed: ParsedOrder): OrderSnapshot {
+  return {
+    financialStatus: parsed.financialStatus,
+    fulfillmentState: parsed.fulfillmentState,
+    currency: parsed.currency,
+    totalMinor: parsed.totalMinor,
+    shippingMinor: parsed.shippingMinor,
+    discountMinor: parsed.discountMinor,
+    cancelled: parsed.cancelledAt !== null,
+    // Billing first, then shipping — the same order the document writer uses,
+    // so the diff watches whichever party the order would actually be filed
+    // against rather than a field that may never be sent.
+    party: partyFingerprint(parsed.partner ?? parsed.receiver),
+    lines: parsed.lines.map((line) => ({
+      shopifyLineItemId: line.shopifyLineItemId,
+      sku: line.sku,
+      title: line.title,
+      quantity: line.quantity,
+      unitPriceWithTaxMinor: line.unitPriceWithTaxMinor,
+      discountMinor: line.discountMinor,
+    })),
+  };
+}
+
+/**
+ * `parseOrder`, but a payload it cannot read is null rather than a throw.
+ *
+ * For every caller that re-parses a *stored* payload rather than an incoming
+ * one, because a stored payload is not guaranteed to still be an order. The
+ * §2.4 retention job overwrites personal data in place after ninety days, and
+ * it replaces whole objects with the string "[redacted]" — `customer`,
+ * `billing_address` and `shipping_address` among them. Handing that to a schema
+ * expecting an object throws.
+ *
+ * That failure would land in the worst possible places: the document writer,
+ * the order sync and the exception re-check all re-read the stored payload, and
+ * all three would have gone from "this order is too old to send" to "this job
+ * crashes, retries, and crashes again". Null says the same thing without
+ * taking anything down, and every caller already has a path for a payload that
+ * is not there.
+ */
+export function parseOrderSafe(payload: unknown): ParsedOrder | null {
+  if (!payload) return null;
+  const parsed = orderPayloadSchema.safeParse(payload);
+  if (!parsed.success) return null;
+  return parseOrder(payload);
+}
+
+/**
+ * Fields dropped from an order payload before it is stored.
+ *
+ * §2.4 is data minimisation: only what is needed to build a MetaKocka partner
+ * and receiver, and nothing stored that is not sent. `order.raw_payload` is
+ * deliberately Shopify's whole record — the document writer, the partner
+ * resolver and the tax re-derivation all read it, and a payload trimmed to
+ * today's diff goes stale permanently — but these are not part of that record.
+ *
+ * `client_details` is the shopper's browser: user agent, accept-language,
+ * session hash and their IP address again. `browser_ip` is the IP on its own.
+ * Nothing in this app has ever read either, none of it reaches MetaKocka, and
+ * both are personal data in their own right under the Level 2 approval. So
+ * they are dropped at the boundary rather than kept for ninety days and then
+ * redacted.
+ */
+const NOT_STORED = ["client_details", "browser_ip"] as const;
+
+/**
+ * An order payload with the fields this app has no business keeping removed.
+ *
+ * Applied where the payload is written, not where it is read, so an order
+ * stored before this existed is left exactly as it was — the retention job
+ * already covers those two keys, and rewriting history to look tidier would
+ * lose the record of what was actually received.
+ */
+export function minimiseOrderPayload(payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object") return payload;
+  if (Array.isArray(payload)) return payload;
+
+  const record = payload as Record<string, unknown>;
+  if (!NOT_STORED.some((key) => key in record)) return payload;
+
+  const out: Record<string, unknown> = { ...record };
+  for (const key of NOT_STORED) delete out[key];
+  return out;
 }

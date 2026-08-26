@@ -13,6 +13,26 @@
  * shows when it echoes a price back.
  */
 
+/**
+ * Half-up, away from zero — not `Math.round`.
+ *
+ * `Math.round` breaks ties toward +∞, so `Math.round(-0.5)` is `-0` while
+ * `Math.round(0.5)` is `1`. Every amount here also arrives negative sometimes:
+ * a refund is the same sale with the sign flipped, and phase 2 maps it onto
+ * credit notes. With `Math.round` the net of a refunded gross would not be the
+ * negation of the net of that gross — the two would differ by a cent on exact
+ * halves, which is a manual reconciliation for a human being (§8.6).
+ *
+ * Away from zero keeps |f(-x)| === |f(x)| for every x, so the credit note is
+ * always the exact mirror of the sale.
+ */
+function roundHalfAwayFromZero(value: number): number {
+  const rounded = value < 0 ? -Math.round(-value) : Math.round(value);
+  // `-Math.round(0.4)` is `-0`, which compares equal to 0 but is not the same
+  // value to anything using Object.is — a test, or a Map key.
+  return rounded === 0 ? 0 : rounded;
+}
+
 /** "0.22" -> 0.22. Null, empty or nonsense means "no tax to apply". */
 export function taxFactorToNumber(factor: string | null | undefined): number {
   if (!factor) return 0;
@@ -23,13 +43,13 @@ export function taxFactorToNumber(factor: string | null | undefined): number {
 /** Gross to net: 209.00 at 22% is 171.31. */
 export function grossToNetMinor(grossMinor: number, taxFactor: number): number {
   if (taxFactor <= 0) return grossMinor;
-  return Math.round(grossMinor / (1 + taxFactor));
+  return roundHalfAwayFromZero(grossMinor / (1 + taxFactor));
 }
 
 /** Net to gross: 171.31 at 22% is 209.00. */
 export function netToGrossMinor(netMinor: number, taxFactor: number): number {
   if (taxFactor <= 0) return netMinor;
-  return Math.round(netMinor * (1 + taxFactor));
+  return roundHalfAwayFromZero(netMinor * (1 + taxFactor));
 }
 
 export interface PriceBasisInput {

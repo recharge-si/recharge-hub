@@ -1,20 +1,30 @@
-node_modules
+node_modules/
 
-/build
-/.cache
-/public/build
+# Build and tool output
+/build/
+/.cache/
+/coverage/
+/public/build/
+/.react-router/
+*.tsbuildinfo
+.eslintcache
 
+# Local environment and logs
 .env
 .env.*
 !.env.example
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
 
 # Shopify CLI
-.shopify/*
+/.shopify/
 .shopify.lock
+/extensions/*/dist/
 
-# React Router generated types
-/.react-router/
-
-/extensions/*/dist
-
+# Operating-system metadata
 .DS_Store
+Thumbs.db
+Desktop.ini

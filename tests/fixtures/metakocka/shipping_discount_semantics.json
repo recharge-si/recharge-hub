@@ -1,0 +1,45 @@
+{
+  "_comment": [
+    "Live probe against designated test company 6789 on 2026-08-26, resolving",
+    "project-status T-05/T-06/T-20: how Shopify shipping and discounts can be",
+    "represented on a MetaKocka sales order.",
+    "",
+    "Two probe documents were created and both deleted (opr_code 0). Amounts are",
+    "gross (price_with_tax) with tax_factor 0.22 throughout; sum_all is gross."
+  ],
+  "shipping": {
+    "mechanism": "an extra product line at a positive price",
+    "observed": { "goods_100": 100, "goods_100_plus_line_5": 105 },
+    "conclusion": "An extra line adds to sum_all exactly. Shipping is representable as a line against a merchant-supplied product code."
+  },
+  "discountMechanisms": [
+    {
+      "mechanism": "per-line discount field",
+      "accepted": true,
+      "semantics": "PERCENTAGE",
+      "evidence": "a line of 200.00 with discount \"10\" produced sum_all 180 (a 10 per cent cut). An absolute 10.00 would have produced 190.",
+      "rejects": "\"10%\" is refused: opr_code 2, 'Paramether discount must be valid number or numbers separate by semicolon (for example : 10;20)'. The semicolon form is a chain of percentages.",
+      "verdict": "Not used. Shopify supplies absolute per-line discount amounts, and converting an amount into a percentage invents rounding this app has no authority to invent."
+    },
+    {
+      "mechanism": "document-level discount_value",
+      "accepted": true,
+      "semantics": "ABSOLUTE AMOUNT in the document currency",
+      "evidence": "goods 200.00 with discount_value \"10\" produced sum_all 190, not 180. With goods 200.00 plus a 5.00 line, discount_value \"10\" produced 195, not 184.5 - so it is subtracted from the document total rather than applied per line.",
+      "rejects": "\"10%\" is refused: opr_code 6, 'Not valid number for discount_value'.",
+      "verdict": "CHOSEN. Absolute is exactly what Shopify supplies, so nothing is converted and no rounding is invented."
+    },
+    {
+      "mechanism": "negative-price line",
+      "accepted": true,
+      "semantics": "subtracts exactly, cents included",
+      "evidence": "goods 200.00 + line 5.00 + line -10.00 produced 195; with -10.37 it produced 194.63.",
+      "verdict": "Works, and deliberately not used: it would put a negative-priced stock article on the document and move inventory for goods that do not exist. discount_value is native and has no such side effect."
+    }
+  ],
+  "fullShape": {
+    "sent": "goods 100.00 (line discount 10) + line 5.00",
+    "sum_all": 95,
+    "note": "The brief's worked example. Also reproducible as goods 100.00 + shipping line 5.00 + discount_value 10.00, which is the combination this app implements."
+  }
+}

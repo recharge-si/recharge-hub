@@ -49,7 +49,25 @@ const COPY: Record<string, ExceptionCopy> = {
     label: "Partially paid",
     short: "partially paid",
     guidance:
-      "The order was created but not marked paid, because a part payment cannot be guessed. Record the payment in MetaKocka.",
+      "Each payment Shopify has recorded is sent to MetaKocka as it arrives. This is here so you can see the order is not settled yet.",
+  },
+  sync_inconsistent: {
+    label: "MetaKocka does not add up",
+    short: "where MetaKocka does not add up",
+    guidance:
+      "What the sales orders hold is not what Shopify says the order contains. Nothing extra was created — another document would make the difference bigger. The order page states the difference for each SKU.",
+  },
+  payment_unallocated: {
+    label: "Payment could not be recorded",
+    short: "with a payment that could not be recorded",
+    guidance:
+      "Money arrived that has no MetaKocka document to go on. Nothing was written anywhere else. Check the order, then reconcile it again.",
+  },
+  unmapped_location: {
+    label: "Location not mapped",
+    short: "fulfilled from an unmapped location",
+    guidance:
+      "Shopify is fulfilling part of the order from a location with no MetaKocka warehouse, so those lines were not sent. Map it on the Supply sources page, then reconcile the order again.",
   },
   voided_payment: {
     label: "Payment voided",
@@ -75,6 +93,36 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "The allocation and any document still describe the order as it was. Check both sides and update MetaKocka.",
   },
+  order_diverged: {
+    label: "Changed after it was sent",
+    short: "changed after being sent to MetaKocka",
+    guidance:
+      "Shopify's version of the order no longer matches the document in MetaKocka. Correct it there, then use \"Mark as sorted in MetaKocka\" on the order so it stops being reported.",
+  },
+  stock_sync_failed: {
+    label: "Stock not syncing",
+    short: "whose stock is not syncing",
+    guidance:
+      "Quantities are not moving between Shopify and MetaKocka for that location, so what the store is selling may be out of date. The message says what MetaKocka answered.",
+  },
+  metakocka_document_missing: {
+    label: "Document deleted in MetaKocka",
+    short: "whose MetaKocka document has been deleted",
+    guidance:
+      "The order is no longer in the ERP. Send it again if that was not deliberate, or resolve this if it was.",
+  },
+  metakocka_document_changed: {
+    label: "Document edited in MetaKocka",
+    short: "whose MetaKocka document has been edited",
+    guidance:
+      "The document no longer says what this app sent. Nothing is changed automatically — it may already be invoiced. Check it in MetaKocka.",
+  },
+  payment_write_failed: {
+    label: "Payment not recorded",
+    short: "whose payment could not be recorded",
+    guidance:
+      "The sales order itself is unchanged. Record the payment in MetaKocka by hand, or fix what the message names and retry.",
+  },
   metakocka_write_failed: {
     label: "MetaKocka rejected the order",
     short: "MetaKocka would not accept",
@@ -93,6 +141,12 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "The order has no tax lines to derive a rate from. Set the rate in MetaKocka, or check the tax settings for that market.",
   },
+  job_failed: {
+    label: "Background work stopped",
+    short: "whose background work stopped",
+    guidance:
+      "A job ran out of retries and will not run again on its own. The recorded failure is on the exception. Fix what it names, then retry.",
+  },
 };
 
 const FALLBACK: ExceptionCopy = {
@@ -103,4 +157,40 @@ const FALLBACK: ExceptionCopy = {
 
 export function describeExceptionKind(kind: string): ExceptionCopy {
   return COPY[kind] ?? FALLBACK;
+}
+
+/** How many open exceptions one category loads at once, and grows by on "Load more". */
+export const EXCEPTIONS_PAGE_SIZE = 5;
+
+/**
+ * The `limit` query parameter for one category's own page, e.g.
+ * `limit_stock_sync_failed`.
+ *
+ * Paging is per category, not global: an early implementation loaded a single
+ * page across every kind ordered by recency, which meant a category with no
+ * exceptions in the last few minutes simply never appeared — its "Load more"
+ * was a button for a category the merchant could not see existed. Each
+ * category needs its own limit, carried in its own query parameter, so
+ * loading more of one never resets or hides another.
+ */
+export function limitParamFor(kind: string): string {
+  return `limit_${kind}`;
+}
+
+const MAX_EXCEPTIONS_LIMIT = 500;
+
+/**
+ * The `limit` query parameter, bounded.
+ *
+ * Anything absent, non-numeric, non-positive, or absurd (someone hand-editing
+ * the URL) falls back to the first page rather than either erroring or, worse,
+ * loading every open exception at once — which is the load this pagination
+ * exists to avoid putting on the page and the database both.
+ */
+export function parseExceptionsLimit(raw: string | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    return EXCEPTIONS_PAGE_SIZE;
+  }
+  return Math.min(n, MAX_EXCEPTIONS_LIMIT);
 }

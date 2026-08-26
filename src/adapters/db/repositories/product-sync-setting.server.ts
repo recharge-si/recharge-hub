@@ -1,7 +1,7 @@
 import type { ProductNamePolicy, ProductSyncSetting } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
-import { DEFAULT_NAME_TEMPLATE } from "~/domain/products/name-template";
+import { DEFAULT_NAME_PATTERN } from "~/domain/products/template";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -25,12 +25,28 @@ export interface ProductSyncSettings {
   pricelistIncludesTax: boolean;
   taxPercent: string | null;
   unit: string;
+  /** Prodajni / Nabavni / Storitev for the articles this app writes. */
+  productSales: boolean;
+  productPurchasing: boolean;
+  productService: boolean;
+  /** Also set them on articles MetaKocka already has. */
+  updateProductType: boolean;
+  /**
+   * Whether the catalogue is re-read on a schedule, and how often in minutes.
+   *
+   * The manual button is a promise the merchant has to remember to keep, and
+   * catalogues drift every day: a product renamed in MetaKocka, a SKU corrected
+   * in Shopify, a variant added this morning. The first anyone hears of a
+   * registry that has quietly stopped matching is an order that cannot be sent.
+   */
+  scheduleEnabled: boolean;
+  scheduleIntervalMinutes: number;
   lastRunAt: Date | null;
 }
 
 export const PRODUCT_SYNC_DEFAULTS: ProductSyncSettings = {
   enabled: false,
-  nameTemplate: DEFAULT_NAME_TEMPLATE,
+  nameTemplate: DEFAULT_NAME_PATTERN,
   namePolicy: "always",
   createMissing: false,
   sendPricing: false,
@@ -39,6 +55,12 @@ export const PRODUCT_SYNC_DEFAULTS: ProductSyncSettings = {
   pricelistIncludesTax: true,
   taxPercent: null,
   unit: "kos",
+  productSales: true,
+  productPurchasing: false,
+  productService: false,
+  updateProductType: false,
+  scheduleEnabled: false,
+  scheduleIntervalMinutes: 720,
   lastRunAt: null,
 };
 
@@ -72,6 +94,12 @@ export async function getProductSyncSetting(
     pricelistIncludesTax: row.pricelistIncludesTax,
     taxPercent: row.taxPercent,
     unit: row.unit,
+    productSales: row.productSales,
+    productPurchasing: row.productPurchasing,
+    productService: row.productService,
+    updateProductType: row.updateProductType,
+    scheduleEnabled: row.scheduleEnabled,
+    scheduleIntervalMinutes: row.scheduleIntervalMinutes,
     lastRunAt: row.lastRunAt,
   };
 }

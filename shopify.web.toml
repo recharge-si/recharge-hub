@@ -5,7 +5,7 @@
 # "Find this app in the pages where you work" placeholder instead of the app.
 #
 # The worker starts alongside the web server. They stay two processes
-# (CLAUDE.md section 4) and Docker runs them as two containers, but in
+# (docs/BUILD_SPEC.md section 4) and Docker runs them as two containers, but in
 # development both have to be up or every sync button silently queues a job
 # that nothing ever picks up. scripts/dev.mjs runs the pair.
 #

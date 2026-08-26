@@ -9,10 +9,18 @@ import { createBoss, ensureQueues } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { makeAppUninstalledHandler } from "~/jobs/handlers/app-uninstalled";
 import { handleCustomersDataRequest } from "~/jobs/handlers/customers-data-request";
+import { handleDeadJob } from "~/jobs/handlers/dead-job";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
 import { handleAllocateOrder } from "~/jobs/handlers/allocate-order";
+import { handleMarkMetakockaPaid } from "~/jobs/handlers/mark-metakocka-paid";
 import { handleOrdersEvent } from "~/jobs/handlers/orders-event";
+import { handlePollMetakockaDocuments } from "~/jobs/handlers/poll-metakocka-documents";
+import { handleRecheckExceptions } from "~/jobs/handlers/recheck-exceptions";
+import { handleReconcileOrder } from "~/jobs/handlers/reconcile-order";
+import { handleReconcileOrders } from "~/jobs/handlers/reconcile-orders";
+import { handleSyncOrderState } from "~/jobs/handlers/sync-order-state";
 import { handleReloadPaymentTypes } from "~/jobs/handlers/reload-payment-types";
+import { handleReloadPricelists } from "~/jobs/handlers/reload-pricelists";
 import { handleReloadProfitCenters } from "~/jobs/handlers/reload-profit-centers";
 import { handleReloadWarehouses } from "~/jobs/handlers/reload-warehouses";
 import { handleRedactOldOrders } from "~/jobs/handlers/redact-old-orders";
@@ -42,6 +50,17 @@ async function main(): Promise<void> {
 
   await boss.start();
   await ensureQueues(boss);
+
+  // §11: a job that has run out of retries is no longer being dealt with by
+  // the queue, so it stops being invisible. Metadata is needed for the queue
+  // the job died in (`sourceName`) and the failure it recorded (`output`).
+  await boss.work(
+    QUEUES.deadJobs,
+    { includeMetadata: true },
+    async (jobs) => {
+      for (const job of jobs) await handleDeadJob(job);
+    },
+  );
 
   // Every handler runs at most once per Shopify webhook id, however many times
   // the event is delivered (CLAUDE.md section 6, idempotency_key).
@@ -74,8 +93,19 @@ async function main(): Promise<void> {
   await boss.work(QUEUES.syncProducts, async (jobs) => {
     for (const job of jobs) await handleSyncProducts(job);
   });
-  // Order flow. Allocation is pure and cheap; the MetaKocka write is the one
-  // that must never run twice, which the count_code claim guarantees (§8.4).
+  /*
+   * Order flow.
+   *
+   * `reconcile-order` is the authority: it holds the per-order lock, reads
+   * Shopify, decides what MetaKocka should hold and changes only the
+   * difference. `allocate-order` and `mark-metakocka-paid` are doorways into
+   * it, kept so jobs already queued at deployment still run.
+   * `write-metakocka-order` is the executor for one document, and the one that
+   * must never run twice — which the count_code claim guarantees (§8.4).
+   */
+  await boss.work(QUEUES.reconcileOrder, async (jobs) => {
+    for (const job of jobs) await handleReconcileOrder(job);
+  });
   await boss.work(QUEUES.allocateOrder, async (jobs) => {
     for (const job of jobs) await handleAllocateOrder(job);
   });
@@ -86,6 +116,37 @@ async function main(): Promise<void> {
     QUEUES.ordersEvent,
     withIdempotency(QUEUES.ordersEvent, handleOrdersEvent),
   );
+  /*
+   * Payment status, edits, cancellations: everything that happens to an order
+   * after it arrives (§8.7, §8.8).
+   *
+   * Deliberately outside the idempotency guard. The guard keys on Shopify's
+   * webhook id, and this queue is also fed by the reconciler and by the order
+   * page, neither of which has one. It does not need the guard either: the
+   * handler compares the order against what is stored and does nothing when
+   * nothing moved, so a redelivery costs one comparison.
+   */
+  await boss.work(QUEUES.syncOrderState, async (jobs) => {
+    for (const job of jobs) await handleSyncOrderState(job);
+  });
+  // Not wrapped in the idempotency guard: this is also queued by the
+  // reconciler and by the order page, neither of which carries a webhook id.
+  // Sending a payment twice is prevented where it matters instead — by the
+  // per-document claim (§8.7).
+  await boss.work(QUEUES.markMetakockaPaid, async (jobs) => {
+    for (const job of jobs) await handleMarkMetakockaPaid(job);
+  });
+  await boss.work(QUEUES.reconcileOrders, async (jobs) => {
+    for (const job of jobs) await handleReconcileOrders(job);
+  });
+  // An exception is a condition, not an event (§11): it stops being true the
+  // moment somebody fixes what it describes, and nothing announces that.
+  await boss.work(QUEUES.recheckExceptions, async (jobs) => {
+    for (const job of jobs) await handleRecheckExceptions(job);
+  });
+  await boss.work(QUEUES.pollMetakockaDocuments, async (jobs) => {
+    for (const job of jobs) await handlePollMetakockaDocuments(job);
+  });
 
   await boss.work(QUEUES.reloadWarehouses, async (jobs) => {
     for (const job of jobs) await handleReloadWarehouses(job);
@@ -93,6 +154,10 @@ async function main(): Promise<void> {
   await boss.work(QUEUES.reloadPaymentTypes, async (jobs) => {
     for (const job of jobs) await handleReloadPaymentTypes(job);
   });
+  await boss.work(QUEUES.reloadPricelists, async (jobs) => {
+    for (const job of jobs) await handleReloadPricelists(job);
+  });
+
   await boss.work(QUEUES.reloadProfitCenters, async (jobs) => {
     for (const job of jobs) await handleReloadProfitCenters(job);
   });
@@ -103,16 +168,59 @@ async function main(): Promise<void> {
     for (const job of jobs) await handleRedactOldOrders(job);
   });
 
-  // One cron entry, fanned out per shop by the tick handler. Everything it
-  // sends is throttled, so a slow run is never lapped by the next tick.
-  await boss.schedule(QUEUES.scheduledTick, "*/15 * * * *", {
-    cadence: "quarter_hourly",
-  });
+  // One cron entry per cadence, fanned out per shop by the tick handler.
+  // Everything it sends is throttled, so a slow run is never lapped.
+  //
+  // **Each schedule carries its own `key`, and the app is dead without them.**
+  // pg-boss upserts schedules on `ON CONFLICT (name, key)` with `key`
+  // defaulting to the empty string, so three keyless schedules on one queue
+  // are one row written three times: only the last call survived, and the
+  // last call was the nightly one. Every five-minute stock sync, the
+  // fifteen-minute reconciler and the exception re-check silently never ran.
+  //
+  // Stock gets its own five-minute cycle: MetaKocka's webhook gives up after
+  // two retries (§3), and stock is the one figure where being behind means
+  // selling something that is not there.
+  // Removes the keyless row the buggy version left behind on an existing
+  // database — without this the nightly tick would fire twice, once from the
+  // old row and once from the keyed one. A no-op on a fresh database.
+  await boss.unschedule(QUEUES.scheduledTick);
+
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "*/5 * * * *",
+    { cadence: "fast" },
+    { key: "fast" },
+  );
+
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "*/15 * * * *",
+    { cadence: "quarter_hourly" },
+    { key: "quarter_hourly" },
+  );
+
+  /*
+   * Hourly: reading this app's own MetaKocka documents back (§8.11).
+   *
+   * At seven minutes past rather than on the hour, so it does not land on the
+   * same tick as the quarter-hourly fan-out and ask a slow ERP for everything
+   * at once.
+   */
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "7 * * * *",
+    { cadence: "hourly" },
+    { key: "hourly" },
+  );
 
   // Nightly work: the section 2.4 retention promise, kept at a quiet hour.
-  await boss.schedule(QUEUES.scheduledTick, "20 3 * * *", {
-    cadence: "nightly",
-  });
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "20 3 * * *",
+    { cadence: "nightly" },
+    { key: "nightly" },
+  );
 
   log.info({ queues: Object.values(QUEUES) }, "Worker started");
 

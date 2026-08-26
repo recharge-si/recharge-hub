@@ -2,6 +2,14 @@
 
 client_id = "77a669bae44e293ff5b59dc85783bc71"
 name = "mk-sync"
+# TODO(deployment): replace with the real HTTPS origin of the deployed web
+# process, e.g. https://orders.example.com. Until then Shopify delivers every
+# webhook to this placeholder and the app hears nothing: the quarter-hourly
+# Admin API reconciler is the only path an order takes. Nothing else needs to
+# change when it is set - the routes, the queue and the handlers are already
+# wired and covered by tests/db/webhook-dispatch.test.ts. Run
+# `shopify app deploy` after changing it so the webhook subscriptions are
+# re-registered against the new origin.
 application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
 
@@ -9,7 +17,11 @@ embedded = true
 automatically_update_urls_on_dev = true
 
 [webhooks]
-api_version = "2026-10"
+# Must equal API_VERSION in src/adapters/shopify/shopify.server.ts, which is
+# what the Admin client speaks. `tests/unit/api-version.test.ts` fails if the
+# two drift. This read "2026-10" — a version the installed SDK does not have —
+# so webhooks were registered against one Admin API and read with another.
+api_version = "2026-07"
 
   [[webhooks.subscriptions]]
   uri = "/webhooks/customers/data_request"
@@ -37,6 +49,19 @@ api_version = "2026-10"
   [[webhooks.subscriptions]]
   topics = [ "orders/create" ]
   uri = "/webhooks/orders/create"
+
+  # An order is not a fact that arrives once (section 8.7). It is paid an hour
+  # later, edited the next morning, refunded on Friday, and without these the
+  # app hears none of it: an order that came in unpaid stays unpaid in the ERP
+  # for good. orders/updated is the broad signal; orders/paid is deliberately
+  # redundant with it, because that is the one event that moves money.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/updated" ]
+  uri = "/webhooks/orders/updated"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
 
   # Not implemented in v1 (section 8.8), but received from day one and turned
   # into exceptions so nothing is lost silently.

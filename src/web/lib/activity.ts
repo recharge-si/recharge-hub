@@ -56,7 +56,8 @@ export function describeSyncBriefly(event: {
     case "inventory.synced": {
       const changed = count(d.written) + count(d.stocked);
       return {
-        text: changed === 0 ? "Already up to date" : `${products(changed)} updated`,
+        text:
+          changed === 0 ? "Already up to date" : `${products(changed)} updated`,
         ok: true,
       };
     }
@@ -140,20 +141,65 @@ export function describeEvent(
     case "products.synced": {
       const renamed = count(d.renamed);
       const created = count(d.created);
+      const repriced = count(d.repriced);
+      const retyped = count(d.retyped);
       const failed = count(d.failed);
       const parts: string[] = [];
       if (renamed > 0) parts.push(`renamed ${products(renamed)}`);
       if (created > 0) parts.push(`created ${products(created)} in MetaKocka`);
+      if (repriced > 0) parts.push(`repriced ${products(repriced)}`);
+      // Named for the MetaKocka boxes it ticks, because "retyped" reads as a
+      // typing correction rather than as Prodajni and Nabavni changing.
+      if (retyped > 0)
+        parts.push(`changed the product type of ${products(retyped)}`);
       if (parts.length === 0) parts.push("nothing needed changing");
+
+      const summary = `Sent product names to MetaKocka: ${parts.join(", ")}.`;
+
+      /*
+       * A count is not a reason.
+       *
+       * "39 products were rejected by MetaKocka and were left alone" was true
+       * and useless: the merchant had deleted a pricelist in MetaKocka, and
+       * nothing on the screen connected the two. MetaKocka's `opr_desc` is the
+       * only account of the cause that exists (CLAUDE.md §3) and §2.8 wants a
+       * message that says what is wrong, so it is quoted rather than counted.
+       */
+      const stopped =
+        typeof d.pricingStopped === "string" && d.pricingStopped.trim() !== ""
+          ? d.pricingStopped.trim()
+          : null;
+
+      if (stopped) {
+        const named =
+          typeof d.pricelistCode === "string" && d.pricelistCode.trim() !== ""
+            ? `pricelist ${d.pricelistCode.trim()}`
+            : "the pricelist";
+
+        return {
+          title: "Product sync",
+          text:
+            `${summary} MetaKocka refused ${named}, so prices were not sent and names went out on their own. ` +
+            `MetaKocka said: “${stopped}”. Check the pricelist in the product sync settings.`,
+          ok: false,
+        };
+      }
+
+      if (failed === 0)
+        return { title: "Product sync", text: summary, ok: true };
+
+      const reasons = Array.isArray(d.reasons)
+        ? (d.reasons as { reason?: unknown; count?: unknown }[])
+        : [];
+      const leading =
+        typeof reasons[0]?.reason === "string" ? reasons[0].reason.trim() : "";
 
       return {
         title: "Product sync",
         text:
-          `Sent product names to MetaKocka: ${parts.join(", ")}.` +
-          (failed > 0
-            ? ` ${products(failed)} were rejected by MetaKocka and were left alone.`
-            : ""),
-        ok: failed === 0,
+          `${summary} MetaKocka rejected ${products(failed)}, which were left alone.` +
+          (leading ? ` It said: “${leading}”.` : ""),
+        ok: false,
       };
     }
 

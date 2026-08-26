@@ -115,6 +115,56 @@ export async function getCredential(
   };
 }
 
+/**
+ * Why a screen cannot have the credential, when it cannot.
+ *
+ * `getCredential` throws for a staff account, which is the correct answer to a
+ * background caller and the wrong one to a route: an unhandled throw in a
+ * loader or an action is a 500, so a staff member pressing "Load payment
+ * types" got a broken page instead of being told that the ERP key belongs to
+ * the store owner (§9). The two cases are kept apart because they need
+ * different copy — "connect MetaKocka" is advice a staff member cannot act on.
+ */
+export type CredentialAccess =
+  | { ok: true; credential: DecryptedCredential }
+  | { ok: false; reason: "not_permitted" | "not_connected"; message: string };
+
+export async function requireCredential(
+  principal: Principal,
+): Promise<CredentialAccess> {
+  let credential: DecryptedCredential | null;
+  try {
+    credential = await getCredential(principal);
+  } catch (error) {
+    if (error instanceof NotPermittedError) {
+      return { ok: false, reason: "not_permitted", message: error.message };
+    }
+    throw error;
+  }
+
+  if (!credential) {
+    return {
+      ok: false,
+      reason: "not_connected",
+      message: "Connect MetaKocka first.",
+    };
+  }
+
+  return { ok: true, credential };
+}
+
+/**
+ * Whether this shop has a working MetaKocka connection.
+ *
+ * For every screen that only needs to know *whether* it is connected — to
+ * decide whether to queue a background refresh, or which empty state to show.
+ * Reading the whole credential for that is both more than the screen needs and
+ * more than a staff account is allowed to ask for.
+ */
+export async function isConnected(principal: Principal): Promise<boolean> {
+  return (await getCredentialSummary(principal)).connected;
+}
+
 export interface SaveCredentialInput {
   companyId: string;
   /** Omit to keep the stored key: the form shows a mask, not the real value. */

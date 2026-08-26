@@ -13,7 +13,10 @@ import {
   appendEvent,
   recentEvents,
 } from "~/adapters/db/repositories/event-log.server";
-import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import {
+  isConnected,
+  requireCredential,
+} from "~/adapters/db/repositories/metakocka-credential.server";
 import {
   listProfitCenters,
   removeProfitCenter,
@@ -46,6 +49,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent, describeSyncBriefly } from "~/web/lib/activity";
+import { formatDateTime } from "~/web/lib/datetime";
 import {
   METAKOCKA_REGISTERS_URL,
   METAKOCKA_WAREHOUSES_URL,
@@ -138,7 +142,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     warehouses,
     sources,
     locations,
-    credential,
+    connected,
     events,
     defaults,
     profitCenters,
@@ -146,7 +150,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     listCachedWarehouses(principal),
     listSupplySources(principal),
     listLocations(admin),
-    getCredential(principal),
+    isConnected(principal),
     recentEvents(principal, 120),
     getSupplyDefaults(principal),
     listProfitCenters(principal),
@@ -200,13 +204,24 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       : null;
     const lastSync = source ? (lastBySourceId.get(source.id) ?? null) : null;
 
+    /*
+     * The location's own record of its last run, not the activity log.
+     *
+     * The log only ever had entries the job managed to write, and a run that
+     * threw wrote none — so the location that had failed every attempt for nine
+     * hours looked exactly like one that had never had a problem. The outcome
+     * is now recorded on the location whether the run worked or not, which is
+     * the only version of this that can report a failure.
+     */
     const status: LocationStatus = !warehouse
       ? "not_connected"
-      : lastSync && !lastSync.ok
+      : source?.lastSyncOk === false
         ? "error"
-        : source && source.stockDirection !== "none" && source.enabled
-          ? "syncing"
-          : "paused";
+        : lastSync && !lastSync.ok
+          ? "error"
+          : source && source.stockDirection !== "none" && source.enabled
+            ? "syncing"
+            : "paused";
 
     return {
       id: location.id,
@@ -222,6 +237,11 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       profitCenterInherited: source?.profitCenterInherited ?? true,
       status,
       lastSync,
+      // What went wrong and how long it has been going wrong, so the row says
+      // something a merchant can act on rather than just turning red.
+      syncMessage: source?.lastSyncOk === false ? source.lastSyncMessage : null,
+      syncFailures: source?.syncFailures ?? 0,
+      syncCheckedAt: source?.lastSyncAt?.toISOString() ?? null,
     };
   });
 
@@ -239,7 +259,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    */
   const unchecked = profitCenters.some((entry) => entry.validatedAt === null);
   let checking = false;
-  if (credential && unchecked) {
+  if (connected && unchecked) {
     await enqueueThrottled(
       QUEUES.reloadProfitCenters,
       { shopDomain: principal.shopDomain },
@@ -250,7 +270,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return {
-    connected: credential !== null,
+    connected,
     defaults: {
       direction: String(defaults.defaultStockDirection),
       profitCenter: defaults.defaultProfitCenter ?? "",
@@ -326,13 +346,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* ---------------------------------------------------------------------- */
 
   if (intent === "refresh-warehouses") {
-    const credential = await getCredential(principal);
-    if (!credential) {
+    const access = await requireCredential(principal);
+    if (!access.ok) {
       return fail(
         "page",
-        "Connect MetaKocka first. The warehouse list comes from there.",
+        access.reason === "not_permitted"
+          ? access.message
+          : "Connect MetaKocka first. The warehouse list comes from there.",
       );
     }
+    const credential = access.credential;
 
     try {
       const client = new MetakockaClient(
@@ -389,9 +412,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* ---------------------------------------------------------------------- */
 
   if (intent === "refresh-profit-centers") {
-    const credential = await getCredential(principal);
-    if (!credential) {
-      return fail("register", "Connect MetaKocka first, then check again.");
+    const access = await requireCredential(principal);
+    if (!access.ok) {
+      return fail(
+        "register",
+        access.reason === "not_permitted"
+          ? access.message
+          : "Connect MetaKocka first, then check again.",
+      );
     }
 
     // Queued rather than awaited: this is one MetaKocka round trip per entry
@@ -482,10 +510,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return fail("register", "Enter the name exactly as MetaKocka has it.");
     }
 
-    const credential = await getCredential(principal);
-    if (!credential) {
-      return fail("register", "Connect MetaKocka first, then add a centre.");
+    const access = await requireCredential(principal);
+    if (!access.ok) {
+      return fail(
+        "register",
+        access.reason === "not_permitted"
+          ? access.message
+          : "Connect MetaKocka first, then add a centre.",
+      );
     }
+    const credential = access.credential;
 
     try {
       const client = new MetakockaClient(
@@ -608,7 +642,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         entityType: "supply_source",
         entityId: atLocation.id,
         event: "warehouse_mapping.saved",
-        detail: { mark: atLocation.metakockaWarehouse, warehouse: atLocation.name, location: null },
+        detail: {
+          mark: atLocation.metakockaWarehouse,
+          warehouse: atLocation.name,
+          location: null,
+        },
       });
     }
     return {
@@ -818,15 +856,12 @@ function shortDateTime(iso: string): string {
   });
 }
 
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 /** The part of the Polaris modal element this page drives from code. */
-type Overlay = { showOverlay: () => void; hideOverlay: () => void };
+// Optional: a custom element is a plain HTMLElement until the browser upgrades
+// it, and a ref is set before that happens. These calls all follow a user
+// action so the element has long since upgraded, but the types should not
+// promise something that is only true later.
+type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
 
 const HELP_MODAL_ID = "about-locations";
 const EDITOR_MODAL_ID = "location-editor";
@@ -944,8 +979,8 @@ export default function Locations() {
   useEffect(() => {
     const result = locationFetcher.data;
     if (!result?.ok) return;
-    if (openDialog.current === "editor") editor.current?.hideOverlay();
-    if (openDialog.current === "connect") connector.current?.hideOverlay();
+    if (openDialog.current === "editor") editor.current?.hideOverlay?.();
+    if (openDialog.current === "connect") connector.current?.hideOverlay?.();
     openDialog.current = null;
     if (typeof shopify !== "undefined") shopify.toast.show(result.message);
   }, [locationFetcher.data]);
@@ -992,7 +1027,8 @@ export default function Locations() {
   /* --- Derived ----------------------------------------------------------- */
 
   const edited = locations.find((row) => row.id === editing) ?? null;
-  const connectingWarehouse = unconnected.find((w) => w.mark === connecting) ?? null;
+  const connectingWarehouse =
+    unconnected.find((w) => w.mark === connecting) ?? null;
 
   const defaultDirectionLabel =
     DIRECTION_LABEL[savedDefaults.direction] ?? DIRECTION_LABEL.none!;
@@ -1017,7 +1053,12 @@ export default function Locations() {
     // The one this location already holds is not in `unconnected`, so it has to
     // be added back or the dialog would open showing nothing chosen.
     ...(edited?.warehouseMark
-      ? [{ value: edited.warehouseMark, label: edited.warehouseName ?? edited.warehouseMark }]
+      ? [
+          {
+            value: edited.warehouseMark,
+            label: edited.warehouseName ?? edited.warehouseMark,
+          },
+        ]
       : []),
   ];
 
@@ -1049,7 +1090,8 @@ export default function Locations() {
 
       return {
         value: row.id,
-        label: notes.length > 0 ? `${row.name} (${notes.join(", ")})` : row.name,
+        label:
+          notes.length > 0 ? `${row.name} (${notes.join(", ")})` : row.name,
       };
     }),
   ];
@@ -1330,7 +1372,11 @@ export default function Locations() {
 
       <s-modal
         id={CONNECT_MODAL_ID}
-        heading={connectingWarehouse ? `Connect ${connectingWarehouse.name}` : "Connect"}
+        heading={
+          connectingWarehouse
+            ? `Connect ${connectingWarehouse.name}`
+            : "Connect"
+        }
         ref={(element: Overlay | null) => {
           connector.current = element;
         }}
@@ -1561,19 +1607,32 @@ export default function Locations() {
         {/* --- Stock sync -------------------------------------------------- */}
 
         <s-section heading="Stock sync">
+          {/*
+           * The count sits in the section's own header slot, beside the
+           * heading, rather than as the first thing in the body. It describes
+           * the card; reading it as a line of content meant reading past it to
+           * reach the two buttons that actually do something.
+           *
+           * Neutral, not green. It is the normal state, and colour marks
+           * exceptions (docs/ui-conventions.md). Not being connected is an
+           * exception, so that one keeps its tone.
+           */}
+          <s-badge slot="secondary-actions" tone="neutral">
+            {syncing === 1
+              ? "1 location syncing"
+              : `${syncing} locations syncing`}
+          </s-badge>
+          {connected ? null : (
+            <s-badge slot="secondary-actions" tone="caution">
+              MetaKocka not connected
+            </s-badge>
+          )}
+
           <s-stack direction="block" gap="base">
             <s-paragraph>
               Syncing copies quantities in the background. It also runs on a
               schedule.
             </s-paragraph>
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-badge tone={syncing > 0 ? "success" : "neutral"}>
-                {syncing === 1 ? "1 location syncing" : `${syncing} locations syncing`}
-              </s-badge>
-              {connected ? null : (
-                <s-badge tone="caution">MetaKocka not connected</s-badge>
-              )}
-            </s-stack>
             <s-stack direction="inline" gap="base" alignItems="center">
               <s-button
                 variant="primary"
@@ -1714,7 +1773,22 @@ export default function Locations() {
                             <SourceBadge />
                           ) : null}
                         </s-stack>
-                        {row.lastSync ? (
+                        {/*
+                          * A failure says what went wrong, not that something
+                          * did. §2.8 asks an error to be actionable, and
+                          * "MetaKocka rejected the request: Internal server
+                          * error." at least sends the merchant to the right
+                          * side of the integration.
+                          */}
+                        {row.syncMessage ? (
+                          <s-text color="subdued" tone="critical">
+                            {`${row.syncFailures} failed ${row.syncFailures === 1 ? "attempt" : "attempts"}${
+                              row.syncCheckedAt
+                                ? `, last ${shortDateTime(row.syncCheckedAt)}`
+                                : ""
+                            } — ${row.syncMessage}`}
+                          </s-text>
+                        ) : row.lastSync ? (
                           <s-text
                             color="subdued"
                             tone={row.lastSync.ok ? "auto" : "caution"}

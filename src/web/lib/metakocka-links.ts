@@ -21,3 +21,14 @@ export const METAKOCKA_REGISTERS_URL =
 /** Warehouses, where a mark and its name are set. */
 export const METAKOCKA_WAREHOUSES_URL =
   "https://main.metakocka.si/index.jsp#skladisce_skladisca";
+
+/**
+ * Sales and Pricelists, where a pricelist's own id is shown.
+ *
+ * That id is what this app stores and sends as the pricelist `count_code`, and
+ * MetaKocka labels it "Price list ID" on that screen. Worth pointing at
+ * precisely, because a merchant told only to "use the pricelist code" has no
+ * way to know which of the numbers on a pricelist is the one meant.
+ */
+export const METAKOCKA_PRICELISTS_URL =
+  "https://main.metakocka.si/index.jsp#prodaja_ceniki";

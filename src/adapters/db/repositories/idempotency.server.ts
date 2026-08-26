@@ -62,13 +62,3 @@ export async function releaseKey(
 ): Promise<void> {
   await prisma.idempotencyKey.deleteMany({ where: { shopDomain, scope, key } });
 }
-
-export async function findKeyResult(
-  shopDomain: string,
-  scope: string,
-  key: string,
-) {
-  return prisma.idempotencyKey.findUnique({
-    where: { shopDomain_scope_key: { shopDomain, scope, key } },
-  });
-}

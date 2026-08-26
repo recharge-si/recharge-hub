@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { MetakockaClient } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
+import type { ProductTypeFlags } from "~/adapters/metakocka/products";
 import { mkDecimal } from "~/adapters/metakocka/values";
 
 /**
@@ -48,17 +49,34 @@ export interface StockLevel {
 const PAGE = 500;
 
 /**
- * Every stock row for one warehouse.
+ * Every stock row for one warehouse, aggregated to one row per product.
  *
  * Fully paginated on purpose. A SKU absent from the result is treated by the
  * caller as zero stock, and that conclusion is only safe once the whole list has
  * been read: a truncated page would otherwise zero out real inventory.
+ *
+ * A live company can return more than one row for the same
+ * `(warehouse_id, code)` pair — separate microlocations inside one physical
+ * warehouse. A caller building a `Map` keyed by product code from the raw
+ * rows would have the last microlocation silently overwrite the rest,
+ * undercounting real stock by however much sat in the ones before it. Summed
+ * here instead, once, so every caller sees the warehouse's true total.
  */
 export async function listWarehouseStock(
   client: MetakockaClient,
   warehouseMkId: string,
 ): Promise<StockLevel[]> {
-  const rows: StockLevel[] = [];
+  interface Aggregate {
+    warehouseId: string;
+    code: string;
+    title: string | null;
+    amount: number;
+    reserved: number;
+    /** Summed only while every contributing row has carried it; see below. */
+    free: number | null;
+  }
+
+  const byKey = new Map<string, Aggregate>();
 
   for (let offset = 0; offset < 200_000; offset += PAGE) {
     const response = await client.call(
@@ -68,20 +86,46 @@ export async function listWarehouseStock(
     );
 
     for (const row of response.stock_list) {
-      rows.push({
-        warehouseId: row.warehouse_id,
-        code: row.code,
-        title: row.title ?? null,
-        amount: row.amount,
-        reserved: row.reserved_amount ?? 0,
-        free: row.free_amount ?? row.amount - (row.reserved_amount ?? 0),
-      });
+      const key = `${row.warehouse_id}:${row.code}`;
+      const reserved = row.reserved_amount ?? 0;
+      const existing = byKey.get(key);
+
+      if (!existing) {
+        byKey.set(key, {
+          warehouseId: row.warehouse_id,
+          code: row.code,
+          title: row.title ?? null,
+          amount: row.amount,
+          reserved,
+          free: row.free_amount ?? null,
+        });
+        continue;
+      }
+
+      existing.amount += row.amount;
+      existing.reserved += reserved;
+      // free_amount is summed only if every microlocation reported it —
+      // one row missing it makes the running total meaningless, and the
+      // fallback below recomputes it from the (always present) aggregate
+      // amount and reserved instead.
+      existing.free =
+        existing.free === null || row.free_amount === undefined
+          ? null
+          : existing.free + row.free_amount;
+      existing.title ??= row.title ?? null;
     }
 
     if (response.stock_list.length < PAGE) break;
   }
 
-  return rows;
+  return [...byKey.values()].map((row) => ({
+    warehouseId: row.warehouseId,
+    code: row.code,
+    title: row.title,
+    amount: row.amount,
+    reserved: row.reserved,
+    free: row.free ?? row.amount - row.reserved,
+  }));
 }
 
 const productRowSchema = z
@@ -91,6 +135,10 @@ const productRowSchema = z
     code: z.string(),
     name: z.string().optional(),
     unit: z.string().optional(),
+    // The three type flags, as MetaKocka sends everything: strings.
+    sales: z.string().optional(),
+    purchasing: z.string().optional(),
+    service: z.string().optional(),
   })
   .passthrough();
 
@@ -105,6 +153,68 @@ export interface MetakockaProduct {
   /** Matches a Shopify SKU. */
   code: string;
   name: string | null;
+  /**
+   * Prodajni / Nabavni / Storitev as the catalogue currently holds them, or
+   * null when the response did not carry all three.
+   *
+   * Null is "we do not know", not "all false", and the difference matters:
+   * a caller that treated an absent flag as false would rewrite the type of
+   * every article on every run.
+   */
+  type: ProductTypeFlags | null;
+}
+
+/** MetaKocka sends booleans as "true"/"false"; anything else is unknown. */
+function flagOf(value: string | undefined): boolean | null {
+  if (value === undefined) return null;
+  const normalised = value.trim().toLowerCase();
+  if (normalised === "true") return true;
+  if (normalised === "false") return false;
+  return null;
+}
+
+function typeOf(row: {
+  sales?: string | undefined;
+  purchasing?: string | undefined;
+  service?: string | undefined;
+}): ProductTypeFlags | null {
+  const sales = flagOf(row.sales);
+  const purchasing = flagOf(row.purchasing);
+  const service = flagOf(row.service);
+  if (sales === null || purchasing === null || service === null) return null;
+  return { sales, purchasing, service };
+}
+
+/**
+ * One product, by the code the merchant typed.
+ *
+ * For validating a shipping article on the settings screen, which is the one
+ * place a merchant hands this app a MetaKocka code by hand. A code that does
+ * not exist is refused there rather than on the next order, where it would
+ * surface as a rejected sales order and a puzzle.
+ *
+ * `product_list` is filtered server-side by `product_code_list`, so this is one
+ * small call rather than a walk of the catalogue.
+ */
+export async function findProductByCode(
+  client: MetakockaClient,
+  code: string,
+): Promise<MetakockaProduct | null> {
+  const response = await client.call(
+    ENDPOINTS.productList,
+    { limit: 5, offset: 0, product_code_list: [{ code }] },
+    productResponseSchema,
+  );
+
+  const row = response.product_list.find((entry) => entry.code === code);
+  if (!row) return null;
+
+  return {
+    mkId: row.mk_id,
+    code: row.code,
+    name: row.name ?? null,
+    type: typeOf(row),
+  };
 }
 
 /** The whole product catalogue, paginated. */
@@ -125,6 +235,7 @@ export async function listProducts(
         mkId: row.mk_id,
         code: row.code,
         name: row.name ?? null,
+        type: typeOf(row),
       });
     }
 

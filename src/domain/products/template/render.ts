@@ -133,6 +133,27 @@ export interface RenderOptions {
 export const MAX_NAME_LENGTH = 250;
 
 /**
+ * The name before truncation, and whether the template produced it.
+ *
+ * Split out of `renderTemplate` so lint can measure the length the merchant
+ * actually wrote against the cap without re-deriving the fallback rule. Nothing
+ * about the result changes: `renderTemplate` is this, truncated.
+ */
+function composeName(
+  nodes: TemplateNode[],
+  facts: VariantFacts,
+): { name: string; usedFallback: boolean } {
+  const rendered = tidy(renderNodes(nodes, facts).text);
+
+  // A template that renders to nothing would create a nameless product. The
+  // product title, then the SKU, is a better answer than an empty name.
+  return {
+    name: rendered || facts.productTitle.trim() || facts.sku,
+    usedFallback: rendered === "",
+  };
+}
+
+/**
  * Renders one product name. Never throws: a template the merchant typed badly
  * shows a visible result in the preview rather than failing a sync at midnight.
  */
@@ -142,11 +163,7 @@ export function renderTemplate(
   options: RenderOptions = {},
 ): string {
   const maxLength = options.maxLength ?? MAX_NAME_LENGTH;
-  const rendered = tidy(renderNodes(nodes, facts).text);
-
-  // A template that renders to nothing would create a nameless product. The
-  // product title, then the SKU, is a better answer than an empty name.
-  const name = rendered || facts.productTitle.trim() || facts.sku;
+  const { name } = composeName(nodes, facts);
 
   return name.length > maxLength ? name.slice(0, maxLength).trim() : name;
 }
@@ -157,9 +174,14 @@ export interface RenderTrace {
   tokens: { field: string; start: number; value: string; known: boolean }[];
   /**
    * True when the template rendered to nothing and the title or SKU stood in.
-   * Lint treats that as an error: the merchant did not ask for that name.
+   * The merchant did not ask for that name, so lint reports it.
    */
   usedFallback: boolean;
+  /**
+   * How long the name was before `maxLength` was applied. `name` is already
+   * truncated, so it cannot answer "is this over the cap" on its own.
+   */
+  rawLength: number;
 }
 
 /** Renders and reports what each token contributed, for lint and the editor. */
@@ -185,11 +207,12 @@ export function renderWithTrace(
   };
   visit(nodes);
 
-  const rendered = tidy(renderNodes(nodes, facts).text);
+  const composed = composeName(nodes, facts);
   return {
     name: renderTemplate(nodes, facts, options),
     tokens,
-    usedFallback: rendered === "",
+    usedFallback: composed.usedFallback,
+    rawLength: composed.name.length,
   };
 }
 

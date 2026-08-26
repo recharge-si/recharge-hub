@@ -164,4 +164,29 @@ describe("the preview never writes", () => {
       created: 1,
     });
   });
+
+  it("says unknown, not renamed, when the product exists but its name does not", () => {
+    // A SKU matched before the registry recorded MetaKocka's name. Reading
+    // that as an empty current name would report every such product as being
+    // renamed, which is the one thing the merchant must not be told wrongly.
+    const settings = settingsFromTemplate("{title}[ {options}]");
+    const currentNames = new Map<string, string | null>([
+      ["TS-001-L", null],
+      ["M-490", "Old mast name"],
+      ["S-54", null],
+    ]);
+
+    const { rows, totals } = buildPreview({
+      settings,
+      variants: VARIANTS,
+      currentNames,
+    });
+
+    expect(rows.map((row) => row.status)).toEqual([
+      "unknown",
+      "changed",
+      "unknown",
+    ]);
+    expect(totals).toMatchObject({ unknown: 2, changed: 1, created: 0 });
+  });
 });

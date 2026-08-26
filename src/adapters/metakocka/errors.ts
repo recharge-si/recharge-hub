@@ -33,6 +33,21 @@ export const MK_SUCCESS = "0";
  * an identical payload will fail identically, and a human has to change
  * something.
  */
+/**
+ * Codes observed to be validation refusals — MetaKocka read the request,
+ * rejected it, and filed nothing. These are the only answers that prove no
+ * document was created: code 2 refuses a request as written, 6 rejects a named
+ * value (profit centre, doc_date), 8 an unknown product code, all before
+ * anything is stored. Any *other* code is an answer whose consequences nobody
+ * has observed, and the duplicate guard treats it like a timeout: look before
+ * sending again.
+ */
+export const VALIDATION_REJECTION_CODES: ReadonlySet<string> = new Set([
+  "2",
+  "6",
+  "8",
+]);
+
 const KNOWN_CODES: Record<string, FailureKind> = {
   // "Partner data are missing", "Cannot find document type sales_order with
   // id = null". A request MetaKocka will not accept as written: retrying the
