@@ -33,6 +33,33 @@ Completed work belongs in Git history, not in this file.
 
 ## Product and integration gaps
 
+### T-20 - Shipping and discounts have no MetaKocka representation to reuse
+
+Established by reading the test company's catalogue on 2026-08-26: **39
+products, every one `service=false`.** There is no shipping product, no discount
+product and no service product to reuse, so the connector has nothing to point
+at, and inventing one would be inventing accounting behaviour.
+
+The three candidate representations, none implemented:
+
+1. **A service product per charge.** Create a MetaKocka service article for
+   shipping, and one for discount at a negative price, and add it as a document
+   line. Closes the value identity exactly. Costs: it puts non-stock articles in
+   the catalogue, and a negative-priced line needs confirming against
+   MetaKocka's validation.
+2. **Document-level fields.** `put_document` documents a `discount_value`, and
+   shipping may have a delivery-cost field. Neither is verified: gross or net,
+   percentage or amount, and whether they enter `sum_all` are all unknown, and
+   T-05/T-06 already say not to guess.
+3. **Leave them off the document and reconcile them as named terms**, which is
+   what the connector does today: `reconcileValue` reports products, shipping,
+   discounts and externally-fulfilled value separately and fails on anything
+   unexplained.
+
+Option 3 is honest but does not satisfy "the MetaKocka commercial representation
+explains the complete total". Choosing between 1 and 2 needs a merchant decision
+about their chart of accounts plus a probe of the document-level fields.
+
 ### T-05/T-06 — Shipping and discounts are not faithfully represented
 
 Document payment shares account for shipping and discounts, but MetaKocka sales

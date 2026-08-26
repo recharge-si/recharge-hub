@@ -414,7 +414,13 @@ export async function claimDocument(
 
   const existing = await prisma.metakockaDocument.findUnique({
     where: { shopId_countCode: { shopId, countCode: input.countCode } },
-    select: { id: true, status: true, updatedAt: true, responseBody: true },
+    select: {
+      id: true,
+      status: true,
+      updatedAt: true,
+      claimedAt: true,
+      responseBody: true,
+    },
   });
 
   if (existing) {
@@ -428,7 +434,7 @@ export async function claimDocument(
     if (existing.status === "failed") {
       const taken = await prisma.metakockaDocument.updateMany({
         where: { id: existing.id, status: "failed" },
-        data: { status: "pending" },
+        data: { status: "pending", claimedAt: new Date() },
       });
       if (taken.count === 0) return null;
 
@@ -455,13 +461,29 @@ export async function claimDocument(
     // lookup first.
     if (existing.status === "pending") {
       const staleBefore = new Date(Date.now() - CLAIM_LEASE_MS);
+
+      /*
+       * Measured from `claimed_at`, which only claiming moves.
+       *
+       * It used to be measured from `updated_at`, and Prisma refreshes that on
+       * every write — including the `is_primary` sweep the reconciler runs
+       * across an order's documents just before the write loop. The lease was
+       * therefore renewed a moment before it was tested, so a row left
+       * `pending` by a crashed worker could never be reclaimed by anything: the
+       * ambiguous-write recovery never ran and the order stayed inconsistent
+       * for good. `claimed_at` is null on rows written before that column
+       * existed, which fall back to the old behaviour.
+       */
       const taken = await prisma.metakockaDocument.updateMany({
         where: {
           id: existing.id,
           status: "pending",
-          updatedAt: { lt: staleBefore },
+          OR: [
+            { claimedAt: { lt: staleBefore } },
+            { claimedAt: null, updatedAt: { lt: staleBefore } },
+          ],
         },
-        data: { status: "pending" },
+        data: { status: "pending", claimedAt: new Date() },
       });
       if (taken.count === 1) {
         return {
@@ -490,6 +512,7 @@ export async function claimDocument(
         countCode: input.countCode,
         isPrimary: input.isPrimary,
         status: "pending",
+        claimedAt: new Date(),
       },
       select: { id: true },
     });
@@ -1282,15 +1305,27 @@ export async function applyPrimaryDocument(
   orderId: string,
   primarySourceId: string | null,
 ): Promise<void> {
+  /*
+   * Only rows whose flag actually differs.
+   *
+   * Rewriting a value that is already correct is not free: every write
+   * refreshes `updated_at`, and this sweep runs across an order's documents
+   * immediately before the write loop. That is how it used to renew the
+   * `count_code` claim lease it was about to be tested against.
+   */
   await prisma.$transaction([
     prisma.metakockaDocument.updateMany({
-      where: { orderId, supplySourceId: { not: primarySourceId } },
+      where: {
+        orderId,
+        supplySourceId: { not: primarySourceId },
+        isPrimary: true,
+      },
       data: { isPrimary: false },
     }),
     ...(primarySourceId
       ? [
           prisma.metakockaDocument.updateMany({
-            where: { orderId, supplySourceId: primarySourceId },
+            where: { orderId, supplySourceId: primarySourceId, isPrimary: false },
             data: { isPrimary: true },
           }),
         ]

@@ -1106,6 +1106,19 @@ model MetakockaDocument {
   /// already was. Distinct from `mkCheckedAt`, which is the read-back poll.
   lastReconciledAt DateTime? @map("last_reconciled_at")
 
+  /// When the `count_code` claim on this row was taken.
+  ///
+  /// The lease that lets a document abandoned by a crashed worker be retried
+  /// has to be measured from something only claiming moves. It used to be
+  /// measured from `updated_at`, which Prisma refreshes on *any* write — and
+  /// the reconciler writes `is_primary` to every document of an order before
+  /// the write loop runs. That renewed the lease a moment before it was
+  /// tested, so a row left `pending` by a crash could never be reclaimed: it
+  /// stayed pending for ever, nothing retried it, and the order stayed
+  /// inconsistent with no way back. Found by killing a write mid-flight
+  /// against the real ERP.
+  claimedAt DateTime? @map("claimed_at")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

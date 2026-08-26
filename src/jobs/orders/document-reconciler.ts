@@ -12,6 +12,7 @@ import type { MetakockaClient } from "~/adapters/metakocka/client";
 import {
   clearedPayments,
   deleteSalesOrder,
+  findSalesOrder,
   updateSalesOrder,
 } from "~/adapters/metakocka/documents";
 import { MetakockaError, describeForMerchant } from "~/adapters/metakocka/errors";
@@ -95,6 +96,26 @@ export interface EmptiedBody {
  * order counted twice in the merchant's books, which is the single failure this
  * whole path exists to prevent.
  */
+/**
+ * Whether a recorded body already describes a document holding nothing.
+ *
+ * **[verified against company 6789 on 2026-08-26]** MetaKocka accepts an empty
+ * `product_list` on a document that *has* lines, and refuses it on one that
+ * does not: `opr_code 6, "Naročila ni mogoče shraniti, ker ne vsebuje
+ * artiklov"` — the order cannot be saved because it contains no items. So
+ * emptying is a one-way operation, not an idempotent one, and a reconciliation
+ * that re-sends it every pass turns a document it already retired successfully
+ * into a permanent error.
+ *
+ * (A zero-quantity line is not an alternative: `opr_code 2`, the quantity must
+ * be greater than zero.)
+ */
+export function documentIsEmpty(body: unknown): boolean {
+  if (!body || typeof body !== "object") return false;
+  const lines = (body as { product_list?: unknown }).product_list;
+  return Array.isArray(lines) && lines.length === 0;
+}
+
 export function emptiedBody(body: Record<string, unknown>): EmptiedBody {
   const cleared = clearedPayments(body);
 
@@ -219,14 +240,42 @@ export async function retireObsoleteDocument(
           stillHoldsPaymentMinor: 0,
           paymentCleared: false,
         };
+      } else if (documentIsEmpty(input.requestBody)) {
+        /*
+         * Already emptied by an earlier pass. Sending it again is refused, so
+         * this is where a repeatable reconciliation has to stop repeating.
+         */
+        outcome = {
+          countCode,
+          action: "emptied",
+          reason: plan.reason,
+          stillHoldsQuantity: false,
+          stillHoldsPaymentMinor: 0,
+          paymentCleared: true,
+        };
       } else {
         const emptied = emptiedBody(
           input.requestBody as Record<string, unknown>,
         );
 
-        const { verified } = await updateSalesOrder(input.client, {
+        const { body: sent, verified } = await updateSalesOrder(input.client, {
           mkId: input.mkId,
           body: emptied.body,
+        });
+
+        /*
+         * The recorded body has to become the emptied one.
+         *
+         * Verification reads these bodies to work out what the ERP holds, so a
+         * document emptied in MetaKocka but still *recorded* with its old lines
+         * is counted as holding them — and the order reports a quantity
+         * discrepancy that does not exist, permanently. Found by running a real
+         * order through: MetaKocka was correct and the verdict said otherwise.
+         */
+        await recordDocumentResult(input.action.documentId, {
+          status: "written",
+          requestBody: sent,
+          responseBody: { emptied: true, lines: verified.lineCount },
         });
 
         await prisma.metakockaDocument.update({
@@ -234,7 +283,6 @@ export async function retireObsoleteDocument(
           data: {
             mkStatus: "emptied, no longer allocated",
             mkCheckedAt: input.now,
-            responseBody: { emptied: true, lines: verified.lineCount },
           },
         });
 
@@ -251,6 +299,39 @@ export async function retireObsoleteDocument(
       }
     }
   } catch (error) {
+    /*
+     * Before believing the failure, look.
+     *
+     * A crash between the call and the record, or a repeat of an empty that
+     * already went through, both surface as a refusal for a document that is in
+     * fact exactly as this app wanted it. Reading it back turns that into the
+     * success it is, records the emptied body so the next pass does not try
+     * again, and leaves only genuine failures to be reported.
+     */
+    const actual = input.mkId ? await findSalesOrder(input.client, input.mkId) : null;
+
+    if (actual && (actual.lineCount ?? 0) === 0 && plan.kind === "empty") {
+      await recordDocumentResult(input.action.documentId, {
+        status: "written",
+        requestBody: emptiedBody(input.requestBody as Record<string, unknown>).body,
+        responseBody: { emptied: true, confirmedByReadBack: true },
+      });
+      await prisma.metakockaDocument.update({
+        where: { id: input.action.documentId },
+        data: { mkStatus: "emptied, no longer allocated", mkCheckedAt: input.now },
+      });
+      await touchDocumentReconciled(input.action.documentId, input.now);
+
+      return {
+        countCode,
+        action: "emptied",
+        reason: plan.reason,
+        stillHoldsQuantity: false,
+        stillHoldsPaymentMinor: actual.paidMinor ?? 0,
+        paymentCleared: (actual.paidMinor ?? 0) === 0,
+      };
+    }
+
     /*
      * The document is still MetaKocka's and still says what it said.
      *

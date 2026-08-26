@@ -11,6 +11,7 @@ import {
 } from "~/adapters/db/repositories/payment-type-map.server";
 import { listCachedWarehouses } from "~/adapters/db/repositories/supply-source.server";
 import { parseOrderSafe } from "~/adapters/shopify/order-payload";
+import { sameLocation } from "~/adapters/shopify/locations";
 import { getLogger } from "~/adapters/observability/logger.server";
 import {
   redriveOrder,
@@ -577,13 +578,22 @@ async function verdictFor(
         return FIXED("Every location on this order maps to a warehouse.");
       }
 
-      const mapped = await prisma.supplySource.count({
-        where: {
-          shop: { domain: principal.shopDomain },
-          enabled: true,
-          shopifyLocationId: { in: unmapped },
-        },
+      /*
+       * Compared in memory, on normalised ids.
+       *
+       * The stored supply-source value is a full GID and the allocation records
+       * the numeric tail, so an `in` over raw strings never matched — the same
+       * mismatch that stopped Shopify-driven allocation resolving at all, which
+       * here would have meant this exception could never close.
+       */
+      const enabled = await prisma.supplySource.findMany({
+        where: { shop: { domain: principal.shopDomain }, enabled: true },
+        select: { shopifyLocationId: true },
       });
+
+      const mapped = enabled.filter((source) =>
+        unmapped.some((location) => sameLocation(source.shopifyLocationId, location)),
+      ).length;
 
       return mapped > 0
         ? {

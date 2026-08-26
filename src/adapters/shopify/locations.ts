@@ -88,3 +88,41 @@ export async function listLocations(
     };
   });
 }
+
+/**
+ * One Shopify location id, in a form both sides of a comparison can agree on.
+ *
+ * **The two sides did not agree, and it was invisible until a real order ran
+ * through.** `supply_source.shopify_location_id` holds what the settings screen
+ * saved, which is the full GID — `gid://shopify/Location/120913232136`. The
+ * fulfilment-order reader emits the numeric tail, because that is the form the
+ * rest of the order pipeline uses (`order.shopify_order_id` is `5001`, not a
+ * GID). Looking one up by the other misses every time.
+ *
+ * The consequence was total rather than partial: under Shopify-driven
+ * allocation *no* location could ever resolve to a supply source, so every
+ * assignment fell through as unresolved and no order could be filed against the
+ * warehouse Shopify had chosen. Every unit test passed, because a test that
+ * invents both sides invents them in the same shape.
+ *
+ * Normalising rather than migrating the column: the stored GID is what the
+ * Shopify pickers and the supply-source screen round-trip, and rewriting it
+ * would be a data migration to fix a comparison.
+ */
+export function locationKey(id: string | null | undefined): string | null {
+  if (!id) return null;
+  const trimmed = id.trim();
+  if (trimmed === "") return null;
+  const tail = trimmed.split("/").pop() ?? trimmed;
+  return tail.split("?")[0] || null;
+}
+
+/** Whether two Shopify location references mean the same location. */
+export function sameLocation(
+  a: string | null | undefined,
+  b: string | null | undefined,
+): boolean {
+  const left = locationKey(a);
+  const right = locationKey(b);
+  return left !== null && left === right;
+}

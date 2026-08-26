@@ -1,6 +1,7 @@
 import { prisma } from "~/adapters/db/client.server";
 import type { AllocationRecord } from "~/adapters/db/repositories/order.server";
 import type { FulfillmentAssignment } from "~/adapters/shopify/fulfillment-orders";
+import { locationKey } from "~/adapters/shopify/locations";
 import { allocate } from "~/domain/allocation/allocate";
 import {
   DEFAULT_RULE,
@@ -114,10 +115,18 @@ export async function planAllocations(
       shopifyLocationId: true,
     },
   });
+  /*
+   * Keyed by the normalised location, not by the stored string.
+   *
+   * The settings screen saves a full GID and the fulfilment reader emits the
+   * numeric tail, so a direct lookup misses every time — see `locationKey`.
+   */
   const sourceByLocation = new Map(
     sources
-      .filter((source) => source.shopifyLocationId)
-      .map((source) => [source.shopifyLocationId!, source] as const),
+      .flatMap((source) => {
+        const key = locationKey(source.shopifyLocationId);
+        return key ? [[key, source] as const] : [];
+      }),
   );
 
   const records: AllocationRecord[] = [];
@@ -135,7 +144,8 @@ export async function planAllocations(
   if (input.mode === "shopify_locations") {
     for (const assignment of input.assignments) {
       const source = assignment.shopifyLocationId
-        ? (sourceByLocation.get(assignment.shopifyLocationId) ?? null)
+        ? (sourceByLocation.get(locationKey(assignment.shopifyLocationId)!) ??
+          null)
         : null;
 
       if (assignment.shopifyLocationId && !source) {

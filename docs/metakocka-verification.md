@@ -206,6 +206,22 @@ Consequences, all now implemented:
 - An empty `product_list` **is** accepted, which the obsolete-document policy
   relies on: the document came back with no `sum_all` and no readable lines.
 
+### A sales order cannot be saved with no items
+
+| Sent to a document that...          | Result                                                        |
+| ----------------------------------- | ------------------------------------------------------------- |
+| has lines: `product_list: []`       | accepted; `sum_all` disappears and the lines are gone          |
+| is already empty: `product_list: []`| `opr_code 6`, "Narocila ni mogoce shraniti, ker ne vsebuje artiklov" |
+| has lines: `product_list: [{ amount: "0" }]` | `opr_code 2`, quantity must be greater than 0         |
+| has lines: empty list + zero payment | accepted; `sum_all` **and** `sum_paid` both disappear          |
+
+Emptying is therefore a **one-way** operation, not an idempotent one. A
+reconciliation that re-sends it on every pass turns a document it has already
+retired successfully into a permanent error, which is what a real order did on
+its first run: MetaKocka was correct and the connector reported the order
+broken. `documentIsEmpty` stops the repeat, and a refusal is re-checked by
+reading the document back before it is believed.
+
 ### `get_document` has `sum_paid`, and no payment list
 
 The full response for a document carrying two payments contains exactly:
@@ -339,6 +355,32 @@ pair under `tests/fixtures/metakocka/`.
     probe sent one partner id and the response reported a different one. This
     predates the reconciliation work and may be nothing, but partner identity is
     load-bearing (§3: inline data creates duplicates) and it should be pinned.
+
+## End-to-end run, 2026-08-26
+
+A full Shopify to MetaKocka pass against dev store `recharge-dev-gp1pzbyn` and
+test company `6789`. It found four defects that no unit or database test had,
+which is the entry that matters here: three were invisible precisely because a
+test that invents both sides of a comparison invents them in the same shape.
+
+| Finding | Consequence |
+| ------- | ----------- |
+| `supply_source.shopify_location_id` holds a GID; the fulfilment reader emits the numeric tail | Under Shopify-driven allocation no location resolved to a supply source. Total, silent. |
+| An emptied document kept its old recorded body | Verification counted lines MetaKocka no longer held, so the order reported a discrepancy that did not exist. |
+| Emptying was re-sent every pass | See the rule above: refused once already empty, leaving the document stuck in error. |
+| The `count_code` claim lease was measured from `updated_at` | Any unrelated write renewed it, including the reconciler's own `is_primary` sweep, so a document abandoned by a crashed worker could never be reclaimed and the ambiguous-write recovery never ran. |
+
+Artifacts left in place. These are dev-store orders that already existed; their
+documents were repaired, not created fresh.
+
+- `SH-1005-GLAVNO` mk_id 1200049920417 - corrected from 4 to 5 units, 836 to 1045
+- `SH-1005-PARTNER-SUPPLY` mk_id **1200049944457** - created by the split test, then emptied and retired when the line moved back
+- `SH-1006-GLAVNO` mk_id 1200049924471 - unchanged; used for the crash/retry test
+- `SH-1007-GLAVNO` mk_id 1200049924918 - emptied and retired (was a duplicate)
+- `SH-1007-PARTNER-SUPPLY` mk_id 1200049925114 - unchanged
+
+Probe documents from the same day were created and deleted: `CLAUDE-PAYPROBE-*`,
+`CLAUDE-CLEARPROBE-*`, `CLAUDE-EMPTYPROBE-*`, each confirmed by `opr_code 0`.
 
 ## Known test-company artifacts
 
