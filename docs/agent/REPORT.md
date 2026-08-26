@@ -390,3 +390,242 @@ Proposed patch once T-06 answers:
   paginated read makes safe). Unmanaged products are echoes by construction
   and cannot differ.
 - **Verified by:** `tsc`, `eslint`, sync-stock unit tests green.
+
+---
+
+## Findings — second pass (26 August 2026)
+
+Worked from `docs/agent/NOT_DONE.md`, batches 1-4. Same rules: no live
+MetaKocka company, fixtures only, `tsc` + `eslint` + `vitest` green on every
+commit. Baseline 437 tests; 474 at the end of this pass.
+
+### [P1] Every amount was the shop's, every currency label was the customer's
+- **Where:** `src/adapters/shopify/order-payload.ts`
+- **What:** `parseOrder` set `currency` from `presentment_currency` and then
+  read `totalMinor`, `discountMinor`, `totalTaxMinor` and each line's price
+  from the plain REST fields, which are the **shop** currency. On any
+  multi-currency store the label and the number disagreed by the exchange rate,
+  and every MetaKocka document was priced wrongly - internally consistent,
+  perfectly plausible, and undetectable downstream.
+- **Spec:** CLAUDE.md section 8.6 ("use the Shopify presentment currency and
+  amount... never silently convert to shop currency").
+- **Status:** fixed - the `*_set` fields are preferred for the total, the
+  discount, the tax, the shipping and both line amounts, falling back to the
+  flat field a single-currency payload carries. The reconciler's GraphQL mapper
+  already resolved presentment, so both paths now agree.
+- **Verified by:** a multi-currency unit test asserting the presentment amount
+  is stored under the presentment code, plus a fallback test; suite green.
+
+### [P1] Protecting an unmanaged stock value was the write that changed it
+- **Where:** `src/adapters/metakocka/sync-stock.ts` (`buildCompleteStockList`)
+- **What:** `sync_stock` removes anything omitted from `stock_list`, so
+  products this app does not manage are echoed back at MetaKocka's own value.
+  The echo branch applied the managed branch's `Math.max(0, Math.trunc())`, so
+  a held 3.5 was restated as 3 and a held -2 as 0 - the destructive write the
+  echo exists to prevent, performed by the echo.
+- **Spec:** CLAUDE.md section 7 ("products this app does not manage are sent
+  back at the value MetaKocka already holds").
+- **Status:** fixed - the echo is verbatim and the clamp belongs to the managed
+  branch alone. `managedAmount` is exported so the caller deciding whether
+  anything changed compares the value that would actually be sent: an oversold
+  Shopify location reporting -1 against a held 0 was a permanent "change", and
+  filed an inventory document in the merchant's ERP every five minutes.
+- **Verified by:** fraction and negative echo tests, plus a request-body test
+  proving the number survives serialisation.
+
+### [P1] A negative sales order would have been filed without complaint
+- **Where:** `src/domain/money/split.ts`, `src/jobs/handlers/write-metakocka-order.ts`
+- **What:** Section 8.6 puts the order-level discount on the primary document
+  alone. On a split order whose discount exceeds the primary's own lines, that
+  produces a document worth less than nothing beside a positive one. MetaKocka
+  validates almost nothing (section 3) and would accept it; the pair still sums
+  to the Shopify total, so no reconciliation check would notice either.
+- **Spec:** CLAUDE.md sections 8.6 and 11.
+- **Status:** fixed - `negativeShares` is pure and the writer refuses: an
+  exception naming each document and its amount, nothing sent. No arithmetic
+  rescues this case - spreading the discount is forbidden and moving it only
+  moves the negative - so a person decides.
+
+### [P1] recordExceptionAttempt was not shop-scoped
+- **Where:** `src/adapters/queue/redrive.server.ts`
+- **What:** `updateMany({ where: { id } })` with no tenant filter. Any
+  authenticated shop could increment the attempt count on another shop's
+  exception by guessing an id, writing into another tenant's audit trail.
+- **Spec:** CLAUDE.md section 9 ("every query filters by shop_id, enforced in
+  the repository layer so route code cannot forget").
+- **Status:** fixed - it takes the `Principal` its callers already hold.
+
+### [P1] A hand-made allocation could name another shop's supply source
+- **Where:** `src/adapters/db/repositories/order.server.ts` (`setManualAllocations`)
+- **What:** The order and its lines were scoped; `supplySourceId` came straight
+  off the form and was written unchecked. Only a forged post reaches it, and
+  what it bought was real: the order page joins the allocation to its source to
+  render the name, and the document writer reads that source's warehouse and
+  profit centre.
+- **Spec:** CLAUDE.md section 9.
+- **Status:** fixed - ownership is verified inside the transaction, with its
+  own error type so the route answers instead of returning a 500.
+
+### [P1] A truncated order read as an edited one
+- **Where:** `src/adapters/shopify/orders.ts`, `src/jobs/handlers/reconcile-orders.ts`
+- **What:** The reconciler read `lineItems(first: 100)` with no pagination, and
+  `syncOrderState` compares the payload against the stored order line by line.
+  Every line past the first page therefore read as **removed**: an untouched
+  B2B order would be rewritten without them, allocated again, and its MetaKocka
+  document reported as diverged.
+- **Spec:** CLAUDE.md sections 8.8 and 8.10.
+- **Status:** fixed - an order that reports more lines gets a follow-up read of
+  its own, bounded at twenty-five pages. Past that it is skipped whole rather
+  than applied in part, the watermark is held behind it, and Sentry hears about
+  it. One query for one over-long order is not a query in a loop (section 2.5);
+  asking for every order's lines separately would be.
+
+### [P2] Webhooks were registered against one Admin API version and read with another
+- **Where:** `shopify.app.toml`, `src/adapters/shopify/shopify.server.ts`
+- **What:** The toml said `2026-10`, a version the installed SDK does not have.
+  The client speaks `2026-07`, which is what every fixture and every section 7
+  verification was captured against.
+- **Spec:** CLAUDE.md section 2.1.5.
+- **Status:** fixed - the toml is corrected and
+  `tests/unit/api-version.test.ts` fails if the two drift again, since the toml
+  cannot import the constant.
+
+### [P2] A staff account got a 500 for asking whether MetaKocka was connected
+- **Where:** `app.products.sync`, `app.settings.payments`, `app.settings.supply-sources`
+- **What:** Three loaders called `getCredential`, which throws
+  `NotPermittedError` for anyone but the store owner, to answer a question that
+  needs no key: is this shop connected. The throw is right; unhandled in a
+  loader it is a broken page.
+- **Spec:** CLAUDE.md sections 9 and 2.8.
+- **Status:** fixed - `isConnected` for the loaders, `requireCredential` for
+  the five actions that genuinely need the key. The latter separates "not
+  permitted" from "not connected", because "connect MetaKocka first" is advice
+  a staff member cannot act on.
+
+### [P2] The MetaKocka webhook told a prober which shops exist
+- **Where:** `src/web/routes/webhooks.metakocka.$shop.stock.tsx`
+- **What:** "Not configured" and "Bad signature" were distinguishable 401s, so
+  the URL space could be walked to learn which shops are installed here and
+  which had finished configuring the webhook.
+- **Status:** fixed - one body for both. The reason stays in our own log, where
+  a support request can find it.
+
+### [P2] sync_stock failures were unclassified, and success was believed on a count
+- **Where:** `src/adapters/metakocka/sync-stock.ts`
+- **What:** No HTTP status classification, so an error page's body was read as
+  a result; `JSON.parse` of a non-JSON body escaped as a raw `SyntaxError`,
+  which pg-boss retried as though it were transient. And the response check
+  compared only the *number* of acknowledged lines, so a right-length list of
+  the wrong products passed.
+- **Spec:** CLAUDE.md sections 7 and 11.
+- **Status:** fixed - `classifyHttpStatus` as in `client.ts`, a typed error for
+  a body that is not JSON, and the echo checked by product code and amount. A
+  field MetaKocka simply omits is "could not tell" rather than a mismatch: the
+  alternative raises an exception on every successful write the moment
+  MetaKocka trims its response, and a queue of false alarms is a queue nobody
+  reads.
+
+### [P2] The retention job deleted the decision trail it promises to keep
+- **Where:** `src/jobs/handlers/redact-old-orders.ts`
+- **What:** Every key called `name` was blanked wherever it appeared, taking
+  `order.name` ("#1042"), every line item's product name and every MetaKocka
+  `product_list` name with it. Those are the decision trail, not the customer,
+  and the order screen and the diff both read them.
+- **Spec:** CLAUDE.md section 2.4 ("the audit log survives; the personal data
+  does not" - SKUs, quantities, sources, rule reasons, document ids).
+- **Status:** fixed - redaction is aware of where a field sits. A name in the
+  order itself or on a line is kept, a name anywhere else is blanked, and the
+  containers that actually hold a person are still blanked whole.
+
+### [P2] The shopper's browser and IP address were stored for ninety days
+- **Where:** `src/adapters/db/repositories/order.server.ts`
+- **What:** `raw_payload` is deliberately Shopify's whole record of the order,
+  which correctly includes fields outside today's diff - but `client_details`
+  (user agent, accept-language, session hash, IP) and `browser_ip` are read by
+  nothing, sent to nothing, and are personal data under the Level 2 approval.
+- **Spec:** CLAUDE.md section 2.4 ("do not store what we do not send").
+- **Status:** fixed - dropped at the three places a payload is written, so no
+  caller can forget. Orders stored before this are left as they were: the
+  retention job already covers both keys, and rewriting history to look tidier
+  would lose the record of what was actually received.
+
+### [P2] A redacted order did not look redacted, and settling it returned a 500
+- **Where:** `src/web/routes/app.orders.$orderId.tsx`
+- **What:** The screen tested for an absent payload, but the retention job
+  overwrites the personal fields in place and leaves the column there - so the
+  banner explaining the missing customer details never appeared. The
+  mark-sorted action then handed that payload to `parseOrder`, which throws on
+  the string "[redacted]": a 500 on the one button that settles a divergence.
+- **Status:** fixed - `redacted_at` is the fact, and the action uses
+  `parseOrderSafe` with a message saying the order is too old to compare.
+
+### [P3] Rounding was asymmetric across zero
+- **Where:** `src/domain/money/tax.ts`
+- **What:** `Math.round` breaks ties toward positive infinity, so the net of a
+  refunded gross was not the negation of the net of that gross. Phase 2 maps
+  refunds onto credit notes, where a cent of difference is a manual
+  reconciliation for a person.
+- **Status:** fixed - half-up away from zero, with the negative-zero case
+  normalised so it cannot differ under `Object.is`.
+
+### [P3] Two deterministic tie-breaks depended on the host's collation
+- **Where:** `src/domain/allocation/allocate.ts`, `src/domain/money/split.ts`
+- **What:** `localeCompare` decides by the runtime's collation rules, which
+  vary with the Node build, the ICU data and the host locale. In `domain/` that
+  chooses which source fills a line and which document carries the shipping
+  charge, so two servers running the same code could disagree and a retry that
+  landed on the other machine would move the money.
+- **Status:** fixed - `compareCodepoints` in `domain/types`: arbitrary, but the
+  same everywhere and forever. Display sorting still uses `localeCompare`.
+
+### [P3] An inventory batch was checked for one location and written for several
+- **Where:** `src/adapters/shopify/inventory.ts`
+- **What:** The one-writer rule is enforced once against `options.locationId`
+  while each item names its own, so a batch mixing locations would write every
+  item on the strength of a check covering one - including a partner or manual
+  location.
+- **Spec:** CLAUDE.md section 7 ("enforce in the inventory adapter: it throws").
+- **Status:** fixed - `writeOnHand` and `activateOnHand` both refuse such a
+  batch before calling Shopify.
+
+### [P3] One shop's failure silently ended the scheduled tick for every shop after it
+- **Where:** `src/jobs/handlers/scheduled-tick.ts`
+- **What:** The cron fan-out is a loop over tenants with no isolation. An
+  unhandled throw halfway down took every shop below it, and did so identically
+  on every subsequent tick.
+- **Status:** fixed - per-shop try/catch, reported to the log and to Sentry and
+  counted in the tick's own log line.
+
+### [P3] The document poller ran four times as often as section 8.11 asks
+- **Where:** `src/jobs/handlers/scheduled-tick.ts`, `src/jobs/worker.ts`
+- **What:** `poll-metakocka-documents` sat on the quarter-hourly tick. Section
+  8.11 says hourly, and every check is a round trip into a slow ERP for an
+  answer that only changes when a person does something by hand.
+- **Status:** fixed - its own hourly cadence, at seven minutes past so it does
+  not land on the quarter-hourly fan-out.
+
+### [P3] A queue with no producer, and a queue with no consumer
+- **Where:** `src/adapters/queue/queues.ts`
+- **What:** `orders-create` was registered and nothing sent to it or worked it.
+  `write-shopify-fulfilment` is worse in kind: `allocate-order` sends to it and
+  nothing works it, so every allocated order queues a job that will never run.
+- **Status:** partly fixed - `orders-create` removed.
+  `write-shopify-fulfilment` is a feature gap (section 8.3) rather than dead
+  wiring, so the enqueue stays and the queue gains an explicit seven-day
+  retention: an unconsumed job is archived instead of accumulating one row per
+  allocated order for ever. The feature itself is T-08.
+
+### Test coverage added
+The section 12 integration test now starts from a **recorded webhook payload on
+disk** (`tests/fixtures/shopify/orders_create_split.json`) and runs parse ->
+allocate -> split -> two request bodies asserted field by field. What nothing
+covered before was the seam between the parser's output and what the allocator
+and the money split consume; that is exactly where the presentment-currency bug
+lived.
+
+### Not attempted in this pass
+Everything under "Documented but unbuilt" in `docs/agent/NOT_DONE.md`, which is
+now T-07 to T-13 in `docs/agent/TODO-HUMAN.md`, plus the spec disagreements
+consolidated in `docs/agent/DRIFT.md`. None of it is a bug to fix quietly: each
+is either a missing feature that changes what a merchant sees, or a place where
+CLAUDE.md and the code disagree about what was decided.
