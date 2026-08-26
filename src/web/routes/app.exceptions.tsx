@@ -28,6 +28,7 @@ import { formatDateTime } from "~/web/lib/datetime";
 import {
   describeExceptionKind,
   EXCEPTIONS_PAGE_SIZE,
+  limitParamFor,
   parseExceptionsLimit,
 } from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -58,15 +59,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const principal = principalFromSession(session);
 
   const url = new URL(request.url);
-  const limit = parseExceptionsLimit(url.searchParams.get("limit"));
 
-  const [open, counts, resolved] = await Promise.all([
-    listExceptions(principal, { status: "open", limit }),
+  const [counts, resolved] = await Promise.all([
     countOpenExceptionsByKind(principal),
     listExceptions(principal, { status: "resolved", limit: 10 }),
   ]);
 
-  const shape = (rows: Awaited<ReturnType<typeof listExceptions>>) =>
+  const shape = (
+    rows: Awaited<ReturnType<typeof listOpenExceptionsByKind>>,
+  ) =>
     rows.map((row) => ({
       id: row.id,
       kind: row.kind,
@@ -83,42 +84,41 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }));
 
   /*
-   * Grouped by kind, because the guidance is per kind.
+   * Grouped by kind, because the guidance is per kind — and paged by kind too.
    *
-   * Flat, every row carried its own copy of "what to do about this" — and with
-   * four open exceptions, two of them the same kind, the page was already
-   * mostly repeated sentences. Grouping states each piece of advice once and
-   * leaves the rows to say only what is different about them: which order, and
-   * what exactly happened to it.
-   *
-   * The page only loads `limit` open rows, so a group's true size comes from
-   * `counts`, not from how many of its rows happened to load — otherwise a
-   * heading and a bulk-action label would understate a group the page hasn't
-   * fully paged in yet.
+   * A single limit across every kind, ordered by recency, meant a category
+   * with nothing recent in it simply never appeared: its rows existed but
+   * never made it into the shared top-N, and there was no "Load more" to find
+   * because the category itself was invisible. Every kind with at least one
+   * open exception gets its own section and its own `limit_<kind>` page size,
+   * so loading more of one never hides or resets another.
    */
-  const rows = shape(open);
-  const kinds = [...new Set(rows.map((row) => row.kind))];
-  const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
-
-  const groups = kinds
-    .map((kind) => ({
-      kind,
-      rows: rows.filter((row) => row.kind === kind),
-      count: counts.get(kind) ?? 0,
-      // Retrying a whole group only makes sense where a retry does something.
-      retryable: TARGET_FOR_KIND[kind] !== "none",
-    }))
+  const kinds = [...counts.keys()].sort(
     // Biggest first: the thing that has gone wrong most is the thing worth
     // dealing with first, and it is usually one fix for all of them.
-    .sort((a, b) => b.count - a.count);
+    (a, b) => (counts.get(b) ?? 0) - (counts.get(a) ?? 0),
+  );
 
-  return {
-    groups,
-    total,
-    limit,
-    hasMore: rows.length < total,
-    resolved: shape(resolved),
-  };
+  const groups = await Promise.all(
+    kinds.map(async (kind) => {
+      const limit = parseExceptionsLimit(url.searchParams.get(limitParamFor(kind)));
+      const rows = await listOpenExceptionsByKind(principal, kind, { limit });
+      const count = counts.get(kind) ?? 0;
+      return {
+        kind,
+        limit,
+        rows: shape(rows),
+        count,
+        hasMore: rows.length < count,
+        // Retrying a whole group only makes sense where a retry does something.
+        retryable: TARGET_FOR_KIND[kind] !== "none",
+      };
+    }),
+  );
+
+  const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
+
+  return { groups, total, resolved: shape(resolved) };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -135,7 +135,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return {
         ok: false,
         message:
-          "This exception is not attached to an order, so there is nothing to retry.",
+          "This issue is not attached to an order, so there is nothing to retry.",
       };
     }
 
@@ -162,7 +162,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ok: true,
       // Says what it is doing, not that it is doing something. A retry that
       // fails the same way is a fact worth being able to see.
-      message: `Retrying: ${queued.join(", ")}. This exception closes itself if it succeeds.`,
+      message: `Retrying: ${queued.join(", ")}. This closes itself if it succeeds.`,
     };
   }
 
@@ -196,7 +196,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       }
       return {
         ok: true,
-        message: `Marked ${mine.length} ${mine.length === 1 ? "exception" : "exceptions"} resolved.`,
+        message: `Marked ${mine.length} ${mine.length === 1 ? "issue" : "issues"} resolved.`,
       };
     }
 
@@ -251,14 +251,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Exceptions() {
-  const { groups, total, limit, hasMore, resolved } =
-    useLoaderData<typeof loader>();
+  const { groups, total, resolved } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
 
   return (
-    <s-page heading="Exceptions">
+    <s-page heading="Needs attention">
       <s-link slot="breadcrumb-actions" href="/app">
         Home
       </s-link>
@@ -314,10 +313,43 @@ export default function Exceptions() {
                 >
                   <s-stack direction="block" gap="base">
                     <s-text color="subdued">{copy.guidance}</s-text>
-                    {loaded < count ? (
-                      <s-text color="subdued">
-                        {`Showing ${loaded} of ${count}. Load more to see the rest.`}
-                      </s-text>
+                    {group.hasMore ? (
+                      <s-stack
+                        direction="inline"
+                        gap="small-300"
+                        alignItems="center"
+                      >
+                        <s-text color="subdued">
+                          {`Showing ${loaded} of ${count}.`}
+                        </s-text>
+                        {/*
+                         * Paging is per category: this form's hidden inputs
+                         * carry every other visible category's current limit
+                         * unchanged, so loading more of this one never resets
+                         * or hides another that the merchant already expanded.
+                         */}
+                        <Form method="get">
+                          {groups.map((g) => (
+                            <input
+                              key={g.kind}
+                              type="hidden"
+                              name={limitParamFor(g.kind)}
+                              value={
+                                g.kind === group.kind
+                                  ? group.limit + EXCEPTIONS_PAGE_SIZE
+                                  : g.limit
+                              }
+                            />
+                          ))}
+                          <s-button
+                            type="submit"
+                            variant="tertiary"
+                            {...(busy ? { disabled: true } : {})}
+                          >
+                            Load more
+                          </s-button>
+                        </Form>
+                      </s-stack>
                     ) : null}
 
                   {/*
@@ -510,23 +542,6 @@ export default function Exceptions() {
               </s-section>
               );
             })}
-
-            {hasMore ? (
-              <Form method="get">
-                <input
-                  type="hidden"
-                  name="limit"
-                  value={limit + EXCEPTIONS_PAGE_SIZE}
-                />
-                <s-button
-                  type="submit"
-                  variant="tertiary"
-                  {...(busy ? { disabled: true } : {})}
-                >
-                  Load more
-                </s-button>
-              </Form>
-            ) : null}
           </>
         )}
 

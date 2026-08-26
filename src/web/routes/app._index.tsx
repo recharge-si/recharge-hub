@@ -194,7 +194,7 @@ export default function Home() {
               .
             </s-paragraph>
             <s-link slot="primary-action" href="/app/exceptions">
-              Open the exceptions queue
+              Go to Needs attention
             </s-link>
           </s-banner>
         ) : null}
@@ -266,7 +266,7 @@ export default function Home() {
         </s-section>
 
         {openExceptionsByKind.length > 0 ? (
-          <s-section heading="Open exceptions by type">
+          <s-section heading="Needs attention by type">
             <s-stack direction="block" gap="small-300">
               {openExceptionsByKind.map((entry) => (
                 <s-grid

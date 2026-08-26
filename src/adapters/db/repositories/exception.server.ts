@@ -168,13 +168,18 @@ export async function countOpenExceptionsByKind(
 }
 
 /**
- * Every open exception of one kind, for a bulk "retry all"/"resolve all" —
- * deliberately not bounded by the page's small display limit, because "all"
- * has to mean all.
+ * Every open exception of one kind, most recent first.
+ *
+ * With no `limit`, this is deliberately unbounded — the bulk "retry all"/
+ * "resolve all" actions call it this way, because "all" has to mean all
+ * regardless of how many of that kind the display page has loaded. The
+ * display page itself passes its own per-category `limit` so each category
+ * pages independently of every other.
  */
 export async function listOpenExceptionsByKind(
   principal: Principal,
   kind: ExceptionKind,
+  options: { limit?: number } = {},
 ) {
   return prisma.exception.findMany({
     where: {
@@ -193,6 +198,7 @@ export async function listOpenExceptionsByKind(
       },
     },
     orderBy: { createdAt: "desc" },
+    ...(options.limit !== undefined ? { take: options.limit } : {}),
   });
 }
 

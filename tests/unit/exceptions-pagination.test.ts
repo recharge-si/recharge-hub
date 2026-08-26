@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   EXCEPTIONS_PAGE_SIZE,
+  limitParamFor,
   parseExceptionsLimit,
 } from "~/web/lib/exceptions";
 
@@ -22,5 +23,22 @@ describe("parseExceptionsLimit", () => {
 
   it("caps an absurd limit rather than loading everything", () => {
     expect(parseExceptionsLimit("999999")).toBeLessThan(999999);
+  });
+});
+
+describe("limitParamFor", () => {
+  it("gives each kind a distinct query parameter", () => {
+    // Paging is per category: two different kinds must never collide on the
+    // same query parameter, or loading more of one would silently page the
+    // other instead.
+    expect(limitParamFor("stock_sync_failed")).not.toBe(
+      limitParamFor("sku_not_in_metakocka"),
+    );
+  });
+
+  it("is stable for the same kind", () => {
+    expect(limitParamFor("stock_sync_failed")).toBe(
+      limitParamFor("stock_sync_failed"),
+    );
   });
 });

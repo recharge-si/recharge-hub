@@ -237,10 +237,10 @@ export default function Orders() {
             of them carries the shipping.
           </s-paragraph>
           <s-paragraph>
-            An order that needs attention has an open exception. Open it to see
+            An order that needs attention has an open issue. Open it to see
             what went wrong and what to do about it.
           </s-paragraph>
-          <s-link href="/app/exceptions">Go to Exceptions</s-link>
+          <s-link href="/app/exceptions">Go to Needs attention</s-link>
         </s-stack>
         <s-button
           slot="primary-action"
@@ -389,8 +389,8 @@ function OrderRow({ order }: { order: OrderRowData }) {
           {order.openExceptions > 0 && order.status !== "needs_attention" ? (
             <s-badge tone="critical">
               {order.openExceptions === 1
-                ? "1 exception"
-                : `${order.openExceptions} exceptions`}
+                ? "1 issue"
+                : `${order.openExceptions} issues`}
             </s-badge>
           ) : null}
         </s-stack>

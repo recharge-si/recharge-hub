@@ -141,8 +141,23 @@ export function describeExceptionKind(kind: string): ExceptionCopy {
   return COPY[kind] ?? FALLBACK;
 }
 
-/** How many open exceptions the page loads at once, and grows by on "Load more". */
+/** How many open exceptions one category loads at once, and grows by on "Load more". */
 export const EXCEPTIONS_PAGE_SIZE = 5;
+
+/**
+ * The `limit` query parameter for one category's own page, e.g.
+ * `limit_stock_sync_failed`.
+ *
+ * Paging is per category, not global: an early implementation loaded a single
+ * page across every kind ordered by recency, which meant a category with no
+ * exceptions in the last few minutes simply never appeared — its "Load more"
+ * was a button for a category the merchant could not see existed. Each
+ * category needs its own limit, carried in its own query parameter, so
+ * loading more of one never resets or hides another.
+ */
+export function limitParamFor(kind: string): string {
+  return `limit_${kind}`;
+}
 
 const MAX_EXCEPTIONS_LIMIT = 500;
 
