@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { parseOrder, parseOrderSafe } from "~/adapters/shopify/order-payload";
+import {
+  minimiseOrderPayload,
+  parseOrder,
+  parseOrderSafe,
+} from "~/adapters/shopify/order-payload";
 import { redactPayload } from "~/jobs/handlers/redact-old-orders";
 
 /**
@@ -302,6 +306,35 @@ describe("the retention job keeps the decision trail", () => {
   it("keeps the order identity, so the audit trail still resolves", () => {
     expect(redacted.id).toBe(5001);
     expect(redacted.order_number).toBe(1042);
+    // `name` used to be blanked wherever it appeared, which took the order's
+    // own number and every line's product name with it — the decision trail
+    // §2.4 promises to keep, and what the order screen reads.
+    expect(redacted.name).toBe("#1042");
+  });
+
+  it("keeps a name that is a product, not a person", () => {
+    const withNames = redactPayload({
+      name: "#1042",
+      line_items: [{ sku: "MAST-490", name: "Carbon mast - Blue", price: "1" }],
+      product_list: [{ code: "MAST-490", name: "Carbon mast" }],
+    }) as {
+      name: string;
+      line_items: { name: string }[];
+      product_list: { name: string }[];
+    };
+
+    expect(withNames.name).toBe("#1042");
+    expect(withNames.line_items[0]?.name).toBe("Carbon mast - Blue");
+    expect(withNames.product_list[0]?.name).toBe("Carbon mast");
+  });
+
+  it("still blanks a name that is a person", () => {
+    const nested = redactPayload({
+      fulfillments: [{ destination: { name: "Lojze Horvat", zip: "1000" } }],
+    }) as { fulfillments: { destination: { name: string } }[] };
+
+    // Not one of the containers blanked whole, so the field itself has to go.
+    expect(nested.fulfillments[0]?.destination.name).toBe("[redacted]");
   });
 
   it("is safe to run twice", () => {
@@ -330,5 +363,41 @@ describe("re-reading a stored payload", () => {
   it("still reads a payload that is intact", () => {
     expect(parseOrderSafe(PAYLOAD)?.orderNumber).toBe("1042");
     expect(parseOrderSafe(null)).toBeNull();
+  });
+});
+
+/*
+ * §2.4 data minimisation. `raw_payload` is deliberately Shopify's whole record
+ * of the order — trimming it to today's diff is what let an arriving address
+ * go unnoticed — but the shopper's browser is not part of that record.
+ */
+describe("what is not stored at all", () => {
+  it("drops the browser and the IP address", () => {
+    const stored = minimiseOrderPayload({
+      ...PAYLOAD,
+      browser_ip: "81.4.6.10",
+      client_details: {
+        browser_ip: "81.4.6.10",
+        user_agent: "Mozilla/5.0",
+        accept_language: "sl-SI",
+        session_hash: "abc",
+      },
+    }) as Record<string, unknown>;
+
+    expect(stored).not.toHaveProperty("browser_ip");
+    expect(stored).not.toHaveProperty("client_details");
+    expect(JSON.stringify(stored)).not.toContain("81.4.6.10");
+  });
+
+  it("keeps everything the app actually reads", () => {
+    const stored = minimiseOrderPayload(PAYLOAD);
+    expect(stored).toEqual(PAYLOAD);
+    // Nothing to remove means the same object, not a rebuilt copy.
+    expect(stored).toBe(PAYLOAD);
+  });
+
+  it("leaves a payload that is not an object alone", () => {
+    expect(minimiseOrderPayload(null)).toBeNull();
+    expect(minimiseOrderPayload("[redacted]")).toBe("[redacted]");
   });
 });

@@ -21,7 +21,6 @@ export const QUEUES = {
   reloadPaymentTypes: "reload-payment-types",
   reloadProfitCenters: "reload-profit-centers",
   reloadPricelists: "reload-pricelists",
-  ordersCreate: "orders-create",
   allocateOrder: "allocate-order",
   writeMetakockaOrder: "write-metakocka-order",
   writeShopifyFulfilment: "write-shopify-fulfilment",
@@ -117,16 +116,6 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryBackoff: true,
     expireInSeconds: 7200,
   },
-  // Order intake. The webhook already wrote the order row inside its own
-  // transaction, so this queue exists for the events that only raise an
-  // exception (refunds, cancellations, edits) and for re-parsing.
-  [QUEUES.ordersCreate]: {
-    deadLetter: DEAD_LETTER,
-    retryLimit: 5,
-    retryDelay: 30,
-    retryBackoff: true,
-    expireInSeconds: 300,
-  },
   [QUEUES.ordersEvent]: {
     deadLetter: DEAD_LETTER,
     retryLimit: 5,
@@ -202,12 +191,27 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     // taken over only once pg-boss has abandoned the job holding it.
     expireInSeconds: 300,
   },
+  /*
+   * §8.3 — moving and splitting Shopify fulfilment orders.
+   *
+   * **This queue has no consumer yet.** `allocate-order` sends to it and
+   * nothing works it, so the jobs sit in `created` for ever. That is a feature
+   * gap, recorded in docs/agent/TODO-HUMAN.md rather than quietly filled in:
+   * `fulfillmentOrderMove` and `fulfillmentOrderSplit` change what a merchant's
+   * staff see in the Shopify admin, and that is not a decision to make
+   * unattended.
+   *
+   * The explicit retention is what keeps the gap from also being a leak: an
+   * unconsumed job is archived after a week instead of accumulating one row
+   * per allocated order for ever. Remove it when the handler lands.
+   */
   [QUEUES.writeShopifyFulfilment]: {
     deadLetter: DEAD_LETTER,
     retryLimit: 4,
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 600,
+    retentionSeconds: 60 * 60 * 24 * 7,
   },
   // Small and cheap. Worth retrying a few times, never worth a human looking.
   [QUEUES.reloadWarehouses]: {

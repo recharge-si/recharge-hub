@@ -114,7 +114,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       shippingMinor: order.shippingMinor,
       discountMinor: order.discountMinor,
       receivedAt: order.receivedAt.toISOString(),
-      redacted: order.rawPayload === null,
+      // `redacted_at`, not an absent payload. The §2.4 job overwrites the
+      // personal fields in place and leaves the column there, so a redacted
+      // order looked un-redacted on this screen and the banner explaining why
+      // the customer details are missing never appeared.
+      redacted: order.redactedAt !== null,
       allocationLockedAt: order.allocationLockedAt?.toISOString() ?? null,
       lines: order.lines.map((line) => ({
         id: line.id,

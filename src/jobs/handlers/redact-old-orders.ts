@@ -41,7 +41,6 @@ const PII_KEYS = new Set([
   "phone",
   "first_name",
   "last_name",
-  "name",
   "customer",
   "address1",
   "address2",
@@ -65,26 +64,67 @@ const PII_KEYS = new Set([
 ]);
 
 /**
+ * Where a field called `name` is a thing rather than a person.
+ *
+ * `name` used to be blanked wherever it appeared, which took `order.name`
+ * ("#1042"), every line item's name ("Carbon mast - Blue") and every MetaKocka
+ * `product_list` name with it. None of those is personal data, all three are
+ * the decision trail §2.4 promises to keep, and the order screen and the diff
+ * both read them — so a redacted order stopped being able to say what was on
+ * it.
+ *
+ * A person's name is still blanked everywhere else, and the containers that
+ * actually hold one — `customer`, `billing_address`, `shipping_address` — are
+ * blanked whole rather than field by field, so nothing depends on this list
+ * being complete in the other direction.
+ *
+ * `null` is the payload's own root: the order object itself.
+ */
+const NAME_IS_NOT_A_PERSON: ReadonlySet<string | null> = new Set([
+  null,
+  "line_items",
+  "product_list",
+  "shipping_lines",
+  "tax_lines",
+  "discount_codes",
+  "attachment_list",
+]);
+
+function isPersonal(key: string, container: string | null): boolean {
+  if (key === "name") return !NAME_IS_NOT_A_PERSON.has(container);
+  return PII_KEYS.has(key);
+}
+
+/**
  * Walks a payload and blanks anything personal, keeping the structure so the
  * order page can still say what it always said about quantities and codes.
  *
  * `product_list`, `line_items` and their SKUs are untouched by design: they are
  * the decision trail, not the customer.
+ *
+ * `container` is the key this value was found under — the enclosing array's
+ * key for an array entry — which is how a name can be judged by where it is
+ * rather than by what it is called.
  */
-export function redactPayload(value: unknown, depth = 0): unknown {
+export function redactPayload(
+  value: unknown,
+  depth = 0,
+  container: string | null = null,
+): unknown {
   if (depth > 12) return value;
   if (Array.isArray(value)) {
-    return value.map((entry) => redactPayload(entry, depth + 1));
+    // An entry keeps its array's key: a line item is still "in line_items".
+    return value.map((entry) => redactPayload(entry, depth + 1, container));
   }
   if (value === null || typeof value !== "object") return value;
 
   const out: Record<string, unknown> = {};
   for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
-    if (PII_KEYS.has(key)) {
+    if (isPersonal(key, container)) {
       out[key] = entry === null || entry === undefined ? entry : "[redacted]";
       continue;
     }
-    out[key] = redactPayload(entry, depth + 1);
+    out[key] = redactPayload(entry, depth + 1, key);
   }
   return out;
 }

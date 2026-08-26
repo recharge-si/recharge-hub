@@ -188,6 +188,20 @@ async function main(): Promise<void> {
     { key: "quarter_hourly" },
   );
 
+  /*
+   * Hourly: reading this app's own MetaKocka documents back (§8.11).
+   *
+   * At seven minutes past rather than on the hour, so it does not land on the
+   * same tick as the quarter-hourly fan-out and ask a slow ERP for everything
+   * at once.
+   */
+  await boss.schedule(
+    QUEUES.scheduledTick,
+    "7 * * * *",
+    { cadence: "hourly" },
+    { key: "hourly" },
+  );
+
   // Nightly work: the section 2.4 retention promise, kept at a quiet hour.
   await boss.schedule(
     QUEUES.scheduledTick,

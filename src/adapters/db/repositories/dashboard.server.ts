@@ -95,6 +95,11 @@ export async function getDashboard(
     prisma.order.count({
       where: {
         shop: { domain },
+        // Deleted orders are excluded here as they are from every other figure
+        // on this page. Without it "received today" and "allocated today"
+        // counted different populations, so an order deleted in Shopify after
+        // it was allocated made the second number larger than the first.
+        shopifyDeletedAt: null,
         receivedAt: { gte: today },
         status: { in: ["allocated", "written"] },
       },

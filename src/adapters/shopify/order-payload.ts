@@ -503,3 +503,41 @@ export function parseOrderSafe(payload: unknown): ParsedOrder | null {
   if (!parsed.success) return null;
   return parseOrder(payload);
 }
+
+/**
+ * Fields dropped from an order payload before it is stored.
+ *
+ * §2.4 is data minimisation: only what is needed to build a MetaKocka partner
+ * and receiver, and nothing stored that is not sent. `order.raw_payload` is
+ * deliberately Shopify's whole record — the document writer, the partner
+ * resolver and the tax re-derivation all read it, and a payload trimmed to
+ * today's diff goes stale permanently — but these are not part of that record.
+ *
+ * `client_details` is the shopper's browser: user agent, accept-language,
+ * session hash and their IP address again. `browser_ip` is the IP on its own.
+ * Nothing in this app has ever read either, none of it reaches MetaKocka, and
+ * both are personal data in their own right under the Level 2 approval. So
+ * they are dropped at the boundary rather than kept for ninety days and then
+ * redacted.
+ */
+const NOT_STORED = ["client_details", "browser_ip"] as const;
+
+/**
+ * An order payload with the fields this app has no business keeping removed.
+ *
+ * Applied where the payload is written, not where it is read, so an order
+ * stored before this existed is left exactly as it was — the retention job
+ * already covers those two keys, and rewriting history to look tidier would
+ * lose the record of what was actually received.
+ */
+export function minimiseOrderPayload(payload: unknown): unknown {
+  if (payload === null || typeof payload !== "object") return payload;
+  if (Array.isArray(payload)) return payload;
+
+  const record = payload as Record<string, unknown>;
+  if (!NOT_STORED.some((key) => key in record)) return payload;
+
+  const out: Record<string, unknown> = { ...record };
+  for (const key of NOT_STORED) delete out[key];
+  return out;
+}

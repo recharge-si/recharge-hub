@@ -5,6 +5,7 @@ import { VALIDATION_REJECTION_CODES } from "~/adapters/metakocka/errors";
 import { enqueueInTransaction } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import {
+  minimiseOrderPayload,
   parseOrderSafe,
   type ParsedOrder,
 } from "~/adapters/shopify/order-payload";
@@ -87,7 +88,9 @@ export async function saveIncomingOrder(
         totalMinor: parsed.totalMinor,
         shippingMinor: parsed.shippingMinor,
         discountMinor: parsed.discountMinor,
-        rawPayload: rawPayload as Prisma.InputJsonValue,
+        // §2.4 minimisation happens here, at the one boundary every stored
+        // payload passes through, rather than in each caller.
+        rawPayload: minimiseOrderPayload(rawPayload) as Prisma.InputJsonValue,
         receivedAt: new Date(),
         shopifyUpdatedAt: parsed.updatedAt,
         lastSyncedAt: new Date(),
@@ -767,7 +770,11 @@ export async function applyOrderSync(
          */
         ...(order.redactedAt
           ? {}
-          : { rawPayload: input.rawPayload as Prisma.InputJsonValue }),
+          : {
+              rawPayload: minimiseOrderPayload(
+                input.rawPayload,
+              ) as Prisma.InputJsonValue,
+            }),
       },
     });
   });
@@ -812,7 +819,11 @@ export async function touchOrderSync(
       // Never over a redacted order: §2.4 promised those details are gone, and
       // writing them back would make `redacted_at` a lie.
       ...(rawPayload !== undefined && !order.redactedAt
-        ? { rawPayload: rawPayload as Prisma.InputJsonValue }
+        ? {
+            rawPayload: minimiseOrderPayload(
+              rawPayload,
+            ) as Prisma.InputJsonValue,
+          }
         : {}),
     },
   });
