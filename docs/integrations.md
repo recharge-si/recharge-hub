@@ -24,6 +24,29 @@ Missing directions and product decisions are tracked in
 
 ## Shopify
 
+### Access scopes the connector actually needs
+
+| Scope | Why |
+| ----- | --- |
+| `read_orders` | The whole Shopify-to-MetaKocka direction: orders, line items, transactions. |
+| `read_locations` | Resolving a fulfilment order's location to a supply source. |
+| `read_merchant_managed_fulfillment_orders` | Which location each line ships from, which is what drives the warehouse split. |
+| `read_products`, `read_inventory` | The SKU registry and stock levels. |
+| `write_inventory` | Writing MetaKocka stock into Shopify for `mk_to_shopify` locations. |
+| `write_products` | Merchant-enabled MetaKocka product-name and product-creation sync. Off by default. |
+
+**`write_orders` is deliberately not requested.** Synchronising Shopify into
+MetaKocka never writes to a Shopify order, so asking for it would be permission
+the connector does not use — and every scope is something a merchant has to
+consent to. The consequence is that order edits and payments cannot be created
+from here, including for testing; the manual procedure in
+`docs/development.md` covers those instead.
+
+`write_merchant_managed_fulfillment_orders` is currently requested and its
+feature (moving/splitting fulfilment orders, T-08) is not built. It is also what
+made the location-move end-to-end test possible. Decide before App Store review:
+either build T-08 or drop the scope (see T-07).
+
 ### Configuration and authentication
 
 - `shopify.app.toml` is the single Partner-app configuration and webhook source.

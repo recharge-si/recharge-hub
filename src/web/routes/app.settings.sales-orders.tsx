@@ -15,6 +15,9 @@ import {
   saveSalesOrderSettings,
   type SalesOrderSettings,
 } from "~/adapters/db/repositories/sales-order-setting.server";
+import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import { MetakockaClient } from "~/adapters/metakocka/client";
+import { findProductByCode } from "~/adapters/metakocka/stock";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
@@ -124,6 +127,51 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
   }
 
+  const shippingProductCode =
+    String(formData.get("shippingProductCode") ?? "").trim() || null;
+
+  /*
+   * A shipping article is checked against MetaKocka before it is saved.
+   *
+   * This is the one place a merchant hands the app a MetaKocka code by hand,
+   * and a code that does not exist there is refused on the next order as a
+   * rejected sales order — a puzzle, hours later, about an order that looked
+   * fine. Checking here turns it into a sentence under the field. It is also
+   * one of the few merchant-initiated actions allowed to wait on MetaKocka
+   * (§2.5 forbids it on *page loads*, not on an explicit save).
+   */
+  if (shippingProductCode) {
+    const credential = await getCredential(principal);
+    if (!credential) {
+      return {
+        ok: false,
+        message:
+          "Nothing was saved: MetaKocka is not connected, so the shipping product could not be checked. Add the credentials on the Connection page first.",
+      };
+    }
+
+    try {
+      const found = await findProductByCode(
+        new MetakockaClient({
+          companyId: credential.companyId,
+          secretKey: credential.secretKey,
+        }),
+        shippingProductCode,
+      );
+      if (!found) {
+        return {
+          ok: false,
+          message: `Nothing was saved: MetaKocka has no product with the code "${shippingProductCode}". Create the article there first — this app never creates one from an order line.`,
+        };
+      }
+    } catch (error) {
+      return {
+        ok: false,
+        message: `Nothing was saved: MetaKocka could not be reached to check the shipping product. ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+  }
+
   const settings: SalesOrderSettings = {
     updateOnChange,
     // Meaningless on its own, and storing it as true while updates are off
@@ -140,6 +188,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     syncPayments: formData.get("syncPayments") === "on",
     paymentAllocation: readAllocation(formData.get("paymentAllocation")),
     paymentEntryMode: readEntryMode(formData.get("paymentEntryMode")),
+    shippingProductCode,
+    discountRepresentation:
+      formData.get("discountRepresentation") === "document_discount_value"
+        ? "document_discount_value"
+        : "none",
   };
 
   await saveSalesOrderSettings(principal, settings);
@@ -162,8 +215,8 @@ export default function OrderSyncSettings() {
 
   const [form, setForm] = useState({
     ...settings,
-    customerOrderTemplate:
-      settings.customerOrderTemplate ?? "",
+    customerOrderTemplate: settings.customerOrderTemplate ?? "",
+    shippingProductCode: settings.shippingProductCode ?? "",
   });
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
@@ -177,7 +230,9 @@ export default function OrderSyncSettings() {
     form.obsoleteDocumentPolicy !== settings.obsoleteDocumentPolicy ||
     form.syncPayments !== settings.syncPayments ||
     form.paymentAllocation !== settings.paymentAllocation ||
-    form.paymentEntryMode !== settings.paymentEntryMode;
+    form.paymentEntryMode !== settings.paymentEntryMode ||
+    form.shippingProductCode !== (settings.shippingProductCode ?? "") ||
+    form.discountRepresentation !== settings.discountRepresentation;
 
   const badFields = unknownPlaceholders(form.customerOrderTemplate);
 
@@ -224,6 +279,8 @@ export default function OrderSyncSettings() {
         syncPayments: form.syncPayments ? "on" : "",
         paymentAllocation: form.paymentAllocation,
         paymentEntryMode: form.paymentEntryMode,
+        shippingProductCode: form.shippingProductCode,
+        discountRepresentation: form.discountRepresentation,
       },
       { method: "post" },
     );
@@ -232,6 +289,7 @@ export default function OrderSyncSettings() {
     setForm({
       ...settings,
       customerOrderTemplate: settings.customerOrderTemplate ?? "",
+      shippingProductCode: settings.shippingProductCode ?? "",
     });
 
   return (
@@ -545,6 +603,77 @@ export default function OrderSyncSettings() {
         </s-modal>
 
         {/* ------------------------------------------------------------- */}
+        <s-section heading="Shipping and discounts">
+          <s-stack direction="block" gap="base">
+            <s-paragraph>
+              MetaKocka sales orders carry products. Shipping and discounts are
+              not products, so each needs somewhere to go before the sales order
+              can add up to what the customer was charged.
+            </s-paragraph>
+
+            <s-text-field
+              name="shippingProductCode"
+              label="Shipping product code"
+              value={form.shippingProductCode}
+              placeholder="e.g. SHIPPING"
+              details="The MetaKocka article a shipping charge is written against. It is checked against MetaKocka when you save; this app never creates one."
+              onChange={(event) =>
+                set("shippingProductCode", event.currentTarget.value)
+              }
+            />
+
+            <s-choice-list
+              name="discountRepresentation"
+              label="Discounts"
+              values={[form.discountRepresentation]}
+              onChange={(event) =>
+                set(
+                  "discountRepresentation",
+                  event.currentTarget.values[0] === "document_discount_value"
+                    ? "document_discount_value"
+                    : "none",
+                )
+              }
+            >
+              <s-choice value="document_discount_value">
+                Write the discount on the sales order
+                <s-text slot="details">
+                  Uses MetaKocka&rsquo;s own discount field, as an amount. It
+                  comes off the document total, so the sales order matches what
+                  the customer paid.
+                </s-text>
+              </s-choice>
+              <s-choice value="none">
+                Do not write discounts
+                <s-text slot="details">
+                  The sales order shows the goods at full price. An order with a
+                  discount is reported as needing attention, because MetaKocka
+                  will not match what the customer was charged.
+                </s-text>
+              </s-choice>
+            </s-choice-list>
+
+            {form.shippingProductCode.trim() === "" ||
+            form.discountRepresentation === "none" ? (
+              <s-banner tone="warning" heading="Orders will be reported as not fully reconciled">
+                <s-paragraph>
+                  {form.shippingProductCode.trim() === "" &&
+                  form.discountRepresentation === "none"
+                    ? "Shipping and discounts have nowhere to go."
+                    : form.shippingProductCode.trim() === ""
+                      ? "Shipping has nowhere to go."
+                      : "Discounts have nowhere to go."}{" "}
+                  An order carrying one is still sent — the goods are right —
+                  but MetaKocka will be short by that amount, and the order is
+                  reported rather than counted as reconciled. Nothing is
+                  guessed.
+                </s-paragraph>
+              </s-banner>
+            ) : null}
+          </s-stack>
+        </s-section>
+
+        {/* ------------------------------------------------------------- */}
         <s-section heading="Payments">
           <s-stack direction="block" gap="base">
             <s-stack direction="block" gap="small-400">
@@ -664,6 +793,11 @@ export default function OrderSyncSettings() {
             <s-list-item>
               A payment type is never guessed, and a card authorisation is never
               treated as money received.
+            </s-list-item>
+            <s-list-item>
+              A shipping or discount article is never invented in MetaKocka. If
+              one is not configured, the order is reported rather than sent with
+              money missing and no mention of it.
             </s-list-item>
           </s-unordered-list>
         </s-section>

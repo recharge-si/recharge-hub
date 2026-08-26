@@ -177,6 +177,25 @@ export interface ValueReconciliation {
   /** Value of quantity fulfilled outside MetaKocka. */
   externalValueMinor: number;
 
+  /** What the documents actually carry as shipping, read back from them. */
+  representedShippingMinor: number;
+  /** What the documents actually carry as a discount. */
+  representedDiscountMinor: number;
+  /** `shipping - representedShipping`. Shipping the ERP does not show. */
+  unrepresentedShippingMinor: number;
+  /** `discount - representedDiscount`. */
+  unrepresentedDiscountMinor: number;
+  /**
+   * Money the merchant has not yet told this app how to represent.
+   *
+   * Kept apart from `documentDriftMinor` because the two need different
+   * answers. Drift means the documents do not hold what this app sent, which is
+   * a fault. This means the app was never configured to send it, which is a
+   * settings decision — so it does not make the order *inconsistent*, it makes
+   * it *blocked*, and the caller raises `commercial_representation_missing`.
+   */
+  representationGapMinor: number;
+
   /** The order total reconstructed from every named part. */
   explainedMinor: number;
   /** `orderTotal - explained`. Anything here is genuinely unaccounted for. */
@@ -221,11 +240,40 @@ export function reconcileValue(input: {
   orderDiscountMinor: number;
   shippingMinor: number;
   externalValueMinor: number;
+  /** What the documents actually carry as shipping. Zero when unconfigured. */
+  representedShippingMinor?: number;
+  /** What the documents actually carry as a discount. */
+  representedDiscountMinor?: number;
+  /** Whether the merchant has configured a shipping representation at all. */
+  shippingConfigured?: boolean;
+  /** Whether the merchant has configured a discount representation at all. */
+  discountConfigured?: boolean;
   toleranceMinor?: number;
 }): ValueReconciliation {
   const tolerance = input.toleranceMinor ?? DEFAULT_VALUE_TOLERANCE_MINOR;
 
-  const documentDriftMinor = input.documentsMinor - input.productsExpectedMinor;
+  const representedShippingMinor = input.representedShippingMinor ?? 0;
+  const representedDiscountMinor = input.representedDiscountMinor ?? 0;
+
+  /*
+   * What the documents were *meant* to carry, which is not the same as what
+   * the order contains: a shipping charge with no configured article was never
+   * going to be on them, and calling that drift would blame the documents for
+   * a decision nobody has made yet.
+   */
+  const expectedShipping = input.shippingConfigured ? input.shippingMinor : 0;
+  const expectedDiscount = input.discountConfigured
+    ? input.orderDiscountMinor
+    : 0;
+
+  const documentDriftMinor =
+    input.documentsMinor +
+    representedShippingMinor -
+    representedDiscountMinor -
+    (input.productsExpectedMinor + expectedShipping - expectedDiscount);
+
+  const representationGapMinor =
+    input.shippingMinor - expectedShipping + (input.orderDiscountMinor - expectedDiscount);
 
   const explainedMinor =
     input.productsExpectedMinor -
@@ -248,6 +296,12 @@ export function reconcileValue(input: {
     orderDiscountMinor: input.orderDiscountMinor,
     shippingMinor: input.shippingMinor,
     externalValueMinor: input.externalValueMinor,
+    representedShippingMinor,
+    representedDiscountMinor,
+    unrepresentedShippingMinor: input.shippingMinor - representedShippingMinor,
+    unrepresentedDiscountMinor:
+      input.orderDiscountMinor - representedDiscountMinor,
+    representationGapMinor,
     explainedMinor,
     unexplainedMinor,
     toleranceMinor: tolerance,
@@ -267,10 +321,18 @@ export function describeValueReconciliation(
     lines.push(`Line discounts not represented: ${money(value.lineDiscountMinor)}.`);
   }
   if (value.orderDiscountMinor !== 0) {
-    lines.push(`Order discount not represented: ${money(value.orderDiscountMinor)}.`);
+    lines.push(
+      value.unrepresentedDiscountMinor === 0
+        ? `Order discount represented in MetaKocka: ${money(value.representedDiscountMinor)}.`
+        : `Order discount not represented: ${money(value.unrepresentedDiscountMinor)} of ${money(value.orderDiscountMinor)}.`,
+    );
   }
   if (value.shippingMinor !== 0) {
-    lines.push(`Shipping not represented: ${money(value.shippingMinor)}.`);
+    lines.push(
+      value.unrepresentedShippingMinor === 0
+        ? `Shipping represented in MetaKocka: ${money(value.representedShippingMinor)}.`
+        : `Shipping not represented: ${money(value.unrepresentedShippingMinor)} of ${money(value.shippingMinor)}.`,
+    );
   }
   if (value.externalValueMinor !== 0) {
     lines.push(

@@ -164,8 +164,22 @@ describe("verifying a whole order", () => {
     expect(result.ok).toBe(true);
     expect(result.quantities.actualTotal).toBe(5);
     expect(result.documents).toEqual([
-      { countCode: "SH-1050-A", retired: false, quantity: 2, valueMinor: 20_000 },
-      { countCode: "SH-1050-B", retired: false, quantity: 3, valueMinor: 30_000 },
+      {
+        countCode: "SH-1050-A",
+        retired: false,
+        quantity: 2,
+        valueMinor: 20_000,
+        shippingMinor: 0,
+        discountMinor: 0,
+      },
+      {
+        countCode: "SH-1050-B",
+        retired: false,
+        quantity: 3,
+        valueMinor: 30_000,
+        shippingMinor: 0,
+        discountMinor: 0,
+      },
     ]);
   });
 

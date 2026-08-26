@@ -209,6 +209,8 @@ export async function writeMetakockaOrderFor(
    * before the call so the merchant is told which SKU is missing rather than
    * reading a rejection.
    */
+  const salesOrderSettings = await getSalesOrderSettings(principal);
+
   const matched = await prisma.sku.findMany({
     where: {
       shop: { domain: shopDomainOf(principal) },
@@ -496,6 +498,47 @@ export async function writeMetakockaOrderFor(
     parsed,
   });
 
+  /*
+   * The non-product money this document carries.
+   *
+   * `share` is this document's slice of the order's shipping and discount,
+   * spread by merchandise value so the parts sum to the charge exactly once
+   * across every document (`domain/money/split`). A document with no share of
+   * a charge sends nothing for it, which is what stops a retired document
+   * keeping stale postage.
+   *
+   * Neither is guessed. Shipping needs a product code the merchant has named
+   * and a discount needs a mechanism they have chosen; without those the
+   * reconciler has already raised `commercial_representation_missing` and this
+   * simply sends the merchandise, so the order is short in a way that is
+   * reported rather than silent.
+   */
+  const shippingMinor = share?.shippingMinor ?? 0;
+  const discountMinor = share?.discountMinor ?? 0;
+
+  const shippingLine =
+    shippingMinor > 0 && salesOrderSettings.shippingProductCode
+      ? {
+          code: salesOrderSettings.shippingProductCode,
+          amountMinor: shippingMinor,
+          /*
+           * Taxed at the order's prevailing rate rather than at a rate of our
+           * own. MetaKocka refuses a line with no tax attribute, and the
+           * shipping article's own rate is not something this app can read.
+           */
+          taxFactor:
+            perSourceLines.length > 0
+              ? taxFactorFor(perSourceLines[0]!.line)
+              : defaultTaxFactor,
+        }
+      : null;
+
+  const discountValueMinor =
+    discountMinor > 0 &&
+    salesOrderSettings.discountRepresentation === "document_discount_value"
+      ? discountMinor
+      : null;
+
   const salesOrder: SalesOrderInput = {
     countCode,
     // §3, verified: `buyer_order` is what links sibling documents.
@@ -516,6 +559,8 @@ export async function writeMetakockaOrderFor(
     profitCenter: source.metakockaProfitCenter,
     deliveryType: source.defaultDeliveryType,
     notes: isPrimary && parsed?.note ? parsed.note : null,
+    shippingLine,
+    discountValueMinor,
     ...(desiredPayment.kind === "ledger"
       ? { payments: desiredPayment.payments }
       : { markPaid: desiredPayment.payment }),
@@ -590,7 +635,7 @@ export async function writeMetakockaOrderFor(
       return;
     }
 
-    const settings = await getSalesOrderSettings(principal);
+    const settings = salesOrderSettings;
 
     /*
      * Only the payments moved.

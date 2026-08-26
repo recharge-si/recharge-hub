@@ -157,11 +157,22 @@ describe("an order webhook becomes two MetaKocka sales orders", () => {
     discountMinor: order.discountMinor,
   });
 
-  it("puts the shipping on the primary document and only there (§8.6)", () => {
+  it("spreads the shipping by merchandise value, charging it once (§8.6)", () => {
+    /*
+     * Once the whole postage sat on the primary document. It is now spread by
+     * what each document is worth, so a warehouse carrying a third of the order
+     * carries a third of the postage — and the property that always mattered is
+     * unchanged and asserted here: charged **once** across the ERP.
+     */
     const primary = shares.find((share) => share.isPrimary)!;
     expect(primary.sourceCode).toBe("GLAVNO");
-    expect(primary.shippingMinor).toBe(499);
-    expect(shares.find((share) => !share.isPrimary)?.shippingMinor).toBe(0);
+
+    const total = shares.reduce((sum, share) => sum + share.shippingMinor, 0);
+    expect(total).toBe(499);
+    // The bigger document carries the bigger share.
+    expect(primary.shippingMinor).toBeGreaterThan(
+      shares.find((share) => !share.isPrimary)!.shippingMinor,
+    );
   });
 
   it("the two documents sum to the Shopify total, to the cent", () => {

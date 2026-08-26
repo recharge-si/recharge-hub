@@ -88,11 +88,17 @@ describe("the section 13 demo, end to end through the pure layers", () => {
     discountMinor: 0,
   });
 
-  it("makes the larger document primary and gives it the shipping", () => {
+  it("makes the larger document primary and spreads the shipping once", () => {
     const primary = shares.find((share) => share.isPrimary)!;
     expect(primary.sourceId).toBe("own-1");
-    expect(primary.shippingMinor).toBe(shippingMinor);
-    expect(shares.find((s) => !s.isPrimary)?.shippingMinor).toBe(0);
+
+    // Spread by merchandise value rather than heaped on the primary, and still
+    // charged exactly once across the two documents.
+    const total = shares.reduce((sum, share) => sum + share.shippingMinor, 0);
+    expect(total).toBe(shippingMinor);
+    expect(primary.shippingMinor).toBeGreaterThan(
+      shares.find((s) => !s.isPrimary)!.shippingMinor,
+    );
   });
 
   it("the two documents sum to the Shopify total exactly", () => {

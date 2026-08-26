@@ -1243,6 +1243,10 @@ enum ExceptionKind {
   /// A background job ran out of retries. Raised from the dead-letter queue so
   /// work stopping is something a merchant can see, not a log line.
   job_failed
+  /// The order carries money - shipping, a discount - that has no configured
+  /// MetaKocka representation, so the sales order cannot account for the whole
+  /// commercial total. A settings decision, not a failure.
+  commercial_representation_missing
   /// The quantity or value invariant is broken: what MetaKocka holds for this
   /// order is not what Shopify says it should. Deliberately its own kind
   /// rather than an `order_diverged`, because the response is different —
@@ -1378,12 +1382,40 @@ model SalesOrderSetting {
   paymentAllocation PaymentAllocationStrategy @default(proportional) @map("payment_allocation")
   paymentEntryMode  PaymentEntryMode          @default(per_transaction) @map("payment_entry_mode")
 
+  /// The MetaKocka product code a shipping charge is written against.
+  ///
+  /// Merchant-supplied, never derived: it is an article in their own catalogue
+  /// and only they know which one their accountant expects postage on. Null
+  /// means shipping has no representation, and an order that carries shipping
+  /// is then reported rather than quietly sent short.
+  shippingProductCode String? @map("shipping_product_code")
+
+  /// How a discount is written. See `DiscountRepresentation`.
+  discountRepresentation DiscountRepresentation @default(none) @map("discount_representation")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("sales_order_setting")
+}
+
+/// How Shopify's non-product money reaches a MetaKocka sales order.
+///
+/// Verified live on 2026-08-26 (docs/metakocka-verification.md): an extra
+/// positive line adds to `sum_all` exactly, so shipping is a line; the
+/// document-level `discount_value` is an **absolute amount**, which is exactly
+/// what Shopify supplies, while the per-line `discount` is a **percentage** and
+/// would need a conversion this app has no authority to invent.
+enum DiscountRepresentation {
+  /// Not configured. An order carrying a discount is reported rather than
+  /// silently sent without one.
+  none
+  /// The document's `discount_value`, as an absolute amount.
+  document_discount_value
+
+  @@map("discount_representation")
 }
 
 /// Shop-level payment settings (docs/BUILD_SPEC.md section 8.7).

@@ -78,7 +78,14 @@ describe("choosing the primary document", () => {
 });
 
 describe("shipping and discounts", () => {
-  it("puts shipping on the primary document only", () => {
+  it("spreads shipping by merchandise value, summing to the charge exactly", () => {
+    /*
+     * Shipping used to sit entirely on the primary document. It never
+     * duplicated — which is the property that actually matters — but it put the
+     * whole postage of a split order on whichever warehouse happened to hold
+     * the most. Spread by value, a document's non-product money matches the
+     * trade it carries.
+     */
     const shares = splitOrderMoney({
       perSource: [
         part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 3000 }),
@@ -89,15 +96,85 @@ describe("shipping and discounts", () => {
       discountMinor: 0,
     });
 
-    const primary = shares.find((s) => s.isPrimary)!;
-    const other = shares.find((s) => !s.isPrimary)!;
+    const a = shares.find((s) => s.sourceCode === "A")!;
+    const b = shares.find((s) => s.sourceCode === "B")!;
 
-    expect(primary.shippingMinor).toBe(500);
-    expect(other.shippingMinor).toBe(0);
+    // 3:1 by value.
+    expect(a.shippingMinor).toBe(375);
+    expect(b.shippingMinor).toBe(125);
+    // The one thing that must never change: charged once, in total.
+    expect(a.shippingMinor + b.shippingMinor).toBe(500);
     expect(sum(shares)).toBe(4500);
   });
 
-  it("puts an order-level discount on the primary document only", () => {
+  it("matches the brief's worked example", () => {
+    // A 100 / B 200 merchandise, 15 shipping, 30 discount => A 5/10, B 10/20.
+    const shares = splitOrderMoney({
+      perSource: [
+        part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 10_000 }),
+        part({ sourceId: "b", sourceCode: "B", lineTotalMinor: 20_000 }),
+      ],
+      orderTotalMinor: 28_500,
+      shippingMinor: 1_500,
+      discountMinor: 3_000,
+    });
+
+    const a = shares.find((s) => s.sourceCode === "A")!;
+    const b = shares.find((s) => s.sourceCode === "B")!;
+
+    expect(a.shippingMinor).toBe(500);
+    expect(b.shippingMinor).toBe(1_000);
+    expect(a.discountMinor).toBe(1_000);
+    expect(b.discountMinor).toBe(2_000);
+    expect(sum(shares)).toBe(28_500);
+  });
+
+  it("allocates an awkward remainder exactly once, deterministically", () => {
+    const build = (order: "ab" | "ba") => {
+      const a = part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 1000 });
+      const b = part({ sourceId: "b", sourceCode: "B", lineTotalMinor: 1000 });
+      const c = part({ sourceId: "c", sourceCode: "C", lineTotalMinor: 1000 });
+      return splitOrderMoney({
+        perSource: order === "ab" ? [a, b, c] : [c, b, a],
+        orderTotalMinor: 3100,
+        shippingMinor: 100,
+        discountMinor: 0,
+      });
+    };
+
+    const forwards = build("ab");
+    const backwards = build("ba");
+
+    // 100 over three equal parts: 34/33/33 in some order, and the same order
+    // however the caller happened to arrange the array.
+    expect(
+      forwards.reduce((total, share) => total + share.shippingMinor, 0),
+    ).toBe(100);
+    for (const code of ["A", "B", "C"]) {
+      expect(forwards.find((s) => s.sourceCode === code)!.shippingMinor).toBe(
+        backwards.find((s) => s.sourceCode === code)!.shippingMinor,
+      );
+    }
+  });
+
+  it("puts a charge on the primary when every document is worth nothing", () => {
+    const shares = splitOrderMoney({
+      perSource: [
+        part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 0 }),
+        part({ sourceId: "b", sourceCode: "B", lineTotalMinor: 0 }),
+      ],
+      orderTotalMinor: 500,
+      shippingMinor: 500,
+      discountMinor: 0,
+    });
+
+    expect(
+      shares.reduce((total, share) => total + share.shippingMinor, 0),
+    ).toBe(500);
+    expect(shares.find((s) => s.isPrimary)!.shippingMinor).toBe(500);
+  });
+
+  it("spreads an order-level discount the same way", () => {
     const shares = splitOrderMoney({
       perSource: [
         part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 3000 }),
@@ -108,9 +185,14 @@ describe("shipping and discounts", () => {
       discountMinor: 400,
     });
 
-    const primary = shares.find((s) => s.isPrimary)!;
-    expect(primary.discountMinor).toBe(400);
-    expect(primary.totalMinor).toBe(2600);
+    const a = shares.find((s) => s.sourceCode === "A")!;
+    const b = shares.find((s) => s.sourceCode === "B")!;
+
+    // 3:1 by value, and deducted once in total.
+    expect(a.discountMinor).toBe(300);
+    expect(b.discountMinor).toBe(100);
+    expect(a.discountMinor + b.discountMinor).toBe(400);
+    expect(a.totalMinor).toBe(2700);
     expect(sum(shares)).toBe(3600);
   });
 });
@@ -210,10 +292,19 @@ describe("the documents always sum to the order total", () => {
 });
 
 /*
- * §8.6 puts the order-level discount on the primary document alone. On a split
- * order where that discount is bigger than the primary's own lines, obeying
- * the rule produces a sales order worth less than nothing — and MetaKocka
- * would file it without a word, because it validates almost nothing (§3).
+ * A sales order worth less than nothing. MetaKocka would file it without a word,
+ * because it validates almost nothing (§3).
+ *
+ * Spreading the discount by merchandise value removes the *ordinary* way this
+ * used to happen: when the whole discount sat on the primary document, a
+ * discount larger than that one document's lines produced a negative beside a
+ * positive, on a perfectly normal order. A proportional share can never exceed
+ * the merchandise it is proportional to, so that case is now arithmetically
+ * impossible — see the test below it.
+ *
+ * What remains is the genuinely strange order: a discount larger than
+ * everything the customer bought. That still goes negative, and it still has to
+ * be refused rather than filed.
  */
 describe("a document that would go negative", () => {
   const shares = splitOrderMoney({
@@ -226,21 +317,40 @@ describe("a document that would go negative", () => {
         lineTotalMinor: 3000,
       }),
     ],
-    orderTotalMinor: 0,
+    // 90.00 off an order whose goods come to 80.00.
+    orderTotalMinor: -1000,
     shippingMinor: 0,
-    discountMinor: 8000,
+    discountMinor: 9000,
   });
 
   it("still adds up, which is exactly why nothing downstream notices", () => {
-    expect(sum(shares)).toBe(0);
+    expect(sum(shares)).toBe(-1000);
   });
 
   it("is reported rather than sent", () => {
     const negative = negativeShares(shares);
-    expect(negative).toHaveLength(1);
-    expect(negative[0]?.sourceCode).toBe("A");
-    expect(negative[0]?.isPrimary).toBe(true);
-    expect(negative[0]!.totalMinor).toBeLessThan(0);
+    expect(negative.length).toBeGreaterThan(0);
+    expect(negative.every((share) => share.totalMinor < 0)).toBe(true);
+  });
+
+  it("no longer goes negative on an ordinary over-discounted primary", () => {
+    /*
+     * The case that used to fail: an 80.00 discount on a 50/30 split. Under the
+     * old primary-only rule the primary went to -30.00; spread by value each
+     * document simply reaches zero.
+     */
+    const ordinary = splitOrderMoney({
+      perSource: [
+        part({ sourceId: "a", sourceCode: "A", lineTotalMinor: 5000 }),
+        part({ sourceId: "b", sourceCode: "B", lineTotalMinor: 3000 }),
+      ],
+      orderTotalMinor: 0,
+      shippingMinor: 0,
+      discountMinor: 8000,
+    });
+
+    expect(negativeShares(ordinary)).toEqual([]);
+    expect(sum(ordinary)).toBe(0);
   });
 
   it("says nothing about an ordinary split", () => {

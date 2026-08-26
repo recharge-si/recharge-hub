@@ -150,6 +150,23 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
        */
       syncState: order.syncState,
       reconciledAt: order.reconciledAt?.toISOString() ?? null,
+      /*
+       * The reconciliation verdict's own numbers.
+       *
+       * `external` is the one that must never be inferred from silence: goods
+       * Shopify is shipping through a service this app cannot manage are
+       * deliberately absent from MetaKocka, and a merchant who is not told that
+       * will assume the ERP holds the whole order.
+       */
+      syncDetail: order.syncDetail as {
+        classification?: { managed: number; external: number; unresolved: number };
+        value?: {
+          representedShippingMinor?: number;
+          representedDiscountMinor?: number;
+          representationGapMinor?: number;
+          unexplainedMinor?: number;
+        };
+      } | null,
       paymentState: order.paymentState,
       grossReceivedMinor: order.grossReceivedMinor,
       refundedMinor: order.refundedMinor,
@@ -616,6 +633,47 @@ export default function OrderDetail() {
                 ? `${describeSyncState(order.syncState)} Last reconciled ${formatDateTime(order.reconciledAt)}.`
                 : "This order has not been reconciled against MetaKocka yet."}
             </s-text>
+
+            {/*
+              * Goods MetaKocka does not hold, said plainly.
+              *
+              * This is the one thing a merchant cannot discover by looking at
+              * the ERP: the sales order looks complete, because what is missing
+              * is missing. Saying it here is what stops "MetaKocka has my
+              * order" being assumed.
+              */}
+            {order.syncDetail?.classification &&
+            order.syncDetail.classification.external > 0 ? (
+              <s-banner
+                tone="warning"
+                heading="Some of this order is not in MetaKocka"
+              >
+                <s-paragraph>
+                  {`${order.syncDetail.classification.external} ${
+                    order.syncDetail.classification.external === 1
+                      ? "item is"
+                      : "items are"
+                  } being fulfilled through a service this app does not manage, so ${
+                    order.syncDetail.classification.external === 1 ? "it is" : "they are"
+                  } deliberately not on the MetaKocka sales order. No warehouse was guessed. Add ${
+                    order.syncDetail.classification.external === 1 ? "it" : "them"
+                  } in MetaKocka by hand if your books need ${
+                    order.syncDetail.classification.external === 1 ? "it" : "them"
+                  }.`}
+                </s-paragraph>
+              </s-banner>
+            ) : null}
+
+            {order.syncDetail?.classification &&
+            order.syncDetail.classification.unresolved > 0 ? (
+              <s-banner tone="critical" heading="Some of this order is unaccounted for">
+                <s-paragraph>
+                  {`${order.syncDetail.classification.unresolved} ${
+                    order.syncDetail.classification.unresolved === 1 ? "item" : "items"
+                  } could not be placed in any warehouse. The exceptions above say which.`}
+                </s-paragraph>
+              </s-banner>
+            ) : null}
 
             {/*
               * Where the payment state came from and when it was last checked.

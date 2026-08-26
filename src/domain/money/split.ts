@@ -10,9 +10,13 @@
  *
  *  - One document is **primary**: highest line total, ties broken own before
  *    partner, then by source code. Deterministic, so a retry picks the same one.
- *  - **Shipping, COD surcharge and order-level discounts go on the primary
- *    document only.** They are single charges, not per-source costs, and
- *    spreading them would invent numbers nobody agreed to.
+ *  - **Shipping and order-level discounts are spread in proportion to each
+ *    document's merchandise value.** They were once assigned to the primary
+ *    document alone, which never duplicated them but did put the whole postage
+ *    of a split order on whichever warehouse happened to hold the most. A
+ *    document's non-product value now matches the trade it actually carries,
+ *    and the property that mattered before still holds and is what the tests
+ *    assert: **the shares sum to the charge exactly, once.**
  *  - Everything is integer minor units (§15). No floats anywhere near money.
  *  - Any rounding remainder lands on the primary, so the documents sum to the
  *    Shopify total to the cent.
@@ -34,9 +38,9 @@ export interface MoneySplitInput {
   perSource: SourceLineTotal[];
   /** What Shopify says the order came to, in minor units. */
   orderTotalMinor: number;
-  /** Shipping and any COD surcharge, minor units. Primary document only. */
+  /** Shipping and any COD surcharge, minor units. Spread by merchandise value. */
   shippingMinor: number;
-  /** Order-level discount as a positive number, minor units. Primary only. */
+  /** Order-level discount as a positive number, minor units. Spread likewise. */
   discountMinor: number;
 }
 
@@ -80,26 +84,64 @@ function primaryIndex(perSource: SourceLineTotal[]): number {
   return best;
 }
 
+/**
+ * Spreads one order-level charge across the documents by merchandise value.
+ *
+ * Deterministic in two senses, both load-bearing. The weights are read in a
+ * canonical order - sorted by source code - so the cent that
+ * `proportionalSplit` hands to the largest fractional part always goes to the
+ * same document however the caller's array happened to be ordered. And a charge
+ * on an order whose documents are all worth nothing lands entirely on the
+ * primary rather than on whichever entry sorted first.
+ *
+ * The invariant, asserted in tests: the parts sum to the charge exactly. Never
+ * more - a duplicated postage charge is money invented in a merchant's books -
+ * and never less.
+ */
+function spread(
+  perSource: SourceLineTotal[],
+  amountMinor: number,
+  primary: number,
+): number[] {
+  const shares = perSource.map(() => 0);
+  if (amountMinor === 0) return shares;
+
+  const order = perSource
+    .map((source, index) => ({ index, code: source.sourceCode }))
+    .sort((a, b) => compareCodepoints(a.code, b.code) || a.index - b.index);
+
+  const weights = order.map((entry) =>
+    Math.max(0, perSource[entry.index]!.lineTotalMinor),
+  );
+
+  if (weights.reduce((total, weight) => total + weight, 0) === 0) {
+    shares[primary] = amountMinor;
+    return shares;
+  }
+
+  const split = proportionalSplit(amountMinor, weights);
+  order.forEach((entry, position) => {
+    shares[entry.index] = split[position] ?? 0;
+  });
+  return shares;
+}
+
 export function splitOrderMoney(input: MoneySplitInput): DocumentShare[] {
   if (input.perSource.length === 0) return [];
 
   const primary = primaryIndex(input.perSource);
+  const shipping = spread(input.perSource, input.shippingMinor, primary);
+  const discount = spread(input.perSource, input.discountMinor, primary);
 
-  const shares: DocumentShare[] = input.perSource.map((source, index) => {
-    const isPrimary = index === primary;
-    const shipping = isPrimary ? input.shippingMinor : 0;
-    const discount = isPrimary ? input.discountMinor : 0;
-
-    return {
-      sourceId: source.sourceId,
-      sourceCode: source.sourceCode,
-      isPrimary,
-      lineTotalMinor: source.lineTotalMinor,
-      shippingMinor: shipping,
-      discountMinor: discount,
-      totalMinor: source.lineTotalMinor + shipping - discount,
-    };
-  });
+  const shares: DocumentShare[] = input.perSource.map((source, index) => ({
+    sourceId: source.sourceId,
+    sourceCode: source.sourceCode,
+    isPrimary: index === primary,
+    lineTotalMinor: source.lineTotalMinor,
+    shippingMinor: shipping[index]!,
+    discountMinor: discount[index]!,
+    totalMinor: source.lineTotalMinor + shipping[index]! - discount[index]!,
+  }));
 
   // Whatever the line values, shipping and discounts do not add up to, the
   // primary absorbs. Shopify's total is the number the customer was charged and

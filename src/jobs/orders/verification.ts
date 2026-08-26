@@ -48,6 +48,7 @@ const productLineSchema = z.object({
 
 const documentBodySchema = z.object({
   product_list: z.array(productLineSchema).default([]),
+  discount_value: z.union([z.string(), z.number()]).optional(),
 });
 
 export interface RecordedDocument {
@@ -60,9 +61,14 @@ export interface RecordedDocument {
 export interface DocumentContent {
   countCode: string;
   retired: boolean;
+  /** Merchandise only. The shipping line is deliberately not in here. */
   lines: { sku: string; quantity: number }[];
-  /** Line value only, tax-inclusive as sent. Shipping is not a line (T-05). */
+  /** Merchandise value, tax-inclusive as sent. */
   valueMinor: number;
+  /** What the document carries as shipping, read from its shipping line. */
+  shippingMinor: number;
+  /** What the document carries as `discount_value`. */
+  discountMinor: number;
 }
 
 /**
@@ -74,7 +80,19 @@ export interface DocumentContent {
  * asks a human to look — where the alternative, skipping the whole check, would
  * report everything as fine.
  */
-export function contentOf(document: RecordedDocument): DocumentContent {
+export function contentOf(
+  document: RecordedDocument,
+  /**
+   * The merchant's shipping article, when they have named one.
+   *
+   * Needed here because a shipping line is a product line like any other on the
+   * wire, and counting it as merchandise would break the quantity invariant on
+   * every order with postage: MetaKocka would appear to hold one unit of a SKU
+   * Shopify never sold. Separating it is what lets shipping be *represented*
+   * and *checked* rather than merely tolerated.
+   */
+  shippingProductCode?: string | null,
+): DocumentContent {
   const parsed = documentBodySchema.safeParse(document.requestBody);
 
   if (!parsed.success) {
@@ -83,23 +101,30 @@ export function contentOf(document: RecordedDocument): DocumentContent {
       retired: document.retired,
       lines: [],
       valueMinor: 0,
+      shippingMinor: 0,
+      discountMinor: 0,
     };
   }
 
   const lines: { sku: string; quantity: number }[] = [];
   let valueMinor = 0;
+  let shippingMinor = 0;
 
   for (const line of parsed.data.product_list) {
     const sku = line.code ?? "";
     const quantity = Number(line.amount ?? 0);
     if (!Number.isFinite(quantity) || quantity === 0) continue;
 
-    lines.push({ sku, quantity });
-
     const unit = line.price_with_tax ?? line.price;
-    if (unit !== undefined) {
-      valueMinor += toMinorUnits(unit) * quantity;
+    const lineValue = unit === undefined ? 0 : toMinorUnits(unit) * quantity;
+
+    if (shippingProductCode && sku === shippingProductCode) {
+      shippingMinor += lineValue;
+      continue;
     }
+
+    lines.push({ sku, quantity });
+    valueMinor += lineValue;
   }
 
   return {
@@ -107,6 +132,11 @@ export function contentOf(document: RecordedDocument): DocumentContent {
     retired: document.retired,
     lines,
     valueMinor,
+    shippingMinor,
+    discountMinor:
+      parsed.data.discount_value === undefined
+        ? 0
+        : toMinorUnits(parsed.data.discount_value),
   };
 }
 
@@ -125,6 +155,8 @@ export interface VerificationResult {
     retired: boolean;
     quantity: number;
     valueMinor: number;
+    shippingMinor: number;
+    discountMinor: number;
   }[];
 }
 
@@ -159,8 +191,14 @@ export function verifyOrder(input: {
   orderDiscountMinor: number;
   grossReceivedMinor: number;
   representedPaymentMinor: number;
+  /** The merchant's shipping article, so its line is not counted as goods. */
+  shippingProductCode?: string | null;
+  /** Whether a discount representation has been chosen at all. */
+  discountConfigured?: boolean;
 }): VerificationResult {
-  const contents = input.documents.map(contentOf);
+  const contents = input.documents.map((document) =>
+    contentOf(document, input.shippingProductCode),
+  );
 
   const quantities = verifyQuantities({
     expected: input.classification.lines
@@ -192,6 +230,22 @@ export function verifyOrder(input: {
     lineDiscountMinor += source.discountMinor;
   }
 
+  /*
+   * What the documents actually carry, read back from the bodies that were
+   * sent — not what this app intended them to carry. Shipping and the discount
+   * are now *represented*, so they are terms of the identity rather than an
+   * allowance around it, and anything the documents failed to carry shows up as
+   * unexplained.
+   */
+  const representedShippingMinor = contents.reduce(
+    (total, document) => total + document.shippingMinor,
+    0,
+  );
+  const representedDiscountMinor = contents.reduce(
+    (total, document) => total + document.discountMinor,
+    0,
+  );
+
   const value = reconcileValue({
     orderTotalMinor: input.orderTotalMinor,
     documentsMinor: contents.reduce(
@@ -203,6 +257,10 @@ export function verifyOrder(input: {
     orderDiscountMinor: input.orderDiscountMinor,
     shippingMinor: input.shippingMinor,
     externalValueMinor,
+    representedShippingMinor,
+    representedDiscountMinor,
+    shippingConfigured: Boolean(input.shippingProductCode),
+    discountConfigured: input.discountConfigured ?? false,
   });
 
   const payments = verifyPaymentRepresentation({
@@ -252,6 +310,8 @@ export function verifyOrder(input: {
         0,
       ),
       valueMinor: document.valueMinor,
+      shippingMinor: document.shippingMinor,
+      discountMinor: document.discountMinor,
     })),
   };
 }

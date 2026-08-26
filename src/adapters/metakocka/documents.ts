@@ -189,6 +189,40 @@ export interface SalesOrderInput {
   payments?: DocumentPayment[] | null;
   /** Currency minor-unit exponent. Two everywhere this app currently ships. */
   currencyDecimals?: number;
+  /**
+   * The shipping charge this document carries, as its own line.
+   *
+   * **[verified 2026-08-26]** An extra positive line adds to `sum_all`
+   * exactly: a document of 100.00 plus a 5.00 line reads 105. The product code
+   * is the merchant's own — an article in their catalogue that their accountant
+   * expects postage on — because nothing this app could derive would be right,
+   * and a code MetaKocka does not have is refused outright (`opr_code 8`)
+   * rather than inventing a product, since `unit` is never sent.
+   *
+   * Absent when the order has no shipping, or when the merchant has not said
+   * which product to use — and in the second case the caller raises rather than
+   * sending a document that is quietly short of the postage.
+   */
+  shippingLine?: {
+    code: string;
+    amountMinor: number;
+    taxFactor?: string | null;
+  } | null;
+  /**
+   * A discount on the whole document, as an absolute amount (§8.6).
+   *
+   * **[verified 2026-08-26]** `discount_value` is an absolute amount in the
+   * document currency, not a percentage: 200.00 with `discount_value: "10"`
+   * reads 190, and with a 5.00 line beside it reads 195 — so it comes off the
+   * document total rather than being applied per line. Shopify supplies
+   * absolute discount amounts, so this is a straight transfer with nothing
+   * converted and no rounding invented.
+   *
+   * The per-line `discount` field is deliberately not used: it is a
+   * *percentage* (a 200.00 line with `discount: "10"` reads 180), and turning
+   * Shopify's amount into a percentage would invent precision.
+   */
+  discountValueMinor?: number | null;
 }
 
 export interface DocumentResult {
@@ -433,6 +467,14 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
      * instead would leave the old one in place on an update.
      */
     ...paymentField(input, decimals),
+    ...(input.discountValueMinor
+      ? {
+          discount_value: minorToDecimalString(
+            input.discountValueMinor,
+            decimals,
+          ),
+        }
+      : {}),
     product_list: input.lines.map((line) => ({
       code: line.code,
       amount: String(line.amount),
@@ -452,7 +494,36 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
       ...(line.taxFactor !== null && line.taxFactor !== undefined
         ? { tax_factor: line.taxFactor }
         : {}),
-    })),
+    })).concat(
+      /*
+       * Shipping goes last, so a document's merchandise lines keep the order
+       * the allocation produced and a body built twice is byte-identical.
+       */
+      input.shippingLine
+        ? [
+            {
+              code: input.shippingLine.code,
+              amount: "1",
+              ...(input.taxesIncluded === false
+                ? {
+                    price: minorToDecimalString(
+                      input.shippingLine.amountMinor,
+                      decimals,
+                    ),
+                  }
+                : {
+                    price_with_tax: minorToDecimalString(
+                      input.shippingLine.amountMinor,
+                      decimals,
+                    ),
+                  }),
+              ...(input.shippingLine.taxFactor
+                ? { tax_factor: input.shippingLine.taxFactor }
+                : {}),
+            },
+          ]
+        : [],
+    ),
   };
 }
 

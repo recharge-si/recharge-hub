@@ -2,6 +2,14 @@
 
 client_id = "77a669bae44e293ff5b59dc85783bc71"
 name = "mk-sync"
+# TODO(deployment): replace with the real HTTPS origin of the deployed web
+# process, e.g. https://orders.example.com. Until then Shopify delivers every
+# webhook to this placeholder and the app hears nothing: the quarter-hourly
+# Admin API reconciler is the only path an order takes. Nothing else needs to
+# change when it is set - the routes, the queue and the handlers are already
+# wired and covered by tests/db/webhook-dispatch.test.ts. Run
+# `shopify app deploy` after changing it so the webhook subscriptions are
+# re-registered against the new origin.
 application_url = "https://shopify.dev/apps/default-app-home"
 embedded = true
 

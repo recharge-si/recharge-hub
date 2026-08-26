@@ -128,6 +128,61 @@ Most tests use mocked boundaries. The concurrency-sensitive guards are the
 exception and run against a real database under `tests/db/` — see Validation
 below. Remaining gaps are tracked in `docs/project-status.md`.
 
+## Manual Shopify tests
+
+Three things cannot be tested from here, and the reason is deliberate: the
+connector does not request `write_orders`, because synchronising Shopify into
+MetaKocka never writes to a Shopify order. Asking for the scope purely to make
+testing easier would be permission the product does not use. So these are done
+by hand in the Shopify admin, against the dev store.
+
+Before each: note the order number, and open the order in this app so you can
+press **Check with Shopify** rather than waiting a quarter of an hour.
+
+### Order edit
+
+1. Shopify admin, order -> **Edit** -> change a line quantity (2 -> 3), save.
+2. In this app, open the order and press **Check with Shopify**.
+3. In MetaKocka, open the sales order named on the order page. Verify:
+   - the line quantity is now 3;
+   - it is the **same** document number as before, not a second one;
+   - `sum_all` moved by one unit price;
+   - any payment already on it is still there.
+4. Repeat with **add a product** and with **remove a product**. After each,
+   verify the same document changed and no second document appeared.
+
+If the order is already paid, this needs *Update it even after the payment has
+been recorded* on the Order sync settings page; without it the app reports the
+difference and deliberately leaves the document alone.
+
+### Partial payment
+
+1. On an unpaid order, Shopify admin -> **Collect payment** -> a partial amount.
+2. Check with Shopify. In MetaKocka verify the sales order shows **that amount**
+   paid, not the order total.
+3. On the app's order page, the Payments section should list one payment and an
+   outstanding balance equal to the rest.
+4. Collect the remainder. Check with Shopify again. Verify MetaKocka now shows
+   **two** payments summing to the order total, and the first one is unchanged.
+5. Press Check with Shopify once more and verify nothing moved: same two
+   payments, same total.
+
+For a split order, verify each document shows its own share and that the shares
+add up to what was collected - never the full amount on each.
+
+### Refund
+
+1. Shopify admin -> **Refund** a part of the order.
+2. Check with Shopify. Verify on the app's order page:
+   - Payments shows Received unchanged, Refunded the amount, Outstanding
+     adjusted;
+   - the order is **not** reported as fully in step;
+   - an exception says a credit note is needed in MetaKocka.
+3. In MetaKocka verify the sales order's payment is **unchanged**. This is
+   correct: the receipt records what was actually received, and the refund is a
+   credit note. Nothing shrinks a recorded payment.
+4. Issue the credit note in MetaKocka, then resolve the exception in the app.
+
 ## Validation
 
 For every code change:

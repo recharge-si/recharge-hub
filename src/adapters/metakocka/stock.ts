@@ -185,6 +185,38 @@ function typeOf(row: {
   return { sales, purchasing, service };
 }
 
+/**
+ * One product, by the code the merchant typed.
+ *
+ * For validating a shipping article on the settings screen, which is the one
+ * place a merchant hands this app a MetaKocka code by hand. A code that does
+ * not exist is refused there rather than on the next order, where it would
+ * surface as a rejected sales order and a puzzle.
+ *
+ * `product_list` is filtered server-side by `product_code_list`, so this is one
+ * small call rather than a walk of the catalogue.
+ */
+export async function findProductByCode(
+  client: MetakockaClient,
+  code: string,
+): Promise<MetakockaProduct | null> {
+  const response = await client.call(
+    ENDPOINTS.productList,
+    { limit: 5, offset: 0, product_code_list: [{ code }] },
+    productResponseSchema,
+  );
+
+  const row = response.product_list.find((entry) => entry.code === code);
+  if (!row) return null;
+
+  return {
+    mkId: row.mk_id,
+    code: row.code,
+    name: row.name ?? null,
+    type: typeOf(row),
+  };
+}
+
 /** The whole product catalogue, paginated. */
 export async function listProducts(
   client: MetakockaClient,

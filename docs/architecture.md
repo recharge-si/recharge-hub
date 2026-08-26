@@ -104,6 +104,25 @@ order out of `in_sync`. A document whose supply source leaves the allocation is 
 according to `sales_order_setting.obsolete_document_policy`; it is never deleted
 except under the explicit `delete_unpaid` opt-in, and only when unpaid.
 
+### Shipping and discounts
+
+Verified live before implementation (`docs/metakocka-verification.md`):
+shipping is an **extra positive product line** against an article the merchant
+names (`sales_order_setting.shipping_product_code`, validated against MetaKocka
+when saved), and a discount is the document's own **`discount_value`**, which is
+an absolute amount. The per-line `discount` field is a percentage and is
+deliberately unused, because Shopify supplies amounts and converting one into
+the other invents rounding.
+
+Both are spread across a split order's documents in proportion to merchandise
+value (`splitOrderMoney`), so the charge appears exactly once across the ERP and
+moves with the goods when the allocation changes.
+
+Neither has a default. Until a merchant configures them, an order carrying
+shipping or a discount raises `commercial_representation_missing` and is held
+out of `in_sync`: the goods are still written, and the order is never reported
+as commercially reconciled while the ERP is short.
+
 ### Payments
 
 Payments are a ledger of individual Shopify transactions, not a flag.

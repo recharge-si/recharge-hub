@@ -23,7 +23,10 @@ Completed work belongs in Git history, not in this file.
 - Real-PostgreSQL concurrency tests for the per-order lock, the `count_code`
   claim and the ledger's unique index (`tests/db/`)
 - Merchant-configurable *Customer's order* reference, allocation mode, obsolete
-  document policy, and payment allocation/entry mode
+  document policy, payment allocation/entry mode, shipping article and discount
+  representation
+- Shipping and discounts written into MetaKocka on verified mechanisms, spread
+  across a split order in proportion to merchandise value and charged once
 - Bidirectional inventory by per-location ownership, including destructive
   `sync_stock` safeguards
 - Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
@@ -33,52 +36,33 @@ Completed work belongs in Git history, not in this file.
 
 ## Product and integration gaps
 
-### T-20 - Shipping and discounts have no MetaKocka representation to reuse
+### T-05/T-06 — Shipping and discounts: representable, not yet configured
 
-Established by reading the test company's catalogue on 2026-08-26: **39
-products, every one `service=false`.** There is no shipping product, no discount
-product and no service product to reuse, so the connector has nothing to point
-at, and inventing one would be inventing accounting behaviour.
+Resolved as a mechanism, live-verified on 2026-08-26
+(`tests/fixtures/metakocka/shipping_discount_semantics.json`):
 
-The three candidate representations, none implemented:
+- **Shipping** is an extra positive product line. An extra line adds to
+  `sum_all` exactly, and the article is one the merchant names —
+  `sales_order_setting.shipping_product_code`, checked against MetaKocka when
+  it is saved. This app never creates one.
+- **Discounts** use the document's own `discount_value`, which is an
+  **absolute amount**. The per-line `discount` field is a *percentage*, and
+  Shopify supplies amounts, so using it would mean inventing a conversion.
+- Both are spread across a split order's documents in proportion to merchandise
+  value and sum to the charge exactly once (`domain/money/split`).
 
-1. **A service product per charge.** Create a MetaKocka service article for
-   shipping, and one for discount at a negative price, and add it as a document
-   line. Closes the value identity exactly. Costs: it puts non-stock articles in
-   the catalogue, and a negative-priced line needs confirming against
-   MetaKocka's validation.
-2. **Document-level fields.** `put_document` documents a `discount_value`, and
-   shipping may have a delivery-cost field. Neither is verified: gross or net,
-   percentage or amount, and whether they enter `sum_all` are all unknown, and
-   T-05/T-06 already say not to guess.
-3. **Leave them off the document and reconcile them as named terms**, which is
-   what the connector does today: `reconcileValue` reports products, shipping,
-   discounts and externally-fulfilled value separately and fails on anything
-   unexplained.
+What remains is per shop, not per codebase: **both settings default to
+unconfigured**, and an order carrying shipping or a discount then raises
+`commercial_representation_missing` and is held out of `in_sync`. That is
+deliberate — there is no safe default for which article an accountant expects
+postage on — but it means every shop has a setup step before its orders reconcile
+commercially.
 
-Option 3 is honest but does not satisfy "the MetaKocka commercial representation
-explains the complete total". Choosing between 1 and 2 needs a merchant decision
-about their chart of accounts plus a probe of the document-level fields.
-
-### T-05/T-06 — Shipping and discounts are not faithfully represented
-
-Document payment shares account for shipping and discounts, but MetaKocka sales
-order bodies contain product lines only. Shipping and order-level discounts can
-therefore make the ERP document total differ from its payment; line discounts
-are parsed and stored but are not encoded on their document line.
-
-The verification pass no longer hides this behind a tolerance. `reconcileValue`
-closes an explicit identity — products represented, less line discounts, less
-the order discount, plus shipping, plus anything fulfilled externally, against
-the Shopify total — and reports each term by name. A genuine unexplained
-difference now fails, where the previous allowance-based check passed anything
-smaller than the postage. That makes the gap measurable per order rather than
-merely known.
-
-Do not invent a fix. The designated test company must establish whether a
-service-product shipping line, document `discount_value`, and per-line
-`discount` are gross/net, percentage/amount, and included in `sum_all`. Record
-fixtures before changing money behavior.
+Line-level discounts are still not represented: they are parsed and stored, and
+they appear in the value reconciliation as a named unrepresented term. Folding
+them into `discount_value` alongside the order-level discount is the obvious
+next step and has not been done, because it changes what each *line* appears to
+have cost and that is a merchant-visible accounting decision.
 
 ### T-18 — Existing shops keep stock-rules allocation until they opt in
 
@@ -101,6 +85,19 @@ setting is discoverable but nothing prompts them, so a merchant who would
 benefit may never look.
 
 ### T-19 — Third-party fulfilment is excluded by rule, not represented
+
+Now visible rather than merely classified: external quantity raises an
+exception, keeps the order out of `in_sync`, is recorded in `order.sync_detail`
+and is stated on the order page, so a merchant cannot assume MetaKocka holds
+those goods.
+
+**The open business decision is unchanged.** If third-party-fulfilled goods
+*should* appear on the MetaKocka sales order, this app cannot decide which
+warehouse to file them against — the fulfilment order names a service and
+withholds a location id, and no mapping exists. That needs either the
+assigned/third-party fulfilment scopes plus a warehouse mapping for those
+services, or an explicit rule that they are filed against a nominated warehouse.
+Neither is something to guess.
 
 The app holds `read_merchant_managed_fulfillment_orders` only, so a fulfilment
 order held by a third-party or assigned service reports a location name with no

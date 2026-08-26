@@ -564,6 +564,55 @@ async function reconcileUnderLock(
   }
 
   /* ---------------------------------------------------------------------- */
+  /* Money the order carries that MetaKocka has no way to show               */
+  /* ---------------------------------------------------------------------- */
+
+  /*
+   * Shipping and discounts are real money the customer was charged, and until
+   * the merchant says how they should appear the ERP cannot account for the
+   * whole order. Reported rather than guessed: which article an accountant
+   * expects postage on is not a decision this app gets to make, and quietly
+   * sending a sales order short of the postage is how a set of books stops
+   * balancing without anyone noticing.
+   *
+   * The order still gets its documents — the merchandise is right, and being
+   * short of the shipping is better than being absent — but it is held out of
+   * `in_sync` below, so nothing reports full commercial reconciliation.
+   */
+  const missingRepresentation: string[] = [];
+  if (order.shippingMinor > 0 && !settings.shippingProductCode) {
+    missingRepresentation.push(
+      `shipping of ${(order.shippingMinor / 100).toFixed(2)} ${order.presentmentCurrency}`,
+    );
+  }
+  if (
+    order.discountMinor > 0 &&
+    settings.discountRepresentation === "none"
+  ) {
+    missingRepresentation.push(
+      `a discount of ${(order.discountMinor / 100).toFixed(2)} ${order.presentmentCurrency}`,
+    );
+  }
+
+  if (missingRepresentation.length > 0) {
+    await raiseException(principal, {
+      orderId,
+      kind: "commercial_representation_missing",
+      message: `Order ${order.shopifyOrderNumber} carries ${missingRepresentation.join(" and ")} that MetaKocka has no way to show, because ${missingRepresentation.length === 1 ? "it has" : "they have"} no representation configured. The sales ${desiredBySource.size === 1 ? "order was" : "orders were"} written with the goods, so the ERP is short by that amount and this order is not reported as fully reconciled. Choose a shipping product and a discount representation on the Order sync settings page, then reconcile this order again.`,
+      detail: {
+        shippingMinor: order.shippingMinor,
+        discountMinor: order.discountMinor,
+        shippingProductCode: settings.shippingProductCode,
+        discountRepresentation: settings.discountRepresentation,
+      },
+    });
+  } else {
+    await closeExceptionsFor(principal, orderId, [
+      "commercial_representation_missing",
+    ]);
+  }
+
+  /* ---------------------------------------------------------------------- */
   /* Apply the difference                                                   */
   /* ---------------------------------------------------------------------- */
 
@@ -655,6 +704,9 @@ async function reconcileUnderLock(
     // rather than widening the tolerance around it.
     shippingMinor: order.shippingMinor,
     orderDiscountMinor: order.discountMinor,
+    shippingProductCode: settings.shippingProductCode,
+    discountConfigured:
+      settings.discountRepresentation === "document_discount_value",
     grossReceivedMinor: ledger.summary.grossReceivedMinor,
     representedPaymentMinor: await representedPaymentTotal(principal, orderId),
   });
@@ -678,6 +730,7 @@ async function reconcileUnderLock(
   );
 
   const blocked =
+    missingRepresentation.length > 0 ||
     accountingActionOutstanding ||
     classification.externalTotal > 0 ||
     (plan?.unmappedLocations.length ?? 0) > 0 ||

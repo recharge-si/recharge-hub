@@ -16,6 +16,7 @@ import { shopDomainOf, type Principal } from "~/domain/types";
 
 export type AllocationMode = "shopify_locations" | "stock_rules";
 export type PaymentEntryMode = "per_transaction" | "aggregate";
+export type DiscountRepresentation = "none" | "document_discount_value";
 
 export interface SalesOrderSettings {
   /** Rewrite the MetaKocka document when the Shopify order changes. */
@@ -32,6 +33,13 @@ export interface SalesOrderSettings {
   syncPayments: boolean;
   paymentAllocation: PaymentAllocationStrategy;
   paymentEntryMode: PaymentEntryMode;
+  /**
+   * The MetaKocka product code a shipping charge is written against, or null
+   * when the merchant has not chosen one. Never derived: it is an article in
+   * their catalogue and only they know which.
+   */
+  shippingProductCode: string | null;
+  discountRepresentation: DiscountRepresentation;
 }
 
 /**
@@ -67,6 +75,16 @@ export const SALES_ORDER_DEFAULTS: SalesOrderSettings = {
   syncPayments: true,
   paymentAllocation: "proportional",
   paymentEntryMode: "per_transaction",
+  /*
+   * Both unset on purpose. Until a merchant chooses, an order carrying shipping
+   * or a discount raises `commercial_representation_missing` and is not
+   * reported as commercially reconciled — which is better than quietly sending
+   * a sales order short of the postage the customer paid. There is no safe
+   * default: the product is one only they can name, and guessing which article
+   * their accountant expects postage on is not this app's decision.
+   */
+  shippingProductCode: null,
+  discountRepresentation: "none",
 };
 
 /** The template actually used, with the default applied. */
@@ -91,6 +109,8 @@ export async function getSalesOrderSettings(
       syncPayments: true,
       paymentAllocation: true,
       paymentEntryMode: true,
+      shippingProductCode: true,
+      discountRepresentation: true,
     },
   });
 

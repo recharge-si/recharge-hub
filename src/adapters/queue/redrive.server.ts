@@ -118,6 +118,12 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
    * maps it on the supply sources page; reconciling then picks it up.
    */
   unmapped_location: "reconcile",
+  /*
+   * The order carries money with no configured MetaKocka representation. The
+   * merchant chooses a shipping product or a discount mechanism on the Order
+   * sync settings page; reconciling then writes it.
+   */
+  commercial_representation_missing: "reconcile",
 };
 
 export interface RedriveResult {
