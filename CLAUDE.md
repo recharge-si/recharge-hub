@@ -1,9 +1,8 @@
 # Claude Code instructions
 
-Shared project rules and knowledge intentionally live outside this
+Read and follow `AGENTS.md`; it is the shared operating manual. Project
+knowledge belongs in the current documents linked there, not in this
 agent-specific file.
 
-Before working, read `AGENTS.md` and follow its takeover protocol. The current
-build specification is `docs/BUILD_SPEC.md`. Existing references to
-"CLAUDE.md section N" refer to the corresponding section of that build
-specification.
+Historical code and migration comments that cite “CLAUDE.md section N” refer to
+the same numbered section of `docs/BUILD_SPEC.md`.

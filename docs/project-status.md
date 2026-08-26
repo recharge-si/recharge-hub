@@ -1,0 +1,158 @@
+# Project status
+
+Reviewed against the repository on 26 August 2026. This is the canonical list
+of current implementation gaps, open decisions, and meaningful technical debt.
+Completed work belongs in Git history, not in this file.
+
+## Implemented
+
+- Embedded Shopify shell, token exchange, encrypted offline sessions, app
+  lifecycle, and required compliance webhooks
+- MetaKocka connection, encrypted credentials, cached warehouse/payment/
+  pricelist/profit-centre data, and in-app settings
+- SKU registry, catalogue matching, merchant-controlled MetaKocka product-name
+  and product-creation sync
+- Order intake, deterministic allocation, split MetaKocka sales orders, payment
+  settlement, order-state synchronization, and document read-back
+- Bidirectional inventory by per-location ownership, including destructive
+  `sync_stock` safeguards
+- Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
+  visibility, dashboard, orders, and exceptions UI
+- 474 fixture-driven tests across pure domain, adapters, presentation helpers,
+  and the order-to-MetaKocka vertical slice
+
+## Product and integration gaps
+
+### T-05/T-06 — Shipping and discounts are not faithfully represented
+
+Document payment shares account for shipping and discounts, but MetaKocka sales
+order bodies contain product lines only. Shipping and order-level discounts can
+therefore make the ERP document total differ from its payment; line discounts
+are parsed and stored but are not encoded on their document line.
+
+Do not invent a fix. The designated test company must establish whether a
+service-product shipping line, document `discount_value`, and per-line
+`discount` are gross/net, percentage/amount, and included in `sum_all`. Record
+fixtures before changing money behavior.
+
+### T-08 — Shopify fulfilment orders are not moved or split
+
+`allocate-order` sends `write-shopify-fulfilment`, but the worker has no
+consumer. Jobs have seven-day retention to avoid indefinite queue growth.
+Implement `fulfillmentOrderSplit`/`fulfillmentOrderMove` and persist resulting
+ids before removing that temporary retention. This changes merchant-visible
+fulfilment state and needs real Shopify fixture/contract verification.
+
+### T-09 — MetaKocka-to-Shopify product sync is absent
+
+No Shopify product mutation exists. SKU, price, tax, weight, dimensions, and
+barcode do not currently flow from MetaKocka to Shopify despite the target
+ownership table in build-spec section 8.9. Decide whether this is v1 or phase 2.
+`write_products` is otherwise unused.
+
+### T-10 — Tracking sync is blocked on MetaKocka evidence
+
+No job creates Shopify fulfilments with tracking. Verified sales-order
+`get_document` responses contain no status or tracking field, so build-spec
+section 8.5 cannot be implemented as originally written. Find and record the
+actual MetaKocka delivery/tracking source first.
+
+### T-11 — Nightly cross-checks are incomplete
+
+Current schedules cover Shopify order reconciliation, inventory, exception
+re-check, and MetaKocka document presence/content. Missing cross-checks are:
+
+- expected MetaKocka document count per Shopify order;
+- allocation-to-Shopify-fulfilment correspondence (blocked on T-08);
+- MetaKocka document totals versus Shopify order total;
+- MetaKocka `free_amount` versus Shopify available stock.
+
+These require new exception/dashboard states rather than silent log lines.
+
+### Configurable allocation rules and returns remain future work
+
+Allocation still uses the hardcoded `DEFAULT_RULE` (own stock first, then
+partners, split allowed); there is no `allocation_rule` table or rule editor.
+Refunds/cancellations are captured and surfaced, but automatic credit notes,
+returns, and complaints remain phase 2.
+
+## Decisions requiring a human
+
+### T-02/T-03 — Ambiguous MetaKocka document recovery
+
+Probe the designated test company for `get_document` by shared `buyer_order` and
+`search` by exact `count_code`. Until response shapes are recorded, recovery
+must treat a sibling result as inconclusive and never blindly resend.
+
+### T-07 — Shopify access scopes before App Store review
+
+`write_products` and both merchant-managed fulfilment-order scopes are requested
+but their target features (T-09 and T-08) are absent. Either build those before
+review or remove the scopes and accept merchant re-consent if they return later.
+
+### T-12 — Name-only partner matching can merge people
+
+Partner resolution searches tax number, email, then name and chooses the first
+ambiguous name match. This avoids duplicate ERP partners but can merge different
+customers with the same name. Choose among stronger address/phone matching,
+creating a duplicate, or a merchant-resolved exception before changing who an
+order is filed against.
+
+### T-13 — JSON customer PII is not column-encrypted
+
+`order.raw_payload` and `metakocka_document.request_body` contain plaintext PII
+until redaction. Secrets and sessions are encrypted, retention is enforced, and
+disk/database encryption may satisfy Shopify's requirement; confirm the Level 2
+expectation before designing searchable encrypted payloads.
+
+## Engineering debt
+
+### T-01/T-04 — Coverage and database concurrency are unmeasured
+
+Vitest coverage tooling is not installed. More importantly, tests do not run
+against PostgreSQL, so transactional enqueue, document claims, and concurrent
+partner/payment/write guards are type- and unit-tested but not exercised under
+real database contention. A Compose-backed Vitest project is the highest-value
+test addition.
+
+### T-14 — Database boundary is not fully enforced
+
+Many direct `prisma.*` calls remain in jobs and a few web/queue modules despite
+the target rule that tenant filtering lives in repositories. Migrate one
+subsystem at a time, then forbid importing the Prisma client outside
+`src/adapters/db/` with ESLint.
+
+### UI, accessibility, and performance need measured passes
+
+The Built for Shopify checklist has not been walked requirement by requirement.
+The 375 px layout, screen-reader table semantics, save-bar behavior, hydration,
+and p75 LCP/CLS/INP budgets need browser measurement. Product loaders currently
+await Shopify catalogue queries; measure before changing them.
+
+### Large modules should be split only along proven responsibilities
+
+Several route/handler/repository files exceed 1,000 lines. They are coherent and
+tested, so a cosmetic split would create churn. Extract server operations,
+presentation helpers, or form sections only when a concrete change establishes
+a stable boundary.
+
+### Formatting and CI are not enforced
+
+ESLint, typecheck, tests, and builds are documented but no CI workflow is
+tracked. Prettier is configured but the existing repository does not pass a
+whole-tree `prettier --check`; avoid a giant formatting-only rewrite and adopt
+enforcement deliberately in a separate change.
+
+## MetaKocka probes still outstanding
+
+All require explicit approval and the designated test company:
+
+- shared-`buyer_order`/`show_split_orders` and exact-`count_code` lookup;
+- realistic and invoice-enabled `put_document` timing;
+- public stock-webhook acknowledgement;
+- full pricelist write including `lowest_price_30_days`;
+- complete-document payment update and payment-survival behavior;
+- shipping and discount semantics described in T-05/T-06.
+
+See `docs/metakocka-verification.md` for completed evidence and test-company
+artifacts. Never probe a production company.

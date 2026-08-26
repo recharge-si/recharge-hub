@@ -1,8 +1,11 @@
 # Fulfilment Orchestrator — build specification
 
-Source of truth for this project. Read fully before writing code. Where this conflicts
-with a convention you would otherwise follow, this file wins. Where this file is wrong
-or stale, say so rather than working around it.
+Source of truth for product requirements and the architecture target. Read the
+relevant sections before changing code, and read it fully before broad
+architectural work. `docs/architecture.md` maps the current implementation and
+`docs/project-status.md` records target features or constraints that are not yet
+implemented. Where this specification is wrong or stale, correct it from
+evidence rather than working around it.
 
 Two sets of constraints govern the work and neither yields to the other:
 
@@ -54,7 +57,9 @@ rejection reasons. Check shopify.dev rather than guessing.
 3. **No theme file writes.** Storefront output ships as theme app extensions only. The
    Asset API is read-only at most.
 4. **No script tags.** Web pixel extensions or theme app extensions instead.
-5. **GraphQL Admin API only**, latest stable version. No REST Admin calls.
+5. **GraphQL Admin API only**, using the latest stable version supported by the
+   pinned Shopify SDK. Bump the SDK/client and webhook version together as a
+   deliberate, tested change. No REST Admin calls.
 6. Mandatory compliance webhooks exist, verify HMAC, respond 200:
    `customers/data_request`, `customers/redact`, `shop/redact`. Also `app/uninstalled`.
 7. Every webhook verifies HMAC **before parsing the body** and responds within 5 seconds.
@@ -454,7 +459,7 @@ Pinned. Do not substitute without asking.
 | Job queue | pg-boss | In Postgres; gives transactional enqueue (§8.1) |
 | Validation | Zod | Every external boundary, no exceptions |
 | Tests | Vitest | |
-| HTTP mocking | MSW with recorded fixtures | |
+| HTTP testing | Recorded fixtures with injected fetch clients | Never call live services from tests |
 | Logging | pino, structured JSON, redaction list | |
 | Errors | Sentry or self-hosted GlitchTip | |
 | Deployment | Docker Compose on one Linux VM | `postgres`, `web`, `worker`, `caddy` |
@@ -484,7 +489,7 @@ prisma/
 tests/fixtures/    recorded MetaKocka and Shopify responses
 ```
 
-**Enforced import direction** (add an ESLint rule): `domain/` imports nothing from the
+**Enforced import direction** (implemented in ESLint): `domain/` imports nothing from the
 others. `adapters/` may import `domain/`. `jobs/` may import both. `web/` may import
 `adapters/` and `domain/`, never `jobs/`.
 
@@ -506,7 +511,11 @@ must be testable in milliseconds.
 
 ## 6. Data model
 
-Every table carries `shop_id`, `created_at`, `updated_at`.
+Tenant-owned records are scoped to a shop either directly with `shop_id` or
+through a required parent relation. Persistent application models carry creation
+and update timestamps unless an external storage contract dictates their shape.
+`prisma/schema.prisma` is authoritative for the implemented physical model; the
+list below is the conceptual target and omits later operational/cache fields.
 
 **`shop`** — domain, offline token (encrypted), install state, uninstalled_at.
 
@@ -735,9 +744,13 @@ section previously specified `ignoreCompareQuantity: false`, which does not exis
   step its stock never reaches Shopify at all. `inventoryActivate` takes one item per
   field, so batch them as aliases in one document rather than a query in a loop.
 
-**Loop prevention:** we receive `inventory_levels/update` for our own writes — compare
-against the last value written and drop matching events. Full stock reconciliation runs
-on a schedule regardless, because MetaKocka's webhook gives up after two retries.
+**Write-loop prevention:** there is currently no `inventory_levels/update`
+subscription. The app reads Shopify-to-MetaKocka locations on the five-minute
+cycle and writes only when the value differs; MetaKocka-to-Shopify writes also
+skip no-ops using the last observed/pushed state. If an inventory webhook is
+added later, compare it with the last app write before scheduling another one.
+Full stock reconciliation still runs on a schedule because MetaKocka's webhook
+gives up after two retries.
 
 Safety stock and virtual availability (phase 2) need a location this app exclusively
 owns. Never attempt it by writing partner locations.
@@ -776,6 +789,9 @@ the remainder `manual`, raise an exception (§11).
 Move and split fulfilment orders so each maps to one supply source's location
 (`fulfillmentOrderMove`, `fulfillmentOrderSplit`). Record resulting ids on the allocation.
 
+Current status: allocation enqueues this work, but no worker consumes that queue
+yet. See `docs/project-status.md` T-08.
+
 ### 8.4 MetaKocka sales orders
 
 One job per supply source. Each job:
@@ -790,16 +806,18 @@ One job per supply source. Each job:
 - sets `buyer_order` to the shared reference (not `customer_order`, §3)
 - maps partner (buyer) and receiver (shipping address) separately — they differ for gift
   and B2B orders
-- sends `price_with_tax` on lines
+- sends `price` or `price_with_tax` according to Shopify's tax-inclusive setting
 - records request and response bodies regardless of outcome
 
 Do **not** set `create_invoice` in v1. Invoicing stays a merchant decision.
 
 ### 8.5 Tracking back to Shopify
 
-Scheduled job polls MetaKocka `search` for sales orders changed since the stored cursor,
-extracts tracking codes, creates Shopify fulfilments with tracking. Never re-scan from the
-beginning.
+Target: create Shopify fulfilments with tracking from a stored MetaKocka cursor,
+never by rescanning from the beginning. This is currently blocked: verified
+sales-order `get_document` responses contain no status or tracking field, so the
+actual delivery/tracking source must be identified and recorded before a job can
+be designed. See `docs/project-status.md` T-10.
 
 ### 8.6 Money on a split order
 
@@ -820,6 +838,10 @@ One Shopify payment becomes N MetaKocka documents. Decided once, here, asserted 
 - **Tax:** derive `tax_factor` per line from Shopify tax lines, not a product default —
   the same SKU has different rates across markets. Handle tax-inclusive and tax-exclusive
   stores.
+
+Current status: shipping, document-level discounts, and line-level discounts are
+not yet encoded faithfully in the MetaKocka request body because their API
+semantics have not been verified. See `docs/project-status.md` T-05/T-06.
 
 ### 8.7 Payments
 
@@ -927,8 +949,11 @@ Phase 2 maps these to MetaKocka credit notes and the complaint endpoints
 
 ### 8.9 Product sync
 
-Field ownership is fixed and enforced in code. Never let both sides own a field — that is
-how you build a nightly flip-flop.
+Field ownership is fixed as the target. Never let both sides own a field — that
+is how you build a nightly flip-flop. MetaKocka-to-Shopify product writes in the
+table are not implemented today; the current app only reads/matches the two
+catalogues and performs merchant-enabled Shopify-to-MetaKocka name/creation
+writes. See `docs/project-status.md` T-09.
 
 | Field | Master | Direction |
 |---|---|---|
@@ -958,7 +983,7 @@ its price.
 **Creating articles is a merchant-controlled exception to the table above.** A Shopify SKU
 with no MetaKocka article can be neither stocked nor ordered, so the app can create one:
 `product_add` with `count_code` and `code` set to the SKU, the barcode, and a name built
-from a template the merchant writes (`domain/products/name-template.ts`). Where this
+from a template the merchant writes (`domain/products/template/`). Where this
 departs from the table, it does so deliberately and only when asked:
 
 - **Price and tax on creation only**, behind their own switch, off by default. The price
@@ -1019,7 +1044,8 @@ The five-minute cycle beside it is the guarantee.
 **MetaKocka documents hourly** (§8.11).
 
 **Everything else nightly**, and mandatory because MetaKocka's webhook gives up after two
-retries:
+retries. These cross-checks are the target and are not yet implemented; the
+current schedules above do run. See `docs/project-status.md` T-11:
 
 - every Shopify order in the window has the expected number of MetaKocka documents
 - every allocation has a corresponding fulfilment order
@@ -1067,8 +1093,10 @@ keeps that from being a way to hide a real difference.
 - Identity from the App Bridge ID token. **No separate login, no user table in v1.**
 - Gate the MetaKocka credentials screen to the shop owner; staff accounts must not read or
   set the ERP key.
-- Every query filters by `shop_id`, enforced in the repository layer so route code cannot
-  forget.
+- Every query must filter by tenant. The repository layer is the target boundary
+  so route/job code cannot forget; existing direct Prisma calls outside that
+  boundary are tracked in `docs/project-status.md` T-14 and should be migrated
+  subsystem by subsystem.
 - Background jobs have no session. Put a thin `Principal` abstraction
   (`ShopSession | ServiceToken`) in front of the service layer now, so a partner portal can
   be added later without a rewrite.
@@ -1145,9 +1173,10 @@ write leave the order looking successful.
 
 ## 12. Testing
 
-- `domain/allocation` needs exhaustive unit tests: zero stock, exact stock, partial stock,
-  split disabled, source below minimum, same SKU on two lines, zero quantity, source
-  disabled mid-order, priority ties.
+- `domain/allocation` needs exhaustive unit tests: zero stock, exact stock,
+  partial stock, split disabled, same SKU on two lines, zero quantity, a disabled
+  source, and priority ties. A minimum-order rule belongs here only after the
+  model has such a concept.
 - `domain/money` needs tests proving documents always sum to the order total, including
   odd cents and three-way splits.
 - All Shopify and MetaKocka interaction tested against **recorded fixtures**. Capture real
@@ -1198,11 +1227,11 @@ bundles via `compound`, Omnibus `lowest_price_30_days`, App Store submission and
 Separate test `company_id`. Never point development at production — there is no sandbox
 flag, only a different company. Record every response in `tests/fixtures/`.
 
-**Results so far are in `docs/metakocka-verification.md`.** Items 2 and 8 are answered;
-items 1 and 3 are partial; 4, 5, 6 and 7 are open. The findings that changed this
-document are marked **[verified]** in §3 and §7.
+**Results are in `docs/metakocka-verification.md`.** Items 2, 7, 8 and 9 are
+answered; items 1 and 3 are partial; items 4, 5, 6 and 10 remain open. The
+findings that changed this document are marked **[verified]** in §3 and §7.
 
-1. Create two sales orders sharing one `customer_order` with different warehouses. Check
+1. Create two sales orders sharing one `buyer_order` with different warehouses. Check
    `show_split_orders` and whether it looks acceptable in the MetaKocka UI.
 2. Send a `profit_center` that does not exist. Record the exact error.
 3. Time `put_document` with realistic line counts, with and without `create_invoice`.
