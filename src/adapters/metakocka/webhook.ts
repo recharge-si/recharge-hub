@@ -60,3 +60,21 @@ export function verifyMetakockaSignature(
  * why the scheduled reconciliation is not optional however well this works.
  */
 export const METAKOCKA_ACK = { check_respond_status_json_ok: true } as const;
+
+/**
+ * The single answer to every request that does not authenticate.
+ *
+ * The two ways in — no client secret stored for this shop, and a signature
+ * that does not verify — used to answer 401 with different bodies, which is
+ * enough for anyone to walk the URL space and learn which shops exist here and
+ * which of them have finished configuring the webhook. That is not a secret
+ * this app has any reason to hand out, and the merchant never sees either
+ * body: MetaKocka reports "the endpoint refused it" and the reason for the
+ * refusal is in our own log, where it is useful.
+ *
+ * A function rather than a constant because a `Response` body can only be
+ * read once.
+ */
+export function metakockaWebhookUnauthorized(): Response {
+  return new Response("Unauthorized", { status: 401 });
+}

@@ -13,7 +13,10 @@ import {
   appendEvent,
   recentEvents,
 } from "~/adapters/db/repositories/event-log.server";
-import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import {
+  isConnected,
+  requireCredential,
+} from "~/adapters/db/repositories/metakocka-credential.server";
 import {
   listProfitCenters,
   removeProfitCenter,
@@ -138,7 +141,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     warehouses,
     sources,
     locations,
-    credential,
+    connected,
     events,
     defaults,
     profitCenters,
@@ -146,7 +149,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     listCachedWarehouses(principal),
     listSupplySources(principal),
     listLocations(admin),
-    getCredential(principal),
+    isConnected(principal),
     recentEvents(principal, 120),
     getSupplyDefaults(principal),
     listProfitCenters(principal),
@@ -255,7 +258,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    */
   const unchecked = profitCenters.some((entry) => entry.validatedAt === null);
   let checking = false;
-  if (credential && unchecked) {
+  if (connected && unchecked) {
     await enqueueThrottled(
       QUEUES.reloadProfitCenters,
       { shopDomain: principal.shopDomain },
@@ -266,7 +269,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   }
 
   return {
-    connected: credential !== null,
+    connected,
     defaults: {
       direction: String(defaults.defaultStockDirection),
       profitCenter: defaults.defaultProfitCenter ?? "",
@@ -342,13 +345,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* ---------------------------------------------------------------------- */
 
   if (intent === "refresh-warehouses") {
-    const credential = await getCredential(principal);
-    if (!credential) {
+    const access = await requireCredential(principal);
+    if (!access.ok) {
       return fail(
         "page",
-        "Connect MetaKocka first. The warehouse list comes from there.",
+        access.reason === "not_permitted"
+          ? access.message
+          : "Connect MetaKocka first. The warehouse list comes from there.",
       );
     }
+    const credential = access.credential;
 
     try {
       const client = new MetakockaClient(
@@ -405,9 +411,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* ---------------------------------------------------------------------- */
 
   if (intent === "refresh-profit-centers") {
-    const credential = await getCredential(principal);
-    if (!credential) {
-      return fail("register", "Connect MetaKocka first, then check again.");
+    const access = await requireCredential(principal);
+    if (!access.ok) {
+      return fail(
+        "register",
+        access.reason === "not_permitted"
+          ? access.message
+          : "Connect MetaKocka first, then check again.",
+      );
     }
 
     // Queued rather than awaited: this is one MetaKocka round trip per entry
@@ -498,10 +509,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return fail("register", "Enter the name exactly as MetaKocka has it.");
     }
 
-    const credential = await getCredential(principal);
-    if (!credential) {
-      return fail("register", "Connect MetaKocka first, then add a centre.");
+    const access = await requireCredential(principal);
+    if (!access.ok) {
+      return fail(
+        "register",
+        access.reason === "not_permitted"
+          ? access.message
+          : "Connect MetaKocka first, then add a centre.",
+      );
     }
+    const credential = access.credential;
 
     try {
       const client = new MetakockaClient(

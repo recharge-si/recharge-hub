@@ -977,6 +977,22 @@ export interface ManualAllocationInput {
  * The reason is recorded like any other (§6: the audit trail is a product
  * feature), so the order page says a person chose this and when.
  */
+/**
+ * A manual allocation naming a supply source this shop does not have.
+ *
+ * Its own type so the route can answer with a message rather than a 500. It
+ * only happens on a forged post — the picker cannot offer one — but "only a
+ * forged post" is not a reason to hand back a stack trace.
+ */
+export class UnknownSupplySourceError extends Error {
+  constructor(readonly supplySourceIds: string[]) {
+    super(
+      `Unknown supply source: ${supplySourceIds.join(", ")}`,
+    );
+    this.name = "UnknownSupplySourceError";
+  }
+}
+
 export async function setManualAllocations(
   principal: Principal,
   orderId: string,
@@ -995,6 +1011,33 @@ export async function setManualAllocations(
 
     const lineIds = new Set(order.lines.map((line) => line.id));
     const mine = records.filter((record) => lineIds.has(record.orderLineId));
+
+    /*
+     * The chosen source has to belong to this shop.
+     *
+     * The order and its lines are already scoped, but the source id comes
+     * straight off a form. Nothing in the picker can offer another tenant's
+     * source — `listAllocatableSources` is scoped too — so only a forged post
+     * reaches here, and what it would buy is real: the order page joins the
+     * allocation to its source to render the name, so a guessed id would show
+     * one shop another shop's supply source, and the document writer would
+     * read that source's warehouse and profit centre.
+     *
+     * §9 puts this in the repository rather than in the route on purpose:
+     * route code is allowed to forget.
+     */
+    const chosen = [...new Set(mine.map((record) => record.supplySourceId))];
+    if (chosen.length > 0) {
+      const owned = await tx.supplySource.findMany({
+        where: { id: { in: chosen }, shop: { domain: shopDomain } },
+        select: { id: true },
+      });
+      const ownedIds = new Set(owned.map((source) => source.id));
+      const foreign = chosen.filter((id) => !ownedIds.has(id));
+      if (foreign.length > 0) {
+        throw new UnknownSupplySourceError(foreign);
+      }
+    }
 
     await tx.allocation.deleteMany({
       where: { orderLineId: { in: [...lineIds] } },

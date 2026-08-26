@@ -9,7 +9,10 @@ import {
 } from "react-router";
 
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
-import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
+import {
+  isConnected,
+  requireCredential,
+} from "~/adapters/db/repositories/metakocka-credential.server";
 import {
   getPricelistRegister,
   listTaxRates,
@@ -125,7 +128,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     catalogue,
     register,
     taxRates,
-    credential,
+    connected,
   ] = await Promise.all([
     getProductSyncSetting(principal),
     listVariantDetails(admin, previewOptions),
@@ -137,7 +140,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     countVariants(admin),
     getPricelistRegister(principal),
     listTaxRates(principal),
-    getCredential(principal),
+    isConnected(principal),
   ]);
 
   // What MetaKocka calls these products now, read from our own registry. No
@@ -165,7 +168,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     readAt === null || Date.now() - readAt.getTime() > STALE_AFTER_MS;
 
   let refreshing = false;
-  if (credential && stale) {
+  if (connected && stale) {
     await enqueueThrottled(
       QUEUES.reloadPricelists,
       { shopDomain: session.shop },
@@ -193,7 +196,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
     pricelistsReadAt: readAt?.toISOString() ?? null,
     taxRates,
-    connected: Boolean(credential),
+    connected,
     refreshing,
   };
 };
@@ -212,15 +215,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
    * the save: it writes nothing to the settings and nothing to MetaKocka.
    */
   if (value("intent") === "load-pricelists") {
-    const credential = await getCredential(principal);
-    if (!credential) {
+    const access = await requireCredential(principal);
+    if (!access.ok) {
       return {
         ok: false,
         field: null,
         message:
-          "Connect MetaKocka first. The pricelists come from your company's own products.",
+          access.reason === "not_permitted"
+            ? access.message
+            : "Connect MetaKocka first. The pricelists come from your company's own products.",
       };
     }
+    const credential = access.credential;
 
     try {
       const client = new MetakockaClient(

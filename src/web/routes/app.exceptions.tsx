@@ -130,7 +130,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       };
     }
 
-    if (id) await recordExceptionAttempt(id, new Date());
+    if (id) await recordExceptionAttempt(principal, id, new Date());
 
     return {
       ok: true,
@@ -180,7 +180,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       const outcome = await redriveOrder(principal, row.order.id, target);
       if (outcome.queued.length > 0) {
         queued += 1;
-        await recordExceptionAttempt(row.id, new Date());
+        await recordExceptionAttempt(principal, row.id, new Date());
       }
     }
 

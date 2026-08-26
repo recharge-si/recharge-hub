@@ -6,6 +6,7 @@ import {
   METAKOCKA_ACK,
   METAKOCKA_EVENT_HEADER,
   METAKOCKA_SIGNATURE_HEADER,
+  metakockaWebhookUnauthorized,
   verifyMetakockaSignature,
 } from "~/adapters/metakocka/webhook";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
@@ -62,12 +63,17 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
      * 401 rather than 200: MetaKocka will retry twice and give up, which is the
      * correct outcome for a shop that has not finished setting the webhook up.
      * Answering "ok" would hide a broken configuration behind a green light.
+     *
+     * The body is the same one a bad signature gets. Two different bodies let
+     * anyone walk the URL space and learn which shops are installed here and
+     * which have finished configuring the webhook; the reason for the refusal
+     * belongs in our log, where the merchant's support request can find it.
      */
     log.warn(
       { shop: shopDomain },
       "MetaKocka stock webhook arrived with no client secret configured",
     );
-    return new Response("Not configured", { status: 401 });
+    return metakockaWebhookUnauthorized();
   }
 
   if (
@@ -83,7 +89,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       { shop: shopDomain, eventId },
       "MetaKocka stock webhook failed signature verification",
     );
-    return new Response("Bad signature", { status: 401 });
+    return metakockaWebhookUnauthorized();
   }
 
   /*

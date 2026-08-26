@@ -3,7 +3,7 @@ import type { ExceptionKind } from "@prisma/client";
 import { prisma } from "~/adapters/db/client.server";
 import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
-import type { Principal } from "~/domain/types";
+import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
  * Re-driving the work behind an order, from wherever the request comes from.
@@ -265,13 +265,25 @@ export async function redriveOrder(
   return { queued, reason: null };
 }
 
-/** Records that a person or the re-check asked for this again. */
+/**
+ * Records that a person or the re-check asked for this again.
+ *
+ * Scoped to the caller's shop like every other query (§9), and for the usual
+ * reason: an id is not an authorisation. Without the filter any authenticated
+ * shop could increment the attempt count on another shop's exception by
+ * guessing an id — not a data leak on its own, but it writes into a tenant's
+ * audit trail, and "the id was in the form" is exactly the reasoning §9 says
+ * the repository layer exists to make impossible to rely on.
+ *
+ * A row that is not the caller's simply matches nothing.
+ */
 export async function recordExceptionAttempt(
+  principal: Principal,
   exceptionId: string,
   at: Date,
 ): Promise<void> {
   await prisma.exception.updateMany({
-    where: { id: exceptionId },
+    where: { id: exceptionId, shop: { domain: shopDomainOf(principal) } },
     data: { lastAttemptAt: at, attempts: { increment: 1 } },
   });
 }

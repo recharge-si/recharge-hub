@@ -17,6 +17,7 @@ import {
   productsForSkus,
   savePartnerOverride,
   setManualAllocations,
+  UnknownSupplySourceError,
   stockForOrder,
 } from "~/adapters/db/repositories/order.server";
 import { metakockaDocumentUrl } from "~/adapters/metakocka/documents";
@@ -313,13 +314,26 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
       };
     }
 
-    await setManualAllocations(
-      principal,
-      orderId,
-      records,
-      session.shop,
-      new Date(),
-    );
+    try {
+      await setManualAllocations(
+        principal,
+        orderId,
+        records,
+        session.shop,
+        new Date(),
+      );
+    } catch (error) {
+      // Only a forged post gets here — the picker is scoped to this shop — but
+      // §2.8 wants an answer next to the field, not a stack trace.
+      if (error instanceof UnknownSupplySourceError) {
+        return {
+          ok: false,
+          message:
+            "One of the chosen supply sources is not set up on this store. Reload the page and choose again.",
+        };
+      }
+      throw error;
+    }
 
     const { queued } = await redriveOrder(principal, orderId, "write");
 
