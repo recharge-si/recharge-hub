@@ -18,7 +18,7 @@ Completed work belongs in Git history, not in this file.
   `sync_stock` safeguards
 - Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
   visibility, dashboard, orders, and exceptions UI
-- 474 fixture-driven tests across pure domain, adapters, presentation helpers,
+- 491 fixture-driven tests across pure domain, adapters, presentation helpers,
   and the order-to-MetaKocka vertical slice
 
 ## Product and integration gaps
@@ -83,6 +83,17 @@ returns, and complaints remain phase 2.
 Probe the designated test company for `get_document` by shared `buyer_order` and
 `search` by exact `count_code`. Until response shapes are recorded, recovery
 must treat a sibling result as inconclusive and never blindly resend.
+
+### T-16 — Company-wide `sync_stock` write is unverified against a live company
+
+`pushShopifyStockIntoMetakocka` now sends every cached warehouse in one
+`sync_stock` request, not only the reverse-synced one, on the strength of that
+endpoint's own documentation ("the total stock for all warehouses must be sent
+in one request") rather than a live probe. The designated test company has not
+been used to confirm that omitting a whole warehouse from the request actually
+removes its stock (or that it does not). See
+`docs/metakocka-verification.md` § `sync_stock` for what is documented versus
+verified, and record a sanitized multi-warehouse fixture once probed.
 
 ### T-07 — Shopify access scopes before App Store review
 

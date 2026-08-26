@@ -49,17 +49,34 @@ export interface StockLevel {
 const PAGE = 500;
 
 /**
- * Every stock row for one warehouse.
+ * Every stock row for one warehouse, aggregated to one row per product.
  *
  * Fully paginated on purpose. A SKU absent from the result is treated by the
  * caller as zero stock, and that conclusion is only safe once the whole list has
  * been read: a truncated page would otherwise zero out real inventory.
+ *
+ * A live company can return more than one row for the same
+ * `(warehouse_id, code)` pair — separate microlocations inside one physical
+ * warehouse. A caller building a `Map` keyed by product code from the raw
+ * rows would have the last microlocation silently overwrite the rest,
+ * undercounting real stock by however much sat in the ones before it. Summed
+ * here instead, once, so every caller sees the warehouse's true total.
  */
 export async function listWarehouseStock(
   client: MetakockaClient,
   warehouseMkId: string,
 ): Promise<StockLevel[]> {
-  const rows: StockLevel[] = [];
+  interface Aggregate {
+    warehouseId: string;
+    code: string;
+    title: string | null;
+    amount: number;
+    reserved: number;
+    /** Summed only while every contributing row has carried it; see below. */
+    free: number | null;
+  }
+
+  const byKey = new Map<string, Aggregate>();
 
   for (let offset = 0; offset < 200_000; offset += PAGE) {
     const response = await client.call(
@@ -69,20 +86,46 @@ export async function listWarehouseStock(
     );
 
     for (const row of response.stock_list) {
-      rows.push({
-        warehouseId: row.warehouse_id,
-        code: row.code,
-        title: row.title ?? null,
-        amount: row.amount,
-        reserved: row.reserved_amount ?? 0,
-        free: row.free_amount ?? row.amount - (row.reserved_amount ?? 0),
-      });
+      const key = `${row.warehouse_id}:${row.code}`;
+      const reserved = row.reserved_amount ?? 0;
+      const existing = byKey.get(key);
+
+      if (!existing) {
+        byKey.set(key, {
+          warehouseId: row.warehouse_id,
+          code: row.code,
+          title: row.title ?? null,
+          amount: row.amount,
+          reserved,
+          free: row.free_amount ?? null,
+        });
+        continue;
+      }
+
+      existing.amount += row.amount;
+      existing.reserved += reserved;
+      // free_amount is summed only if every microlocation reported it —
+      // one row missing it makes the running total meaningless, and the
+      // fallback below recomputes it from the (always present) aggregate
+      // amount and reserved instead.
+      existing.free =
+        existing.free === null || row.free_amount === undefined
+          ? null
+          : existing.free + row.free_amount;
+      existing.title ??= row.title ?? null;
     }
 
     if (response.stock_list.length < PAGE) break;
   }
 
-  return rows;
+  return [...byKey.values()].map((row) => ({
+    warehouseId: row.warehouseId,
+    code: row.code,
+    title: row.title,
+    amount: row.amount,
+    reserved: row.reserved,
+    free: row.free ?? row.amount - row.reserved,
+  }));
 }
 
 const productRowSchema = z

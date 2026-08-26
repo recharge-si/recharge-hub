@@ -982,6 +982,14 @@ model Exception {
   message String
   detail  Json?
 
+  /// Identity of the condition this row is about, e.g. "order:<id>" or
+  /// "source:<id>". Lets an orderless condition (a location's stock sync)
+  /// dedupe the same way an order-scoped one always has, instead of piling up
+  /// one row per failed attempt. Null for older rows and anything that has no
+  /// natural identity beyond (shop, kind). A partial unique index below
+  /// enforces one open row per (shop, kind, dedupe_key).
+  dedupeKey String? @map("dedupe_key")
+
   status     ExceptionStatus @default(open)
   resolvedBy String?         @map("resolved_by")
   resolvedAt DateTime?       @map("resolved_at")
@@ -1010,6 +1018,11 @@ model Exception {
 
   @@index([shopId, status])
   @@index([orderId])
+  // One open row per (shop, kind, dedupe_key) is enforced by a partial unique
+  // index (WHERE status = 'open' AND dedupe_key IS NOT NULL) that Prisma's
+  // schema language cannot express; it is created by hand in
+  // 20260826030000_exception_dedupe/migration.sql and doubles as the lookup
+  // index for the case that matters (an open row by its dedupe key).
   @@map("exception")
 }
 

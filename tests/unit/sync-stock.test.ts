@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MetakockaError } from "~/adapters/metakocka/errors";
 import {
+  buildCompleteCompanyStockList,
   buildCompleteStockList,
   syncStockToMetakocka,
 } from "~/adapters/metakocka/sync-stock";
@@ -154,6 +155,61 @@ describe("building the stock list for sync_stock", () => {
           { product_code: "LOOSE-CABLE-M", amount: "3.5" },
         ],
       });
+    });
+  });
+});
+
+describe("building the company-wide stock list for sync_stock", () => {
+  // MetaKocka's own documentation for this endpoint says the total stock for
+  // *all* warehouses must be sent in one request, and that anything absent
+  // from it is removed. Sending lines for the reverse-synced warehouse alone
+  // would, on that reading, wipe every other warehouse in the company.
+  it("preserves lines from warehouses this app is not reverse-syncing", () => {
+    const lines = buildCompleteCompanyStockList({
+      warehouseId: "W1",
+      managed: new Map([["A", 7]]),
+      currentByWarehouse: new Map([
+        ["W1", new Map([["A", 3]])],
+        ["W2", new Map([["A", 9], ["B", 5]])],
+      ]),
+    });
+
+    expect(lines).toContainEqual({ warehouseId: "W1", productCode: "A", amount: 7 });
+    expect(lines).toContainEqual({ warehouseId: "W2", productCode: "A", amount: 9 });
+    expect(lines).toContainEqual({ warehouseId: "W2", productCode: "B", amount: 5 });
+  });
+
+  it("still applies Shopify's number only at the reverse-synced warehouse", () => {
+    const lines = buildCompleteCompanyStockList({
+      warehouseId: "W1",
+      managed: new Map([["A", 7]]),
+      currentByWarehouse: new Map([
+        ["W1", new Map([["A", 3]])],
+        ["W2", new Map([["A", 3]])],
+      ]),
+    });
+
+    expect(lines).toContainEqual({ warehouseId: "W1", productCode: "A", amount: 7 });
+    // Same product code, a warehouse this source has no say over: untouched.
+    expect(lines).toContainEqual({ warehouseId: "W2", productCode: "A", amount: 3 });
+  });
+
+  it("still includes a managed product at a warehouse MetaKocka has never held stock in", () => {
+    const lines = buildCompleteCompanyStockList({
+      warehouseId: "NEW-WH",
+      managed: new Map([["A", 5]]),
+      currentByWarehouse: new Map([["W2", new Map([["B", 1]])]]),
+    });
+
+    expect(lines).toContainEqual({
+      warehouseId: "NEW-WH",
+      productCode: "A",
+      amount: 5,
+    });
+    expect(lines).toContainEqual({
+      warehouseId: "W2",
+      productCode: "B",
+      amount: 1,
     });
   });
 });
@@ -396,5 +452,123 @@ describe("syncStockToMetakocka", () => {
     ).catch((e: unknown) => e);
 
     expect((error as MetakockaError).kind).toBe("exception");
+  });
+
+  it("treats a non-empty stock_remove_list as a failure, not a quiet success", async () => {
+    // The endpoint's own documentation: an item absent from the request is
+    // removed and comes back listed here. The adapter's whole premise is
+    // that the list it sends is complete, so this should never be non-empty
+    // — and if it is, real stock was just dropped by a write that already
+    // happened.
+    const fetchImpl = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({
+            opr_code: "0",
+            stock_list: [{ product_code: "A", amount: "1" }],
+            stock_remove_list: [{ product_code: "GONE" }],
+          }),
+          { status: 200, headers: { "Content-Type": "application/json" } },
+        ),
+    );
+
+    const error = await syncStockToMetakocka(
+      CREDENTIALS,
+      [{ warehouseId: "W1", productCode: "A", amount: 1 }],
+      { fetchImpl: fetchImpl as unknown as typeof fetch },
+    ).catch((e: unknown) => e);
+
+    expect(error).toBeInstanceOf(MetakockaError);
+    expect((error as MetakockaError).message).toContain("removed 1 item");
+  });
+
+  describe("matching the echo across more than one warehouse", () => {
+    it("matches by (warehouse_id, product_code) when the same code is sent to two warehouses", async () => {
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              opr_code: "0",
+              stock_list: [
+                { warehouse_id: "W1", product_code: "A", amount: "7" },
+                { warehouse_id: "W2", product_code: "A", amount: "9" },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+
+      await expect(
+        syncStockToMetakocka(
+          CREDENTIALS,
+          [
+            { warehouseId: "W1", productCode: "A", amount: 7 },
+            { warehouseId: "W2", productCode: "A", amount: 9 },
+          ],
+          { fetchImpl: fetchImpl as unknown as typeof fetch },
+        ),
+      ).resolves.toEqual({ sent: 2, acknowledged: 2 });
+    });
+
+    it("catches a real amount mismatch even with the same code in two warehouses", async () => {
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              opr_code: "0",
+              stock_list: [
+                { warehouse_id: "W1", product_code: "A", amount: "7" },
+                // W2's line came back wrong.
+                { warehouse_id: "W2", product_code: "A", amount: "0" },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+
+      const error = await syncStockToMetakocka(
+        CREDENTIALS,
+        [
+          { warehouseId: "W1", productCode: "A", amount: 7 },
+          { warehouseId: "W2", productCode: "A", amount: 9 },
+        ],
+        { fetchImpl: fetchImpl as unknown as typeof fetch },
+      ).catch((e: unknown) => e);
+
+      expect((error as MetakockaError).message).toContain(
+        "A was sent as 9 but came back as 0",
+      );
+    });
+
+    it("does not invent a mismatch when the same code in two warehouses echoes back without a warehouse_id", async () => {
+      // Every fixture recorded against a live company so far has omitted
+      // warehouse_id from the echo. With the same code sent to two
+      // warehouses, an unwarehoused echo cannot say which one it answers
+      // for — "could not tell" applies rather than a false alarm.
+      const fetchImpl = vi.fn(
+        async () =>
+          new Response(
+            JSON.stringify({
+              opr_code: "0",
+              stock_list: [
+                { product_code: "A", amount: "7" },
+                { product_code: "A", amount: "9" },
+              ],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+      );
+
+      await expect(
+        syncStockToMetakocka(
+          CREDENTIALS,
+          [
+            { warehouseId: "W1", productCode: "A", amount: 7 },
+            { warehouseId: "W2", productCode: "A", amount: 9 },
+          ],
+          { fetchImpl: fetchImpl as unknown as typeof fetch },
+        ),
+      ).resolves.toEqual({ sent: 2, acknowledged: 2 });
+    });
   });
 });

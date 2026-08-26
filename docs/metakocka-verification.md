@@ -25,6 +25,7 @@ sanitized response under `tests/fixtures/metakocka/` before code depends on it.
 | Document update   | Update behaves as replacement; omitted lines disappear                          | Replay a complete recorded body and read it back              |
 | Payment types     | Invalid `payment_type` returns the accepted value set                           | Discover/cache the register from the rejection                |
 | Stock write       | `sync_stock` removes omitted products and can report success for an empty no-op | Send and verify a complete warehouse list                     |
+| Stock write scope | Documented (not yet live-verified): all warehouses must be sent in one request  | Send and verify a complete *company* list, not one warehouse  |
 | Read-back         | `get_document` has no sales-order status or tracking field                      | Tracking design remains blocked on another source             |
 
 ## Inventory reservation
@@ -214,6 +215,8 @@ reported server time and 91–372 ms wall time. Realistic line counts and
 
 ## `sync_stock`
 
+Live-verified against test company `6789`:
+
 - Endpoint: `/rest/eshop/sync_stock`, outside both v1 families.
 - Requires `api_user_email` in addition to company id and secret key.
 - Products omitted from `stock_list` are removed from the warehouse snapshot.
@@ -222,6 +225,33 @@ reported server time and 91–372 ms wall time. Realistic line counts and
 The adapter refuses an empty write, echoes unmanaged values unchanged, sends a
 complete list, classifies HTTP/non-JSON failures, and verifies returned product
 codes and amounts when MetaKocka echoes them.
+
+**Documented, not yet live-verified** (fetched from the official
+`metakocka/metakocka_api_base` repository's `docs/warehouse_stock_sync.md` on
+2026-08-26 — a public documentation read, not a live company call):
+
+- "The total stock for all warehouses must be sent in one request." Read
+  together with the omission-removes rule above, this implies a warehouse
+  missing from the request is treated the same as a product missing from a
+  warehouse that is present: removed. The adapter now builds and sends one
+  list covering every cached warehouse for this reason
+  (`buildCompleteCompanyStockList`), not only the warehouse being
+  reverse-synced.
+- A response can include `stock_remove_list`, naming what was removed for
+  being absent from the request. Because the list this adapter sends is meant
+  to be complete, a non-empty `stock_remove_list` is treated as a failure —
+  proof the list it just sent was not actually complete.
+- `include_current_stock` (bool) adds a same-day-invoice figure
+  (`current_day_invoice_amount`) to each item in the *response*. It does not
+  appear to change what a write can remove, so the adapter does not set it;
+  nothing today depends on the field it adds.
+
+None of the three items above has been checked against the designated test
+company. Do this before depending further on the company-wide write: confirm
+that omitting a whole warehouse from a real `sync_stock` request actually
+zeroes it (or find that it does not, and that the single-warehouse behaviour
+was safe all along), and record a sanitized multi-warehouse request/response
+pair under `tests/fixtures/metakocka/`.
 
 ## Outstanding approved-test-company work
 
@@ -235,6 +265,10 @@ codes and amounts when MetaKocka echoes them.
    line survival.
 7. Shipping service-line, document `discount_value`, and per-line `discount`
    semantics.
+8. Whether `sync_stock` actually removes stock from a warehouse omitted from
+   the request entirely, as its documentation implies — the reverse-sync
+   handler now sends every cached warehouse on that assumption and this has
+   not been checked live.
 
 ## Known test-company artifacts
 

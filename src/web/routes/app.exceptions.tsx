@@ -9,9 +9,13 @@ import {
   type LoaderFunctionArgs,
 } from "react-router";
 
+import type { ExceptionKind } from "@prisma/client";
+
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import {
+  countOpenExceptionsByKind,
   listExceptions,
+  listOpenExceptionsByKind,
   resolveException,
 } from "~/adapters/db/repositories/exception.server";
 import {
@@ -21,7 +25,11 @@ import {
 } from "~/adapters/queue/redrive.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { formatDateTime } from "~/web/lib/datetime";
-import { describeExceptionKind } from "~/web/lib/exceptions";
+import {
+  describeExceptionKind,
+  EXCEPTIONS_PAGE_SIZE,
+  parseExceptionsLimit,
+} from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -49,8 +57,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [open, resolved] = await Promise.all([
-    listExceptions(principal, { status: "open" }),
+  const url = new URL(request.url);
+  const limit = parseExceptionsLimit(url.searchParams.get("limit"));
+
+  const [open, counts, resolved] = await Promise.all([
+    listExceptions(principal, { status: "open", limit }),
+    countOpenExceptionsByKind(principal),
     listExceptions(principal, { status: "resolved", limit: 10 }),
   ]);
 
@@ -78,22 +90,35 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    * mostly repeated sentences. Grouping states each piece of advice once and
    * leaves the rows to say only what is different about them: which order, and
    * what exactly happened to it.
+   *
+   * The page only loads `limit` open rows, so a group's true size comes from
+   * `counts`, not from how many of its rows happened to load — otherwise a
+   * heading and a bulk-action label would understate a group the page hasn't
+   * fully paged in yet.
    */
   const rows = shape(open);
   const kinds = [...new Set(rows.map((row) => row.kind))];
+  const total = [...counts.values()].reduce((sum, n) => sum + n, 0);
 
   const groups = kinds
     .map((kind) => ({
       kind,
       rows: rows.filter((row) => row.kind === kind),
+      count: counts.get(kind) ?? 0,
       // Retrying a whole group only makes sense where a retry does something.
       retryable: TARGET_FOR_KIND[kind] !== "none",
     }))
     // Biggest first: the thing that has gone wrong most is the thing worth
     // dealing with first, and it is usually one fix for all of them.
-    .sort((a, b) => b.rows.length - a.rows.length);
+    .sort((a, b) => b.count - a.count);
 
-  return { groups, total: rows.length, resolved: shape(resolved) };
+  return {
+    groups,
+    total,
+    limit,
+    hasMore: rows.length < total,
+    resolved: shape(resolved),
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -149,9 +174,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
      * profit centre created, stock delivered — so making the merchant press the
      * same button once per order is asking them to do the app's arithmetic.
      */
-    const kind = String(formData.get("kind") ?? "");
-    const open = await listExceptions(principal, { status: "open" });
-    const mine = open.filter((row) => row.kind === kind && row.order);
+    const kind = String(formData.get("kind") ?? "") as ExceptionKind;
+    const open = await listOpenExceptionsByKind(principal, kind);
+    // Resolving needs nothing but the row; retrying redrives an order, so it
+    // only applies to rows that have one. An orderless stock exception used
+    // to be excluded from both, which meant it could never be bulk-resolved
+    // even though marking it dealt with needs no order at all.
+    const mine =
+      intent === "resolve-kind" ? open : open.filter((row) => row.order);
 
     if (mine.length === 0) {
       return { ok: false, message: "There is nothing left of that kind." };
@@ -221,7 +251,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function Exceptions() {
-  const { groups, total, resolved } = useLoaderData<typeof loader>();
+  const { groups, total, limit, hasMore, resolved } =
+    useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
@@ -270,17 +301,24 @@ export default function Exceptions() {
            * every row in a card — a gateway nobody mapped, stock that ran out —
            * so the fix is one press for the group rather than one per order.
            */
-          groups.map((group) => {
-            const copy = describeExceptionKind(group.kind);
-            const count = group.rows.length;
+          <>
+            {groups.map((group) => {
+              const copy = describeExceptionKind(group.kind);
+              const count = group.count;
+              const loaded = group.rows.length;
 
-            return (
-              <s-section
-                key={group.kind}
-                heading={`${copy.label}${count > 1 ? ` (${count})` : ""}`}
-              >
-                <s-stack direction="block" gap="base">
-                  <s-text color="subdued">{copy.guidance}</s-text>
+              return (
+                <s-section
+                  key={group.kind}
+                  heading={`${copy.label}${count > 1 ? ` (${count})` : ""}`}
+                >
+                  <s-stack direction="block" gap="base">
+                    <s-text color="subdued">{copy.guidance}</s-text>
+                    {loaded < count ? (
+                      <s-text color="subdued">
+                        {`Showing ${loaded} of ${count}. Load more to see the rest.`}
+                      </s-text>
+                    ) : null}
 
                   {/*
                    * Bulk first, because it is usually the right one. Only shown
@@ -470,8 +508,26 @@ export default function Exceptions() {
                   </s-table>
                 </s-stack>
               </s-section>
-            );
-          })
+              );
+            })}
+
+            {hasMore ? (
+              <Form method="get">
+                <input
+                  type="hidden"
+                  name="limit"
+                  value={limit + EXCEPTIONS_PAGE_SIZE}
+                />
+                <s-button
+                  type="submit"
+                  variant="tertiary"
+                  {...(busy ? { disabled: true } : {})}
+                >
+                  Load more
+                </s-button>
+              </Form>
+            ) : null}
+          </>
         )}
 
         {resolved.length > 0 ? (

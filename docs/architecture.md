@@ -71,8 +71,12 @@ location:
 - `none`: this app writes neither side.
 
 The Shopify adapter refuses writes to locations this app does not own. The
-MetaKocka adapter sends a complete warehouse snapshot because omission from
-`sync_stock` is destructive.
+MetaKocka adapter sends a complete *company* snapshot — every cached
+warehouse, not only the one being reverse-synced — because `sync_stock`'s own
+documentation requires the total stock for all warehouses in one request and
+treats anything omitted, including a whole warehouse, as removed. Every
+warehouse but the one Shopify is authoritative for is echoed back exactly as
+read.
 
 ### Catalogue and product names
 

@@ -140,3 +140,24 @@ const FALLBACK: ExceptionCopy = {
 export function describeExceptionKind(kind: string): ExceptionCopy {
   return COPY[kind] ?? FALLBACK;
 }
+
+/** How many open exceptions the page loads at once, and grows by on "Load more". */
+export const EXCEPTIONS_PAGE_SIZE = 5;
+
+const MAX_EXCEPTIONS_LIMIT = 500;
+
+/**
+ * The `limit` query parameter, bounded.
+ *
+ * Anything absent, non-numeric, non-positive, or absurd (someone hand-editing
+ * the URL) falls back to the first page rather than either erroring or, worse,
+ * loading every open exception at once — which is the load this pagination
+ * exists to avoid putting on the page and the database both.
+ */
+export function parseExceptionsLimit(raw: string | null): number {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+    return EXCEPTIONS_PAGE_SIZE;
+  }
+  return Math.min(n, MAX_EXCEPTIONS_LIMIT);
+}

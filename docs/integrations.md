@@ -13,7 +13,7 @@ probe evidence belong in `docs/metakocka-verification.md`.
 | SKU catalogue match                      | Shopify + MetaKocka → app   | `sync-catalogue` registry read                              |
 | MetaKocka product names/prices on opt-in | Shopify → MetaKocka         | `sync-products`; merchant-controlled and off by default     |
 | Inventory for `mk_to_shopify` locations  | MetaKocka → Shopify         | Physical `amount` to Shopify `on_hand`                      |
-| Inventory for `shopify_to_mk` locations  | Shopify → MetaKocka         | Complete-warehouse `sync_stock` write                       |
+| Inventory for `shopify_to_mk` locations  | Shopify → MetaKocka         | Complete-company `sync_stock` write                         |
 | Fulfilment-order placement               | Planned app → Shopify       | Queue exists; no consumer yet                               |
 | Tracking                                 | Planned MetaKocka → Shopify | Blocked: verified sales-order payload has no tracking field |
 
@@ -81,7 +81,11 @@ third base URL and a dedicated adapter.
 - Product lines are catalogue references. Sending `unit` can create a product
   accidentally, so order lines deliberately omit it.
 - Stock `sync_stock` removes omitted products and can report success for a
-  no-op, so the adapter sends and verifies a complete list.
+  no-op, so the adapter sends and verifies a complete list. Its own
+  documentation says the total stock for *all* warehouses must be sent in one
+  request, so a reverse (`shopify_to_mk`) sync reads and re-sends every cached
+  warehouse in the company, not only the one it is authoritative for — see
+  `docs/metakocka-verification.md`.
 - The only MetaKocka webhook is a stock-change nudge with limited retries;
   scheduled reconciliation remains mandatory.
 

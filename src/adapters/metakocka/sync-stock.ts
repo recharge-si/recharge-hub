@@ -56,6 +56,14 @@ const responseSchema = z
           .passthrough(),
       )
       .optional(),
+    // Per the endpoint's own documentation: items previously in stock but
+    // absent from the request come back here, having been removed. The list
+    // sent is meant to be complete, so a non-empty response here means it
+    // was not — a real product this app does not manage, or a whole
+    // warehouse, was left out and just lost its recorded stock.
+    stock_remove_list: z
+      .array(z.object({}).passthrough())
+      .optional(),
   })
   .passthrough();
 
@@ -111,6 +119,76 @@ export function buildCompleteStockList(input: CompleteListInput): StockLine[] {
     if (seen.has(productCode)) continue;
     // Not ours to change, but it has to be present or MetaKocka removes it.
     lines.push({ warehouseId: input.warehouseId, productCode, amount });
+  }
+
+  return lines;
+}
+
+export interface CompanyListInput {
+  /** What Shopify says, for the SKUs this app manages at the reverse-synced warehouse. */
+  managed: Map<string, number>;
+  /** The warehouse Shopify is the source of truth for. */
+  warehouseId: string;
+  /**
+   * What MetaKocka currently holds, for every cached warehouse — not only
+   * `warehouseId`. Keyed by warehouse id, then by product code.
+   */
+  currentByWarehouse: Map<string, Map<string, number>>;
+}
+
+/**
+ * The full stock list for the whole company, across every cached warehouse.
+ *
+ * MetaKocka's own documentation for this endpoint (`warehouse_stock_sync`,
+ * fetched 2026-08-26, not yet checked against the designated test company)
+ * says plainly that "the total stock for all warehouses must be sent in one
+ * request" and that an item absent from the request is removed from stock —
+ * which reads as applying to a warehouse missing from the request altogether,
+ * not only to a product missing within a warehouse that is present.
+ * `buildCompleteStockList` alone sent lines for the reverse-synced warehouse
+ * only, which on that reading would zero out every other warehouse in the
+ * company on every write.
+ *
+ * The reverse-synced warehouse is built the same way `buildCompleteStockList`
+ * always has: Shopify's number for managed products, MetaKocka's own value
+ * echoed back verbatim for everything else. Every other cached warehouse is
+ * echoed back verbatim in full — this app has no opinion about it, and the
+ * only reason it appears in the request at all is that the endpoint requires
+ * it to.
+ */
+export function buildCompleteCompanyStockList(
+  input: CompanyListInput,
+): StockLine[] {
+  const lines: StockLine[] = [];
+
+  for (const [warehouseId, current] of input.currentByWarehouse) {
+    if (warehouseId === input.warehouseId) {
+      lines.push(
+        ...buildCompleteStockList({
+          warehouseId,
+          managed: input.managed,
+          current,
+        }),
+      );
+      continue;
+    }
+
+    for (const [productCode, amount] of current) {
+      lines.push({ warehouseId, productCode, amount });
+    }
+  }
+
+  // The reverse-synced warehouse might not yet be in `currentByWarehouse`
+  // (MetaKocka has never held stock there) — still has to carry Shopify's
+  // managed products, or they would never appear in the warehouse at all.
+  if (!input.currentByWarehouse.has(input.warehouseId)) {
+    lines.push(
+      ...buildCompleteStockList({
+        warehouseId: input.warehouseId,
+        managed: input.managed,
+        current: new Map(),
+      }),
+    );
   }
 
   return lines;
@@ -282,6 +360,24 @@ export async function syncStockToMetakocka(
     );
   }
 
+  // The list this adapter sends is meant to describe every warehouse
+  // completely, so nothing should ever come back here. If something did, the
+  // list was not actually complete and MetaKocka has just removed real stock
+  // — treated as a failure rather than logged quietly, because the write
+  // already happened and cannot be taken back from here.
+  const removed = parsed.data.stock_remove_list ?? [];
+  if (removed.length > 0) {
+    throw new MetakockaError(
+      `MetaKocka sync_stock removed ${removed.length} item(s) not present in the request — the stock list sent was not complete`,
+      {
+        endpoint: "sync_stock",
+        kind: "exception",
+        oprCode: parsed.data.opr_code,
+        oprDesc: parsed.data.opr_desc,
+      },
+    );
+  }
+
   getLogger().info(
     { sent: lines.length, acknowledged },
     "Stock written to MetaKocka",
@@ -306,6 +402,14 @@ type EchoedLine = NonNullable<
  * raises an exception on every successful write the moment MetaKocka trims a
  * field from its response, and a queue full of false alarms is a queue nobody
  * reads (§11).
+ *
+ * Matched by `(warehouse_id, product_code)`, not product code alone, because
+ * a company-wide write can legitimately send the same product code to more
+ * than one warehouse. Where the echo omits `warehouse_id` — the shape every
+ * fixture recorded so far has used — a code is still matched by itself as
+ * long as it was only ever sent to one warehouse in this request; sent to
+ * more than one, an unwarehoused echo cannot say which of them it answers
+ * for, and "could not tell" applies rather than guessing.
  */
 function describeEchoMismatch(
   sent: StockLine[],
@@ -314,12 +418,36 @@ function describeEchoMismatch(
   const named = echoed.filter((line) => line.product_code !== undefined);
   if (named.length === 0) return null;
 
-  const byCode = new Map<string, EchoedLine>();
-  for (const line of named) byCode.set(String(line.product_code), line);
+  const exact = new Map<string, EchoedLine>();
+  const byCodeUnwarehoused = new Map<string, EchoedLine>();
+  for (const line of named) {
+    const code = String(line.product_code);
+    if (line.warehouse_id !== undefined) {
+      exact.set(`${line.warehouse_id}:${code}`, line);
+    } else if (!byCodeUnwarehoused.has(code)) {
+      byCodeUnwarehoused.set(code, line);
+    }
+  }
+
+  const warehousesByCode = new Map<string, Set<string>>();
+  for (const line of sent) {
+    const set = warehousesByCode.get(line.productCode) ?? new Set();
+    set.add(line.warehouseId);
+    warehousesByCode.set(line.productCode, set);
+  }
 
   for (const line of sent) {
-    const back = byCode.get(line.productCode);
+    const back =
+      exact.get(`${line.warehouseId}:${line.productCode}`) ??
+      (warehousesByCode.get(line.productCode)!.size === 1
+        ? byCodeUnwarehoused.get(line.productCode)
+        : undefined);
+
     if (!back) {
+      // Ambiguous (sent to several warehouses, echo does not say which) is
+      // silently skipped, not reported here — ambiguity is not evidence of
+      // anything having gone wrong.
+      if (warehousesByCode.get(line.productCode)!.size > 1) continue;
       return `${line.productCode} was sent but not acknowledged`;
     }
     if (back.amount === undefined) continue;

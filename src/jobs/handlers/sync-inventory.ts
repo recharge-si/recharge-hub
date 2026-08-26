@@ -8,6 +8,7 @@ import { getCredential } from "~/adapters/db/repositories/metakocka-credential.s
 import {
   listCachedWarehouses,
   listSupplySources,
+  type CachedWarehouse,
 } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import {
@@ -16,7 +17,7 @@ import {
 } from "~/adapters/metakocka/errors";
 import { listWarehouseStock } from "~/adapters/metakocka/stock";
 import {
-  buildCompleteStockList,
+  buildCompleteCompanyStockList,
   managedAmount,
   syncStockToMetakocka,
 } from "~/adapters/metakocka/sync-stock";
@@ -255,21 +256,22 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
       );
     }
 
-    const stock = await listWarehouseStock(client, warehouseMkId);
-    const amountByCode = new Map(stock.map((row) => [row.code, row]));
-
     if (source.stockDirection === "shopify_to_mk") {
       await pushShopifyStockIntoMetakocka({
         shopDomain,
         principal,
         source,
         warehouseMkId,
-        metakockaStock: stock,
+        client,
+        warehouses,
         credential,
         admin,
       });
       return;
     }
+
+    const stock = await listWarehouseStock(client, warehouseMkId);
+    const amountByCode = new Map(stock.map((row) => [row.code, row]));
 
     const skus = await prisma.sku.findMany({
       where: {
@@ -417,7 +419,9 @@ interface ReverseSyncInput {
     metakockaWarehouse: string | null;
   };
   warehouseMkId: string;
-  metakockaStock: Array<{ code: string; amount: number }>;
+  client: MetakockaClient;
+  /** Every warehouse this company has, cached — not only this source's own. */
+  warehouses: CachedWarehouse[];
   credential: {
     companyId: string;
     secretKey: string;
@@ -427,12 +431,17 @@ interface ReverseSyncInput {
 }
 
 /**
- * Shopify is the truth for this warehouse: copy its on-hand into MetaKocka.
+ * Shopify is the truth for one warehouse: copy its on-hand into MetaKocka.
  *
- * `sync_stock` removes anything omitted from the list, so the payload always
- * describes the whole warehouse. Products this app does not manage are sent
- * back at the value MetaKocka already holds, which makes the write incapable of
- * dropping stock it was never asked to touch.
+ * `sync_stock`'s own documentation says the total stock for *all* warehouses
+ * has to be sent in one request, and that anything absent from it is removed
+ * — read plainly, that includes a warehouse missing from the request
+ * altogether, not only a product missing from a warehouse that is present.
+ * So every cached warehouse is read and echoed back, not only this source's:
+ * Shopify's on-hand replaces the managed products at the one warehouse this
+ * source is responsible for, and everything else — every other product at
+ * that warehouse, every product at every other warehouse — is sent back
+ * exactly as MetaKocka already holds it.
  */
 async function pushShopifyStockIntoMetakocka(
   input: ReverseSyncInput,
@@ -450,7 +459,12 @@ async function pushShopifyStockIntoMetakocka(
       event: "inventory.sync_skipped",
       detail: { reason: "missing_api_user_email", source: input.source.code },
     });
-    return;
+    // A skip is not a success: nothing was written, and a source stuck this
+    // way should count toward the failure threshold like any other, not sit
+    // silently marked "ok" while nobody is told.
+    throw new Error(
+      "MetaKocka has no API user email configured. Add it on the Connection page.",
+    );
   }
 
   const skus = await prisma.sku.findMany({
@@ -473,9 +487,20 @@ async function pushShopifyStockIntoMetakocka(
     managed.set(sku.metakockaCode ?? sku.sku, quantity);
   }
 
-  const current = new Map(
-    input.metakockaStock.map((row) => [row.code, row.amount]),
-  );
+  // Every cached warehouse's current stock, read up front: the destructive
+  // write below has to abort if any of these reads fails, and a plain throw
+  // out of a `listWarehouseStock` call does exactly that — the caller's
+  // try/catch around `syncOneSource` records it as this source's failure.
+  const currentByWarehouse = new Map<string, Map<string, number>>();
+  for (const warehouse of input.warehouses) {
+    const stock = await listWarehouseStock(input.client, warehouse.mkId);
+    currentByWarehouse.set(
+      warehouse.mkId,
+      new Map(stock.map((row) => [row.code, row.amount])),
+    );
+  }
+
+  const current = currentByWarehouse.get(input.warehouseMkId) ?? new Map();
 
   /*
    * Write only on change (§7's own rule for the other direction, and it binds
@@ -487,6 +512,8 @@ async function pushShopifyStockIntoMetakocka(
    * The unmanaged products are echoed back at MetaKocka's own values by
    * construction, so the only thing that can differ is a managed code —
    * absence from `warehouse_stock` means zero (the read is fully paginated).
+   * Other warehouses are echoed back verbatim too and so can never be the
+   * reason this is true, whatever else changed in the company meanwhile.
    */
   let changed = false;
   for (const [code, quantity] of managed) {
@@ -508,9 +535,9 @@ async function pushShopifyStockIntoMetakocka(
     return;
   }
 
-  const lines = buildCompleteStockList({
+  const lines = buildCompleteCompanyStockList({
     managed,
-    current,
+    currentByWarehouse,
     warehouseId: input.warehouseMkId,
   });
 
