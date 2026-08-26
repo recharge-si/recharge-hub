@@ -119,6 +119,9 @@ class Connector {
       (assignment) => ({
         shopifyLocationId: assignment.locationId,
         supplySourceId: this.sourceByLocation[assignment.locationId] ?? null,
+        disposition: this.sourceByLocation[assignment.locationId]
+          ? ("managed" as const)
+          : ("unresolved" as const),
         lines: assignment.lines.map((line) => ({
           shopifyLineItemId: line.lineId,
           quantity: line.quantity,
@@ -860,8 +863,8 @@ describe("an unmapped location", () => {
     // The lines are still visible as unmapped, so the exception can name the
     // location instead of saying "part of this order could not be allocated".
     const grouped = groupBySupplySource([
-      { shopifyLocationId: "loc-a", supplySourceId: "src-a", lines: [{ shopifyLineItemId: "l1", quantity: 1 }] },
-      { shopifyLocationId: "loc-z", supplySourceId: null, lines: [{ shopifyLineItemId: "l2", quantity: 2 }] },
+      { shopifyLocationId: "loc-a", supplySourceId: "src-a", disposition: "managed" as const, lines: [{ shopifyLineItemId: "l1", quantity: 1 }] },
+      { shopifyLocationId: "loc-z", supplySourceId: null, disposition: "unresolved" as const, lines: [{ shopifyLineItemId: "l2", quantity: 2 }] },
     ]);
 
     expect([...grouped.bySource.keys()]).toEqual(["src-a"]);
@@ -877,8 +880,8 @@ describe("an unmapped location", () => {
      * warehouse is document-level (§3).
      */
     const grouped = groupBySupplySource([
-      { shopifyLocationId: "loc-a", supplySourceId: "src-a", lines: [{ shopifyLineItemId: "l1", quantity: 1 }] },
-      { shopifyLocationId: "loc-a2", supplySourceId: "src-a", lines: [{ shopifyLineItemId: "l1", quantity: 2 }] },
+      { shopifyLocationId: "loc-a", supplySourceId: "src-a", disposition: "managed" as const, lines: [{ shopifyLineItemId: "l1", quantity: 1 }] },
+      { shopifyLocationId: "loc-a2", supplySourceId: "src-a", disposition: "managed" as const, lines: [{ shopifyLineItemId: "l1", quantity: 2 }] },
     ]);
 
     expect(grouped.bySource.get("src-a")).toEqual([
@@ -908,6 +911,7 @@ describe("a line Shopify has not assigned anywhere", () => {
         {
           shopifyLocationId: "loc-a",
           supplySourceId: "src-a",
+          disposition: "managed" as const,
           lines: [{ shopifyLineItemId: "l1", quantity: 1 }],
         },
       ],
@@ -942,6 +946,7 @@ describe("a line Shopify has not assigned anywhere", () => {
         {
           shopifyLocationId: "loc-a",
           supplySourceId: "src-a",
+          disposition: "managed" as const,
           lines: [{ shopifyLineItemId: "l1", quantity: 3 }],
         },
       ],

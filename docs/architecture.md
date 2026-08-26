@@ -95,8 +95,12 @@ comes from:
 - `stock_rules`: the pure allocator under `src/domain/allocation/` decides from
   cached `supply_level` rows, as it always did.
 
-A location with no supply source is reported (`unmapped_location`), never
-guessed at. A document whose supply source leaves the allocation is *retired*
+Every Shopify quantity is classified `managed`, `external` or `unresolved`
+(`classifyQuantities`), and the three sum to the line — so any unit can be
+answered for. A location with no supply source is `unresolved` and reported,
+never guessed at; a third-party fulfilment service the app's scopes cannot
+resolve is `external`, explicitly not represented in MetaKocka, and keeps the
+order out of `in_sync`. A document whose supply source leaves the allocation is *retired*
 according to `sales_order_setting.obsolete_document_policy`; it is never deleted
 except under the explicit `delete_unpaid` opt-in, and only when unpaid.
 
@@ -111,12 +115,22 @@ as money — successful `SALE`/`CAPTURE` only, never an authorization — and
 `domain/payments/allocation` divides receipts across a split order's documents
 so they sum to exactly what was received.
 
-MetaKocka's verified replacement semantics are used deliberately rather than
-worked around: each document is sent the **complete** `mark_paid` array it
-should carry (`replaceDocumentPayments`), so two captures are two entries and
-re-sending an unchanged ledger changes nothing. Refunds are recorded in the
-ledger and never projected onto a sales order; they remain a credit-note
-exception.
+MetaKocka's replacement semantics — **live-verified on 2026-08-26**, see
+`docs/metakocka-verification.md` — are used deliberately rather than worked
+around: each document is sent the complete set of payment applications
+*belonging to that document* (`replaceDocumentPayments`), so two captures are
+two entries and re-sending an unchanged ledger changes nothing. "Complete" is
+per document, never per order: a €300 order split €100/€200 sends `[€100]` and
+`[€200]`, never €300 twice.
+
+Clearing a payment sends a single **zero-amount** entry, not an empty array: an
+empty array is verified to change nothing at all, and a document that keeps its
+payment after its goods moved is the order recorded twice.
+
+Refunds are recorded in the ledger and never projected onto a sales order. The
+order is held at `blocked` while a credit note is outstanding, so "the Shopify
+ledger is reconciled" and "MetaKocka's accounting is reconciled" stay separable
+— `order.sync_detail.accounting` records both.
 
 ### Inventory
 

@@ -10,6 +10,7 @@ import {
 import { replaceApplicationsForDocument } from "~/adapters/db/repositories/order-payment.server";
 import type { MetakockaClient } from "~/adapters/metakocka/client";
 import {
+  clearedPayments,
   deleteSalesOrder,
   updateSalesOrder,
 } from "~/adapters/metakocka/documents";
@@ -53,21 +54,58 @@ export interface RetirementOutcome {
   reason: string;
   /** True while MetaKocka may still hold quantity for this order. */
   stillHoldsQuantity: boolean;
+  /**
+   * What MetaKocka still reports as paid on the document, in minor units.
+   *
+   * Read back from `sum_paid` rather than assumed, because the money is the
+   * part that cannot be allowed to stay: the receipts have been reallocated to
+   * whichever document now describes the goods, so anything left here is the
+   * order paid twice.
+   */
+  stillHoldsPaymentMinor: number;
+  /** Whether the payment was actually removed. */
+  paymentCleared: boolean;
+}
+
+export interface EmptiedBody {
+  body: Record<string, unknown>;
+  /**
+   * Whether the payment could actually be cleared.
+   *
+   * False when the recorded body names no payment type to hang a zero on. The
+   * lines still go, so the document stops holding goods; the money stays, and
+   * the caller has to say so rather than reporting a clean retirement.
+   */
+  paymentCleared: boolean;
 }
 
 /**
- * A document body with every product line removed.
+ * A document body with every product line removed, and its payment cleared.
  *
  * The whole body is replayed because MetaKocka treats an update as a
  * replacement (§3) — a patch would delete the partner, the dates and the
- * totals along with the lines. What changes is `product_list`, which becomes
- * empty, and `mark_paid`, which is cleared: a document holding nothing must not
- * go on carrying a payment for goods that are now on another document.
+ * totals along with the lines. Two things change.
+ *
+ * `product_list` becomes empty. **[verified 2026-08-26]** MetaKocka accepts
+ * that: the document came back with no `sum_all` and no readable lines.
+ *
+ * `mark_paid` becomes a zero entry, **not** an empty array. An empty array is
+ * verified to change nothing at all — see `clearedPayments` — and a document
+ * that keeps its payment after its goods moved to another warehouse is the
+ * order counted twice in the merchant's books, which is the single failure this
+ * whole path exists to prevent.
  */
-export function emptiedBody(
-  body: Record<string, unknown>,
-): Record<string, unknown> {
-  return { ...body, product_list: [], mark_paid: [] };
+export function emptiedBody(body: Record<string, unknown>): EmptiedBody {
+  const cleared = clearedPayments(body);
+
+  return {
+    body: {
+      ...body,
+      product_list: [],
+      ...(cleared ? { mark_paid: cleared } : {}),
+    },
+    paymentCleared: cleared !== null || body.mark_paid === undefined,
+  };
 }
 
 export async function retireObsoleteDocument(
@@ -117,6 +155,8 @@ export async function retireObsoleteDocument(
       action: "discarded",
       reason: plan.reason,
       stillHoldsQuantity: false,
+      stillHoldsPaymentMinor: 0,
+      paymentCleared: true,
     };
   }
 
@@ -127,6 +167,8 @@ export async function retireObsoleteDocument(
       reason:
         "this app does not hold a MetaKocka id for that document, so it cannot be changed automatically",
       stillHoldsQuantity: true,
+      stillHoldsPaymentMinor: 0,
+      paymentCleared: false,
     };
   }
 
@@ -135,6 +177,8 @@ export async function retireObsoleteDocument(
     action: "reported",
     reason: plan.reason,
     stillHoldsQuantity: true,
+    stillHoldsPaymentMinor: 0,
+    paymentCleared: false,
   };
 
   try {
@@ -153,6 +197,8 @@ export async function retireObsoleteDocument(
         action: "deleted",
         reason: plan.reason,
         stillHoldsQuantity: false,
+        stillHoldsPaymentMinor: 0,
+        paymentCleared: true,
       };
     } else if (plan.kind === "empty") {
       /*
@@ -170,11 +216,17 @@ export async function retireObsoleteDocument(
           reason:
             "this app no longer holds the document exactly as MetaKocka accepted it, and an update replaces rather than patches, so it was left alone",
           stillHoldsQuantity: true,
+          stillHoldsPaymentMinor: 0,
+          paymentCleared: false,
         };
       } else {
+        const emptied = emptiedBody(
+          input.requestBody as Record<string, unknown>,
+        );
+
         const { verified } = await updateSalesOrder(input.client, {
           mkId: input.mkId,
-          body: emptiedBody(input.requestBody as Record<string, unknown>),
+          body: emptied.body,
         });
 
         await prisma.metakockaDocument.update({
@@ -190,8 +242,11 @@ export async function retireObsoleteDocument(
           countCode,
           action: "emptied",
           reason: plan.reason,
-          // Verified as empty by the read-back `updateSalesOrder` already does.
+          // Verified by the read-back `updateSalesOrder` already does.
           stillHoldsQuantity: (verified.lineCount ?? 0) > 0,
+          // What MetaKocka itself says is still on it, not what we intended.
+          stillHoldsPaymentMinor: verified.paidMinor ?? 0,
+          paymentCleared: emptied.paymentCleared && (verified.paidMinor ?? 0) === 0,
         };
       }
     }
@@ -221,6 +276,8 @@ export async function retireObsoleteDocument(
       action: "refused",
       reason: describeForMerchant(error),
       stillHoldsQuantity: true,
+      stillHoldsPaymentMinor: 0,
+      paymentCleared: false,
     };
   }
 
@@ -262,6 +319,8 @@ export async function retireObsoleteDocument(
       action: outcome.action,
       reason: outcome.reason,
       paidBefore: input.action.paid,
+      paymentCleared: outcome.paymentCleared,
+      stillHoldsPaymentMinor: outcome.stillHoldsPaymentMinor,
     },
   });
 
@@ -293,7 +352,13 @@ function retirementMessage(input: {
 
   switch (input.outcome.action) {
     case "emptied":
-      return `${opening} Its lines have been removed so it no longer holds any of this order's goods, and the document itself was kept — it may already be invoiced.${paidNote} Cancel or credit it in MetaKocka, then resolve this.`;
+      return (
+        `${opening} Its lines have been removed so it no longer holds any of this order's goods, and the document itself was kept — it may already be invoiced.${paidNote}` +
+        (input.outcome.paymentCleared
+          ? ""
+          : ` **MetaKocka still records ${(input.outcome.stillHoldsPaymentMinor / 100).toFixed(2)} as paid on it**, which this app could not remove, so the money for this order is currently recorded twice there.`) +
+        " Cancel or credit it in MetaKocka, then resolve this."
+      );
     case "deleted":
       return `${opening} It carried no payment, and your obsolete-document setting is to delete those, so it has been removed from MetaKocka.${paidNote} Resolve this once you have checked.`;
     case "refused":

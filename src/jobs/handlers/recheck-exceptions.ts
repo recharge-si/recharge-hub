@@ -89,6 +89,7 @@ async function factsFor(principal: Principal, orderId: string) {
       divergedAt: true,
       syncState: true,
       grossReceivedMinor: true,
+      refundedMinor: true,
       partnerOverride: true,
       rawPayload: true,
       lines: {
@@ -449,10 +450,18 @@ async function verdictFor(
        * a job nobody did. An order that came back out of a refunded state is
        * different: there is no longer a refund to credit.
        */
-      return order.financialStatus === "refunded" ||
-        order.financialStatus === "partially_refunded"
+      /*
+       * Keyed on the ledger, not on `financial_status`.
+       *
+       * The display status moves for reasons that have nothing to do with the
+       * refund — an edit, a further capture — and closing on it would tell the
+       * merchant a credit note was no longer needed while the money was still
+       * out. `refunded_minor` is the connector's own arithmetic over the
+       * transactions, so it only reaches zero if the refund itself was reversed.
+       */
+      return order.refundedMinor > 0
         ? OPEN
-        : FIXED(`Shopify now reports this order as ${order.financialStatus}.`);
+        : FIXED("Shopify no longer reports a refund against this order.");
 
     case "order_cancelled":
       return order.cancelledAt

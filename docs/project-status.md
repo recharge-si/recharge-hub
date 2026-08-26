@@ -18,7 +18,10 @@ Completed work belongs in Git history, not in this file.
   value verification
 - Transaction-level payment synchronization: an `order_payment` ledger keyed by
   Shopify transaction id, allocation across a split order's documents, partial
-  payments, and refunds recorded without rewriting a receipt
+  payments, and refunds recorded without rewriting a receipt. Multi-entry
+  `mark_paid` semantics are live-verified (`docs/metakocka-verification.md`)
+- Real-PostgreSQL concurrency tests for the per-order lock, the `count_code`
+  claim and the ledger's unique index (`tests/db/`)
 - Merchant-configurable *Customer's order* reference, allocation mode, obsolete
   document policy, and payment allocation/entry mode
 - Bidirectional inventory by per-location ownership, including destructive
@@ -37,50 +40,58 @@ order bodies contain product lines only. Shipping and order-level discounts can
 therefore make the ERP document total differ from its payment; line discounts
 are parsed and stored but are not encoded on their document line.
 
+The verification pass no longer hides this behind a tolerance. `reconcileValue`
+closes an explicit identity — products represented, less line discounts, less
+the order discount, plus shipping, plus anything fulfilled externally, against
+the Shopify total — and reports each term by name. A genuine unexplained
+difference now fails, where the previous allowance-based check passed anything
+smaller than the postage. That makes the gap measurable per order rather than
+merely known.
+
 Do not invent a fix. The designated test company must establish whether a
 service-product shipping line, document `discount_value`, and per-line
 `discount` are gross/net, percentage/amount, and included in `sum_all`. Record
 fixtures before changing money behavior.
 
-### T-17 — Multi-entry `mark_paid` is not live-verified
+### T-18 — Existing shops keep stock-rules allocation until they opt in
 
-The payment path sends each document the complete array of payments it should
-carry, which is what makes an order paid twice representable and what makes a
-repeated pass a no-op. `mark_paid` is documented as an array and the app has
-observed a single-element one being accepted; **a multi-element array has not
-been sent to a real company.** `sales_order_setting.payment_entry_mode`
-(`aggregate`) exists as the fallback so a refusal is a setting change rather
-than a code change.
+`sales_order_setting.allocation_mode` defaults to `shopify_locations`, which is
+right for a shop installing the app today. It is the wrong thing to do *to* a
+shop already running: its MetaKocka documents are filed against warehouses this
+app chose from stock levels, and flipping the authority underneath them would
+restructure those documents the next time anything unrelated touched the order.
 
-Probe this on the designated test company before relying on it in production:
-send a two-entry `mark_paid`, read the document back, and record a sanitized
-request/response pair. Confirm at the same time that re-sending the identical
-array leaves the document unchanged rather than adding to it.
+Migration `20260826050000_existing_shops_keep_stock_rules` therefore pins every
+shop that existed at that moment to `stock_rules`. Shops created afterwards have
+no row and inherit the new default. Switching is one control on the Order sync
+settings page, which shows what will change before it is saved.
 
-### T-18 — Allocation follows Shopify by default, which is a behaviour change
+Nothing is re-sent in bulk either way: an order is only rebuilt when something
+changes it or a merchant checks it by hand.
 
-`sales_order_setting.allocation_mode` defaults to `shopify_locations`, so a shop
-that never opens the settings screen now takes its warehouse split from
-Shopify's fulfilment orders instead of from cached stock levels. That is what
-the connector is for — a merchant moving a line between locations should reach
-the ERP — but for an existing shop whose Shopify locations do not correspond to
-how they warehouse things, it changes which MetaKocka warehouse an order is
-filed against.
+**Open decision:** whether, and how, to invite existing shops to switch. The
+setting is discoverable but nothing prompts them, so a merchant who would
+benefit may never look.
 
-Nothing historical is rewritten: the migration touches no rows and the existing
-order-import boundary still decides which orders are acted on. The change lands
-on the *next* order or the next reconciliation of an order that has moved.
-Decide before wider rollout whether existing shops should be migrated to
-`stock_rules` and opted in deliberately.
+### T-19 — Third-party fulfilment is excluded by rule, not represented
 
-### T-19 — Assigned and third-party fulfilment orders are invisible
+The app holds `read_merchant_managed_fulfillment_orders` only, so a fulfilment
+order held by a third-party or assigned service reports a location name with no
+id. Those quantities are now classified `external`
+(`domain/orders/canonical`): **deliberately not represented in MetaKocka**,
+because the goods never pass through a MetaKocka warehouse and no mapping could
+say which one, so allocating them by guesswork would misstate ERP stock.
 
-The app holds `read_merchant_managed_fulfillment_orders` only. A fulfilment
-order held by a third-party service reports a location name with no id, which
-the reader surfaces as `hasUnreadableLocation` and the loop fills in from stock
-rules. That is safe and it is not right: those lines are filed against a
-warehouse Shopify did not choose. Either request the assigned/third-party
-scopes or raise an exception for that case instead of falling back silently.
+It is explicit rather than silent — external quantity raises an exception naming
+the service, keeps the order out of `in_sync`, and appears in
+`order.sync_detail` — but it is still a *gap in coverage*: a merchant who
+fulfils through a 3PL and invoices from MetaKocka gets a sales order short of
+those goods and has to add them by hand.
+
+Closing it properly means requesting `read_assigned_fulfillment_orders` and
+`read_third_party_fulfillment_orders`, mapping those services to warehouses, and
+deciding whether their stock is MetaKocka's to hold. That is a scope change and
+a merchant-consent event (see T-07), so it is a decision rather than a task.
 
 ### T-08 — Shopify fulfilment orders are not moved or split
 
@@ -181,13 +192,16 @@ partner/payment/write guards are type- and unit-tested but not exercised under
 real database contention. A Compose-backed Vitest project is the highest-value
 test addition.
 
-This now includes the per-order reconciliation lock
-(`claimOrderReconciliation`), which is a conditional `updateMany` with a lease
-and cannot be exercised without a database. Its *consequence* — that a repeated
-pass over an unchanged order creates nothing — is covered at the pure level in
-`tests/integration/order-reconciliation.test.ts`, but "two workers, one order,
-one winner" is not. That is the single most valuable case a Compose-backed
-Vitest project would buy.
+**Partly addressed.** `tests/db/` now runs against the Compose database when one
+is reachable and skips cleanly when not: it covers the per-order reconciliation
+lock (exclusivity at two and at eight workers, lease expiry, takeover races,
+release, tenant scoping), the `count_code` claim under an eight-way race, and
+the payment ledger's unique index. Each file creates its own shop and deletes it
+afterwards, so it touches no other tenant's rows.
+
+Still unmeasured: Vitest coverage tooling, and the transactional
+enqueue path (`enqueueInTransaction`), which needs pg-boss running rather than
+just PostgreSQL.
 
 ### T-14 — Database boundary is not fully enforced
 

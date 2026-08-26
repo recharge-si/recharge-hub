@@ -1,7 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import { buildSalesOrderBody } from "~/adapters/metakocka/documents";
-import type { CanonicalLine } from "~/domain/orders/canonical";
+import {
+  classifyQuantities,
+  type CanonicalLine,
+  type QuantityClassification,
+} from "~/domain/orders/canonical";
 import { contentOf, verifyOrder } from "~/jobs/orders/verification";
 
 /**
@@ -43,6 +47,47 @@ function body(
       taxFactor: "0.22",
     })),
   });
+}
+
+/**
+ * The classification a verification pass would have been handed.
+ *
+ * Written out rather than defaulted, because "where did every unit go" is
+ * exactly what these tests are about: an order whose managed total is not its
+ * Shopify total is a different assertion from one whose documents are wrong.
+ */
+function managed(lines: CanonicalLine[], external = 0): QuantityClassification {
+  return classifyQuantities(
+    lines,
+    lines.flatMap((entry) => [
+      {
+        shopifyLocationId: "loc-a",
+        supplySourceId: "src-a",
+        disposition: "managed" as const,
+        lines: [
+          {
+            shopifyLineItemId: entry.shopifyLineItemId,
+            quantity: entry.quantity - external,
+          },
+        ],
+      },
+      ...(external > 0
+        ? [
+            {
+              shopifyLocationId: null,
+              supplySourceId: null,
+              disposition: "external" as const,
+              lines: [
+                {
+                  shopifyLineItemId: entry.shopifyLineItemId,
+                  quantity: external,
+                },
+              ],
+            },
+          ]
+        : []),
+    ]),
+  );
 }
 
 function line(sku: string, quantity: number, unitMinor = 10_000): CanonicalLine {
@@ -107,9 +152,11 @@ describe("verifying a whole order", () => {
   it("passes for a split order that adds up", () => {
     const result = verifyOrder({
       lines: [line("SKU-A", 5)],
+      classification: managed([line("SKU-A", 5)]),
       documents,
       orderTotalMinor: 50_000,
-      unrepresentedMinor: 0,
+      shippingMinor: 0,
+      orderDiscountMinor: 0,
       grossReceivedMinor: 0,
       representedPaymentMinor: 0,
     });
@@ -131,6 +178,7 @@ describe("verifying a whole order", () => {
      */
     const result = verifyOrder({
       lines: [line("SKU-A", 2)],
+      classification: managed([line("SKU-A", 2)]),
       documents: [
         {
           countCode: "SH-1050-A",
@@ -148,7 +196,8 @@ describe("verifying a whole order", () => {
         },
       ],
       orderTotalMinor: 20_000,
-      unrepresentedMinor: 0,
+      shippingMinor: 0,
+      orderDiscountMinor: 0,
       grossReceivedMinor: 0,
       representedPaymentMinor: 0,
     });
@@ -160,15 +209,21 @@ describe("verifying a whole order", () => {
     expect(result.summary[0]).toBe("SKU-A: Shopify 2, MetaKocka 4 (+2).");
   });
 
-  it("allows exactly the shipping the documents do not carry", () => {
-    // Shipping is in the payment shares but is not a MetaKocka line yet
-    // (project status T-05/T-06). Without the allowance every order with
-    // postage would report as broken.
+  it("explains shipping as shipping rather than widening the tolerance", () => {
+    /*
+     * The identity closes: 500.00 of products plus 50.00 of postage is the
+     * 550.00 Shopify charged. Shipping is not yet a MetaKocka document line
+     * (project status T-05/T-06), so it is *named* as an unrepresented term
+     * rather than absorbed into a tolerance that would also hide a 50.00 price
+     * error.
+     */
     const result = verifyOrder({
       lines: [line("SKU-A", 5)],
+      classification: managed([line("SKU-A", 5)]),
       documents,
       orderTotalMinor: 55_000,
-      unrepresentedMinor: 5_000,
+      shippingMinor: 5_000,
+      orderDiscountMinor: 0,
       grossReceivedMinor: 0,
       representedPaymentMinor: 0,
     });
@@ -179,17 +234,30 @@ describe("verifying a whole order", () => {
   it("still fails when a line price has drifted", () => {
     const result = verifyOrder({
       lines: [line("SKU-A", 5)],
+      classification: managed([line("SKU-A", 5)]),
       documents,
       // The order is worth 600.00 but the documents only add to 500.00 and
       // there is only 50.00 of shipping to explain it.
       orderTotalMinor: 60_000,
-      unrepresentedMinor: 5_000,
+      shippingMinor: 5_000,
+      orderDiscountMinor: 0,
       grossReceivedMinor: 0,
       representedPaymentMinor: 0,
     });
 
+    /*
+     * 500.00 of products plus 50.00 of postage explains 550.00 of a 600.00
+     * order, so 50.00 is unaccounted for and the check fails.
+     *
+     * The old allowance-based version **passed this**: it widened the tolerance
+     * by the shipping charge, so any drift smaller than the postage went
+     * unnoticed. That is the hole the identity closes.
+     */
     expect(result.ok).toBe(false);
-    expect(result.summary.some((entry) => entry.startsWith("Value:"))).toBe(true);
+    expect(result.value.unexplainedMinor).toBe(5_000);
+    expect(
+      result.summary.some((entry) => entry.includes("not accounted for")),
+    ).toBe(true);
   });
 
   it("reports a payment mismatch without failing the order's sync verdict", () => {
@@ -200,9 +268,11 @@ describe("verifying a whole order", () => {
      */
     const result = verifyOrder({
       lines: [line("SKU-A", 5)],
+      classification: managed([line("SKU-A", 5)]),
       documents,
       orderTotalMinor: 50_000,
-      unrepresentedMinor: 0,
+      shippingMinor: 0,
+      orderDiscountMinor: 0,
       grossReceivedMinor: 50_000,
       representedPaymentMinor: 0,
     });

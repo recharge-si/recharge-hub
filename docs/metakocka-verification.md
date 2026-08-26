@@ -176,26 +176,67 @@ That a complete replay preserves every field is strongly inferred and used by
 the implementation, but a controlled multi-line replay/payment-survival probe
 is still outstanding.
 
-### `mark_paid` as an array — documented, not live-verified
+### `mark_paid` as an array — **live-verified 2026-08-26**
 
-`mark_paid` is documented as a list, and a **single-element** array has been
-accepted repeatedly by the test company. The connector now depends on something
-one step past that: it sends the *complete set* of payments a document should
-carry, so that MetaKocka's replacement semantics converge rather than destroy —
-an order paid twice becomes two entries, and re-sending an unchanged ledger is a
-no-op.
+Probed against test company `6789`; sanitized transcript in
+`tests/fixtures/metakocka/mark_paid_semantics.json`. Two probe sales orders were
+created and both were deleted by the same run.
 
-Two things about that have not been checked against a real company:
+| Sent                          | `sum_paid` afterwards | Meaning                              |
+| ----------------------------- | --------------------: | ------------------------------------ |
+| create `[100.00, 50.00]`      |                   150 | multi-entry accepted, both retained  |
+| the identical array again     |                   150 | **replacement, not accumulation**    |
+| `[100.00, 50.00, 25.00]`      |                   175 | a later capture is representable     |
+| `[40.00]`                     |                    40 | replacement in both directions       |
+| `[]` (empty array)            |                    40 | **clears nothing**                   |
+| `mark_paid` omitted entirely  |                    40 | same as empty: "leave it alone"      |
+| `[0.00]`                      |    *(field absent)*   | **this is how a payment is cleared** |
+| `[-100.00]`                   |                  -100 | accepted; deliberately never used    |
 
-- whether a **multi-element** `mark_paid` array is accepted at all, and whether
-  the document then reports two payments;
-- whether re-sending an identical array leaves the document unchanged rather
-  than appending to it. (Update-is-replacement makes this near-certain and it is
-  the assumption the whole payment path rests on, so it is worth proving.)
+Consequences, all now implemented:
 
-Until both are recorded, `sales_order_setting.payment_entry_mode` offers
-`aggregate`, which collapses a document's payments to one entry per payment type
-— it loses when each part arrived and keeps how much and under which type.
+- The payment path may send the complete desired ledger on every write. T-17 is
+  closed, and `payment_entry_mode: aggregate` remains only as an escape hatch
+  for a company configured differently.
+- **An empty array does not clear a payment.** The implementation had assumed it
+  did, which would have left a document holding money after its goods moved to
+  another warehouse — the order recorded twice. Clearing sends one zero-amount
+  entry, reusing the payment type the document already carries, because a
+  payment type is never invented (§8.7). See `clearedPayments`.
+- An empty `product_list` **is** accepted, which the obsolete-document policy
+  relies on: the document came back with no `sum_all` and no readable lines.
+
+### `get_document` has `sum_paid`, and no payment list
+
+The full response for a document carrying two payments contains exactly:
+
+```text
+bank_ref_number, buyer_order, count_code, created_ts, currency_code,
+doc_created_email, doc_date, doc_type, fulfillment_user, mk_id, opr_code,
+partner, product_list, profit_center, profit_center_desc, sum_all, sum_basic,
+sum_paid, sum_tax_ex4, warehouse
+```
+
+There is **no `payment_list`** under any name, and `return_payment_list`,
+`show_payments` and `return_mark_paid` change nothing. The app's schema had
+guessed at `payment_list`, so `hasPayment` could never be true and the
+ambiguous-write recovery never recorded a payment it had in fact sent. The
+adapter now reads `sum_paid`, which also lets the payment write verify itself
+against what the ERP reports rather than against this app's own bookkeeping.
+
+`sum_paid` is **absent** rather than "0" when nothing is paid.
+
+### `delete_document` needs `mk_id` and `doc_type`
+
+| Request                | Result                                          |
+| ---------------------- | ----------------------------------------------- |
+| `{ doc_id }`           | `opr_code 2`, "Paramether mk_id must be set"    |
+| `{ mk_id }`            | `opr_code 1`, "Internal server error."          |
+| `{ mk_id, doc_type }`  | `opr_code 0`                                    |
+
+Note that `get_document` takes the same identifier as `doc_id`. The app's
+original `{ doc_id }` shape was a guess by analogy and could never have worked,
+so the `delete_unpaid` obsolete-document policy was inoperative until this.
 
 ### Payment types
 
@@ -290,15 +331,20 @@ pair under `tests/fixtures/metakocka/`.
    the request entirely, as its documentation implies — the reverse-sync
    handler now sends every cached warehouse on that assumption and this has
    not been checked live.
-9. A two-entry `mark_paid` on a sales order: accepted or refused, and what
-   `get_document` reports afterwards. Then the same array again, to prove a
-   repeated send replaces rather than appends. The payment ledger depends on
-   both (project status T-17).
-10. `delete_document` against a sales order the app wrote, to confirm the
-    response shape the `delete_unpaid` obsolete-document policy classifies. It
-    is currently exercised only through the shared client's error handling.
+9. Whether a zero-amount `mark_paid` entry leaves a visible zero payment row in
+   the MetaKocka UI, or removes the payment outright. `sum_paid` disappears
+   either way, which is what the connector reads, but a merchant looking at the
+   document may see an artefact.
+10. Whether `partner: { mk_id, mk_address_id }` on a create is honoured: the
+    probe sent one partner id and the response reported a different one. This
+    predates the reconciliation work and may be nothing, but partner identity is
+    load-bearing (§3: inline data creates duplicates) and it should be pinned.
 
 ## Known test-company artifacts
+
+The 26 August `mark_paid` probe created two sales orders
+(`CLAUDE-PAYPROBE-*`, `CLAUDE-CLEARPROBE-*`) and deleted both, each confirmed by
+`opr_code 0`. Nothing from it should remain.
 
 The 24 August probe reported several `CLAUDE-VERIFY-*` sales orders and one test
 partner left in company `6789`; later probes deleted some other temporary

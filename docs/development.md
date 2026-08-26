@@ -124,8 +124,9 @@ normally injected rather than stored in `.env`.
   worker processes first if generation fails with `EPERM` on
   `query_engine-windows.dll.node`.
 
-Tests currently use mocked boundaries rather than a database-backed harness;
-the missing concurrency harness is tracked in `docs/project-status.md`.
+Most tests use mocked boundaries. The concurrency-sensitive guards are the
+exception and run against a real database under `tests/db/` — see Validation
+below. Remaining gaps are tracked in `docs/project-status.md`.
 
 ## Validation
 
@@ -148,6 +149,27 @@ docker compose config --quiet
 The test suite discovers `tests/**/*.test.ts`. Unit tests live under
 `tests/unit/`; the fixture-driven vertical slice lives under
 `tests/integration/`; recorded external payloads live under `tests/fixtures/`.
+
+`tests/db/` runs against a **real PostgreSQL**, because the guarantees it checks
+— the per-order reconciliation lock, the `count_code` claim, the payment
+ledger's unique index — are properties of conditional updates and unique
+indexes, and a mocked database would be a mock of the thing under test. It picks
+up `DATABASE_URL` from `.env` (or `TEST_DATABASE_URL`), and **skips itself with
+a visible reason when neither is reachable**, so a checkout with no Compose
+stack still passes. Start the database first to include it:
+
+```bash
+docker compose up -d postgres
+npx prisma migrate deploy
+npx vitest run
+```
+
+`SKIP_DB_TESTS=1` forces the skip, which is what a CI job without a database
+should set.
+
+Each database test file creates its own shop with a random domain and deletes it
+afterwards; every table is tenant-scoped with `ON DELETE CASCADE`, so it cannot
+touch another tenant's rows.
 
 ## Production Compose
 

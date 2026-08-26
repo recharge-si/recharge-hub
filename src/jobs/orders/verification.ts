@@ -1,14 +1,18 @@
 import { z } from "zod";
 
 import { toMinorUnits } from "~/adapters/metakocka/values";
-import type { CanonicalLine } from "~/domain/orders/canonical";
+import type {
+  CanonicalLine,
+  QuantityClassification,
+} from "~/domain/orders/canonical";
 import {
   describeDiscrepancies,
+  describeValueReconciliation,
+  reconcileValue,
   verifyPaymentRepresentation,
   verifyQuantities,
-  verifyValue,
   type QuantityVerification,
-  type ValueVerification,
+  type ValueReconciliation,
 } from "~/domain/orders/invariants";
 
 /**
@@ -109,7 +113,9 @@ export function contentOf(document: RecordedDocument): DocumentContent {
 export interface VerificationResult {
   ok: boolean;
   quantities: QuantityVerification;
-  value: ValueVerification;
+  /** Managed / external / unresolved, carried through for the audit trail. */
+  classification: QuantityClassification;
+  value: ValueReconciliation;
   payments: ReturnType<typeof verifyPaymentRepresentation>;
   /** Merchant-readable, one line per SKU that does not add up. */
   summary: string[];
@@ -124,38 +130,79 @@ export interface VerificationResult {
 
 export function verifyOrder(input: {
   lines: CanonicalLine[];
+  /**
+   * Where every Shopify quantity went (`domain/orders/canonical`).
+   *
+   * The expected side of the quantity invariant is the **managed** quantity,
+   * not the raw Shopify quantity, because a unit Shopify is shipping through a
+   * third-party service is deliberately not in MetaKocka. Comparing against
+   * the raw figure would report that as a shortfall for ever.
+   *
+   * What stops that becoming a hole is `unresolvedTotal`: any quantity nothing
+   * can place fails verification on its own, whatever the documents say. So an
+   * order can only pass by having every unit either represented or explicitly
+   * external — never by having one quietly fall out of the allocation.
+   */
+  classification: QuantityClassification;
   documents: RecordedDocument[];
   orderTotalMinor: number;
   /**
-   * Money the connector knows is not on any document line.
+   * The parts of the order's money that are deliberately not document lines.
    *
-   * Shipping and the order-level discount are accounted for in the payment
-   * shares but are not yet encoded as MetaKocka lines (project status
-   * T-05/T-06). Passing them keeps the value check honest — it still fails when
-   * a line price drifts, which is what it is for — instead of failing for a
-   * limitation that is recorded elsewhere and has its own fix.
+   * Named individually rather than summed into an allowance, because an
+   * allowance is a way of not checking: any drift smaller than the postage
+   * would pass, whatever caused it. `reconcileValue` closes the identity
+   * instead, so shipping is explained *as shipping* and anything left over
+   * fails.
    */
-  unrepresentedMinor: number;
+  shippingMinor: number;
+  orderDiscountMinor: number;
   grossReceivedMinor: number;
   representedPaymentMinor: number;
 }): VerificationResult {
   const contents = input.documents.map(contentOf);
 
   const quantities = verifyQuantities({
-    expected: input.lines.map((line) => ({
-      sku: line.sku,
-      quantity: line.quantity,
-    })),
+    expected: input.classification.lines
+      .filter((line) => line.managed > 0)
+      .map((line) => ({ sku: line.sku, quantity: line.managed })),
     actual: contents.flatMap((document) => document.lines),
   });
 
-  const value = verifyValue({
-    expectedMinor: input.orderTotalMinor,
-    actualMinor: contents.reduce(
+  /*
+   * What the documents should be worth, from the same managed quantities the
+   * quantity invariant uses — not from the order total. Deriving it from the
+   * total would make the two checks the same check written twice.
+   */
+  const unitPrice = new Map(
+    input.lines.map((line) => [line.shopifyLineItemId, line] as const),
+  );
+
+  let productsExpectedMinor = 0;
+  let externalValueMinor = 0;
+  let lineDiscountMinor = 0;
+
+  for (const line of input.classification.lines) {
+    const source = unitPrice.get(line.shopifyLineItemId);
+    if (!source) continue;
+    productsExpectedMinor += line.managed * source.unitPriceWithTaxMinor;
+    externalValueMinor += line.external * source.unitPriceWithTaxMinor;
+    // Stored per line and deliberately not encoded on the document line
+    // (project status T-06). Named here so it explains rather than hides.
+    lineDiscountMinor += source.discountMinor;
+  }
+
+  const value = reconcileValue({
+    orderTotalMinor: input.orderTotalMinor,
+    documentsMinor: contents.reduce(
       (total, document) => total + document.valueMinor,
       0,
     ),
-    allowanceMinor: input.unrepresentedMinor,
+    productsExpectedMinor,
+    lineDiscountMinor,
+    orderDiscountMinor: input.orderDiscountMinor,
+    shippingMinor: input.shippingMinor,
+    externalValueMinor,
   });
 
   const payments = verifyPaymentRepresentation({
@@ -165,20 +212,35 @@ export function verifyOrder(input: {
 
   const summary = [
     ...describeDiscrepancies(quantities.discrepancies),
-    ...(value.ok
-      ? []
-      : [
-          `Value: Shopify ${decimal(value.expectedMinor)}, MetaKocka ${decimal(value.actualMinor)} (${value.differenceMinor > 0 ? "+" : ""}${decimal(value.differenceMinor)}).`,
-        ]),
+    ...(input.classification.unresolvedTotal > 0
+      ? [
+          `${input.classification.unresolvedTotal} ${input.classification.unresolvedTotal === 1 ? "unit is" : "units are"} not accounted for anywhere: ${input.classification.unresolvedLines
+            .map((line) => `${line.sku || line.title} (${line.unresolved})`)
+            .join(", ")}.`,
+        ]
+      : []),
+    ...(input.classification.externalTotal > 0
+      ? [
+          `${input.classification.externalTotal} ${input.classification.externalTotal === 1 ? "unit is" : "units are"} fulfilled outside MetaKocka and deliberately not represented there.`,
+        ]
+      : []),
+    ...(value.ok ? [] : describeValueReconciliation(value, decimal)),
   ];
 
   return {
-    // Payments deliberately do not fail the order's *sync* verdict. A payment
-    // waiting on an unmapped gateway is a blocked payment, which has its own
-    // exception and its own retry; calling the whole order inconsistent for it
-    // would put a red banner on an order whose documents are perfect.
-    ok: quantities.ok && value.ok,
+    /*
+     * Payments deliberately do not fail the order's *sync* verdict. A payment
+     * waiting on an unmapped gateway is a blocked payment, which has its own
+     * exception and its own retry; calling the whole order inconsistent for it
+     * would put a red banner on an order whose documents are perfect.
+     *
+     * Unresolved quantity **does** fail it, and that is the point of tracking
+     * it: an order with a unit nothing can place must never report clean, even
+     * when every document that exists is perfectly correct.
+     */
+    ok: quantities.ok && value.ok && input.classification.unresolvedTotal === 0,
     quantities,
+    classification: input.classification,
     value,
     payments,
     summary,

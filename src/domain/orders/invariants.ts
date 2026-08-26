@@ -155,6 +155,147 @@ export function verifyValue(input: {
   };
 }
 
+/* -------------------------------------------------------------------------- */
+/* The value invariant, stated as an identity rather than a tolerance          */
+/* -------------------------------------------------------------------------- */
+
+export interface ValueReconciliation {
+  ok: boolean;
+  /** What Shopify charged, including shipping and after discounts. */
+  orderTotalMinor: number;
+  /** Line value the MetaKocka documents actually hold. */
+  documentsMinor: number;
+  /** Line value they *should* hold: managed quantity at Shopify's unit price. */
+  productsExpectedMinor: number;
+  /** `documents - productsExpected`. Real drift; nothing explains this away. */
+  documentDriftMinor: number;
+
+  /* The parts of the order that are deliberately not on a document line. */
+  lineDiscountMinor: number;
+  orderDiscountMinor: number;
+  shippingMinor: number;
+  /** Value of quantity fulfilled outside MetaKocka. */
+  externalValueMinor: number;
+
+  /** The order total reconstructed from every named part. */
+  explainedMinor: number;
+  /** `orderTotal - explained`. Anything here is genuinely unaccounted for. */
+  unexplainedMinor: number;
+  toleranceMinor: number;
+}
+
+/**
+ * Reconciles the Shopify order total against everything the connector knows.
+ *
+ * The previous version of this check took a single `allowanceMinor` and widened
+ * the tolerance by it, which is a way of not checking: any difference smaller
+ * than the shipping charge passed, whatever caused it. So the identity is
+ * written out instead, and every term is named:
+ *
+ * ```text
+ *   products represented          (managed quantity x unit price)
+ * - line discounts                (parsed, stored, not on a document line)
+ * - order-level discount          (assigned to the primary share, not a line)
+ * + shipping                      (assigned to the primary share, not a line)
+ * + value fulfilled externally    (deliberately not in MetaKocka)
+ * = the Shopify order total
+ * ```
+ *
+ * Two failures fall out of it, and they mean different things:
+ *
+ *  - **`documentDriftMinor`** — the documents do not hold what this app meant
+ *    to send. A price that moved after the document was written, a line that
+ *    was rewritten by hand in the ERP. Nothing explains this and it always
+ *    fails.
+ *  - **`unexplainedMinor`** — the identity does not close. Something about the
+ *    order's money is not in any of the named terms, which is precisely the
+ *    condition the old allowance was hiding.
+ *
+ * Rounding only: `toleranceMinor` is a cent, not a shipping charge.
+ */
+export function reconcileValue(input: {
+  orderTotalMinor: number;
+  documentsMinor: number;
+  productsExpectedMinor: number;
+  lineDiscountMinor: number;
+  orderDiscountMinor: number;
+  shippingMinor: number;
+  externalValueMinor: number;
+  toleranceMinor?: number;
+}): ValueReconciliation {
+  const tolerance = input.toleranceMinor ?? DEFAULT_VALUE_TOLERANCE_MINOR;
+
+  const documentDriftMinor = input.documentsMinor - input.productsExpectedMinor;
+
+  const explainedMinor =
+    input.productsExpectedMinor -
+    input.lineDiscountMinor -
+    input.orderDiscountMinor +
+    input.shippingMinor +
+    input.externalValueMinor;
+
+  const unexplainedMinor = input.orderTotalMinor - explainedMinor;
+
+  return {
+    ok:
+      Math.abs(documentDriftMinor) <= tolerance &&
+      Math.abs(unexplainedMinor) <= tolerance,
+    orderTotalMinor: input.orderTotalMinor,
+    documentsMinor: input.documentsMinor,
+    productsExpectedMinor: input.productsExpectedMinor,
+    documentDriftMinor,
+    lineDiscountMinor: input.lineDiscountMinor,
+    orderDiscountMinor: input.orderDiscountMinor,
+    shippingMinor: input.shippingMinor,
+    externalValueMinor: input.externalValueMinor,
+    explainedMinor,
+    unexplainedMinor,
+    toleranceMinor: tolerance,
+  };
+}
+
+/** Merchant-readable, one term per line. The brief's requested breakdown. */
+export function describeValueReconciliation(
+  value: ValueReconciliation,
+  money: (minor: number) => string,
+): string[] {
+  const lines = [
+    `Products represented in MetaKocka: ${money(value.productsExpectedMinor)}.`,
+  ];
+
+  if (value.lineDiscountMinor !== 0) {
+    lines.push(`Line discounts not represented: ${money(value.lineDiscountMinor)}.`);
+  }
+  if (value.orderDiscountMinor !== 0) {
+    lines.push(`Order discount not represented: ${money(value.orderDiscountMinor)}.`);
+  }
+  if (value.shippingMinor !== 0) {
+    lines.push(`Shipping not represented: ${money(value.shippingMinor)}.`);
+  }
+  if (value.externalValueMinor !== 0) {
+    lines.push(
+      `Fulfilled outside MetaKocka: ${money(value.externalValueMinor)}.`,
+    );
+  }
+
+  lines.push(
+    `Explained total: ${money(value.explainedMinor)} against a Shopify total of ${money(value.orderTotalMinor)}.`,
+  );
+
+  if (value.documentDriftMinor !== 0) {
+    lines.push(
+      `The documents hold ${money(value.documentsMinor)} where ${money(value.productsExpectedMinor)} was expected (${value.documentDriftMinor > 0 ? "+" : ""}${money(value.documentDriftMinor)}).`,
+    );
+  }
+  if (value.unexplainedMinor !== 0) {
+    lines.push(
+      `${money(Math.abs(value.unexplainedMinor))} of this order's value is not accounted for by any of the above.`,
+    );
+  }
+
+  return lines;
+}
+
 export interface PaymentVerification {
   ok: boolean;
   /** Settled receipts less settled refunds, from the ledger. */

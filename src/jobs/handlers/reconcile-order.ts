@@ -5,6 +5,7 @@ import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import {
   closeExceptionsFor,
+  hasOpenException,
   raiseException,
 } from "~/adapters/db/repositories/exception.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
@@ -28,7 +29,11 @@ import {
 import { fetchOrderById } from "~/adapters/shopify/orders";
 import { fetchOrderTransactions } from "~/adapters/shopify/transactions";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
-import type { CanonicalLine } from "~/domain/orders/canonical";
+import {
+  classifyQuantities,
+  type CanonicalAllocation,
+  type CanonicalLine,
+} from "~/domain/orders/canonical";
 import {
   planDocuments,
   sameLines,
@@ -276,6 +281,36 @@ async function reconcileUnderLock(
     now,
   });
 
+  /*
+   * A refund Shopify has processed and MetaKocka has not been credited for.
+   *
+   * The ledger is right either way — the capture stays at what was actually
+   * received and the refund nets against it, which is the rule the brief is
+   * emphatic about and which this app does not break. But *MetaKocka* is then
+   * carrying a receipt with no corresponding credit, and an order in that state
+   * is not financially reconciled however tidy its documents are.
+   *
+   * This app cannot issue the credit note: the accounting behaviour is not
+   * verified and inventing one would be exactly the speculative implementation
+   * the brief rules out. So it raises the action and, below, refuses to call
+   * the order `in_sync` while the action is outstanding. The merchant resolving
+   * the exception is the signal that the books have been squared, because
+   * nothing in the API would tell this app.
+   */
+  if (ledger.summary.refundedMinor > 0) {
+    await raiseException(principal, {
+      orderId,
+      kind: "refund_received",
+      message: `Order ${order.shopifyOrderNumber} has been refunded ${(ledger.summary.refundedMinor / 100).toFixed(2)} ${order.presentmentCurrency} in Shopify, of ${(ledger.summary.grossReceivedMinor / 100).toFixed(2)} received. This app records the refund, so what the customer has actually paid is right — but a refund is never written onto a sales order, because the only way to do that would be to shrink the payment already recorded and destroy the record of what was received. MetaKocka still shows the full receipt. Issue the credit note there, then resolve this.`,
+      detail: {
+        grossReceivedMinor: ledger.summary.grossReceivedMinor,
+        refundedMinor: ledger.summary.refundedMinor,
+        netPaidMinor: ledger.summary.netPaidMinor,
+        creditRequiredMinor: ledger.summary.refundedMinor,
+      },
+    });
+  }
+
   if (transactions.possiblyTruncated) {
     await raiseException(principal, {
       orderId,
@@ -344,6 +379,20 @@ async function reconcileUnderLock(
         mode: settings.allocationMode,
       });
 
+  /*
+   * Where every Shopify quantity went.
+   *
+   * From the plan when one was made; from the persisted allocations when a
+   * person pinned the sources by hand, so a locked order is classified by the
+   * same rules rather than skipping the question.
+   */
+  const classification =
+    plan?.classification ??
+    classifyQuantities(
+      canonicalLines,
+      await persistedAllocations(orderId, canonicalLines),
+    );
+
   if (plan) {
     const coverage = planCoverage(canonicalLines, plan);
 
@@ -384,12 +433,46 @@ async function reconcileUnderLock(
       await closeExceptionsFor(principal, orderId, ["unmapped_location"]);
     }
 
-    if (unreadableLocation) {
-      log.info(
-        { shop: shopDomain, orderId },
-        "Shopify assigned part of this order to a location this app cannot read; stock rules filled the remainder",
-      );
-    }
+  }
+
+  /*
+   * Shopify is fulfilling part of this order somewhere this app cannot manage.
+   *
+   * An explicit business rule rather than an omission: those quantities are
+   * **not** represented in MetaKocka, because the goods never move through a
+   * MetaKocka warehouse and no mapping could say which one — allocating them by
+   * guesswork would misstate the ERP's stock.
+   *
+   * It is also never silent. The quantity is classified as `external`, the
+   * order is held out of `in_sync` below, and this names the service so the
+   * merchant can tell it apart from something being broken.
+   */
+  if (classification.externalTotal > 0) {
+    const services = [
+      ...new Set(
+        (plan?.externalLocations ?? [])
+          .map((entry) => entry.locationName)
+          .filter((name): name is string => Boolean(name)),
+      ),
+    ];
+
+    await raiseException(principal, {
+      orderId,
+      kind: "unmapped_location",
+      message: `Shopify is fulfilling ${classification.externalTotal} ${classification.externalTotal === 1 ? "item" : "items"} on order ${order.shopifyOrderNumber} through ${services.length > 0 ? services.join(", ") : "a fulfilment service this app cannot see"}. Those ${classification.externalTotal === 1 ? "goods do" : "goods do"} not pass through a MetaKocka warehouse, so ${classification.externalTotal === 1 ? "it is" : "they are"} deliberately not on the sales order and this app has not guessed a warehouse for ${classification.externalTotal === 1 ? "it" : "them"}. Record ${classification.externalTotal === 1 ? "it" : "them"} in MetaKocka by hand if your books need ${classification.externalTotal === 1 ? "it" : "them"}, then resolve this.`,
+      detail: {
+        services,
+        externalUnits: classification.externalTotal,
+        lines: classification.externalLines,
+      },
+    });
+  }
+
+  if (unreadableLocation && classification.externalTotal === 0) {
+    log.info(
+      { shop: shopDomain, orderId },
+      "Shopify named a fulfilment service this app cannot resolve, but it holds none of this order's quantity",
+    );
   }
 
   /* ---------------------------------------------------------------------- */
@@ -564,15 +647,39 @@ async function reconcileUnderLock(
         retired: row.retiredAt !== null,
         requestBody: row.requestBody,
       })),
+    classification,
     orderTotalMinor: order.totalMinor,
-    // Shipping and the order-level discount are in the payment shares but not
-    // yet encoded as MetaKocka lines (project status T-05/T-06).
-    unrepresentedMinor: order.shippingMinor - order.discountMinor,
+    // Named, not summed into an allowance: shipping and the order-level
+    // discount are in the payment shares but are not yet MetaKocka document
+    // lines (project status T-05/T-06), so they explain part of the total
+    // rather than widening the tolerance around it.
+    shippingMinor: order.shippingMinor,
+    orderDiscountMinor: order.discountMinor,
     grossReceivedMinor: ledger.summary.grossReceivedMinor,
     representedPaymentMinor: await representedPaymentTotal(principal, orderId),
   });
 
+  /*
+   * Two different questions about money, and the brief is right that they must
+   * not be collapsed:
+   *
+   *   Shopify ledger reconciled     — every receipt Shopify reports is
+   *                                   represented against a MetaKocka document.
+   *   MetaKocka accounting reconciled — and nothing is outstanding on the ERP
+   *                                   side, such as a credit note for a refund.
+   *
+   * An order can satisfy the first and fail the second, which is exactly what a
+   * refund does.
+   */
+  const accountingActionOutstanding = await hasOpenException(
+    principal,
+    orderId,
+    ["refund_received", "voided_payment"],
+  );
+
   const blocked =
+    accountingActionOutstanding ||
+    classification.externalTotal > 0 ||
     (plan?.unmappedLocations.length ?? 0) > 0 ||
     (payments?.unmappedGateways.length ?? 0) > 0 ||
     (payments?.unallocated.length ?? 0) > 0;
@@ -588,8 +695,29 @@ async function reconcileUnderLock(
     detail: {
       checkedAt: now.toISOString(),
       quantities: verification.quantities,
+      /*
+       * Every Shopify unit, sorted: represented in MetaKocka, explicitly
+       * fulfilled elsewhere, or unresolved. The brief's "never silently
+       * missing" is only meaningful if the breakdown is recorded, so it is.
+       */
+      classification: {
+        managed: classification.managedTotal,
+        external: classification.externalTotal,
+        unresolved: classification.unresolvedTotal,
+        lines: classification.lines,
+      },
       value: verification.value,
       payments: verification.payments,
+      accounting: {
+        shopifyLedgerReconciled: verification.payments.ok,
+        metakockaAccountingReconciled: !accountingActionOutstanding,
+        grossReceivedMinor: ledger.summary.grossReceivedMinor,
+        refundedMinor: ledger.summary.refundedMinor,
+        netPaidMinor: ledger.summary.netPaidMinor,
+        creditRequiredMinor: accountingActionOutstanding
+          ? ledger.summary.refundedMinor
+          : 0,
+      },
       documents: verification.documents,
     },
     at: now,
@@ -673,6 +801,50 @@ async function reconcileUnderLock(
     actions,
     inconsistent: !verification.ok,
   };
+}
+
+/**
+ * The persisted allocations, in canonical form.
+ *
+ * Only for the order whose supply sources a person pinned by hand: no plan was
+ * made this pass, and the classification still has to answer "where did every
+ * Shopify unit go?" — an order nobody re-planned is not an order nobody has to
+ * account for. A row with a source is managed; one without is unresolved, and
+ * whatever the rows do not cover is added by `classifyQuantities` itself.
+ */
+async function persistedAllocations(
+  orderId: string,
+  lines: readonly CanonicalLine[],
+): Promise<CanonicalAllocation[]> {
+  const rows = await prisma.orderLine.findMany({
+    where: { orderId },
+    select: {
+      shopifyLineItemId: true,
+      allocations: {
+        select: { supplySourceId: true, quantity: true, shopifyLocationId: true },
+      },
+    },
+  });
+
+  const known = new Set(lines.map((line) => line.shopifyLineItemId));
+
+  return rows.flatMap((row) =>
+    known.has(row.shopifyLineItemId)
+      ? row.allocations.map((allocation) => ({
+          shopifyLocationId: allocation.shopifyLocationId,
+          supplySourceId: allocation.supplySourceId,
+          disposition: allocation.supplySourceId
+            ? ("managed" as const)
+            : ("unresolved" as const),
+          lines: [
+            {
+              shopifyLineItemId: row.shopifyLineItemId,
+              quantity: allocation.quantity,
+            },
+          ],
+        }))
+      : [],
+  );
 }
 
 /**

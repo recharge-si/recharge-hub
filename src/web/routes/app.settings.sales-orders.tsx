@@ -333,10 +333,38 @@ export default function OrderSyncSettings() {
                   Ignore Shopify&rsquo;s assignment and choose from the stock
                   this app has read: own warehouses first, then partners. For
                   stores whose Shopify locations do not correspond to how goods
-                  are actually warehoused.
+                  are actually warehoused. Stores that were already running
+                  before Shopify locations were supported stay on this until
+                  they choose otherwise.
                 </s-text>
               </s-choice>
             </s-choice-list>
+
+            {/*
+              * The overwrite-risk pattern from docs/ui-conventions.md: one
+              * standing line under the control, plus a banner that renders only
+              * in the unsaved-changes state, naming what will actually change.
+              *
+              * Changing this authority restructures documents — that is the
+              * whole point of it — so the merchant sees the consequence before
+              * saving rather than discovering it on their next order.
+              */}
+            {form.allocationMode !== settings.allocationMode ? (
+              <s-banner
+                tone="warning"
+                heading="This changes which warehouse orders are filed against"
+              >
+                <s-paragraph>
+                  {form.allocationMode === "shopify_locations"
+                    ? "From the next time each order is checked, its MetaKocka sales orders will be rebuilt to match the locations Shopify has assigned. Orders currently filed against a warehouse this app chose from stock levels will move, and a sales order left with nothing on it is reported for you to cancel or credit."
+                    : "From the next time each order is checked, warehouses will be chosen from stock levels again and Shopify's own location assignment will be ignored. Orders currently following Shopify may move to a different MetaKocka warehouse."}
+                </s-paragraph>
+                <s-paragraph>
+                  Orders already sent are only rebuilt when something changes
+                  them or you check them by hand. Nothing is re-sent in bulk.
+                </s-paragraph>
+              </s-banner>
+            ) : null}
 
             <s-text color="subdued">
               Which MetaKocka warehouse a Shopify location means is set on the{" "}

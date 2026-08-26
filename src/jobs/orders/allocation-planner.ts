@@ -10,8 +10,13 @@ import {
 import type {
   CanonicalAllocation,
   CanonicalLine,
+  QuantityClassification,
+  QuantityDisposition,
 } from "~/domain/orders/canonical";
-import { allocationShortfalls } from "~/domain/orders/canonical";
+import {
+  allocationShortfalls,
+  classifyQuantities,
+} from "~/domain/orders/canonical";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -45,10 +50,26 @@ export interface AllocationPlan {
   allocations: CanonicalAllocation[];
   /** Lines Shopify assigned to a location with no supply source. */
   unmappedLocations: { shopifyLocationId: string; locationName: string | null }[];
+  /**
+   * Fulfilment services this app is not allowed to resolve.
+   *
+   * Named rather than counted, because "Shopify is shipping part of this order
+   * through Acme 3PL" is something a merchant can act on and "part of this
+   * order could not be allocated" is not.
+   */
+  externalLocations: { locationName: string | null }[];
   /** What the stock rules could not satisfy either. */
   shortfalls: { sku: string; quantity: number }[];
   /** True when at least one line's warehouse came from Shopify. */
   usedShopifyAssignment: boolean;
+  /**
+   * Every Shopify quantity, sorted into managed / external / unresolved.
+   *
+   * The answer to "for every unit the customer bought, where is it?" — which
+   * the verification pass consumes so that an order can never report itself
+   * clean because a line fell out of the allocation logic.
+   */
+  classification: QuantityClassification;
 }
 
 interface LineRef {
@@ -102,6 +123,7 @@ export async function planAllocations(
   const records: AllocationRecord[] = [];
   const allocations: CanonicalAllocation[] = [];
   const unmappedLocations: AllocationPlan["unmappedLocations"] = [];
+  const externalLocations: AllocationPlan["externalLocations"] = [];
 
   /* ---------------------------------------------------------------------- */
   /* 1. What Shopify has already decided                                    */
@@ -123,9 +145,36 @@ export async function planAllocations(
         });
       }
 
+      /*
+       * Which of the three this quantity is, decided once and recorded.
+       *
+       * A location with **no id at all** is a fulfilment order held by a
+       * third-party or assigned service: this app holds only
+       * `read_merchant_managed_fulfillment_orders`, so Shopify names the
+       * service and withholds the id. Those goods never move through a
+       * MetaKocka warehouse and no mapping could say which one, so they are
+       * `external` — explicitly not represented, rather than allocated to a
+       * warehouse by guesswork, which would misstate the ERP's stock.
+       *
+       * A location with an id that nothing maps is different in kind: the
+       * merchant *can* fix it, on the supply sources page, so it is
+       * `unresolved` and says so.
+       */
+      const disposition: QuantityDisposition = source
+        ? "managed"
+        : assignment.shopifyLocationId === null
+          ? "external"
+          : "unresolved";
+
+      if (disposition === "external") {
+        externalLocations.push({ locationName: assignment.locationName });
+      }
+
       const canonical: CanonicalAllocation = {
         shopifyLocationId: assignment.shopifyLocationId,
         supplySourceId: source?.id ?? null,
+        disposition,
+        locationName: assignment.locationName,
         lines: [],
       };
 
@@ -172,7 +221,7 @@ export async function planAllocations(
             rule: "shopify-fulfilment-order",
             locationId: assignment.shopifyLocationId,
             locationName: assignment.locationName,
-            ...(source ? {} : { unmapped: true }),
+            disposition,
           },
         });
       }
@@ -265,13 +314,14 @@ export async function planAllocations(
           entry.supplySourceId === allocation.sourceId &&
           entry.shopifyLocationId === locationId,
       );
-      const target =
+      const target: CanonicalAllocation =
         existing ??
-        ({
+        {
           shopifyLocationId: locationId,
           supplySourceId: allocation.sourceId,
+          disposition: allocation.sourceId ? "managed" : "unresolved",
           lines: [],
-        } satisfies CanonicalAllocation);
+        };
       if (!existing) allocations.push(target);
 
       const line = target.lines.find(
@@ -283,6 +333,31 @@ export async function planAllocations(
           shopifyLineItemId: known.shopifyLineItemId,
           quantity: allocation.quantity,
         });
+    }
+
+    /*
+     * Stock could not satisfy the rest.
+     *
+     * Recorded as an `unresolved` allocation with no source, so the
+     * classification adds up rather than the quantity simply vanishing from
+     * every bucket. Nothing is written to MetaKocka for it either way; the
+     * difference is whether the order can report itself clean, and it cannot.
+     */
+    for (const shortfall of result.shortfalls) {
+      const known = input.lines.find((line) => line.sku === shortfall.sku);
+      if (!known) continue;
+
+      allocations.push({
+        shopifyLocationId: null,
+        supplySourceId: null,
+        disposition: "unresolved",
+        lines: [
+          {
+            shopifyLineItemId: known.shopifyLineItemId,
+            quantity: shortfall.quantity,
+          },
+        ],
+      });
     }
 
     shortfalls.push(
@@ -297,8 +372,10 @@ export async function planAllocations(
     records,
     allocations,
     unmappedLocations,
+    externalLocations,
     shortfalls,
     usedShopifyAssignment: assignedByLine.size > 0,
+    classification: classifyQuantities(input.canonicalLines, allocations),
   };
 }
 

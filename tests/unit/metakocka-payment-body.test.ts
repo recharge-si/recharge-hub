@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildSalesOrderBody,
+  clearedPayments,
   type DocumentPayment,
   type SalesOrderInput,
 } from "~/adapters/metakocka/documents";
@@ -136,16 +137,48 @@ describe("a document paid more than once (§18)", () => {
   });
 });
 
-describe("a document whose payment moved elsewhere", () => {
-  it("sends an empty mark_paid, which is what clears it", () => {
+describe("a document that should carry no payment", () => {
+  it("omits mark_paid on a create, because there is nothing to clear", () => {
     /*
-     * A receipt reallocated after a warehouse move. Omitting the key would
-     * leave the old payment in place — the document would go on carrying money
-     * for goods that are now on another document, and the order would read as
-     * paid twice.
+     * An empty array would be a key that changes nothing — verified: MetaKocka
+     * treats `mark_paid: []` exactly like an absent `mark_paid`. Omitting it
+     * also keeps two equivalent bodies comparing equal, which is what stops a
+     * pointless rewrite on the next pass.
      */
     const body = buildSalesOrderBody({ ...BASE, payments: [] });
-    expect(markPaidOf(body)).toEqual([]);
+    expect(markPaidOf(body)).toBeUndefined();
+  });
+
+  it("clears an existing payment with a zero entry, not an empty array", () => {
+    /*
+     * **[verified against company 6789 on 2026-08-26]** the finding this test
+     * exists for:
+     *
+     *   [100, 50] -> [40]   => sum_paid 40   (replacement works)
+     *   [40]      -> []     => sum_paid 40   (an empty array clears NOTHING)
+     *   [40]      -> omit   => sum_paid 40   (absent means "leave it")
+     *   [100]     -> [0.00] => sum_paid gone (a zero entry clears it)
+     *
+     * Getting this wrong leaves a document holding money for goods that moved
+     * to another warehouse, which is the order paid twice.
+     */
+    const previous = buildSalesOrderBody({
+      ...BASE,
+      payments: [payment(20_900, "TRR", new Date("2026-01-05T09:00:00Z"))],
+    }) as Record<string, unknown>;
+
+    expect(clearedPayments(previous)).toEqual([
+      // The original date, not today: a zero is a correction to that payment,
+      // and today's date would book it in a period nothing moved in.
+      { payment_type: "TRR", date: "05.01.2026", amount: "0.00" },
+    ]);
+  });
+
+  it("refuses to invent a payment type when the body names none", () => {
+    // §8.7: a payment type is a value from the merchant's own register and is
+    // never guessed. The caller raises instead of clearing.
+    expect(clearedPayments(buildSalesOrderBody(BASE) as Record<string, unknown>))
+      .toBeNull();
   });
 });
 
@@ -158,14 +191,18 @@ describe("emptying an obsolete document", () => {
 
     const emptied = emptiedBody(original);
 
-    expect(emptied.product_list).toEqual([]);
-    expect(emptied.mark_paid).toEqual([]);
+    expect(emptied.body.product_list).toEqual([]);
+    // A zero entry, because an empty array is verified to clear nothing.
+    expect(emptied.body.mark_paid).toEqual([
+      { payment_type: "TRR", date: "05.01.2026", amount: "0.00" },
+    ]);
+    expect(emptied.paymentCleared).toBe(true);
     // The whole body is replayed because MetaKocka replaces rather than
     // patches: a partial update would delete the partner and the dates too.
-    expect(emptied.count_code).toBe("SH-1050-GLAVNO");
-    expect(emptied.buyer_order).toBe("SH-1050");
-    expect(emptied.partner).toEqual(original.partner);
-    expect(emptied.warehouse).toBe("glavno");
+    expect(emptied.body.count_code).toBe("SH-1050-GLAVNO");
+    expect(emptied.body.buyer_order).toBe("SH-1050");
+    expect(emptied.body.partner).toEqual(original.partner);
+    expect(emptied.body.warehouse).toBe("glavno");
   });
 });
 

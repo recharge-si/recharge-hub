@@ -176,9 +176,12 @@ export interface SalesOrderInput {
    * MetaKocka held before, it now holds precisely these payments, and sending
    * the same list again changes nothing.
    *
-   * An empty array is meaningful and is sent: it means "this document should
-   * carry no payment", which is what a document whose only receipt was
-   * reallocated elsewhere needs.
+   * An empty array means "this document should carry no payment", which is what
+   * a document whose only receipt was reallocated elsewhere needs. **On a
+   * create that is expressed by omitting `mark_paid`; on an update it needs a
+   * zero-amount entry, not an empty array** — see `clearedPayments` below for
+   * the verified reason. `buildSalesOrderBody` omits, and
+   * `replaceDocumentPayments` clears.
    *
    * Entries are sent in the order given; the caller sorts them by transaction
    * time so a re-run produces a byte-identical body.
@@ -356,7 +359,7 @@ function paymentField(
 ): Record<string, unknown> {
   const entries = input.payments;
 
-  if (entries) {
+  if (entries && entries.length > 0) {
     return {
       mark_paid: entries.map((payment) => ({
         payment_type: payment.paymentType,
@@ -365,6 +368,16 @@ function paymentField(
       })),
     };
   }
+
+  /*
+   * An empty desired ledger, on a document that does not exist yet.
+   *
+   * Omitted rather than sent as `mark_paid: []`, because there is nothing to
+   * clear on a create and — verified below — an empty array does not clear
+   * anything anyway. Sending it would put a key in the body that changes
+   * nothing and makes two equivalent bodies compare as different.
+   */
+  if (entries) return {};
 
   if (!input.markPaid) return {};
 
@@ -485,9 +498,27 @@ const singleDocumentSchema = mkEnvelopeSchema.and(
             .passthrough(),
         )
         .optional(),
-      // Present once a payment has been recorded. Named for the field the
-      // document carries back, which is not the `mark_paid` we send.
-      payment_list: z.array(z.record(z.string(), z.unknown())).optional(),
+      /*
+       * **[verified against company 6789 on 2026-08-26]** How much MetaKocka
+       * says has been paid on the document.
+       *
+       * This replaces a `payment_list` array that never existed. A full dump of
+       * `get_document` for a document carrying two payments returns exactly
+       * these keys — `bank_ref_number, buyer_order, count_code, created_ts,
+       * currency_code, doc_created_email, doc_date, doc_type, fulfillment_user,
+       * mk_id, opr_code, partner, product_list, profit_center,
+       * profit_center_desc, sum_all, sum_basic, sum_paid, sum_tax_ex4,
+       * warehouse` — and no list of payments under any name. Asking for one
+       * with `return_payment_list`, `show_payments` or `return_mark_paid`
+       * changes nothing.
+       *
+       * The consequence of the old guess was silent: `hasPayment` could never
+       * be true, so the ambiguous-write recovery never recorded a payment it
+       * had in fact sent, and the next pass sent it again.
+       *
+       * The field is **absent** when nothing is paid, rather than "0".
+       */
+      sum_paid: z.union([z.string(), z.number()]).optional(),
       /*
        * **[verified against company 6789 on 2026-08-25]** `get_document` with
        * `doc_id` set to the `mk_id` returned by `put_document` answers with the
@@ -527,6 +558,14 @@ export interface DocumentSnapshot {
   lineCount: number | null;
   /** Whether MetaKocka reports a payment against it, where it says. */
   hasPayment: boolean | null;
+  /**
+   * `sum_paid`, in minor units, or null when MetaKocka reports no payment.
+   *
+   * **[verified 2026-08-26]** The field is absent rather than "0" on a document
+   * carrying nothing, so null and zero mean the same thing here and both are
+   * distinguishable from "we did not look".
+   */
+  paidMinor: number | null;
   /** `sum_all`, the document total as MetaKocka now holds it. Minor units. */
   totalMinor: number | null;
   buyerOrder: string | null;
@@ -587,9 +626,14 @@ function toDocumentSnapshot(
     countCode: response.count_code ?? null,
     docNumber: response.doc_number ?? null,
     lineCount: response.product_list ? response.product_list.length : null,
-    hasPayment: response.payment_list
-      ? response.payment_list.length > 0
-      : null,
+    hasPayment:
+      response.sum_paid !== undefined
+        ? toMinorUnits(String(response.sum_paid)) !== 0
+        : null,
+    paidMinor:
+      response.sum_paid === undefined
+        ? null
+        : toMinorUnits(String(response.sum_paid)),
     // Parsed at the boundary and never as a float (§15). MetaKocka sends money
     // as a string and sometimes with a decimal comma.
     totalMinor:
@@ -832,6 +876,15 @@ export async function replaceDocumentPayments(
     body: Record<string, unknown>;
     /** The desired ledger. An empty array clears the document's payments. */
     payments: DocumentPayment[];
+    /**
+     * Whether a clear that cannot be expressed should throw.
+     *
+     * Default true. Clearing needs a payment type to hang a zero on, and the
+     * only honest source is the one the document already carries — so a
+     * document whose recorded body has no `mark_paid` to read cannot be
+     * cleared, and pretending otherwise is how money stays counted twice.
+     */
+    requireClearable?: boolean;
     timeZone?: string;
     currencyDecimals?: number;
   },
@@ -842,19 +895,64 @@ export async function replaceDocumentPayments(
     ? input.body.product_list.length
     : 0;
 
+  const markPaid =
+    input.payments.length > 0
+      ? input.payments.map((payment) => ({
+          payment_type: payment.paymentType,
+          date: toPaymentDate(payment.paidAt, input.timeZone),
+          amount: minorToDecimalString(payment.amountMinor, decimals),
+        }))
+      : clearedPayments(input.body, input.timeZone);
+
+  if (markPaid === null) {
+    if (input.requireClearable ?? true) {
+      throw new MetakockaError(
+        "This document's payment cannot be cleared: nothing records which payment type it carries",
+        {
+          endpoint: ENDPOINTS.putDocument,
+          kind: "exception",
+          oprDesc: `Document ${input.mkId} should no longer carry a payment, but clearing one in MetaKocka needs a payment type and this app no longer holds the body that named it. Remove the payment in MetaKocka by hand.`,
+        },
+      );
+    }
+    // Nothing to clear and nothing to send.
+    return { body: input.body, verified: await getSalesOrder(client, input.mkId) };
+  }
+
   const body: Record<string, unknown> = {
     ...input.body,
     mk_id: input.mkId,
-    mark_paid: input.payments.map((payment) => ({
-      payment_type: payment.paymentType,
-      date: toPaymentDate(payment.paidAt, input.timeZone),
-      amount: minorToDecimalString(payment.amountMinor, decimals),
-    })),
+    mark_paid: markPaid,
   };
 
   await client.call(ENDPOINTS.putDocument, body, documentResponseSchema);
 
   const verified = await getSalesOrder(client, input.mkId);
+
+  /*
+   * The payment total is checked against MetaKocka itself, not against our
+   * own records.
+   *
+   * `sum_paid` is what the ERP says it holds, so this closes the loop the §24
+   * invariant otherwise only closes against this app's own bookkeeping. A
+   * cleared document reports no `sum_paid` at all, which reads as zero.
+   */
+  const intendedMinor = input.payments.reduce(
+    (total, payment) => total + payment.amountMinor,
+    0,
+  );
+  const actualMinor = verified.paidMinor ?? 0;
+
+  if (actualMinor !== intendedMinor) {
+    throw new MetakockaError(
+      `MetaKocka accepted the payments but reports ${actualMinor} where ${intendedMinor} was sent`,
+      {
+        endpoint: ENDPOINTS.putDocument,
+        kind: "exception",
+        oprDesc: `Document ${input.mkId} should carry ${minorToDecimalString(intendedMinor, decimals)} in payments and MetaKocka reports ${minorToDecimalString(actualMinor, decimals)}. Check the document in MetaKocka before doing anything else with this order.`,
+      },
+    );
+  }
 
   /*
    * Only an answer counts as a failure — the same rule as `markDocumentPaid`.
@@ -881,6 +979,62 @@ export async function replaceDocumentPayments(
 }
 
 /**
+ * How to tell MetaKocka a document should carry no payment at all.
+ *
+ * **[verified against company 6789 on 2026-08-26], and it is not what it
+ * looks like.** An update replaces the payment set — sending `[100, 50]` and
+ * then `[40]` leaves `sum_paid` at 40, not 190 — so the obvious way to clear
+ * one is to send an empty array. That does **nothing**: a document at 40 sent
+ * `mark_paid: []` was still at 40 afterwards, and so was one sent no
+ * `mark_paid` key at all. Empty and absent are the same instruction, and the
+ * instruction is "leave the payment alone".
+ *
+ * What does clear it is a single entry for **zero**: after
+ * `[{ payment_type, date, amount: "0.00" }]` the document reported no
+ * `sum_paid` at all.
+ *
+ * That matters far more than it sounds. A document the order no longer takes
+ * anything from has its receipts reallocated to the document that does, and if
+ * the old one keeps its payment the ERP holds the money twice — which is the
+ * precise failure the whole payment design exists to prevent.
+ *
+ * The zero needs a payment type, and the only honest one is the type the
+ * document already carries: it is a value from the merchant's own register,
+ * which is the one thing this app must never invent (§8.7). Returns null when
+ * the recorded body cannot supply one, and the caller refuses rather than
+ * guesses.
+ */
+export function clearedPayments(
+  previousBody: Record<string, unknown>,
+  timeZone?: string,
+): { payment_type: string; date: string; amount: string }[] | null {
+  const previous = previousBody.mark_paid;
+  if (!Array.isArray(previous) || previous.length === 0) return null;
+
+  const first = previous[0];
+  if (!first || typeof first !== "object") return null;
+
+  const paymentType = (first as { payment_type?: unknown }).payment_type;
+  if (typeof paymentType !== "string" || paymentType.trim() === "") return null;
+
+  const date = (first as { date?: unknown }).date;
+
+  return [
+    {
+      payment_type: paymentType,
+      // The original date where there is one: a zero payment is a correction
+      // to that payment, and dating it today would put a book entry in a
+      // period the money never moved in.
+      date:
+        typeof date === "string" && date.trim() !== ""
+          ? date
+          : toPaymentDate(new Date(0), timeZone),
+      amount: "0.00",
+    },
+  ];
+}
+
+/**
  * Deletes a sales order MetaKocka holds.
  *
  * **The one call in this app that destroys an ERP record, and it is never made
@@ -901,9 +1055,21 @@ export async function deleteSalesOrder(
   mkId: string,
 ): Promise<{ deleted: boolean }> {
   try {
+    /*
+     * **[verified against company 6789 on 2026-08-26]** `delete_document` wants
+     * `mk_id` *and* `doc_type`, and is unhelpful about both:
+     *
+     *   { doc_id }             -> opr_code 2, "Paramether mk_id must be set"
+     *   { mk_id }              -> opr_code 1, "Internal server error."
+     *   { mk_id, doc_type }    -> opr_code 0
+     *
+     * Note that `get_document` takes the same id as `doc_id` while this takes
+     * it as `mk_id`. The first shape here was this app's guess by analogy and
+     * was wrong, which meant the delete path could never have worked.
+     */
     await client.call(
       ENDPOINTS.deleteDocument,
-      { doc_id: mkId },
+      { mk_id: mkId, doc_type: "sales_order" },
       mkEnvelopeSchema,
     );
     return { deleted: true };

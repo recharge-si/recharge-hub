@@ -45,6 +45,41 @@ export interface CanonicalAllocationLine {
   quantity: number;
 }
 
+/**
+ * What will become of one quantity (order-reconciliation brief §4).
+ *
+ * Every Shopify quantity lands in exactly one of these, and the three sum to
+ * the line. That total is the point: it is what makes "never silently missing"
+ * checkable rather than aspirational, and it is why the reconciler can say of
+ * any unit the customer bought whether it is in the ERP, deliberately not in
+ * the ERP, or a problem.
+ */
+export type QuantityDisposition =
+  /** Represented in a MetaKocka sales order. */
+  | "managed"
+  /**
+   * Fulfilled through something this app does not manage, and **deliberately
+   * not represented in MetaKocka**.
+   *
+   * Today that means one thing: a fulfilment order held by a third-party or
+   * assigned service, which reports a location name and no location id because
+   * the app holds only `read_merchant_managed_fulfillment_orders`. The goods
+   * never move through a MetaKocka warehouse and there is no mapping that could
+   * say which one, so inventing a warehouse would misstate stock in the ERP.
+   *
+   * This is an explicit business rule, not an omission — and it is never
+   * silent: external quantity keeps an order out of `in_sync` and raises an
+   * exception naming the service.
+   */
+  | "external"
+  /**
+   * Nothing can say where this quantity goes.
+   *
+   * A Shopify location with no supply source mapped, or quantity the stock
+   * rules could not satisfy. Always an error state.
+   */
+  | "unresolved";
+
 export interface CanonicalAllocation {
   /**
    * The Shopify location this group is fulfilled from, or null for the part of
@@ -58,7 +93,111 @@ export interface CanonicalAllocation {
   shopifyLocationId: string | null;
   /** The supply source the location maps to, when there is a mapping. */
   supplySourceId: string | null;
+  /** What becomes of these quantities. Never inferred by a reader. */
+  disposition: QuantityDisposition;
+  /** Shopify's name for the location, which is all a 3PL assignment gives us. */
+  locationName?: string | null;
   lines: CanonicalAllocationLine[];
+}
+
+export interface LineDisposition {
+  shopifyLineItemId: string;
+  sku: string;
+  title: string;
+  /** What Shopify says the customer is buying. */
+  quantity: number;
+  managed: number;
+  external: number;
+  /** `quantity - managed - external`, floored at zero, plus any over-assignment. */
+  unresolved: number;
+}
+
+export interface QuantityClassification {
+  lines: LineDisposition[];
+  managedTotal: number;
+  externalTotal: number;
+  unresolvedTotal: number;
+  /** True when every unit is either represented or explicitly external. */
+  fullyAccounted: boolean;
+  /** Lines with quantity nothing can place. The ones that need a person. */
+  unresolvedLines: LineDisposition[];
+  /** Lines Shopify is fulfilling elsewhere. Reported, not an error. */
+  externalLines: LineDisposition[];
+}
+
+/**
+ * Sorts every Shopify quantity into exactly one disposition.
+ *
+ * The invariant this exists to make checkable, stated as arithmetic:
+ *
+ * ```text
+ * for every line:  managed + external + unresolved = Shopify quantity
+ * ```
+ *
+ * Anything an allocation does not account for becomes `unresolved` rather than
+ * disappearing — that is the whole difference between a connector that reports
+ * a gap and one that reports success because a line quietly fell out of its own
+ * allocation logic.
+ *
+ * An *over*-assignment (fulfilment orders describing more than the order
+ * contains) is counted into `unresolved` too. It is a Shopify state this app
+ * must not average away, and it is equally a reason not to call the order done.
+ */
+export function classifyQuantities(
+  lines: readonly CanonicalLine[],
+  allocations: readonly CanonicalAllocation[],
+): QuantityClassification {
+  const byDisposition = new Map<string, Record<QuantityDisposition, number>>();
+
+  for (const line of lines) {
+    byDisposition.set(line.shopifyLineItemId, {
+      managed: 0,
+      external: 0,
+      unresolved: 0,
+    });
+  }
+
+  for (const allocation of allocations) {
+    for (const entry of allocation.lines) {
+      const totals = byDisposition.get(entry.shopifyLineItemId);
+      // An allocation for a line the order does not hold. Counted nowhere,
+      // because there is no Shopify quantity for it to be part of.
+      if (!totals) continue;
+      totals[allocation.disposition] += entry.quantity;
+    }
+  }
+
+  const classified: LineDisposition[] = lines.map((line) => {
+    const totals = byDisposition.get(line.shopifyLineItemId)!;
+    const placed = totals.managed + totals.external;
+
+    return {
+      shopifyLineItemId: line.shopifyLineItemId,
+      sku: line.sku,
+      title: line.title,
+      quantity: line.quantity,
+      managed: totals.managed,
+      external: totals.external,
+      // Whatever the allocations called unresolved, plus whatever they did not
+      // mention at all, plus the magnitude of any over-assignment.
+      unresolved: totals.unresolved + Math.abs(line.quantity - placed - totals.unresolved),
+    };
+  });
+
+  const sum = (pick: (line: LineDisposition) => number) =>
+    classified.reduce((total, line) => total + pick(line), 0);
+
+  const unresolvedTotal = sum((line) => line.unresolved);
+
+  return {
+    lines: classified,
+    managedTotal: sum((line) => line.managed),
+    externalTotal: sum((line) => line.external),
+    unresolvedTotal,
+    fullyAccounted: unresolvedTotal === 0,
+    unresolvedLines: classified.filter((line) => line.unresolved > 0),
+    externalLines: classified.filter((line) => line.external > 0),
+  };
 }
 
 export interface CanonicalFinancialState {

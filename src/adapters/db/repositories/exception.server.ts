@@ -218,6 +218,35 @@ export async function resolveException(
 }
 
 /** Closes an exception the app itself has just fixed, e.g. a successful retry. */
+/**
+ * Whether an order still has an open exception of any of these kinds.
+ *
+ * The reconciliation verdict needs this for one specific question: a refund
+ * that Shopify has processed and MetaKocka has not been credited for. This app
+ * cannot see a credit note being issued in the ERP — there is no endpoint that
+ * would tell it — so the open exception *is* the outstanding-action flag, and
+ * the merchant resolving it is the signal that the books have been squared.
+ */
+export async function hasOpenException(
+  principal: Principal,
+  orderId: string,
+  kinds: readonly ExceptionKind[],
+): Promise<boolean> {
+  if (kinds.length === 0) return false;
+
+  const found = await prisma.exception.findFirst({
+    where: {
+      orderId,
+      status: "open",
+      kind: { in: [...kinds] },
+      shop: { domain: shopDomainOf(principal) },
+    },
+    select: { id: true },
+  });
+
+  return found !== null;
+}
+
 export async function closeExceptionsFor(
   principal: Principal,
   orderId: string,
