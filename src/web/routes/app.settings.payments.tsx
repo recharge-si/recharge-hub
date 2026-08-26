@@ -37,6 +37,7 @@ import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
+import { formatDateTime } from "~/web/lib/datetime";
 import { METAKOCKA_REGISTERS_URL } from "~/web/lib/metakocka-links";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -262,13 +263,6 @@ function normalise(mapping: Record<string, string>): Record<string, string> {
       .filter(([, type]) => type !== "")
       .sort(([a], [b]) => a.localeCompare(b)),
   );
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 /**

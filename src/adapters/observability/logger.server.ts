@@ -74,8 +74,3 @@ export function getLogger(): Logger {
   cached ??= build();
   return cached;
 }
-
-/** A logger bound to one shop, so every line carries the tenant. */
-export function shopLogger(shopDomain: string): Logger {
-  return getLogger().child({ shop: shopDomain });
-}

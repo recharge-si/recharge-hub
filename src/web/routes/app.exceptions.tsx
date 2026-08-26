@@ -20,6 +20,7 @@ import {
   TARGET_FOR_KIND,
 } from "~/adapters/queue/redrive.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
+import { formatDateTime } from "~/web/lib/datetime";
 import { describeExceptionKind } from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
 
@@ -218,13 +219,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   return { ok: false, message: "Unknown action." };
 };
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
 
 export default function Exceptions() {
   const { groups, total, resolved } = useLoaderData<typeof loader>();

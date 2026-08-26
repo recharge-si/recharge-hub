@@ -42,12 +42,6 @@ export const customersDataRequestSchema = z
   })
   .passthrough();
 
-export type ShopRedactPayload = z.infer<typeof shopRedactSchema>;
-export type CustomersRedactPayload = z.infer<typeof customersRedactSchema>;
-export type CustomersDataRequestPayload = z.infer<
-  typeof customersDataRequestSchema
->;
-
 /** The envelope every webhook-triggered job carries. */
 export const webhookJobSchema = z.object({
   shopDomain: z.string().min(1),
@@ -55,5 +49,3 @@ export const webhookJobSchema = z.object({
   topic: z.string().min(1),
   payload: z.unknown(),
 });
-
-export type WebhookJob = z.infer<typeof webhookJobSchema>;

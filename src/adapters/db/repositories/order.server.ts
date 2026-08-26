@@ -282,18 +282,6 @@ export async function replaceAllocations(
   });
 }
 
-export async function setOrderStatus(
-  principal: Principal,
-  orderId: string,
-  status:
-    "received" | "allocated" | "written" | "needs_attention" | "cancelled",
-): Promise<void> {
-  await prisma.order.updateMany({
-    where: { id: orderId, shop: { domain: shopDomainOf(principal) } },
-    data: { status },
-  });
-}
-
 /**
  * Claims a `count_code` before anything is sent to MetaKocka.
  *

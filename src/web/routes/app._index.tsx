@@ -15,6 +15,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { OrderChart } from "~/web/components/order-chart";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
+import { formatDateTime } from "~/web/lib/datetime";
 import { describeExceptionKind } from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
 
@@ -84,13 +85,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }),
   };
 };
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
 
 /** How long ago, in the words a person would use. */
 function ago(iso: string | null): string {

@@ -95,18 +95,6 @@ export async function listExceptions(
   });
 }
 
-export async function countOpenExceptionsByKind(
-  principal: Principal,
-): Promise<{ kind: ExceptionKind; count: number }[]> {
-  const rows = await prisma.exception.groupBy({
-    by: ["kind"],
-    where: { shop: { domain: shopDomainOf(principal) }, status: "open" },
-    _count: { _all: true },
-  });
-
-  return rows.map((row) => ({ kind: row.kind, count: row._count._all }));
-}
-
 export async function resolveException(
   principal: Principal,
   id: string,

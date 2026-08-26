@@ -21,14 +21,6 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export const METAKOCKA_SIGNATURE_HEADER = "x-metakocka-signature";
 export const METAKOCKA_EVENT_HEADER = "x-metakocka-id";
 
-/**
- * The only event MetaKocka pushes.
- *
- * §3: there is no order webhook, no document webhook and no tracking webhook.
- * Everything else this app learns from MetaKocka, it learns by asking.
- */
-export const STOCK_EVENT = "warehouse_product_stock_update";
-
 export function signMetakockaBody(rawBody: string, clientSecret: string): string {
   return createHmac("sha1", clientSecret).update(rawBody, "utf8").digest("base64");
 }

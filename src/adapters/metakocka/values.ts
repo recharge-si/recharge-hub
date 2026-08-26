@@ -52,22 +52,6 @@ export const mkDecimal = z
     return parsed;
   });
 
-export const mkInteger = z
-  .union([z.number(), z.string()])
-  .transform((value, ctx) => {
-    const parsed =
-      typeof value === "number" ? value : Number(normaliseDecimalString(value));
-
-    if (!Number.isInteger(parsed)) {
-      ctx.addIssue({
-        code: "custom",
-        message: `Expected an integer, received ${JSON.stringify(value)}`,
-      });
-      return z.NEVER;
-    }
-    return parsed;
-  });
-
 /**
  * Money, as integer minor units (CLAUDE.md section 15: never float).
  *
@@ -151,18 +135,6 @@ export function parseMkDate(raw: string): Date {
 
   throw new RangeError(`Unrecognised MetaKocka date: ${JSON.stringify(raw)}`);
 }
-
-export const mkDate = z.string().transform((value, ctx) => {
-  try {
-    return parseMkDate(value);
-  } catch {
-    ctx.addIssue({
-      code: "custom",
-      message: `Unrecognised date ${JSON.stringify(value)}`,
-    });
-    return z.NEVER;
-  }
-});
 
 /**
  * Outbound only. `mark_paid.date` is dd.mm.yyyy while the rest of the same

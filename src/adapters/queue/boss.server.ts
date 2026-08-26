@@ -76,14 +76,6 @@ export async function getQueueClient(): Promise<PgBoss> {
   return starting;
 }
 
-export async function stopQueueClient(): Promise<void> {
-  if (!client) return;
-
-  await client.stop({ graceful: true });
-  client = undefined;
-  starting = undefined;
-}
-
 export interface EnqueueOptions {
   /**
    * Deduplication key. pg-boss keeps at most one pre-active job per

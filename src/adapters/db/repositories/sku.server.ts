@@ -3,8 +3,6 @@ import type { Sku } from "@prisma/client";
 import { prisma } from "~/adapters/db/client.server";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
-export type { Sku };
-
 async function shopIdFor(principal: Principal): Promise<string> {
   const domain = shopDomainOf(principal);
   const shop = await prisma.shop.findUnique({
@@ -159,32 +157,6 @@ export async function countByStatus(
   const counts = { matched: 0, unmatched: 0, ignored: 0 };
   for (const row of grouped) counts[row.status] = row._count._all;
   return counts;
-}
-
-export async function listSkus(
-  principal: Principal,
-  status: "matched" | "unmatched" | "ignored" | "all",
-  take = 50,
-): Promise<Sku[]> {
-  return prisma.sku.findMany({
-    where: {
-      shop: { domain: shopDomainOf(principal) },
-      ...(status === "all" ? {} : { status }),
-    },
-    orderBy: { sku: "asc" },
-    take,
-  });
-}
-
-export async function setSkuStatus(
-  principal: Principal,
-  id: string,
-  status: "unmatched" | "ignored",
-): Promise<void> {
-  await prisma.sku.updateMany({
-    where: { id, shop: { domain: shopDomainOf(principal) } },
-    data: { status },
-  });
 }
 
 /**

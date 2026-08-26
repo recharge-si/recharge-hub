@@ -34,15 +34,6 @@ export async function listSupplySources(
   });
 }
 
-export async function findSupplySource(
-  principal: Principal,
-  id: string,
-): Promise<SupplySource | null> {
-  return prisma.supplySource.findFirst({
-    where: { id, shop: { domain: shopDomainOf(principal) } },
-  });
-}
-
 export interface SupplySourceInput {
   code: string;
   name: string;
@@ -132,28 +123,6 @@ export async function detachSupplySource(
       enabled: false,
     },
   });
-}
-
-export async function deleteSupplySource(
-  principal: Principal,
-  id: string,
-): Promise<void> {
-  await prisma.supplySource.deleteMany({
-    where: { id, shop: { domain: shopDomainOf(principal) } },
-  });
-}
-
-export async function codeIsTaken(
-  principal: Principal,
-  code: string,
-  exceptId: string | null,
-): Promise<boolean> {
-  const existing = await prisma.supplySource.findFirst({
-    where: { code, shop: { domain: shopDomainOf(principal) } },
-    select: { id: true },
-  });
-
-  return existing !== null && existing.id !== exceptId;
 }
 
 /* -------------------------------------------------------------------------- */

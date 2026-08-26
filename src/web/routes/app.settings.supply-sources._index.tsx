@@ -49,6 +49,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent, describeSyncBriefly } from "~/web/lib/activity";
+import { formatDateTime } from "~/web/lib/datetime";
 import {
   METAKOCKA_REGISTERS_URL,
   METAKOCKA_WAREHOUSES_URL,
@@ -852,13 +853,6 @@ function shortDateTime(iso: string): string {
     month: "short",
     hour: "2-digit",
     minute: "2-digit",
-  });
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
   });
 }
 

@@ -1,5 +1,7 @@
 import { useState } from "react";
 
+import { formatDateTime } from "~/web/lib/datetime";
+
 /**
  * The one activity list every page uses.
  *
@@ -21,13 +23,6 @@ export interface ActivityItem {
   text: string;
   /** False when a person has to do something about it. */
   ok: boolean;
-}
-
-function formatDateTime(iso: string): string {
-  return new Date(iso).toLocaleString(undefined, {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
 }
 
 export function RecentActivity({
