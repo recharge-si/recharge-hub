@@ -122,6 +122,21 @@ the target rule that tenant filtering lives in repositories. Migrate one
 subsystem at a time, then forbid importing the Prisma client outside
 `src/adapters/db/` with ESLint.
 
+### T-15 — Prisma's config dependency has an open security advisory
+
+`npm audit --omit=dev` reports
+[GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx)
+against `deepmerge-ts` 7.1.5 through Prisma 6.19.3's `@prisma/config`. The flaw
+requires recursive in-memory object graphs; the application does not pass
+request payloads into Prisma configuration, so no exposed request path is
+currently known. The audit nevertheless remains red, and the Prisma CLI ships
+in the production image because the migration service uses it.
+
+Do not accept npm's forced Prisma version change or add a transitive override
+without compatibility testing. Adopt a compatible upstream fix, or validate an
+upgrade/override separately against generation, all migrations, the test suite,
+and both runtime images.
+
 ### UI, accessibility, and performance need measured passes
 
 The Built for Shopify checklist has not been walked requirement by requirement.
