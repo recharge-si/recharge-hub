@@ -23,6 +23,7 @@ import {
   settingsFromTemplate,
   usesMetafields,
 } from "~/domain/products/template";
+import { DistributionBars } from "~/web/components/distribution-bars";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
 import { formatDateTime, formatInterval } from "~/web/lib/datetime";
@@ -171,7 +172,17 @@ export default function Products() {
   const busy = syncer.state !== "idle";
   const lastRunAt = status?.at ?? productSync.lastRunAt;
 
-  const total = counts.matched + counts.unmatched + counts.ignored;
+  /*
+   * How the catalogue divides. A row that is zero is left out rather than
+   * drawn empty: "0 ignored" is not a fact anybody came here for, and an
+   * unmatched row of zero is the good news the card's own silence already
+   * carries.
+   */
+  const breakdown = [
+    { name: "Matched to a MetaKocka product", count: counts.matched },
+    { name: "Not matched", count: counts.unmatched },
+    { name: "Ignored", count: counts.ignored },
+  ].filter((row) => row.count > 0);
 
   // Confirmations are toasts, like the rest of the admin. Failures stay on the
   // page as a banner, because section 2.8 requires errors to persist.
@@ -185,6 +196,19 @@ export default function Products() {
       <s-link slot="breadcrumb-actions" href="/app">
         Home
       </s-link>
+
+      {/*
+       * Settings in the header, where a merchant looks for it, rather than only
+       * at the foot of the card that summarises it. This page is what is
+       * happening; the settings page is what it was told to do.
+       */}
+      <s-button
+        slot="secondary-actions"
+        icon="settings"
+        href="/app/products/sync"
+      >
+        Settings
+      </s-button>
 
       {/*
        * The explanation behind a header action, the same as the payment types
@@ -246,23 +270,33 @@ export default function Products() {
 
         <s-section heading="Matching">
           <s-stack direction="block" gap="base">
-            {/* One count, stated once. The total is part of the sentence. */}
-            <s-text>
-              {total === 0
-                ? "No SKUs have been read yet."
-                : `${counts.matched} of ${total} SKUs are matched to a MetaKocka product.`}
-            </s-text>
+            {/*
+             * The catalogue as a breakdown rather than a sentence: how many
+             * SKUs there are, and how they divide. Each number appears once —
+             * the bars are the count, so there is no summary line restating
+             * them above (docs/ui-conventions.md).
+             *
+             * The same component the home page uses for warehouse shares, so
+             * two pages showing a breakdown show it the same way.
+             */}
+            <DistributionBars
+              rows={breakdown}
+              unit="SKU"
+              empty="No SKUs have been read yet."
+            />
 
-            <s-button
-              type="button"
-              variant="primary"
-              onClick={() =>
-                syncer.submit({ intent: "sync" }, { method: "post" })
-              }
-              {...(busy ? { disabled: true, loading: true } : {})}
-            >
-              Sync products
-            </s-button>
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-button
+                type="button"
+                variant="primary"
+                onClick={() =>
+                  syncer.submit({ intent: "sync" }, { method: "post" })
+                }
+                {...(busy ? { disabled: true, loading: true } : {})}
+              >
+                Sync products
+              </s-button>
+            </s-stack>
 
             {/*
              * When it last ran, and what makes it run. This said syncing
