@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import {
   Form,
   useActionData,
@@ -71,9 +71,9 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { suggestPaymentMapping } from "~/domain/payments/gateway-match";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
-  ORDER_REFERENCE_PLACEHOLDERS,
   orderReferenceFor,
   unknownPlaceholders,
+  type OrderReferenceContext,
 } from "~/domain/orders/reference";
 import {
   describeDirection,
@@ -81,10 +81,15 @@ import {
   type StockDirectionValue,
 } from "~/domain/readiness";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
+import { PatternEditor } from "~/web/components/pattern-editor";
 import { ReadinessList } from "~/web/components/readiness-list";
 import { INHERIT, toDirection } from "~/web/lib/locations";
 import { saveLocationMapping } from "~/web/lib/locations.server";
 import { redirectWithin } from "~/web/lib/redirects";
+import {
+  ORDER_REFERENCE_REGISTRY,
+  orderReferenceRows,
+} from "~/web/lib/order-reference-fields";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
 import {
   isOwnershipKnown,
@@ -309,9 +314,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orders: {
         template: settings.customerOrderTemplate ?? "",
         defaultTemplate: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
-        fields: ORDER_REFERENCE_PLACEHOLDERS.map(
-          (placeholder) => `{{${placeholder.token}}}`,
-        ),
         sample: recent
           ? {
               name: `#${recent.shopifyOrderNumber}`,
@@ -644,7 +646,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       return {
         ok: false,
         field: "template",
-        message: `${unknown.map((field) => `{{${field}}}`).join(", ")} ${unknown.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
+        message: `${unknown.map((field) => `{${field}}`).join(", ")} ${unknown.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
       } satisfies StepResult;
     }
 
@@ -1328,7 +1330,6 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
 interface OrdersData {
   template: string;
   defaultTemplate: string;
-  fields: string[];
   sample: { name: string; number: string; id: string } | null;
   profitCenter: string;
   register: string[];
@@ -1357,13 +1358,42 @@ function OrdersStep({
     result && !result.ok && result.field === field ? result.message : undefined;
 
   const badFields = unknownPlaceholders(template);
-  const preview = orders.sample
-    ? orderReferenceFor(template.trim() || orders.defaultTemplate, {
-        name: orders.sample.name,
-        number: orders.sample.number,
-        id: orders.sample.id,
-        customerEmail: null,
-      })
+
+  const templateError =
+    errorFor("template") ??
+    (badFields.length > 0
+      ? `${badFields.map((field) => `{${field}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`
+      : undefined);
+
+  /*
+   * The order the pattern is read against, for both the sentence above the
+   * field and the fields the editor offers. No customer email: this app does
+   * not keep one, so that field has nothing to show rather than an empty
+   * value.
+   */
+  const sampleContext: OrderReferenceContext | null = useMemo(
+    () =>
+      orders.sample
+        ? {
+            name: orders.sample.name,
+            number: orders.sample.number,
+            id: orders.sample.id,
+            customerEmail: null,
+          }
+        : null,
+    [orders.sample],
+  );
+
+  const referenceRows = useCallback(
+    (query: string) => orderReferenceRows(query, sampleContext),
+    [sampleContext],
+  );
+
+  const preview = sampleContext
+    ? orderReferenceFor(
+        template.trim() || orders.defaultTemplate,
+        sampleContext,
+      )
     : null;
 
   const typeOptions: DropdownOption[] = [
@@ -1405,25 +1435,27 @@ function OrdersStep({
             </s-stack>
 
             {customising ? (
+              /*
+               * The same control the product name pattern is edited in: fields
+               * as chips, offered as they are typed, each showing what it comes
+               * to for a real order of theirs. One way of editing a pattern,
+               * for both patterns a merchant edits.
+               *
+               * The value travels in a hidden input because this step is a real
+               * form and the editor is a contenteditable, which submits
+               * nothing on its own.
+               */
               <s-box maxInlineSize="520px">
-                <s-stack direction="block" gap="small-400">
-                  <s-text-field
-                    name="template"
-                    label="Reference pattern"
-                    value={template}
-                    placeholder={orders.defaultTemplate}
-                    onChange={(event) => setTemplate(event.currentTarget.value)}
-                    error={
-                      errorFor("template") ??
-                      (badFields.length > 0
-                        ? `${badFields.map((field) => `{{${field}}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`
-                        : undefined)
-                    }
-                  />
-                  <s-text color="subdued">
-                    {`Fields you can use: ${orders.fields.join(", ")}. Leave empty for the default.`}
-                  </s-text>
-                </s-stack>
+                <input type="hidden" name="template" value={template} />
+                <PatternEditor
+                  label="Reference pattern"
+                  value={template}
+                  onChange={setTemplate}
+                  registry={ORDER_REFERENCE_REGISTRY}
+                  rows={referenceRows}
+                  details={`Leave it empty for the default, ${orders.defaultTemplate}.`}
+                  {...(templateError ? { error: templateError } : {})}
+                />
               </s-box>
             ) : (
               <>

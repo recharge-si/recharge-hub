@@ -38,7 +38,7 @@ export interface OrderReferenceContext {
  * The default, and the value every order written before this setting existed
  * already carries. Changing it must not change existing orders.
  */
-export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = "SH-{{order.number}}";
+export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = "SH-{order.number}";
 
 interface Placeholder {
   readonly token: string;
@@ -54,27 +54,68 @@ interface Placeholder {
 export const ORDER_REFERENCE_PLACEHOLDERS: readonly Placeholder[] = [
   {
     token: "order.name",
-    label: "Shopify order name, such as #1050",
+    label: "Order name",
     of: (context) => context.name,
   },
   {
     token: "order.number",
-    label: "Shopify order number, such as 1050",
+    label: "Order number",
     of: (context) => context.number,
   },
   {
     token: "order.id",
-    label: "Shopify order id",
+    label: "Order id",
     of: (context) => context.id,
   },
   {
     token: "customer.email",
-    label: "Customer email address, when the order has one",
+    label: "Customer email",
     of: (context) => context.customerEmail,
   },
 ];
 
-const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+/**
+ * `{order.number}`, and `{{order.number}}` for what is already stored.
+ *
+ * One brace is the syntax the pattern editor reads and writes, and it is the
+ * same one the product name patterns use — one syntax for the two patterns a
+ * merchant edits rather than one each. Two braces was what this shipped with,
+ * so it still renders: a template stored months ago has to keep producing the
+ * reference the documents in MetaKocka already carry.
+ *
+ * The doubled form is matched first, or `{{order.number}}` would be read as a
+ * brace, a field and a brace.
+ */
+const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}|\{\s*([a-zA-Z0-9_.]+)\s*\}/g;
+
+/**
+ * Ready-made references, and what each one is for.
+ *
+ * Patterns, not examples: the settings screen renders each against one of the
+ * merchant's own orders, so choosing one is a decision about their data rather
+ * than about syntax — the same as the product name patterns.
+ */
+export interface OrderReferencePattern {
+  id: string;
+  /** Short enough to read at a glance on a row. */
+  label: string;
+  pattern: string;
+}
+
+export const ORDER_REFERENCE_PATTERNS: readonly OrderReferencePattern[] = [
+  {
+    id: "sh-number",
+    label: "SH and the order number",
+    pattern: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+  },
+  { id: "number", label: "Order number", pattern: "{order.number}" },
+  { id: "name", label: "Order name", pattern: "{order.name}" },
+  {
+    id: "sh-name",
+    label: "SH and the order name",
+    pattern: "SH-{order.name}",
+  },
+];
 
 const BY_TOKEN = new Map(
   ORDER_REFERENCE_PLACEHOLDERS.map((placeholder) => [
@@ -87,7 +128,7 @@ const BY_TOKEN = new Map(
 export function unknownPlaceholders(template: string): string[] {
   const found = new Set<string>();
   for (const match of template.matchAll(PLACEHOLDER_PATTERN)) {
-    const token = match[1] ?? "";
+    const token = match[1] ?? match[2] ?? "";
     if (!BY_TOKEN.has(token)) found.add(token);
   }
   return [...found];
@@ -115,8 +156,8 @@ export function renderOrderReference(
 ): string {
   const rendered = template.replace(
     PLACEHOLDER_PATTERN,
-    (whole, rawToken: string) => {
-      const placeholder = BY_TOKEN.get(rawToken);
+    (whole, doubled: string | undefined, single: string | undefined) => {
+      const placeholder = BY_TOKEN.get(doubled ?? single ?? "");
       if (!placeholder) return whole;
       return placeholder.of(context) ?? "";
     },

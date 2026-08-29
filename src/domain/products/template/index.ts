@@ -91,6 +91,7 @@ export {
   flattenGroups,
   pickerGroups,
   pickerQueryAt,
+  pickerRows,
   triggerAt,
   MIN_SUGGEST,
   type PickerGroup,

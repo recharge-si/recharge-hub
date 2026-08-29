@@ -62,9 +62,15 @@ differently, that's a bug.
 - Explanatory prose is a last resort. One short sentence per card plus an optional help
   link. If a card needs two paragraphs to be understood, the layout is wrong.
 
-## Pattern cards
-A preset is a selectable card showing the name it produces for one of the merchant's real
-products. Never a bare text link.
+## Patterns
+A merchant edits two patterns — the product name and the order reference — and they are
+edited the same way: one syntax (`{field}`), one control (`PatternEditor`), fields as
+chips offered while typing, and every field showing what it comes to for a real record of
+theirs. The control knows the syntax and nothing about what the pattern is about; the page
+tells it which fields exist and what they resolve to.
+
+A preset is a selectable row showing what it produces for one of the merchant's real
+records. Never a bare text link.
 
 ## Custom controls
 Any control not built from the design system's primitives carries a real label, correct
@@ -91,6 +97,7 @@ differs it is given, because the code is not going to be renamed to match.
 | **Name** | The MetaKocka product's `name` — the thing this app writes. Never "title". | `name` |
 | **Title** | Shopify's customer-facing product title. Only ever an input to a name, never the output. | `product.title`, `{title}` |
 | **Name pattern** | What the merchant edits to decide how a name is built. Never "template" in copy. | `nameTemplate`, `TemplateNode[]` |
+| **Reference pattern** | What the merchant edits to decide how the order reference is built. Same syntax and same editor as a name pattern. | `customerOrderTemplate` |
 | **Field** | One piece of Shopify data a name pattern can insert. Never "token" in copy. | `FieldDef`, `kind: "token"` |
 | **Matching** | Reading both catalogues and pairing them by SKU. Writes nothing to MetaKocka. | job `sync-catalogue` |
 | **Name sync** | Writing names into MetaKocka, and creating products for unmatched SKUs when that is on. | job `sync-products` |

@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -24,12 +24,18 @@ import { findProductByCode } from "~/adapters/metakocka/stock";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
-  ORDER_REFERENCE_PLACEHOLDERS,
+  ORDER_REFERENCE_PATTERNS,
   orderReferenceFor,
   unknownPlaceholders,
+  type OrderReferenceContext,
 } from "~/domain/orders/reference";
 import { componentOf } from "~/domain/readiness";
 import { AdvancedSection } from "~/web/components/advanced-section";
+import { PatternEditor } from "~/web/components/pattern-editor";
+import {
+  ORDER_REFERENCE_REGISTRY,
+  orderReferenceRows,
+} from "~/web/lib/order-reference-fields";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -55,6 +61,7 @@ import { principalFromSession } from "~/web/lib/principal.server";
  * this page states what they currently are and links to them.
  */
 const HELP_MODAL_ID = "about-order-sync";
+const REFERENCE_PATTERNS_MODAL_ID = "ready-reference-patterns";
 const REFERENCE_MODAL_ID = "about-customer-order";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -95,10 +102,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           currentRef: recent.customerOrderRef,
         }
       : null,
-    fields: ORDER_REFERENCE_PLACEHOLDERS.map((placeholder) => ({
-      token: `{{${placeholder.token}}}`,
-      label: placeholder.label,
-    })),
     defaultPattern: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
     /*
      * What this page states rather than owns. The counts and the profit centre
@@ -175,10 +178,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     return {
       ok: false,
       message: `Nothing was saved: ${unknown
-        .map((field) => `{{${field}}}`)
+        .map((field) => `{${field}}`)
         .join(
           ", ",
-        )} ${unknown.length === 1 ? "is not a field" : "are not fields"} this app can fill in. Use one of the fields listed under the box.`,
+        )} ${unknown.length === 1 ? "is not a field" : "are not fields"} this app can fill in. Choose one from the list the pattern offers.`,
     };
   }
 
@@ -281,10 +284,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function OrderSyncSettings() {
-  const { settings, sample, fields, defaultPattern, status, recommended } =
+  const { settings, sample, defaultPattern, status, recommended } =
     useLoaderData<typeof loader>();
   const saver = useFetcher<typeof action>();
   const result = saver.data;
+
+  /** Overlay methods land on the element only once the browser upgrades it. */
+  const referencePatterns = useRef<{ hideOverlay?: () => void } | null>(null);
   const busy = saver.state !== "idle";
 
   const [form, setForm] = useState({
@@ -348,13 +354,38 @@ export default function OrderSyncSettings() {
    * for guest checkouts, and that should be visible here rather than
    * discovered in the ERP.
    */
-  const preview = sample
-    ? orderReferenceFor(form.customerOrderTemplate.trim() || defaultPattern, {
-        name: sample.name,
-        number: sample.number,
-        id: sample.id,
-        customerEmail: null,
-      })
+  /*
+   * The order every part of this card reads the pattern against: the preview
+   * below it, the fields the editor offers, and what each ready pattern would
+   * produce. One context, so the three cannot disagree.
+   *
+   * No customer email, because this app does not keep one. That field still
+   * exists and still renders; it simply has nothing to show here, which the
+   * picker states by showing no value rather than an empty one.
+   */
+  const sampleContext: OrderReferenceContext | null = useMemo(
+    () =>
+      sample
+        ? {
+            name: sample.name,
+            number: sample.number,
+            id: sample.id,
+            customerEmail: null,
+          }
+        : null,
+    [sample],
+  );
+
+  const referenceRows = useCallback(
+    (query: string) => orderReferenceRows(query, sampleContext),
+    [sampleContext],
+  );
+
+  const preview = sampleContext
+    ? orderReferenceFor(
+        form.customerOrderTemplate.trim() || defaultPattern,
+        sampleContext,
+      )
     : null;
 
   useEffect(() => {
@@ -406,6 +437,81 @@ export default function OrderSyncSettings() {
       >
         Help
       </s-button>
+
+      {/*
+       * Ready references, each rendered against one of the merchant's own
+       * orders — the same list the product name patterns get, for the same
+       * reason: choosing one should be a decision about their data rather than
+       * about syntax. A shop with no orders yet reads the labels alone; nothing
+       * here is a made-up example.
+       */}
+      <s-modal
+        id={REFERENCE_PATTERNS_MODAL_ID}
+        heading="Ready references"
+        ref={(element) => {
+          referencePatterns.current =
+            (element as { hideOverlay?: () => void }) ?? null;
+        }}
+      >
+        <s-stack direction="block" gap="none">
+          {ORDER_REFERENCE_PATTERNS.map((option, index) => {
+            const inUse =
+              option.pattern === form.customerOrderTemplate ||
+              (option.pattern === defaultPattern &&
+                form.customerOrderTemplate.trim() === "");
+            const produced = sampleContext
+              ? orderReferenceFor(option.pattern, sampleContext).reference
+              : null;
+
+            return (
+              <s-stack key={option.id} direction="block" gap="none">
+                {index === 0 ? null : <s-divider />}
+                <s-clickable
+                  inlineSize="100%"
+                  borderRadius="base"
+                  paddingInline="small-200"
+                  paddingBlock="small-300"
+                  accessibilityLabel={
+                    produced
+                      ? `${option.label}. Would produce ${produced}.`
+                      : option.label
+                  }
+                  onClick={() => {
+                    set("customerOrderTemplate", option.pattern);
+                    referencePatterns.current?.hideOverlay?.();
+                  }}
+                >
+                  <s-grid
+                    gridTemplateColumns="1fr auto"
+                    gap="small-200"
+                    alignItems="center"
+                  >
+                    <s-stack direction="block" gap="small-500">
+                      <s-text type="strong">{option.label}</s-text>
+                      {produced ? (
+                        <s-text color="subdued">{produced}</s-text>
+                      ) : null}
+                    </s-stack>
+                    {inUse ? (
+                      <s-icon type="check" />
+                    ) : (
+                      <s-box inlineSize="20px" />
+                    )}
+                  </s-grid>
+                </s-clickable>
+              </s-stack>
+            );
+          })}
+        </s-stack>
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          command="--hide"
+          commandFor={REFERENCE_PATTERNS_MODAL_ID}
+        >
+          Close
+        </s-button>
+      </s-modal>
 
       <s-modal id={HELP_MODAL_ID} heading="About order sync">
         <s-stack direction="block" gap="base">
@@ -562,26 +668,41 @@ export default function OrderSyncSettings() {
              */}
             {customisingReference ? (
               <>
-                <s-text-field
-                  name="customerOrderTemplate"
+                {/*
+                 * The same control the product name pattern is edited in, and
+                 * for the same reasons: fields as chips rather than syntax to
+                 * be learnt, a list that offers them as you type, and each one
+                 * showing what it comes to for a real order of the merchant's.
+                 * Two patterns a merchant edits; one way of editing a pattern.
+                 *
+                 * No preview passed to it. What this pattern produces is stated
+                 * once, in the sentence below, which also has room to say what
+                 * happens to orders already sent.
+                 */}
+                <PatternEditor
                   label="Reference pattern"
                   value={form.customerOrderTemplate}
-                  placeholder={defaultPattern}
-                  error={
-                    badFields.length > 0
-                      ? `${badFields.map((field) => `{{${field}}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`
-                      : undefined
-                  }
-                  onChange={(event) =>
-                    set("customerOrderTemplate", event.currentTarget.value)
-                  }
+                  onChange={(next) => set("customerOrderTemplate", next)}
+                  registry={ORDER_REFERENCE_REGISTRY}
+                  rows={referenceRows}
+                  details={`Leave it empty for the default, ${defaultPattern}.`}
+                  {...(badFields.length > 0
+                    ? {
+                        error: `${badFields.map((field) => `{${field}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
+                      }
+                    : {})}
                 />
 
-                <s-text color="subdued">
-                  Fields you can use:{" "}
-                  {fields.map((field) => field.token).join(", ")}. Leave the box
-                  empty for the default.
-                </s-text>
+                <s-stack direction="inline">
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={REFERENCE_PATTERNS_MODAL_ID}
+                  >
+                    Start from a ready pattern
+                  </s-button>
+                </s-stack>
               </>
             ) : (
               <s-stack direction="block" gap="small-400">

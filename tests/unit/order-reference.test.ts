@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
   MAX_ORDER_REFERENCE_LENGTH,
+  ORDER_REFERENCE_PATTERNS,
   ORDER_REFERENCE_PLACEHOLDERS,
   orderReferenceFor,
   renderOrderReference,
@@ -119,5 +120,44 @@ describe("falling back when a pattern produces nothing", () => {
     const first = orderReferenceFor("WEB-{{order.number}}", CONTEXT);
     const second = orderReferenceFor("WEB-{{order.number}}", CONTEXT);
     expect(first).toEqual(second);
+  });
+  /**
+   * One brace is what the pattern editor reads and writes, and it is what the
+   * product name patterns already used. Two braces is what shipped first, and
+   * a template stored then still has to render the reference the documents in
+   * MetaKocka already carry.
+   */
+  describe("both brace styles", () => {
+    it("renders a single-braced field", () => {
+      expect(renderOrderReference("{order.number}", CONTEXT)).toBe("1050");
+      expect(renderOrderReference("SH-{order.number}", CONTEXT)).toBe("SH-1050");
+      expect(renderOrderReference("{ order.number }", CONTEXT)).toBe("1050");
+    });
+
+    it("renders a stored double-braced field the same way", () => {
+      expect(renderOrderReference("SH-{{order.number}}", CONTEXT)).toBe(
+        renderOrderReference("SH-{order.number}", CONTEXT),
+      );
+    });
+
+    it("leaves an unknown field of either style alone, and reports it", () => {
+      expect(renderOrderReference("{order.tags}", CONTEXT)).toBe("{order.tags}");
+      expect(unknownPlaceholders("{order.tags}-{order.number}")).toEqual([
+        "order.tags",
+      ]);
+      expect(unknownPlaceholders("{{order.tags}}")).toEqual(["order.tags"]);
+    });
+  });
+
+  it("offers ready patterns that all render for a real order", () => {
+    for (const option of ORDER_REFERENCE_PATTERNS) {
+      expect(unknownPlaceholders(option.pattern)).toEqual([]);
+      const { reference, usedFallback } = orderReferenceFor(
+        option.pattern,
+        CONTEXT,
+      );
+      expect(usedFallback).toBe(false);
+      expect(reference.length).toBeGreaterThan(0);
+    }
   });
 });

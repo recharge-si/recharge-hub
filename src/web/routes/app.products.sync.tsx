@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -711,6 +711,24 @@ export default function ProductSyncSettings() {
     result && !result.ok && result.field === field ? result.message : undefined;
 
   const patternSample = samples[0] ?? null;
+
+  /*
+   * What the picker offers and what the name comes to, both resolved against
+   * one of the merchant's own variants. The editor itself knows the syntax and
+   * nothing about products, so this is where a product answers for itself.
+   */
+  const pickerRowsFor = useCallback(
+    (query: string) =>
+      pickerGroups(registry, query, (patternSample as VariantFacts) ?? null),
+    [registry, patternSample],
+  );
+
+  const resolvedName = patternSample
+    ? nameFor(
+        settingsFromTemplate(state.nameTemplate),
+        patternSample as VariantFacts,
+      ).name
+    : null;
   const loadingPricelists = refreshing || reloader.state !== "idle";
   const reloadFailed = reloader.data && !reloader.data.ok;
 
@@ -1214,7 +1232,12 @@ export default function ProductSyncSettings() {
                     set({ nameTemplate: next });
                   }}
                   registry={registry}
-                  sample={patternSample ?? null}
+                  rows={pickerRowsFor}
+                  preview={
+                    resolvedName
+                      ? `${patternSample?.sku}: ${resolvedName}`
+                      : null
+                  }
                   {...(fieldError ? { error: fieldError } : {})}
                 />
 
