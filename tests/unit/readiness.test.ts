@@ -238,8 +238,27 @@ describe("computeReadiness", () => {
     const payments = componentOf(readiness, "payments");
     expect(payments.status).toBe("ready");
     expect(payments.reason).toContain("cash_on_delivery");
-    expect(payments.reason).toContain("Kartica");
+    // The fallback is named once, in the summary, because that is the line the
+    // order settings card shows on its own.
+    expect(payments.summary).toContain("Kartica");
     expect(readiness.overall).toBe("ready");
+  });
+
+  it("says every method is covered when only the fallback is set", () => {
+    const readiness = computeReadiness(
+      facts({
+        payments: {
+          enabled: true,
+          seenGateways: ["shopify_payments"],
+          mappedGateways: [],
+          fallback: "Kartica",
+        },
+      }),
+    );
+
+    const payments = componentOf(readiness, "payments");
+    expect(payments.status).toBe("ready");
+    expect(payments.summary).toBe("Every payment method settles into Kartica");
   });
 
   it("says nothing about payments when the merchant records them by hand", () => {

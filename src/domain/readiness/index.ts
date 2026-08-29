@@ -317,14 +317,24 @@ function paymentsOf(facts: ReadinessFacts): ReadinessComponent {
     };
   }
 
+  /*
+   * The count alone was not the state of things. A shop with a fallback and one
+   * mapped gateway read "1 method mapped" wherever this is shown, which sounds
+   * like the other methods are unanswered when the merchant has in fact
+   * answered for all of them at once. What is true is that every method is
+   * covered, and one of them has a type of its own.
+   */
   return {
     ...base,
     required: true,
     status: "ready",
-    summary: `${mappedCount} ${plural(mappedCount, "method", "methods")} mapped`,
+    summary:
+      mappedCount === 0
+        ? `Every payment method settles into ${facts.payments.fallback}`
+        : `${mappedCount} ${plural(mappedCount, "method", "methods")} mapped; anything else settles into ${facts.payments.fallback}`,
     reason:
       unmapped.length > 0
-        ? `${unmapped.length} ${plural(unmapped.length, "method", "methods")} this store has used ${plural(unmapped.length, "falls", "fall")} back to ${facts.payments.fallback}: ${list(unmapped)}.`
+        ? `${unmapped.length} ${plural(unmapped.length, "method", "methods")} this store has used ${plural(unmapped.length, "has", "have")} no type of ${plural(unmapped.length, "its", "their")} own: ${list(unmapped)}.`
         : null,
   };
 }

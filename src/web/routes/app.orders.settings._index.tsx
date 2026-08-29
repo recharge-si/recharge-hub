@@ -10,7 +10,6 @@ import {
 
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
-import { listPaymentTypeMaps } from "~/adapters/db/repositories/payment-type-map.server";
 import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import {
@@ -80,10 +79,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
-  const [settings, readiness, paymentMaps, supplyDefaults] = await Promise.all([
+  const [settings, readiness, supplyDefaults] = await Promise.all([
     getSalesOrderSettings(principal),
     getReadiness(principal),
-    listPaymentTypeMaps(principal),
     getSupplyDefaults(principal),
   ]);
 
@@ -113,7 +111,6 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       paymentsSummary: componentOf(readiness, "payments").summary,
       paymentsNeedsAttention:
         componentOf(readiness, "payments").status === "needs_attention",
-      mappedCount: paymentMaps.length,
       defaultProfitCenter: supplyDefaults.defaultProfitCenter,
     },
     /*
