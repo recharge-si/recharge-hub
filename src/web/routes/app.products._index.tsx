@@ -25,7 +25,7 @@ import {
 } from "~/domain/products/template";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
-import { formatDateTime } from "~/web/lib/datetime";
+import { formatDateTime, formatInterval } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -115,6 +115,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       exampleName: sample ? nameFor(naming, sample).name : null,
       exampleSku: sample?.sku ?? null,
       lastRunAt: productSync.lastRunAt?.toISOString() ?? null,
+      scheduleEnabled: productSync.scheduleEnabled,
+      scheduleIntervalMinutes: productSync.scheduleIntervalMinutes,
     },
     status: latest ? { at: latest.at, text: latest.text, ok: latest.ok } : null,
     recent: described.slice(0, 6),
@@ -262,10 +264,27 @@ export default function Products() {
               Sync products
             </s-button>
 
+            {/*
+             * When it last ran, and what makes it run. This said syncing
+             * happens when you press the button and nothing else, which stops
+             * being true the moment a merchant turns the schedule on — and the
+             * page with the button was the one still claiming the button was
+             * the only way.
+             *
+             * The cadence, not a next-run time: the tick that fires it looks
+             * every quarter of an hour, and a time computed against the
+             * reader's own clock is a hydration mismatch waiting to happen.
+             */}
             <s-text color="subdued">
-              {lastRunAt
-                ? `Last synced ${formatDateTime(lastRunAt)}. Syncing runs when you press the button.`
-                : "Not synced yet. Syncing runs when you press the button."}
+              {`${
+                lastRunAt
+                  ? `Last synced ${formatDateTime(lastRunAt)}.`
+                  : "Not synced yet."
+              } ${
+                productSync.scheduleEnabled
+                  ? `It also runs on its own every ${formatInterval(productSync.scheduleIntervalMinutes)}.`
+                  : "Syncing runs when you press the button."
+              }`}
             </s-text>
           </s-stack>
         </s-section>

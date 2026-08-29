@@ -50,6 +50,34 @@ export function formatListDateTime(iso: string, now: Date = new Date()): string 
   return `${date} at ${time}`;
 }
 
+/**
+ * A number of minutes as the phrase that follows "every".
+ *
+ * A schedule is stored in minutes because that is what the field asks for and
+ * what the tick compares against, but nobody reads "every 720 minutes". Whole
+ * days and whole hours are said as days and hours, and anything else keeps the
+ * remainder rather than rounding a merchant's own answer away.
+ */
+export function formatInterval(minutes: number): string {
+  const whole = Math.max(1, Math.round(minutes));
+
+  if (whole % 1440 === 0) {
+    const days = whole / 1440;
+    return days === 1 ? "day" : `${days} days`;
+  }
+
+  if (whole % 60 === 0) {
+    const hours = whole / 60;
+    return hours === 1 ? "hour" : `${hours} hours`;
+  }
+
+  if (whole < 60) return whole === 1 ? "minute" : `${whole} minutes`;
+
+  const hours = Math.floor(whole / 60);
+  const rest = whole % 60;
+  return `${hours} ${hours === 1 ? "hour" : "hours"} ${rest} ${rest === 1 ? "minute" : "minutes"}`;
+}
+
 function startOfDay(date: Date): Date {
   const copy = new Date(date);
   copy.setHours(0, 0, 0, 0);
