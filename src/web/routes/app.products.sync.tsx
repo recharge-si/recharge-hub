@@ -65,6 +65,7 @@ import {
 import { Advanced } from "~/web/components/advanced";
 import { AdvancedSection } from "~/web/components/advanced-section";
 import { Dropdown } from "~/web/components/dropdown";
+import { LearnMore } from "~/web/components/learn-more";
 import { PatternEditor } from "~/web/components/pattern-editor";
 import { PatternFieldsModal } from "~/web/components/pattern-fields-modal";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
@@ -1135,18 +1136,38 @@ export default function ProductSyncSettings() {
                   />
                 </s-box>
                 <s-text color="subdued">
-                  Twelve hours by default. MetaKocka has no bulk endpoint, so a
-                  full sync reads the catalogue a page at a time — once or twice
-                  a day suits most catalogues.
+                  Twelve hours by default.
                 </s-text>
               </s-stack>
             ) : null}
 
+            {/*
+             * Stock stays on the card rather than behind the disclosure: it is
+             * the answer to "does this schedule control my stock", and a
+             * merchant who does not think to ask is exactly the one who needs
+             * to read it.
+             */}
             <s-text color="subdued">
               Stock is separate and always automatic: it is read from MetaKocka
               every five minutes, and immediately when MetaKocka sends a stock
               update.
             </s-text>
+
+            <LearnMore label="How often is worth it">
+              <s-paragraph>
+                MetaKocka has no bulk endpoint, so a full sync reads the
+                catalogue a page at a time and is slow on a large one. Once or
+                twice a day suits most catalogues; anything from a quarter of an
+                hour to a week is accepted.
+              </s-paragraph>
+              <s-paragraph>
+                Matching is worth running on its own schedule even with product
+                sync off: a product renamed in MetaKocka, a SKU corrected in
+                Shopify or a variant added this morning all change what matches,
+                and a catalogue only as fresh as the last time somebody pressed
+                the button stops matching quietly.
+              </s-paragraph>
+            </LearnMore>
           </s-stack>
         </s-section>
 
@@ -1285,7 +1306,7 @@ export default function ProductSyncSettings() {
               </s-stack>
             </s-section>
 
-            <s-section heading="Creating products MetaKocka does not have">
+            <s-section heading="New products">
               <s-stack direction="block" gap="base">
                 <s-stack direction="block" gap="small-400">
                   <s-checkbox
@@ -1350,7 +1371,7 @@ export default function ProductSyncSettings() {
          * being synced, because every sales order carries them. The switch does
          * not: with name sync off the job returns before it could write a price.
          */}
-        <s-section heading="Prices and tax in MetaKocka">
+        <s-section heading="Prices and tax">
           <s-stack direction="block" gap="base">
             {/*
              * First in the section and set apart, because it is the only
@@ -1424,6 +1445,8 @@ export default function ProductSyncSettings() {
               </s-box>
             ) : null}
 
+            {state.enabled ? <s-divider /> : null}
+
             {reloadFailed ? (
               <s-banner tone="warning" heading="Could not read your pricelists">
                 <s-paragraph>{reloader.data?.message}</s-paragraph>
@@ -1451,9 +1474,21 @@ export default function ProductSyncSettings() {
                     ? { error: errorFor("pricelistCode") }
                     : {})}
                 />
-                <s-link href={METAKOCKA_PRICELISTS_URL} target="_blank">
-                  Open pricelists in MetaKocka
-                </s-link>
+                {/*
+                 * A button, not a bare link: standing on its own under a field
+                 * rather than inside a sentence, a line of blue text reads as a
+                 * caption. The order settings page settled this the same way.
+                 */}
+                <s-stack direction="inline">
+                  <s-button
+                    variant="secondary"
+                    href={METAKOCKA_PRICELISTS_URL}
+                    target="_blank"
+                    icon="external"
+                  >
+                    Open pricelists in MetaKocka
+                  </s-button>
+                </s-stack>
               </s-stack>
             ) : (
               <Dropdown
@@ -1540,6 +1575,8 @@ export default function ProductSyncSettings() {
                 </s-text>
               )}
             </s-stack>
+
+            <s-divider />
 
             <s-text-field
               name="taxPercent"
