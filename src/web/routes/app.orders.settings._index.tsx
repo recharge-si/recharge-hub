@@ -25,6 +25,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
   orderReferenceFor,
+  salesOrderNumberFor,
   unknownPlaceholders,
   type OrderReferenceContext,
 } from "~/domain/orders/reference";
@@ -66,6 +67,7 @@ import { principalFromSession } from "~/web/lib/principal.server";
 const HELP_MODAL_ID = "about-order-sync";
 const REFERENCE_PATTERNS_MODAL_ID = "ready-reference-patterns";
 const REFERENCE_FIELDS_MODAL_ID = "reference-fields";
+const NUMBER_FIELDS_MODAL_ID = "sales-order-number-fields";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -89,6 +91,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     },
   });
 
+  /*
+   * A real supply source code, for the sales order number preview.
+   *
+   * A split shop's document numbers carry the warehouse's code, and that suffix
+   * is the part a merchant does not expect. Showing it with one of their own
+   * codes rather than a made-up one is the same rule the reference preview
+   * follows: sample data is the merchant's own.
+   */
+  const firstSource = await prisma.supplySource.findFirst({
+    where: { shop: { domain: session.shop }, enabled: true },
+    orderBy: [{ priority: "asc" }, { code: "asc" }],
+    select: { code: true },
+  });
+
   const [settings, readiness, supplyDefaults] = await Promise.all([
     getSalesOrderSettings(principal),
     getReadiness(principal),
@@ -106,6 +122,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         }
       : null,
     defaultPattern: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+    sampleSourceCode: firstSource?.code ?? null,
     /*
      * What this page states rather than owns. The counts and the profit centre
      * come from the pages that do own them, so a summary here can never say
@@ -145,6 +162,12 @@ function readSplit(
   raw: FormDataEntryValue | null,
 ): SalesOrderSettings["salesOrderSplit"] {
   return raw === "single" ? "single" : "per_warehouse";
+}
+
+function readNumbering(
+  raw: FormDataEntryValue | null,
+): SalesOrderSettings["salesOrderNumbering"] {
+  return raw === "metakocka" ? "metakocka" : "app";
 }
 
 function readMode(
@@ -191,6 +214,30 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         .join(
           ", ",
         )} ${unknown.length === 1 ? "is not a field" : "are not fields"} this app can fill in. Choose one from the list the pattern offers.`,
+    };
+  }
+
+  const numbering = readNumbering(formData.get("salesOrderNumbering"));
+  const numberPattern = String(
+    formData.get("salesOrderNumberTemplate") ?? "",
+  ).trim();
+
+  /*
+   * The document-number pattern is checked exactly as the reference pattern is.
+   *
+   * A token this app cannot fill in renders as itself, so an unnoticed typo
+   * becomes a MetaKocka document numbered `SH-{order.numbr}` — visible only in
+   * the ERP, on documents already filed.
+   */
+  const unknownNumberFields = unknownPlaceholders(numberPattern);
+  if (numbering === "app" && unknownNumberFields.length > 0) {
+    return {
+      ok: false,
+      message: `Nothing was saved: ${unknownNumberFields
+        .map((field) => `{${field}}`)
+        .join(
+          ", ",
+        )} ${unknownNumberFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in. Choose one from the list the sales order number pattern offers.`,
     };
   }
 
@@ -263,6 +310,13 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         ? null
         : pattern,
     salesOrderSplit: readSplit(formData.get("salesOrderSplit")),
+    salesOrderNumbering: numbering,
+    /*
+     * Empty means "the same as the customer's order reference", which is the
+     * default and is stored as null rather than as a copy of that pattern —
+     * copying it would freeze the two apart the next time either changed.
+     */
+    salesOrderNumberTemplate: numbering === "app" && numberPattern !== "" ? numberPattern : null,
     allocationMode: readMode(formData.get("allocationMode")),
     obsoleteDocumentPolicy: readObsolete(
       formData.get("obsoleteDocumentPolicy"),
@@ -294,8 +348,14 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function OrderSyncSettings() {
-  const { settings, sample, defaultPattern, status, recommended } =
-    useLoaderData<typeof loader>();
+  const {
+    settings,
+    sample,
+    defaultPattern,
+    sampleSourceCode,
+    status,
+    recommended,
+  } = useLoaderData<typeof loader>();
   const saver = useFetcher<typeof action>();
   const result = saver.data;
   const busy = saver.state !== "idle";
@@ -303,6 +363,7 @@ export default function OrderSyncSettings() {
   const [form, setForm] = useState({
     ...settings,
     customerOrderTemplate: settings.customerOrderTemplate ?? "",
+    salesOrderNumberTemplate: settings.salesOrderNumberTemplate ?? "",
     shippingProductCode: settings.shippingProductCode ?? "",
   });
 
@@ -314,6 +375,9 @@ export default function OrderSyncSettings() {
     form.updateAfterPaid !== settings.updateAfterPaid ||
     form.customerOrderTemplate !== (settings.customerOrderTemplate ?? "") ||
     form.salesOrderSplit !== settings.salesOrderSplit ||
+    form.salesOrderNumbering !== settings.salesOrderNumbering ||
+    form.salesOrderNumberTemplate !==
+      (settings.salesOrderNumberTemplate ?? "") ||
     form.allocationMode !== settings.allocationMode ||
     form.obsoleteDocumentPolicy !== settings.obsoleteDocumentPolicy ||
     form.syncPayments !== settings.syncPayments ||
@@ -344,6 +408,10 @@ export default function OrderSyncSettings() {
   // the default and the sentence says everything.
   const [customisingReference, setCustomisingReference] = useState(
     settings.customerOrderTemplate !== null,
+  );
+
+  const [customisingNumber, setCustomisingNumber] = useState(
+    settings.salesOrderNumberTemplate !== null,
   );
 
   /*
@@ -417,6 +485,29 @@ export default function OrderSyncSettings() {
       )
     : null;
 
+  const badNumberFields = unknownPlaceholders(form.salesOrderNumberTemplate);
+
+  /*
+   * What a sales order of this shop's would actually be numbered.
+   *
+   * Rendered with the same function the write path uses, including the
+   * warehouse suffix a split shop gets — because that suffix is the part a
+   * merchant does not expect and would otherwise meet in the ERP.
+   */
+  const numberPreview =
+    form.salesOrderNumbering === "metakocka"
+      ? null
+      : sampleContext && preview
+        ? salesOrderNumberFor({
+            numbering: "app",
+            template: form.salesOrderNumberTemplate,
+            customerOrderRef: preview.reference,
+            context: sampleContext,
+            sourceCode:
+              form.salesOrderSplit === "single" ? null : sampleSourceCode,
+          })
+        : null;
+
   useEffect(() => {
     if (typeof shopify === "undefined") return;
     if (dirty) void shopify.saveBar.show("order-sync-save-bar");
@@ -435,6 +526,8 @@ export default function OrderSyncSettings() {
         updateAfterPaid: form.updateAfterPaid ? "on" : "",
         customerOrderTemplate: form.customerOrderTemplate,
         salesOrderSplit: form.salesOrderSplit,
+        salesOrderNumbering: form.salesOrderNumbering,
+        salesOrderNumberTemplate: form.salesOrderNumberTemplate,
         allocationMode: form.allocationMode,
         obsoleteDocumentPolicy: form.obsoleteDocumentPolicy,
         syncPayments: form.syncPayments ? "on" : "",
@@ -450,6 +543,7 @@ export default function OrderSyncSettings() {
     setForm({
       ...settings,
       customerOrderTemplate: settings.customerOrderTemplate ?? "",
+      salesOrderNumberTemplate: settings.salesOrderNumberTemplate ?? "",
       shippingProductCode: settings.shippingProductCode ?? "",
     });
 
@@ -478,6 +572,15 @@ export default function OrderSyncSettings() {
       <PatternFieldsModal
         id={REFERENCE_FIELDS_MODAL_ID}
         heading="What you can put in a reference"
+        resolvedAgainst={
+          sample ? `order ${sample.name}` : "one of your own orders"
+        }
+        groups={referenceRows("")}
+      />
+
+      <PatternFieldsModal
+        id={NUMBER_FIELDS_MODAL_ID}
+        heading="What you can put in a sales order number"
         resolvedAgainst={
           sample ? `order ${sample.name}` : "one of your own orders"
         }
@@ -720,6 +823,146 @@ export default function OrderSyncSettings() {
                 Everything else is the same either way. Changed orders are still
                 rebuilt, payments still recorded, and the quantities still
                 checked against what Shopify says the customer bought.
+              </s-paragraph>
+            </LearnMore>
+
+            <s-divider />
+
+            {/* -------------------------------------------------------------
+             * The document's own number — MetaKocka's *Sales ord. no.*
+             *
+             * It sits with the split rather than with the order reference,
+             * because both questions are about the document this app writes
+             * rather than about what it refers back to. The reference is what
+             * MetaKocka shows as *Customer's order* and links siblings by; this
+             * is the number the document is filed under, and a merchant whose
+             * books are kept in MetaKocka wants their own sequence there.
+             * ------------------------------------------------------------- */}
+            <s-choice-list
+              name="salesOrderNumbering"
+              label="Sales order number"
+              values={[form.salesOrderNumbering]}
+              onChange={(event) =>
+                set(
+                  "salesOrderNumbering",
+                  event.currentTarget.values[0] === "metakocka"
+                    ? "metakocka"
+                    : "app",
+                )
+              }
+            >
+              <s-choice value="app">
+                Number them from the Shopify order
+                <s-text slot="details">
+                  The sales order carries a number this app builds, so the same
+                  reference reads on both systems.
+                </s-text>
+              </s-choice>
+              <s-choice value="metakocka">
+                Let MetaKocka number them
+                <s-text slot="details">
+                  No number is sent, so MetaKocka&rsquo;s own sequence answers —
+                  1/2026, 2/2026, and on.
+                </s-text>
+              </s-choice>
+            </s-choice-list>
+
+            {form.salesOrderNumbering === "app" ? (
+              <>
+                <SettingRow
+                  label="Number pattern"
+                  summary={
+                    numberPreview && sample
+                      ? `Order ${sample.name} would be filed as ${numberPreview}.`
+                      : "By default, the same as the customer’s order reference."
+                  }
+                  action={
+                    customisingNumber ? null : (
+                      <s-button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setCustomisingNumber(true)}
+                      >
+                        Customize
+                      </s-button>
+                    )
+                  }
+                />
+
+                {customisingNumber ? (
+                  <>
+                    <PatternEditor
+                      label="Sales order number pattern"
+                      value={form.salesOrderNumberTemplate}
+                      onChange={(next) => set("salesOrderNumberTemplate", next)}
+                      registry={ORDER_REFERENCE_REGISTRY}
+                      rows={referenceRows}
+                      details="Leave it empty to use the customer’s order reference, which is what this app has always sent."
+                      {...(badNumberFields.length > 0
+                        ? {
+                            error: `${badNumberFields.map((field) => `{${field}}`).join(", ")} ${badNumberFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
+                          }
+                        : {})}
+                    />
+
+                    <s-stack direction="inline" gap="base" alignItems="center">
+                      <s-button
+                        type="button"
+                        variant="secondary"
+                        command="--show"
+                        commandFor={NUMBER_FIELDS_MODAL_ID}
+                      >
+                        What you can put in a number
+                      </s-button>
+                    </s-stack>
+                  </>
+                ) : null}
+
+                {/*
+                 * The suffix, stated where it is decided rather than met in the
+                 * ERP. Only for a shop that splits, because only there is there
+                 * a second document that cannot share the number.
+                 */}
+                {form.salesOrderSplit === "per_warehouse" ? (
+                  <s-text color="subdued">
+                    An order shipping from more than one warehouse gets one sales
+                    order per warehouse, so each number ends in that
+                    warehouse&rsquo;s code — they cannot share one.
+                  </s-text>
+                ) : null}
+              </>
+            ) : null}
+
+            {form.salesOrderNumbering !== settings.salesOrderNumbering ||
+            form.salesOrderNumberTemplate !==
+              (settings.salesOrderNumberTemplate ?? "") ? (
+              <s-banner tone="info" heading="Only orders from now on">
+                <s-paragraph>
+                  Sales orders MetaKocka already holds keep the number they were
+                  written under. A document&rsquo;s number is an accounting
+                  record, so nothing is renumbered — including when an order is
+                  updated later.
+                </s-paragraph>
+              </s-banner>
+            ) : null}
+
+            <LearnMore label="What this number is, and is not">
+              <s-paragraph>
+                This is MetaKocka&rsquo;s <em>Sales ord. no.</em> — the number at
+                the top of the document. It is separate from{" "}
+                <em>Customer&rsquo;s order</em>, which is the reference back to
+                Shopify and is set under Order references below.
+              </s-paragraph>
+              <s-paragraph>
+                It is a number, never an identity. This app matches orders by
+                their Shopify id and guards against duplicate documents with a
+                key of its own that nothing here changes, so either choice is
+                safe and switching is safe.
+              </s-paragraph>
+              <s-paragraph>
+                With MetaKocka numbering them, this app records the number it
+                chose the first time each document is written, and shows it
+                wherever it names the document.
               </s-paragraph>
             </LearnMore>
           </s-stack>

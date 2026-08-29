@@ -153,6 +153,7 @@ export async function handlePollMetakockaDocuments(
       id: true,
       mkId: true,
       countCode: true,
+      sentCountCode: true,
       orderId: true,
       supplySourceId: true,
       mkStatus: true,
@@ -181,6 +182,16 @@ export async function handlePollMetakockaDocuments(
   for (const document of documents) {
     if (!document.mkId) continue;
 
+    /*
+     * What to call it when telling the merchant something.
+     *
+     * The number MetaKocka holds it under, which is the app's internal claim
+     * key only when the app chose the number. A shop that lets MetaKocka number
+     * its documents would otherwise be told to go and find `SH-1050-GLAVNO`,
+     * which exists nowhere on their screen.
+     */
+    const label = document.sentCountCode ?? document.countCode;
+
     try {
       const snapshot = await findSalesOrder(client, document.mkId);
       read += 1;
@@ -204,23 +215,47 @@ export async function handlePollMetakockaDocuments(
          * Nothing is re-sent automatically. Deleting it may well have been
          * deliberate, and §8.8's rule cuts both ways.
          */
+        /*
+         * The number goes with it.
+         *
+         * `sent_count_code` records the number MetaKocka is holding the
+         * document under, and it is no longer holding one. Under the app's own
+         * numbering the next write renders the same string again, so nothing
+         * changes; under MetaKocka's, sending the deleted document's number
+         * back would file the replacement under a number the ERP's sequence has
+         * already moved past. Clearing it lets MetaKocka number the new
+         * document as it would any other.
+         */
         await prisma.metakockaDocument.update({
           where: { id: document.id },
-          data: { mkCheckedAt: now, mkStatus: "missing", status: "failed" },
+          data: {
+            mkCheckedAt: now,
+            mkStatus: "missing",
+            status: "failed",
+            sentCountCode: null,
+          },
         });
 
         await raiseException(principal, {
           orderId: document.orderId,
           kind: "metakocka_document_missing",
-          message: `The MetaKocka document ${document.countCode} for order ${document.order.shopifyOrderNumber} no longer exists — it has been deleted in MetaKocka. This app still had it recorded as sent, so nothing else would ever have noticed. If that was deliberate, resolve this. If not, use "Send to MetaKocka again" on the order to write it once more.`,
-          detail: { countCode: document.countCode, mkId: document.mkId },
+          message: `The MetaKocka document ${label} for order ${document.order.shopifyOrderNumber} no longer exists — it has been deleted in MetaKocka. This app still had it recorded as sent, so nothing else would ever have noticed. If that was deliberate, resolve this. If not, use "Send to MetaKocka again" on the order to write it once more.`,
+          detail: {
+            countCode: document.countCode,
+            sentCountCode: document.sentCountCode,
+            mkId: document.mkId,
+          },
         });
 
         await appendEvent(principal, {
           entityType: "order",
           entityId: document.orderId,
           event: "order.metakocka_document_missing",
-          detail: { countCode: document.countCode, mkId: document.mkId },
+          detail: {
+            countCode: document.countCode,
+            sentCountCode: document.sentCountCode,
+            mkId: document.mkId,
+          },
         });
 
         continue;
@@ -268,7 +303,7 @@ export async function handlePollMetakockaDocuments(
         await raiseException(principal, {
           orderId: document.orderId,
           kind: "metakocka_document_changed",
-          message: `The MetaKocka document ${document.countCode} for order ${document.order.shopifyOrderNumber} no longer matches what this app sent: ${drifted}. Nothing was changed automatically, because the document may already be invoiced. Either correct it in MetaKocka, or delete it there and use "Send to MetaKocka again" on the order to write it afresh.`,
+          message: `The MetaKocka document ${label} for order ${document.order.shopifyOrderNumber} no longer matches what this app sent: ${drifted}. Nothing was changed automatically, because the document may already be invoiced. Either correct it in MetaKocka, or delete it there and use "Send to MetaKocka again" on the order to write it afresh.`,
           detail: {
             countCode: document.countCode,
             sent: Object.fromEntries(sent),

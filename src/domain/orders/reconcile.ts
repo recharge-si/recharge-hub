@@ -54,6 +54,14 @@ export interface DesiredDocument {
 export interface ExistingDocument {
   documentId: string;
   supplySourceId: string | null;
+  /**
+   * What to call this document when telling somebody about it.
+   *
+   * The number MetaKocka holds it under — which is the app's internal claim key
+   * only when the app chose the number. Nothing here looks a document *up* by
+   * it: documents are addressed by `documentId` and grouped by supply source,
+   * so this travels only into the actions and the messages they produce.
+   */
   countCode: string;
   status: "pending" | "written" | "failed";
   /** Whether MetaKocka has actually acknowledged it with an id. */

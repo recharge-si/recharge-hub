@@ -799,10 +799,13 @@ becomes.
 
 **`per_warehouse` (default).** One job per supply source. Each job:
 
-- builds `count_code` = `SH-{orderNumber}-{sourceCode}`
-- checks `metakocka_document` for that `count_code`; if a successful row exists, **return
+- builds its internal claim key = `SH-{orderNumber}-{sourceCode}`, from the
+  frozen `customer_order_ref`
+- checks `metakocka_document` for that key; if a successful row exists, **return
   without calling MetaKocka**. This is not an optimisation: MetaKocka happily creates a
-  duplicate document under its own numbering (§3), so this check is the duplicate guard
+  duplicate document under its own numbering (§3), so this check is the duplicate guard.
+  The key is **internal** and derived from a value frozen at intake, so no merchant
+  setting can move it — see *Numbering* below
 - validates the source's `metakocka_warehouse` against `warehouse_list` before sending,
   because MetaKocka accepts an unknown warehouse silently (§3)
 - sets document-level `warehouse`, `profit_center`, `delivery_type` from the source
@@ -827,6 +830,40 @@ This is a merchant's choice and it has a stated cost: MetaKocka no longer
 records which warehouse the goods left from. It is offered because a shop that
 does not keep its warehouses in MetaKocka gets nothing from the split except two
 documents per order, each filed against a warehouse nobody meant to use.
+
+**Numbering.** `count_code` is what MetaKocka's screen labels *Sales ord. no.*,
+and §3 verified it is **not unique** there — so it is a number and never an
+identity. `sales_order_setting.sales_order_numbering` decides who chooses it:
+
+- `app` (default): the number is rendered from
+  `sales_order_number_template`, which defaults to *the order's
+  `customer_order_ref`* rather than to a second copy of
+  `DEFAULT_CUSTOMER_ORDER_TEMPLATE` — so a merchant who customised their
+  reference gets a matching document number and the two cannot drift apart.
+  A `per_warehouse` document suffixes `-{sourceCode}`, because siblings cannot
+  share a number.
+- `metakocka`: **no `count_code` is sent at all** — the field is absent, not
+  empty — and MetaKocka's own sequence answers. Whatever it returns is recorded
+  in `metakocka_document.sent_count_code`, so the number is known from the first
+  write onwards: every later update sends the same one back, and every message
+  about the document names something the merchant can find.
+
+The number is settled once, when the row is claimed, and frozen there for the
+same reason `customer_order_ref` is frozen at intake: a document's number is an
+accounting record, and re-rendering it after a template change would renumber
+documents MetaKocka already holds. It is cleared only when the drift poller
+finds the document deleted in MetaKocka, so the rewrite is numbered afresh.
+
+`metakocka_document.count_code` therefore means **the app's internal claim key**
+and nothing else. `sent_count_code` is what MetaKocka holds, and is what every
+merchant-facing message and screen names.
+
+One consequence is stated rather than hidden: under `metakocka` numbering an
+ambiguous write (§8.4's `buyer_order` lookup) cannot be resolved by comparing
+numbers, because this app has none of its own. For an unsplit order the document
+found under the reference is necessarily the one, and is adopted; for a split
+order it is not, so the merchant is asked. That cost is paid only by a write
+whose outcome was already unknown.
 
 Do **not** set `create_invoice` in v1. Invoicing stays a merchant decision.
 

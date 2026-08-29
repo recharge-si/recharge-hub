@@ -111,7 +111,16 @@ export interface DocumentPayment {
 }
 
 export interface SalesOrderInput {
-  countCode: string;
+  /**
+   * The document's own number — MetaKocka's *Sales ord. no.*
+   *
+   * **Null omits the field**, which is how a merchant hands numbering to
+   * MetaKocka: the ERP's own sequence answers and returns the number it chose.
+   * It is not sent as an empty string, because §3 records that MetaKocka
+   * validates almost nothing and an empty code is a value rather than an
+   * absence.
+   */
+  countCode: string | null;
   /** Shared by every document from one Shopify order. */
   buyerOrder: string;
   /** When the order happened. Injected, never read from the clock here (§5). */
@@ -439,7 +448,7 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
 
   return {
     doc_type: "sales_order",
-    count_code: input.countCode,
+    ...(input.countCode ? { count_code: input.countCode } : {}),
     doc_date: toDocumentDate(input.docDate, input.timeZone),
     currency_code: input.currencyCode,
     // §3, verified: this is the field that links sibling documents and the only

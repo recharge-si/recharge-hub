@@ -202,3 +202,54 @@ export function orderReferenceFor(
     usedFallback: true,
   };
 }
+
+/**
+ * The number a MetaKocka sales order is written under (`count_code`).
+ *
+ * MetaKocka's screen labels this *Sales ord. no.* It is a number and never an
+ * identity: §3 verified that MetaKocka does not enforce uniqueness on it, so
+ * this app has never looked anything up by it and does not start here. The
+ * identity remains the Shopify order id and the internal
+ * `(shop_id, count_code)` claim on `metakocka_document`, which is derived from
+ * the frozen `customer_order_ref` and is untouched by any of this.
+ *
+ * Three things decide the answer, in this order:
+ *
+ *  1. **A merchant who has handed numbering to MetaKocka gets null**, and the
+ *     caller then sends no `count_code` at all. That is the whole mechanism:
+ *     MetaKocka's own sequence answers, which is what a shop whose books are
+ *     kept there wants on its documents.
+ *  2. **No template means the customer's order reference**, which is what every
+ *     document written before this setting existed carries. Following that
+ *     value rather than re-rendering the default template is deliberate: a
+ *     merchant who customised their reference gets a document number that still
+ *     matches it, and the two can never drift apart.
+ *  3. **A split order suffixes the supply source's code**, because two sibling
+ *     documents cannot share a number and the merchant is not being asked to
+ *     write a template that guarantees that.
+ *
+ * The `usedFallback` rule of `orderReferenceFor` applies to a custom template
+ * exactly as it does to a reference: a pattern that renders to nothing for this
+ * particular order falls back rather than producing a document with a blank
+ * number, which MetaKocka would fill in with its own — silently, and only for
+ * the orders that tripped it.
+ */
+export function salesOrderNumberFor(input: {
+  /** `null` when the merchant has handed numbering to MetaKocka. */
+  template: string | null;
+  numbering: "app" | "metakocka";
+  /** The order's frozen reference, used when there is no template of its own. */
+  customerOrderRef: string;
+  context: OrderReferenceContext;
+  /** The supply source's code, or null for a document with no warehouse. */
+  sourceCode: string | null;
+}): string | null {
+  if (input.numbering === "metakocka") return null;
+
+  const base = input.template?.trim()
+    ? orderReferenceFor(input.template, input.context).reference
+    : input.customerOrderRef;
+
+  const number = input.sourceCode ? `${base}-${input.sourceCode}` : base;
+  return number.slice(0, MAX_ORDER_REFERENCE_LENGTH);
+}

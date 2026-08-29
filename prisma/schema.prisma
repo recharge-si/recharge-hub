@@ -756,6 +756,24 @@ enum AllocationMode {
   @@map("allocation_mode")
 }
 
+/// Who decides a sales order's number.
+///
+/// MetaKocka's `count_code` is what its screen labels *Sales ord. no.*, and it
+/// is **not** unique on MetaKocka's side (docs/BUILD_SPEC.md §3) — so it is a
+/// number, never an identity. This app's identity is `shopify_order_id` and the
+/// `(shop_id, count_code)` claim on `metakocka_document`, which is internal and
+/// is unaffected by either choice here.
+enum SalesOrderNumbering {
+  /// This app numbers the document, from `sales_order_number_template`.
+  app
+  /// No `count_code` is sent, so MetaKocka assigns its own — `1/2026` and on.
+  /// Whatever it answers with is recorded, so the number is known from the
+  /// first write onwards and is what every later update sends back.
+  metakocka
+
+  @@map("sales_order_numbering")
+}
+
 /// Whether one Shopify order becomes one MetaKocka sales order or several.
 ///
 /// MetaKocka's `warehouse` is document-level, so an order fulfilled from two
@@ -1092,9 +1110,30 @@ model MetakockaDocument {
 
   docType String @default("sales_order") @map("doc_type")
 
-  /// SH-{orderNumber}-{sourceCode}. Section 3 verified MetaKocka does not treat
-  /// this as unique, so the uniqueness below is the only duplicate guard.
+  /// The app's internal claim key, `SH-{orderNumber}-{sourceCode}`.
+  ///
+  /// **Not necessarily what MetaKocka was told.** Section 3 verified MetaKocka
+  /// does not treat `count_code` as unique, so the uniqueness below is the only
+  /// duplicate guard there is — which means this column has to stay stable and
+  /// collision-free whatever the merchant does to their numbering settings. It
+  /// is derived from `order.customer_order_ref`, which is itself frozen at
+  /// intake, so it never moves.
   countCode String  @map("count_code")
+
+  /// The number MetaKocka actually holds, and what its screen shows as
+  /// *Sales ord. no.*
+  ///
+  /// Under `app` numbering this is the rendered
+  /// `sales_order_number_template` — usually the same string as `count_code`,
+  /// which is why existing rows were backfilled from it. Under `metakocka`
+  /// numbering nothing is sent and this is filled in from the response, so the
+  /// number is known from the first write onwards and every later update sends
+  /// the same one back rather than risking a renumber.
+  ///
+  /// Null only while a claimed document has not been written yet, or when a
+  /// write landed and MetaKocka's answer did not name a number.
+  sentCountCode String? @map("sent_count_code")
+
   mkId      String? @map("mk_id")
 
   status DocumentStatus @default(pending)
@@ -1420,6 +1459,28 @@ model SalesOrderSetting {
   /// nothing is allocated to a warehouse at all, so `allocationMode` above has
   /// no effect.
   salesOrderSplit SalesOrderSplit @default(per_warehouse) @map("sales_order_split")
+
+  /// Who decides the number MetaKocka shows as *Sales ord. no.*
+  ///
+  /// `app` by default, which is what this connector has always done. `metakocka`
+  /// sends no `count_code` at all and lets the ERP's own sequence answer, for a
+  /// merchant whose accountant expects MetaKocka's numbering on its documents.
+  salesOrderNumbering SalesOrderNumbering @default(app) @map("sales_order_numbering")
+
+  /// The pattern the document number is rendered from, under `app` numbering.
+  ///
+  /// Null means *the same as the customer's order reference*, which is what
+  /// every document written before this setting existed carries — so the
+  /// default is not a string that could drift away from
+  /// `customer_order_template`, it is that template's own result. A split
+  /// order suffixes the supply source's code, because sibling documents cannot
+  /// share a number.
+  ///
+  /// Rendered once and frozen in `metakocka_document.sent_count_code`, for the
+  /// same reason `customer_order_ref` is frozen at intake: re-rendering it
+  /// after a template change would renumber documents MetaKocka already holds,
+  /// and a document's number is an accounting record.
+  salesOrderNumberTemplate String? @map("sales_order_number_template")
 
   /// What happens to a document this order stops taking anything from.
   obsoleteDocumentPolicy ObsoleteDocumentPolicy @default(empty) @map("obsolete_document_policy")

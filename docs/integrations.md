@@ -124,6 +124,10 @@ third base URL and a dedicated adapter.
   `sales_order_setting.sales_order_split = single` writes one document for the
   whole order with **no** warehouse mark instead, which MetaKocka files against
   the company default.
+- `count_code` is MetaKocka's *Sales ord. no.* and is optional on the wire:
+  omitting the field lets the ERP's own sequence number the document, which is
+  `sales_order_setting.sales_order_numbering = metakocka`. It is sent as absent,
+  never as an empty string.
 - MetaKocka does not enforce `count_code` uniqueness. Never retry an ambiguous
   write without resolving whether it succeeded.
 - An unknown warehouse mark is silently replaced by the company default, so

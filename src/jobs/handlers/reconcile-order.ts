@@ -336,7 +336,7 @@ async function reconcileUnderLock(
         reason: "the order is cancelled in Shopify",
         documents: (await listDocumentsForReconciliation(principal, orderId))
           .filter((document) => document.status === "written")
-          .map((document) => document.countCode),
+          .map((document) => document.sentCountCode ?? document.countCode),
       },
       at: now,
     });
@@ -568,7 +568,10 @@ async function reconcileUnderLock(
   const existing: ExistingDocument[] = existingRows.map((row) => ({
     documentId: row.id,
     supplySourceId: documentKey(row.supplySourceId),
-    countCode: row.countCode,
+    // The number MetaKocka holds it under, falling back to the internal key
+    // for a document that was claimed and never written — which has no number
+    // because it does not exist there yet.
+    countCode: row.sentCountCode ?? row.countCode,
     status: row.status,
     present: row.status === "written" && row.mkId !== null,
     paid: row.paymentMarkedAt !== null,
@@ -770,7 +773,9 @@ async function reconcileUnderLock(
     documents: finalRows
       .filter((row) => row.status === "written")
       .map((row) => ({
-        countCode: row.countCode,
+        // Merchant-facing throughout: the verdict's document list is quoted
+        // back in the `sync_inconsistent` message.
+        countCode: row.sentCountCode ?? row.countCode,
         retired: row.retiredAt !== null,
         requestBody: row.requestBody,
       })),

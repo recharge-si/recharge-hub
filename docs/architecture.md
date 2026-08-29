@@ -238,6 +238,22 @@ that no longer describe the order are retired under
 `sales_order_setting.obsolete_document_policy` and the new shape is written, on
 each order's next pass.
 
+### Sales order numbering
+
+`sales_order_setting.sales_order_numbering` decides who chooses the number
+MetaKocka shows as *Sales ord. no.* — `app`, from
+`sales_order_number_template` (null meaning the order's own
+`customer_order_ref`, plus the warehouse code on a split document), or
+`metakocka`, which sends no `count_code` and records whatever the ERP answers
+with.
+
+The split that makes this safe is in `metakocka_document`:
+`count_code` is the app's **internal claim key**, derived from the intake-frozen
+`customer_order_ref`, and remains the sole duplicate guard; `sent_count_code` is
+what MetaKocka actually holds. The number is settled at claim time and frozen,
+so changing the pattern renumbers nothing that exists. Every merchant-facing
+message and screen reads `sent_count_code`.
+
 ### Warehouse allocation
 
 Under `sales_order_split = per_warehouse`,

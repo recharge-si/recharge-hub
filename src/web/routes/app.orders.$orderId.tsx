@@ -234,6 +234,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       })),
       documents: order.documents.map((document) => ({
         id: document.id,
+        /**
+         * What MetaKocka calls this document, which is not always what this app
+         * calls it.
+         *
+         * `count_code` is the app's internal claim key; `sent_count_code` is
+         * the number the document actually carries — the two are the same
+         * string only while the app is the one numbering them. A document
+         * claimed but never written has no number at all, and saying so beats
+         * showing an internal key the merchant cannot find anywhere.
+         */
+        number: document.sentCountCode,
         countCode: document.countCode,
         mkId: document.mkId,
         status: document.status,
@@ -1322,7 +1333,11 @@ export default function OrderDetail() {
                       gap="small-300"
                       alignItems="center"
                     >
-                      <s-text type="strong">{document.countCode}</s-text>
+                      <s-text type="strong">
+                        {document.number ??
+                          document.mkDocNumber ??
+                          "Not numbered yet"}
+                      </s-text>
                       {document.isPrimary ? (
                         <s-badge tone="info">Primary</s-badge>
                       ) : null}

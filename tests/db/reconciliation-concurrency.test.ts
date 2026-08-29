@@ -197,6 +197,7 @@ describeDatabase("no duplicate MetaKocka document under concurrency", () => {
           orderId,
           supplySourceId: tenant.supplySourceId,
           countCode,
+          sentCountCode: countCode,
           isPrimary: true,
         }),
       ),
@@ -237,6 +238,7 @@ describeDatabase("no duplicate MetaKocka document under concurrency", () => {
           orderId,
           supplySourceId: tenant.supplySourceId,
           countCode: "SH-3002-GLAVNO",
+          sentCountCode: "SH-3002-GLAVNO",
           isPrimary: true,
         });
         return "worked";
@@ -279,6 +281,7 @@ describeDatabase("no duplicate MetaKocka document under concurrency", () => {
           orderId,
           supplySourceId: tenant.supplySourceId,
           countCode: "SH-3003-GLAVNO",
+          sentCountCode: "SH-3003-GLAVNO",
           isPrimary: true,
         }),
       ),
@@ -287,6 +290,7 @@ describeDatabase("no duplicate MetaKocka document under concurrency", () => {
           orderId,
           supplySourceId: second.id,
           countCode: "SH-3003-PARTNER",
+          sentCountCode: "SH-3003-PARTNER",
           isPrimary: false,
         }),
       ),
