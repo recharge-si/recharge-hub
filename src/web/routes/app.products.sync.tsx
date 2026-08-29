@@ -1129,20 +1129,33 @@ export default function ProductSyncSettings() {
             </s-stack>
 
             {state.scheduleEnabled ? (
-              <s-box maxInlineSize="260px">
-                <s-number-field
-                  name="scheduleIntervalMinutes"
-                  // §2.8: labels state their units.
-                  label="Sync every (minutes)"
-                  min={15}
-                  max={10080}
-                  value={state.scheduleIntervalMinutes}
-                  onChange={(e) =>
-                    set({ scheduleIntervalMinutes: e.currentTarget.value })
-                  }
-                  details="Twelve hours by default. MetaKocka has no bulk endpoint, so a full sync is slow — hourly is plenty for most catalogues."
-                />
-              </s-box>
+              /*
+               * The interval's explanation is a sibling line, not the field's
+               * `details`: `details` is laid out to the field's own width, so a
+               * sentence under a 260px number box wraps into a narrow ragged
+               * column beside a lot of empty card. Every other explanation on
+               * this page sits at the card's left edge, and so does this one.
+               */
+              <s-stack direction="block" gap="small-400">
+                <s-box maxInlineSize="200px">
+                  <s-number-field
+                    name="scheduleIntervalMinutes"
+                    // §2.8: labels state their units.
+                    label="Sync every (minutes)"
+                    min={15}
+                    max={10080}
+                    value={state.scheduleIntervalMinutes}
+                    onChange={(e) =>
+                      set({ scheduleIntervalMinutes: e.currentTarget.value })
+                    }
+                  />
+                </s-box>
+                <s-text color="subdued">
+                  Twelve hours by default. MetaKocka has no bulk endpoint, so a
+                  full sync reads the catalogue a page at a time — once or twice
+                  a day suits most catalogues.
+                </s-text>
+              </s-stack>
             ) : null}
 
             <s-text color="subdued">
