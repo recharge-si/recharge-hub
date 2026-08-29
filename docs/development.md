@@ -124,6 +124,52 @@ normally injected rather than stored in `.env`.
   worker processes first if generation fails with `EPERM` on
   `query_engine-windows.dll.node`.
 
+### Starting from a clean state
+
+Three levels, smallest first. Pick the smallest one that answers the question,
+because the larger two also throw away the Shopify sessions and the migration
+history you were probably not trying to test.
+
+**One store, keeping the database.** Disconnect on
+`/app/settings/metakocka`, confirmed by typing the company ID. It erases every
+row this app holds for that store, keeps the Shopify session, and restarts
+guided setup. Nothing is sent to MetaKocka. This is the one to reach for when
+the question is "what does a merchant see on a fresh install", and it is the
+only one of the three a merchant can do themselves.
+
+**Every store, keeping the container.** Drops and rebuilds the schema from the
+migrations:
+
+```bash
+npx prisma migrate reset --force
+```
+
+It drops the schema in `DATABASE_URL` — `public` — and reapplies every
+migration. The `pgboss` schema is created by the worker and lives outside it,
+so queued jobs survive a reset and reference stores that no longer exist. They
+are harmless (every handler treats a missing row as nothing to do), but to be
+rid of them too:
+
+```bash
+docker compose exec postgres psql -U orchestrator -d orchestrator \
+  -c 'DROP SCHEMA IF EXISTS pgboss CASCADE'
+```
+
+The worker recreates it on next start. Sessions go with the schema, so the app
+re-authenticates the next time it is opened in the Shopify admin.
+
+**Everything, including the container's disk.** Removes the `pgdata` volume, so
+nothing at all survives — schema, pgboss, and any manual state:
+
+```bash
+docker compose down -v
+docker compose up -d postgres
+npx prisma migrate deploy
+```
+
+`down -v` also removes the Caddy volumes, which means a new TLS certificate on
+next start. Harmless locally; do not run it against anything shared.
+
 Most tests use mocked boundaries. The concurrency-sensitive guards are the
 exception and run against a real database under `tests/db/` — see Validation
 below. Remaining gaps are tracked in `docs/project-status.md`.
