@@ -231,35 +231,107 @@ function typeOf(row: {
 }
 
 /**
- * One product, by the code the merchant typed.
+ * What a lookup by code can honestly conclude.
  *
- * For validating a shipping article on the settings screen, which is the one
- * place a merchant hands this app a MetaKocka code by hand. A code that does
- * not exist is refused there rather than on the next order, where it would
- * surface as a rejected sales order and a puzzle.
- *
- * `product_list` is filtered server-side by `product_code_list`, so this is one
- * small call rather than a walk of the catalogue.
+ * Three answers, not two. "Absent" is a claim about the merchant's catalogue
+ * and it refuses their save, so it is only returned when the whole catalogue
+ * was read and the code was not in it. Everything short of that — a filter
+ * that may not have been applied, a catalogue longer than this is willing to
+ * walk — is `unknown`, which is not an answer worth blocking a save over.
  */
-export async function findProductByCode(
-  client: MetakockaClient,
-  code: string,
-): Promise<MetakockaProduct | null> {
-  const response = await client.call(
-    ENDPOINTS.productList,
-    { limit: 5, offset: 0, product_code_list: [{ code }] },
-    productResponseSchema,
-  );
+export type ProductLookup =
+  | { status: "found"; product: MetakockaProduct }
+  | { status: "absent" }
+  | { status: "unknown" };
 
-  const row = response.product_list.find((entry) => entry.code === code);
-  if (!row) return null;
+/** Codes are compared the way a person reads them, not the way bytes compare. */
+function codeKey(value: string): string {
+  return value.trim().toLowerCase();
+}
 
+function productOf(row: {
+  mk_id: string;
+  code: string;
+  name?: string | undefined;
+  sales?: string | undefined;
+  purchasing?: string | undefined;
+  service?: string | undefined;
+}): MetakockaProduct {
   return {
     mkId: row.mk_id,
     code: row.code,
     name: row.name ?? null,
     type: typeOf(row),
   };
+}
+
+/**
+ * How far this will walk before it gives up and says it does not know. Ten
+ * pages is five thousand articles, which is more than a catalogue this app has
+ * ever been pointed at, and a bound is what stops one save request from
+ * reading an unbounded catalogue a page at a time.
+ */
+const MAX_LOOKUP_PAGES = 10;
+
+/**
+ * One product, by the code the merchant typed.
+ *
+ * For validating a shipping article on the settings screen, which is the one
+ * place a merchant hands this app a MetaKocka code by hand. A code that does
+ * not exist is worth catching there rather than on the next order, where it
+ * surfaces as a rejected sales order and a puzzle.
+ *
+ * It asks with `product_code_list` first, because when that filter is applied
+ * the answer costs one small call. **No recorded response proves `product_list`
+ * applies it** — it is verified on `warehouse_stock` and assumed here — so a
+ * miss proves nothing and is not reported as one: a merchant whose shipping
+ * article exists was told it did not, and their settings would not save. The
+ * miss falls through to reading the catalogue, which is the same walk
+ * `listProducts` does and is answering a question the merchant asked for.
+ *
+ * Matching ignores case and surrounding space, because "Shipping" typed as
+ * "SHIPPING" is the same article to everyone except a byte comparison.
+ */
+export async function findProductByCode(
+  client: MetakockaClient,
+  code: string,
+): Promise<ProductLookup> {
+  const wanted = codeKey(code);
+  if (wanted === "") return { status: "absent" };
+
+  const filtered = await client.call(
+    ENDPOINTS.productList,
+    { limit: PAGE, offset: 0, product_code_list: [{ code }] },
+    productResponseSchema,
+  );
+
+  const hit = filtered.product_list.find((row) => codeKey(row.code) === wanted);
+  if (hit) return { status: "found", product: productOf(hit) };
+
+  for (let page = 0; page < MAX_LOOKUP_PAGES; page += 1) {
+    const response = await client.call(
+      ENDPOINTS.productList,
+      { limit: PAGE, offset: page * PAGE },
+      productResponseSchema,
+    );
+
+    const row = response.product_list.find(
+      (entry) => codeKey(entry.code) === wanted,
+    );
+    if (row) {
+      getLogger().warn(
+        { code, page },
+        "product_code_list did not return the article the catalogue holds",
+      );
+      return { status: "found", product: productOf(row) };
+    }
+
+    // A short page is the end of the catalogue, and only then is "absent" a
+    // fact rather than a guess.
+    if (response.product_list.length < PAGE) return { status: "absent" };
+  }
+
+  return { status: "unknown" };
 }
 
 /** The whole product catalogue, paginated. */
@@ -276,12 +348,7 @@ export async function listProducts(
     );
 
     for (const row of response.product_list) {
-      products.push({
-        mkId: row.mk_id,
-        code: row.code,
-        name: row.name ?? null,
-        type: typeOf(row),
-      });
+      products.push(productOf(row));
     }
 
     if (response.product_list.length < PAGE) break;

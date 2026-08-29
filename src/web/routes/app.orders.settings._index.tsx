@@ -185,6 +185,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const shippingProductCode =
     String(formData.get("shippingProductCode") ?? "").trim() || null;
 
+  /** True when MetaKocka never confirmed the code either way. */
+  let unconfirmedShippingCode = false;
+
   /*
    * A shipping article is checked against MetaKocka before it is saved.
    *
@@ -206,19 +209,28 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     }
 
     try {
-      const found = await findProductByCode(
+      const lookup = await findProductByCode(
         new MetakockaClient({
           companyId: credential.companyId,
           secretKey: credential.secretKey,
         }),
         shippingProductCode,
       );
-      if (!found) {
+
+      if (lookup.status === "absent") {
         return {
           ok: false,
           message: `Nothing was saved: MetaKocka has no product with the code "${shippingProductCode}". Create the article there first — this app never creates one from an order line.`,
         };
       }
+
+      /*
+       * `unknown` means the catalogue could not be read to the end, not that
+       * the article is missing, so the save goes through and says so. Refusing
+       * on a check that did not finish is how a merchant whose article exists
+       * ends up unable to save their settings at all.
+       */
+      unconfirmedShippingCode = lookup.status === "unknown";
     } catch (error) {
       return {
         ok: false,
@@ -260,7 +272,12 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     detail: { ...settings },
   });
 
-  return { ok: true, message: "Saved order sync settings." };
+  return {
+    ok: true,
+    message: unconfirmedShippingCode
+      ? `Saved. MetaKocka did not answer whether "${shippingProductCode}" is one of its products, so check the code exists — an order with shipping is refused if it does not.`
+      : "Saved order sync settings.",
+  };
 };
 
 export default function OrderSyncSettings() {

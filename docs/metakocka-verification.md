@@ -150,6 +150,14 @@ the pricelist's basis with integer-minor-unit arithmetic.
 Additional observations:
 
 - `product_list` omits `pricelist` unless `return_pricelist: "true"` is sent.
+- **`product_code_list` is not verified to filter `product_list`.** It is
+  recorded on `warehouse_stock` and was assumed to work the same way here. A
+  merchant whose shipping article exists was told MetaKocka had no product with
+  that code, so `findProductByCode` now treats a miss from the filtered call as
+  no answer at all: it reads the catalogue, matches ignoring case and
+  surrounding space, and reports "absent" only after reaching the end of the
+  list. A catalogue longer than ten pages returns "unknown", which the settings
+  screen saves rather than refuses.
 - UI-created products have an internal `count_code`; matching uses product
   `code`, and updates use `mk_id`.
 - `sales_pricelist_code` persists on a sales order and records which catalogue
