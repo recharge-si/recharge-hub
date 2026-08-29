@@ -949,8 +949,13 @@ function StepActions({
       >
         {label}
       </s-button>
+      {/*
+       * Secondary, so the pair reads as two buttons. A tertiary Back beside a
+       * filled Continue has no edge of its own and reads as a word someone left
+       * next to the button.
+       */}
       {step === "welcome" ? null : (
-        <s-button variant="tertiary" href={`/app/setup?step=${back}`}>
+        <s-button variant="secondary" href={`/app/setup?step=${back}`}>
           Back
         </s-button>
       )}
@@ -1423,10 +1428,17 @@ function OrdersStep({
             ) : (
               <>
                 <input type="hidden" name="template" value={template} />
+                {/*
+                 * Secondary, not tertiary. A tertiary button has no border and
+                 * no fill, so alone on its own line under a paragraph it is
+                 * indistinguishable from a stray bold word — it needs
+                 * neighbouring controls to read as one. The tertiary buttons
+                 * this app keeps all sit in a table row or an action group.
+                 */}
                 <s-stack direction="inline">
                   <s-button
                     type="button"
-                    variant="tertiary"
+                    variant="secondary"
                     onClick={() => setCustomising(true)}
                   >
                     Customize
@@ -1512,14 +1524,20 @@ function OrdersStep({
               </s-table-body>
             </s-table>
 
-            <s-box maxInlineSize="360px">
+            {/*
+             * 520px, the width of every other field in this step, and not the
+             * 360px it had: the help line and the error render under the
+             * control at the control's own width, so a narrower box wrapped
+             * both into a ragged column while the card stayed empty beside it.
+             */}
+            <s-box maxInlineSize="520px">
               <Dropdown
                 name="fallback"
                 label="Type for anything not mapped"
                 placeholder="Choose a type"
                 value={fallback}
                 options={fallbackOptions}
-                details="Used for any payment method above with no type of its own. A payment type is never guessed, so this cannot be empty."
+                details="Used for any method above with no type of its own, so it cannot be empty."
                 onChange={setFallback}
                 {...(errorFor("fallback")
                   ? { error: errorFor("fallback") }

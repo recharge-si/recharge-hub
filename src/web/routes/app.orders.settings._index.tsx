@@ -569,10 +569,13 @@ export default function OrderSyncSettings() {
             ) : (
               <s-stack direction="block" gap="small-400">
                 <s-text>Shopify order number</s-text>
+                {/* Secondary for the same reason as guided setup's: a lone
+                 * tertiary button under a paragraph reads as text, not as a
+                 * control. */}
                 <s-stack direction="inline">
                   <s-button
                     type="button"
-                    variant="tertiary"
+                    variant="secondary"
                     onClick={() => setCustomisingReference(true)}
                   >
                     Customize
