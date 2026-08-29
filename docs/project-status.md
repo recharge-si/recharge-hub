@@ -216,6 +216,20 @@ removes its stock (or that it does not). See
 `docs/metakocka-verification.md` § `sync_stock` for what is documented versus
 verified, and record a sanitized multi-warehouse fixture once probed.
 
+The same probe settles T-19 below, and the two share a fixture.
+
+### T-19 — `warehouse_stock` server-side warehouse filtering is unverified
+
+`listWarehouseStock` sends `wh_id_list` and then drops any row naming a
+different warehouse, because nothing proves the parameter filters and the
+consequence of trusting it was doubled ERP stock on the `shopify_to_mk`
+path. The client-side filter makes that safe either way, but two things are
+still unknown: whether `wh_id_list` filters at all (if not, every read pays
+for the whole company's stock list), and what shape it wants ids in. A
+recorded multi-warehouse `warehouse_stock` response answers both. Until
+then, a `warehouse_stock returned rows for other warehouses` warning in the
+worker log is the signal that it does not filter.
+
 ### T-07 — Shopify access scopes before App Store review
 
 `write_products` and both merchant-managed fulfilment-order scopes are requested

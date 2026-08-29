@@ -142,6 +142,11 @@ third base URL and a dedicated adapter.
   request, so a reverse (`shopify_to_mk`) sync reads and re-sends every cached
   warehouse in the company, not only the one it is authoritative for — see
   `docs/metakocka-verification.md`.
+- `warehouse_stock` is read one warehouse at a time and
+  `listWarehouseStock` keeps only the rows naming that warehouse. Because the
+  company-wide write above sends one map per warehouse, a leaked row is not a
+  display error: it restates one warehouse's stock as another's and multiplies
+  the company total. `wh_id_list` is not verified to filter server-side.
 - The only MetaKocka webhook is a stock-change nudge with limited retries;
   scheduled reconciliation remains mandatory.
 

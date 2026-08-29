@@ -2,8 +2,8 @@ import type { Job } from "pg-boss";
 import { z } from "zod";
 
 import { prisma } from "~/adapters/db/client.server";
-import { enqueueThrottled } from "~/adapters/queue/boss.server";
-import { QUEUES } from "~/adapters/queue/queues";
+import { enqueue, enqueueThrottled } from "~/adapters/queue/boss.server";
+import { QUEUES, inventorySyncKey } from "~/adapters/queue/queues";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { captureException } from "~/adapters/observability/sentry.server";
 
@@ -122,12 +122,15 @@ async function fanOutForShop(
      *
      * Cheap by construction: the sync writes only what differs and skips
      * every no-op (§7).
+     *
+     * Deduped rather than throttled, and the key is shared with the webhook
+     * that also asks for this job — see `inventorySyncKey` for why a window
+     * did not actually collapse the two.
      */
-    await enqueueThrottled(
+    await enqueue(
       QUEUES.syncInventory,
       { shopDomain: domain },
-      `inventory:${domain}`,
-      4 * 60,
+      { singletonKey: inventorySyncKey(domain) },
     );
     return;
   }

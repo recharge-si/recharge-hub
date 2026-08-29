@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import type { MetakockaClient } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
+import { MetakockaError } from "~/adapters/metakocka/errors";
 import type { ProductTypeFlags } from "~/adapters/metakocka/products";
 import { mkDecimal } from "~/adapters/metakocka/values";
+import { getLogger } from "~/adapters/observability/logger.server";
 
 /**
  * `warehouse_stock` and `product_list`.
@@ -57,10 +59,19 @@ const PAGE = 500;
  *
  * A live company can return more than one row for the same
  * `(warehouse_id, code)` pair — separate microlocations inside one physical
- * warehouse. A caller building a `Map` keyed by product code from the raw
- * rows would have the last microlocation silently overwrite the rest,
- * undercounting real stock by however much sat in the ones before it. Summed
- * here instead, once, so every caller sees the warehouse's true total.
+ * warehouse. Those are summed, so a caller sees the warehouse's true total
+ * rather than whichever microlocation happened to come last.
+ *
+ * **Only the warehouse that was asked for comes back.** `wh_id_list` is a
+ * server-side filter no recorded `warehouse_stock` response has ever proved,
+ * and every caller keys this result by product code alone — so a response
+ * that also carried another warehouse was folded in as though it belonged
+ * here. In the Shopify → MetaKocka direction that is not a display bug:
+ * `pushShopifyStockIntoMetakocka` builds one map per warehouse and sends all
+ * of them in a single `sync_stock` request, so every warehouse received every
+ * warehouse's stock and the company total for a product came out multiplied
+ * by the number of warehouses — two warehouses, exactly double. Filtering
+ * here, once, is what makes that impossible however `wh_id_list` behaves.
  */
 export async function listWarehouseStock(
   client: MetakockaClient,
@@ -76,7 +87,9 @@ export async function listWarehouseStock(
     free: number | null;
   }
 
-  const byKey = new Map<string, Aggregate>();
+  const byCode = new Map<string, Aggregate>();
+  /** Rows for another warehouse: proof `wh_id_list` did not filter. */
+  let foreign = 0;
 
   for (let offset = 0; offset < 200_000; offset += PAGE) {
     const response = await client.call(
@@ -86,12 +99,16 @@ export async function listWarehouseStock(
     );
 
     for (const row of response.stock_list) {
-      const key = `${row.warehouse_id}:${row.code}`;
+      if (row.warehouse_id !== warehouseMkId) {
+        foreign += 1;
+        continue;
+      }
+
       const reserved = row.reserved_amount ?? 0;
-      const existing = byKey.get(key);
+      const existing = byCode.get(row.code);
 
       if (!existing) {
-        byKey.set(key, {
+        byCode.set(row.code, {
           warehouseId: row.warehouse_id,
           code: row.code,
           title: row.title ?? null,
@@ -118,7 +135,35 @@ export async function listWarehouseStock(
     if (response.stock_list.length < PAGE) break;
   }
 
-  return [...byKey.values()].map((row) => ({
+  if (foreign > 0) {
+    // Dropped rather than trusted, so this is not fatal on its own — but it
+    // means every read here is paying for the whole company's stock list,
+    // and it is the one condition that makes the refusal below possible.
+    getLogger().warn(
+      { warehouseMkId, foreignRows: foreign, kept: byCode.size },
+      "warehouse_stock returned rows for other warehouses; wh_id_list did not filter",
+    );
+  }
+
+  /*
+   * Rows came back, and none of them were for the warehouse that was asked
+   * for.
+   *
+   * That is not an empty warehouse: an empty warehouse returns nothing at
+   * all. It means the `warehouse_id` MetaKocka answers with and the `mk_id`
+   * this app holds are not the same identifier — and every caller reads an
+   * empty result as “every product is at zero”, which publishes zero on-hand
+   * into Shopify or sends a `sync_stock` request that empties the warehouse.
+   * Refusing is the only safe answer.
+   */
+  if (foreign > 0 && byCode.size === 0) {
+    throw new MetakockaError(
+      `warehouse_stock returned ${foreign} row(s), none of them for warehouse ${warehouseMkId}. Stock was not read; reload the warehouse list and check this location's mapping.`,
+      { endpoint: ENDPOINTS.warehouseStock, kind: "exception" },
+    );
+  }
+
+  return [...byCode.values()].map((row) => ({
     warehouseId: row.warehouseId,
     code: row.code,
     title: row.title,

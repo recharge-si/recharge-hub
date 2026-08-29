@@ -37,6 +37,25 @@ export const QUEUES = {
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
 
+/**
+ * The dedupe key every producer of an inventory sync must use.
+ *
+ * Two things ask for this job — the five-minute tick and MetaKocka's stock
+ * webhook — and they used to throttle it with the same key but different
+ * windows (four minutes and thirty seconds). pg-boss derives a throttle's
+ * slot from the window, so two windows are two slots: the key matched, the
+ * slot did not, and both jobs were accepted. The throttle looked like it was
+ * collapsing a burst and was not.
+ *
+ * Shared here and used with `singletonKey` instead of a window, which says
+ * the thing actually meant: at most one inventory sync waiting per shop, no
+ * matter who asked or when. A webhook still gets its sync within seconds
+ * rather than waiting out somebody else's window.
+ */
+export function inventorySyncKey(shopDomain: string): string {
+  return `inventory:${shopDomain}`;
+}
+
 type QueueOptions = Omit<Queue, "name">;
 
 /**

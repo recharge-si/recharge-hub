@@ -47,6 +47,25 @@ already computes available from on-hand and committed quantities, so copying
 and `free_amount` without an extra flag, and filters `product_code_list` by the
 product's `code` rather than internal `count_code`.
 
+**`wh_id_list` is not verified to filter server-side.** No `warehouse_stock`
+response has been recorded, the request sends a bare id to a parameter named
+as a list, and every caller reads the result as one warehouse's stock. A
+response that also carried another warehouse was therefore folded in as
+though it belonged to the one asked for — harmless-looking in the
+`mk_to_shopify` direction, and the cause of doubled ERP stock in the
+`shopify_to_mk` one, where each warehouse's map goes into a single
+company-wide `sync_stock` request and every warehouse received every
+warehouse's products. `listWarehouseStock` now drops rows whose
+`warehouse_id` is not the one requested, logs a warning naming how many it
+dropped, and refuses outright when rows came back and none of them were for
+the requested warehouse — that combination means the id this app holds is
+not the id MetaKocka answers with, and an empty result would be read as
+“everything is at zero”.
+
+Record a `warehouse_stock` response from the designated test company for a
+company with more than one warehouse and settle whether `wh_id_list` filters,
+and in what shape it wants the ids.
+
 ## Sales-order identity and routing
 
 ### `count_code` is not unique
