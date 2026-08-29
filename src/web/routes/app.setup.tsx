@@ -185,17 +185,18 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       listLocations(admin),
     ]);
 
-    const markByLocation = new Map(
+    /*
+     * The source already sitting on each location, if any.
+     *
+     * Carries two answers this step now asks for: which warehouse the
+     * location is connected to, and whether that connection took the shop
+     * default or an answer of its own. Coming back to setup has to show the
+     * merchant what they last chose, not reset it to the default.
+     */
+    const sourceByLocation = new Map(
       sources
-        .filter(
-          (source) =>
-            source.shopifyLocationId !== null &&
-            source.metakockaWarehouse !== null,
-        )
-        .map((source) => [
-          source.shopifyLocationId!,
-          source.metakockaWarehouse!,
-        ]),
+        .filter((source) => source.shopifyLocationId !== null)
+        .map((source) => [source.shopifyLocationId!, source]),
     );
 
     /*
@@ -221,17 +222,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           mark: warehouse.mark,
           name: warehouse.name,
         })),
-        locations: locations.map((location) => ({
-          id: location.id,
-          name: location.name,
-          where: location.where,
-          isActive: location.isActive,
-          fulfillmentServiceName: location.fulfillmentServiceName,
-          mark:
-            markByLocation.get(location.id) ??
-            byName.get(location.name.trim().toLowerCase()) ??
-            "",
-        })),
+        locations: locations.map((location) => {
+          const source = sourceByLocation.get(location.id) ?? null;
+
+          return {
+            id: location.id,
+            name: location.name,
+            where: location.where,
+            isActive: location.isActive,
+            fulfillmentServiceName: location.fulfillmentServiceName,
+            mark:
+              source?.metakockaWarehouse ??
+              byName.get(location.name.trim().toLowerCase()) ??
+              "",
+            // A location that has never been configured, or one following
+            // the shop answer, offers INHERIT. Only a deliberate override
+            // comes back as itself.
+            direction:
+              source && !source.stockDirectionInherited
+                ? String(source.stockDirection)
+                : INHERIT,
+          };
+        }),
       },
       orders: null,
       review: null,
@@ -521,6 +533,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         locationId,
         mark: String(formData.get(`warehouse:${locationId}`) ?? "").trim(),
         name: String(formData.get(`name:${locationId}`) ?? ""),
+        // INHERIT unless the merchant answered for this location itself.
+        direction: String(
+          formData.get(`direction:${locationId}`) ?? INHERIT,
+        ),
       }));
 
     /*
@@ -550,11 +566,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     });
 
     for (const pair of pairs) {
+      /*
+       * The per-location answer, not the shop default.
+       *
+       * Every location used to leave setup on `INHERIT`, so a store with one
+       * MetaKocka-counted warehouse and one Shopify-counted one could not be
+       * described here at all: the merchant finished setup, sync activated
+       * on the answer they had given for the *store*, and the five-minute
+       * cycle published stock in the wrong direction for one of their
+       * warehouses before they reached the Locations page to correct it. By
+       * then MetaKocka had an inventory document or Shopify had the ERP's
+       * numbers, and neither is undone by fixing the setting.
+       */
       const outcome = await saveLocationMapping(principal, {
         shopifyLocationId: pair.locationId,
         warehouseMark: pair.mark,
         locationName: pair.name,
-        direction: INHERIT,
+        direction: pair.direction,
         profitCenter: INHERIT,
       });
       if (!outcome.ok) {
@@ -565,7 +593,17 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     await appendEvent(principal, {
       entityType: "supply_source",
       event: "supply_defaults.saved",
-      detail: { direction, via: "setup", connected: chosen.length },
+      detail: {
+        direction,
+        via: "setup",
+        connected: chosen.length,
+        // Locations that answered for themselves rather than following the
+        // shop default. Worth recording: it is the difference between a
+        // store with one stock story and a store with several.
+        overridden: pairs.filter(
+          (pair) => pair.mark !== "" && pair.direction !== INHERIT,
+        ).length,
+      },
     });
 
     await saveSetupStep(principal, "orders");
@@ -1045,6 +1083,8 @@ interface StockData {
     isActive: boolean;
     fulfillmentServiceName: string | null;
     mark: string;
+    /** `INHERIT`, or this location's own answer. */
+    direction: string;
   }[];
 }
 
@@ -1053,6 +1093,11 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
   const [marks, setMarks] = useState<Record<string, string>>(() =>
     Object.fromEntries(
       stock.locations.map((location) => [location.id, location.mark]),
+    ),
+  );
+  const [directions, setDirections] = useState<Record<string, string>>(() =>
+    Object.fromEntries(
+      stock.locations.map((location) => [location.id, location.direction]),
     ),
   );
 
@@ -1067,6 +1112,19 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
   ];
 
   const connected = Object.values(marks).filter(Boolean).length;
+
+  /*
+   * The per-location answer, offered here rather than only on the Locations
+   * page. Finishing setup starts the five-minute stock cycle, so a warehouse
+   * that needs a different direction has to be able to say so *before* the
+   * first sync rather than after it has already written.
+   */
+  const directionOptions: DropdownOption[] = [
+    { value: INHERIT, label: `Same as above (${flow.countedIn})` },
+    { value: "mk_to_shopify", label: "MetaKocka" },
+    { value: "shopify_to_mk", label: "Shopify" },
+    { value: "none", label: "Do not synchronize" },
+  ];
 
   return (
     <Form method="post">
@@ -1112,8 +1170,8 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
 
             <s-text color="subdued">
               {flow.flow
-                ? `Stock flows ${flow.flow}. Every location follows this unless you change it later.`
-                : "No stock is copied in either direction."}
+                ? `Stock flows ${flow.flow}. Every location below follows this unless you give it its own answer.`
+                : "No stock is copied in either direction unless a location below says otherwise."}
             </s-text>
           </s-stack>
         </s-section>
@@ -1133,6 +1191,13 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
                   orders and publishes no stock.
                 </s-paragraph>
 
+                <s-paragraph>
+                  Set where each one counts stock now. Finishing setup starts
+                  the stock sync, and the first run writes real quantities, so
+                  a warehouse that works the other way round should say so
+                  here rather than be corrected afterwards.
+                </s-paragraph>
+
                 <s-table variant="auto">
                   <s-table-header-row>
                     <s-table-header listSlot="primary">
@@ -1140,6 +1205,9 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
                     </s-table-header>
                     <s-table-header listSlot="labeled">
                       MetaKocka warehouse
+                    </s-table-header>
+                    <s-table-header listSlot="labeled">
+                      Stock counted in
                     </s-table-header>
                   </s-table-header-row>
                   <s-table-body>
@@ -1179,6 +1247,24 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
                               options={warehouseOptions}
                               onChange={(next) =>
                                 setMarks((current) => ({
+                                  ...current,
+                                  [location.id]: next,
+                                }))
+                              }
+                            />
+                          </s-box>
+                        </s-table-cell>
+                        <s-table-cell>
+                          <s-box maxInlineSize="240px">
+                            <Dropdown
+                              name={`direction:${location.id}`}
+                              label={`Where stock is counted for ${location.name}`}
+                              hideLabel
+                              disabled={!marks[location.id]}
+                              value={directions[location.id] ?? INHERIT}
+                              options={directionOptions}
+                              onChange={(next) =>
+                                setDirections((current) => ({
                                   ...current,
                                   [location.id]: next,
                                 }))

@@ -124,76 +124,6 @@ export function buildCompleteStockList(input: CompleteListInput): StockLine[] {
   return lines;
 }
 
-export interface CompanyListInput {
-  /** What Shopify says, for the SKUs this app manages at the reverse-synced warehouse. */
-  managed: Map<string, number>;
-  /** The warehouse Shopify is the source of truth for. */
-  warehouseId: string;
-  /**
-   * What MetaKocka currently holds, for every cached warehouse — not only
-   * `warehouseId`. Keyed by warehouse id, then by product code.
-   */
-  currentByWarehouse: Map<string, Map<string, number>>;
-}
-
-/**
- * The full stock list for the whole company, across every cached warehouse.
- *
- * MetaKocka's own documentation for this endpoint (`warehouse_stock_sync`,
- * fetched 2026-08-26, not yet checked against the designated test company)
- * says plainly that "the total stock for all warehouses must be sent in one
- * request" and that an item absent from the request is removed from stock —
- * which reads as applying to a warehouse missing from the request altogether,
- * not only to a product missing within a warehouse that is present.
- * `buildCompleteStockList` alone sent lines for the reverse-synced warehouse
- * only, which on that reading would zero out every other warehouse in the
- * company on every write.
- *
- * The reverse-synced warehouse is built the same way `buildCompleteStockList`
- * always has: Shopify's number for managed products, MetaKocka's own value
- * echoed back verbatim for everything else. Every other cached warehouse is
- * echoed back verbatim in full — this app has no opinion about it, and the
- * only reason it appears in the request at all is that the endpoint requires
- * it to.
- */
-export function buildCompleteCompanyStockList(
-  input: CompanyListInput,
-): StockLine[] {
-  const lines: StockLine[] = [];
-
-  for (const [warehouseId, current] of input.currentByWarehouse) {
-    if (warehouseId === input.warehouseId) {
-      lines.push(
-        ...buildCompleteStockList({
-          warehouseId,
-          managed: input.managed,
-          current,
-        }),
-      );
-      continue;
-    }
-
-    for (const [productCode, amount] of current) {
-      lines.push({ warehouseId, productCode, amount });
-    }
-  }
-
-  // The reverse-synced warehouse might not yet be in `currentByWarehouse`
-  // (MetaKocka has never held stock there) — still has to carry Shopify's
-  // managed products, or they would never appear in the warehouse at all.
-  if (!input.currentByWarehouse.has(input.warehouseId)) {
-    lines.push(
-      ...buildCompleteStockList({
-        warehouseId: input.warehouseId,
-        managed: input.managed,
-        current: new Map(),
-      }),
-    );
-  }
-
-  return lines;
-}
-
 /**
  * A stock amount as a decimal string MetaKocka will read back as the same
  * number.
@@ -360,15 +290,26 @@ export async function syncStockToMetakocka(
     );
   }
 
-  // The list this adapter sends is meant to describe every warehouse
-  // completely, so nothing should ever come back here. If something did, the
-  // list was not actually complete and MetaKocka has just removed real stock
-  // — treated as a failure rather than logged quietly, because the write
-  // already happened and cannot be taken back from here.
+  /*
+   * What MetaKocka removed for not being in the request.
+   *
+   * Within a warehouse this is a completeness check: the list sent names
+   * every product that warehouse holds, so nothing should come back here.
+   *
+   * It is also the one detector for a question nobody has answered. This
+   * endpoint's documentation says the total stock for *all* warehouses must
+   * be sent in one request, which read strictly would mean a warehouse left
+   * out is emptied. The caller deliberately sends one warehouse — the one
+   * Shopify is authoritative for — because writing warehouses the merchant
+   * counts in MetaKocka is what docs/BUILD_SPEC.md §7 forbids. If the strict
+   * reading is right, the products of every other warehouse arrive here on
+   * the first write and this throw is what says so, loudly and once, instead
+   * of the loss being noticed weeks later in the ERP.
+   */
   const removed = parsed.data.stock_remove_list ?? [];
   if (removed.length > 0) {
     throw new MetakockaError(
-      `MetaKocka sync_stock removed ${removed.length} item(s) not present in the request — the stock list sent was not complete`,
+      `MetaKocka sync_stock removed ${removed.length} item(s) not present in the request. Either the list sent was not complete for its warehouse, or MetaKocka empties warehouses left out of a stock write — check the other warehouses in this company before writing stock again.`,
       {
         endpoint: "sync_stock",
         kind: "exception",
@@ -403,9 +344,10 @@ type EchoedLine = NonNullable<
  * field from its response, and a queue full of false alarms is a queue nobody
  * reads (§11).
  *
- * Matched by `(warehouse_id, product_code)`, not product code alone, because
- * a company-wide write can legitimately send the same product code to more
- * than one warehouse. Where the echo omits `warehouse_id` — the shape every
+ * Matched by `(warehouse_id, product_code)`, not product code alone. Today's
+ * caller sends one warehouse, but this adapter validates whatever it was
+ * given, and a list covering several warehouses can legitimately carry the
+ * same product code twice. Where the echo omits `warehouse_id` — the shape every
  * fixture recorded so far has used — a code is still matched by itself as
  * long as it was only ever sent to one warehouse in this request; sent to
  * more than one, an unwarehoused echo cannot say which of them it answers

@@ -205,18 +205,34 @@ Probe the designated test company for `get_document` by shared `buyer_order` and
 `search` by exact `count_code`. Until response shapes are recorded, recovery
 must treat a sibling result as inconclusive and never blindly resend.
 
-### T-16 — Company-wide `sync_stock` write is unverified against a live company
+### T-16 — Whether `sync_stock` empties a warehouse left out of the request
 
-`pushShopifyStockIntoMetakocka` now sends every cached warehouse in one
-`sync_stock` request, not only the reverse-synced one, on the strength of that
-endpoint's own documentation ("the total stock for all warehouses must be sent
-in one request") rather than a live probe. The designated test company has not
-been used to confirm that omitting a whole warehouse from the request actually
-removes its stock (or that it does not). See
-`docs/metakocka-verification.md` § `sync_stock` for what is documented versus
-verified, and record a sanitized multi-warehouse fixture once probed.
+`pushShopifyStockIntoMetakocka` writes one warehouse: the one Shopify is
+authoritative for. The endpoint's documentation ("the total stock for all
+warehouses must be sent in one request"), read together with its
+omission-removes rule, could mean every other warehouse in the company is
+emptied by that request. It has never been observed, and the alternative —
+sending every warehouse, which this briefly did — is a certain wrong write
+on every cycle to warehouses section 7 reserves to the merchant (T-20).
 
+Until it is probed on the designated test company, a non-empty
+`stock_remove_list` is the detector: the adapter treats it as a failure and
+the merchant is told. Record a sanitized multi-warehouse fixture once probed.
 The same probe settles T-19 below, and the two share a fixture.
+
+### T-20 — The app must not write a warehouse the merchant counts in MetaKocka
+
+Section 7 gives a `mk_to_shopify` warehouse to the merchant: this app reads
+it and never writes it. Sending every cached warehouse in a `sync_stock`
+request broke that — one Shopify-counted location filed an inventory document
+restating warehouses it had no say over, and reverted anything moved in the
+ERP between the read and the write. Fixed by writing only the authoritative
+warehouse.
+
+The open decision is what to do if T-16 proves omission really does empty a
+warehouse. Going back to writing warehouses this app does not own is not the
+answer; sending the authoritative warehouses together, and echoing the rest
+only under an explicit merchant-visible setting, is the shape to design.
 
 ### T-19 — `warehouse_stock` server-side warehouse filtering is unverified
 

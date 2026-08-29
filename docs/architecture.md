@@ -98,6 +98,23 @@ Shopify location to a MetaKocka warehouse, shared by the locations page and
 guided setup, because "one writer per location" is not an invariant worth having
 two of.
 
+### Stock direction is answered before activation, not after
+
+The stock step asks where the shop counts stock and then asks it again per
+location, defaulting to the shop answer. Both answers land on
+`supply_setting.default_stock_direction` and `supply_source.stock_direction`
+through the same `saveLocationMapping`, with `stock_direction_inherited`
+recording which one a location took.
+
+The per-location question is not a convenience. Finish setup starts the
+five-minute stock cycle, and the first run writes real quantities: MetaKocka's
+into Shopify, or Shopify's into an ERP inventory document. A store with one
+MetaKocka-counted warehouse and one Shopify-counted one could previously not
+say so until after activation, so the wrong direction had already been written
+for one of them by the time the merchant reached the Locations page — and
+neither an inventory document nor an overwritten on-hand is undone by
+correcting the setting afterwards.
+
 ## Important flows
 
 ### Order intake and the reconciliation loop
@@ -216,13 +233,20 @@ location:
 - `shopify_to_mk`: Shopify `on_hand` is written through MetaKocka `sync_stock`.
 - `none`: this app writes neither side.
 
-The Shopify adapter refuses writes to locations this app does not own. The
-MetaKocka adapter sends a complete *company* snapshot — every cached
-warehouse, not only the one being reverse-synced — because `sync_stock`'s own
-documentation requires the total stock for all warehouses in one request and
-treats anything omitted, including a whole warehouse, as removed. Every
-warehouse but the one Shopify is authoritative for is echoed back exactly as
-read.
+The Shopify adapter refuses writes to locations this app does not own, and
+the MetaKocka write is bounded the same way: a `shopify_to_mk` sync sends a
+complete list for **its own warehouse only**. Within that warehouse the list
+is complete — managed products take Shopify's number, everything else
+MetaKocka holds there is echoed back verbatim — because `sync_stock` removes
+what it is not sent.
+
+It briefly sent every cached warehouse, on the strength of that endpoint's
+documentation asking for the total stock of all warehouses in one request.
+That made a Shopify-counted location file an inventory document restating
+the merchant's MetaKocka-counted warehouses, which is what one-writer
+ownership exists to prevent. The documented risk of leaving a warehouse out
+— that it is emptied — has never been observed and is announced by
+`stock_remove_list` if it happens (T-16, T-20 in `docs/project-status.md`).
 
 ### Catalogue and product names
 

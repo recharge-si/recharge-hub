@@ -9,7 +9,6 @@ import { isSyncActivated } from "~/adapters/db/repositories/shop.server";
 import {
   listCachedWarehouses,
   listSupplySources,
-  type CachedWarehouse,
 } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import {
@@ -18,7 +17,7 @@ import {
 } from "~/adapters/metakocka/errors";
 import { listWarehouseStock } from "~/adapters/metakocka/stock";
 import {
-  buildCompleteCompanyStockList,
+  buildCompleteStockList,
   managedAmount,
   syncStockToMetakocka,
 } from "~/adapters/metakocka/sync-stock";
@@ -285,7 +284,6 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         source,
         warehouseMkId,
         client,
-        warehouses,
         credential,
         admin,
       });
@@ -442,8 +440,6 @@ interface ReverseSyncInput {
   };
   warehouseMkId: string;
   client: MetakockaClient;
-  /** Every warehouse this company has, cached — not only this source's own. */
-  warehouses: CachedWarehouse[];
   credential: {
     companyId: string;
     secretKey: string;
@@ -455,15 +451,28 @@ interface ReverseSyncInput {
 /**
  * Shopify is the truth for one warehouse: copy its on-hand into MetaKocka.
  *
- * `sync_stock`'s own documentation says the total stock for *all* warehouses
- * has to be sent in one request, and that anything absent from it is removed
- * — read plainly, that includes a warehouse missing from the request
- * altogether, not only a product missing from a warehouse that is present.
- * So every cached warehouse is read and echoed back, not only this source's:
- * Shopify's on-hand replaces the managed products at the one warehouse this
- * source is responsible for, and everything else — every other product at
- * that warehouse, every product at every other warehouse — is sent back
- * exactly as MetaKocka already holds it.
+ * **Only that one warehouse is written.** `sync_stock`'s documentation says
+ * the total stock for all warehouses has to be sent in one request, and this
+ * used to take that literally: every cached warehouse was read and echoed
+ * back, so one Shopify-counted location filed an inventory document that also
+ * restated every MetaKocka-counted warehouse in the company. That is the thing
+ * docs/BUILD_SPEC.md §7 says this app never does — a `mk_to_shopify` warehouse
+ * is the merchant's number, not ours — and “echoed unchanged” was not
+ * harmless either: anything moved in the ERP between the read and the write
+ * was put silently back, and while `listWarehouseStock` was returning other
+ * warehouses' rows (fixed with it) the echo was not even the right numbers.
+ *
+ * The documented risk of leaving a warehouse out is that its stock is removed.
+ * That has never been observed — the live `sync_stock` probe against the test
+ * company was a single-warehouse write and no other warehouse was reported
+ * lost — and if it does happen MetaKocka names it in `stock_remove_list`,
+ * which the adapter treats as a failure. A bounded, announced risk on the
+ * warehouses this app does not own beats a certain wrong write to them on
+ * every cycle. See T-16 and T-20 in docs/project-status.md.
+ *
+ * Within the warehouse it does write, the list is still complete: managed
+ * products take Shopify's number and every other product MetaKocka holds
+ * there is echoed back verbatim, because omission removes.
  */
 async function pushShopifyStockIntoMetakocka(
   input: ReverseSyncInput,
@@ -509,20 +518,23 @@ async function pushShopifyStockIntoMetakocka(
     managed.set(sku.metakockaCode ?? sku.sku, quantity);
   }
 
-  // Every cached warehouse's current stock, read up front: the destructive
-  // write below has to abort if any of these reads fails, and a plain throw
-  // out of a `listWarehouseStock` call does exactly that — the caller's
-  // try/catch around `syncOneSource` records it as this source's failure.
-  const currentByWarehouse = new Map<string, Map<string, number>>();
-  for (const warehouse of input.warehouses) {
-    const stock = await listWarehouseStock(input.client, warehouse.mkId);
-    currentByWarehouse.set(
-      warehouse.mkId,
-      new Map(stock.map((row) => [row.code, row.amount])),
-    );
-  }
-
-  const current = currentByWarehouse.get(input.warehouseMkId) ?? new Map();
+  /*
+   * This source's own warehouse, and only it.
+   *
+   * It is the only warehouse whose numbers can decide whether anything has to
+   * be written, and on most cycles nothing has. Reading the whole company up
+   * front spent one MetaKocka call per warehouse every five minutes to answer
+   * a question this single call settles.
+   *
+   * A read that fails throws, which is the right end for a destructive write:
+   * the caller's try/catch around `syncOneSource` records it as this source's
+   * failure and nothing is sent.
+   */
+  const currentRows = await listWarehouseStock(
+    input.client,
+    input.warehouseMkId,
+  );
+  const current = new Map(currentRows.map((row) => [row.code, row.amount]));
 
   /*
    * Write only on change (§7's own rule for the other direction, and it binds
@@ -534,8 +546,6 @@ async function pushShopifyStockIntoMetakocka(
    * The unmanaged products are echoed back at MetaKocka's own values by
    * construction, so the only thing that can differ is a managed code —
    * absence from `warehouse_stock` means zero (the read is fully paginated).
-   * Other warehouses are echoed back verbatim too and so can never be the
-   * reason this is true, whatever else changed in the company meanwhile.
    */
   let changed = false;
   for (const [code, quantity] of managed) {
@@ -557,9 +567,9 @@ async function pushShopifyStockIntoMetakocka(
     return;
   }
 
-  const lines = buildCompleteCompanyStockList({
+  const lines = buildCompleteStockList({
     managed,
-    currentByWarehouse,
+    current,
     warehouseId: input.warehouseMkId,
   });
 
@@ -590,6 +600,7 @@ async function pushShopifyStockIntoMetakocka(
     event: "inventory.written_to_metakocka",
     detail: {
       source: input.source.code,
+      warehouse: input.warehouseMkId,
       lines: result.sent,
       fromShopify: managed.size,
       preserved: result.sent - managed.size,
