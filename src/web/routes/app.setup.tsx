@@ -63,7 +63,10 @@ import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { listLocations } from "~/adapters/shopify/locations";
-import { listPaymentGateways } from "~/adapters/shopify/payment-gateways";
+import {
+  COMMON_GATEWAYS,
+  listPaymentGateways,
+} from "~/adapters/shopify/payment-gateways";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { suggestPaymentMapping } from "~/domain/payments/gateway-match";
 import {
@@ -275,8 +278,23 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       }),
     ]);
 
+    /*
+     * The same list as the payments settings page, and for the same reason:
+     * gateways this shop has used, plus the ones any store can produce, plus
+     * anything already mapped.
+     *
+     * Used-only was wrong here in the one place it matters most. A shop being
+     * set up has usually taken no orders at all, so the table came up empty or
+     * showed the single method one test order happened to use, the suggestions
+     * had nothing to fill in, and the merchant met the rest of their payment
+     * methods later on the settings page with nothing mapped.
+     */
     const known = [
-      ...new Set([...gateways, ...maps.map((row) => row.shopifyGateway)]),
+      ...new Set([
+        ...gateways,
+        ...COMMON_GATEWAYS,
+        ...maps.map((row) => row.shopifyGateway),
+      ]),
     ].sort((a, b) => gatewayLabel(a).localeCompare(gatewayLabel(b)));
 
     const mapping = Object.fromEntries(
