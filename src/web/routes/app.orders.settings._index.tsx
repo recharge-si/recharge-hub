@@ -3,7 +3,6 @@ import {
   useCallback,
   useEffect,
   useMemo,
-  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -31,7 +30,6 @@ import { findProductByCode } from "~/adapters/metakocka/stock";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
-  ORDER_REFERENCE_PATTERNS,
   orderReferenceFor,
   unknownPlaceholders,
   type OrderReferenceContext,
@@ -40,6 +38,8 @@ import { componentOf } from "~/domain/readiness";
 import { AdvancedSection } from "~/web/components/advanced-section";
 import { LearnMore } from "~/web/components/learn-more";
 import { PatternEditor } from "~/web/components/pattern-editor";
+import { PatternFieldsModal } from "~/web/components/pattern-fields-modal";
+import { ReferencePatternsModal } from "~/web/components/reference-patterns-modal";
 import {
   ORDER_REFERENCE_REGISTRY,
   orderReferenceRows,
@@ -70,6 +70,7 @@ import { principalFromSession } from "~/web/lib/principal.server";
  */
 const HELP_MODAL_ID = "about-order-sync";
 const REFERENCE_PATTERNS_MODAL_ID = "ready-reference-patterns";
+const REFERENCE_FIELDS_MODAL_ID = "reference-fields";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -295,9 +296,6 @@ export default function OrderSyncSettings() {
     useLoaderData<typeof loader>();
   const saver = useFetcher<typeof action>();
   const result = saver.data;
-
-  /** Overlay methods land on the element only once the browser upgrades it. */
-  const referencePatterns = useRef<{ hideOverlay?: () => void } | null>(null);
   const busy = saver.state !== "idle";
 
   const [form, setForm] = useState({
@@ -457,80 +455,29 @@ export default function OrderSyncSettings() {
         Help
       </s-button>
 
-      {/*
-       * Ready references, each rendered against one of the merchant's own
-       * orders — the same list the product name patterns get, for the same
-       * reason: choosing one should be a decision about their data rather than
-       * about syntax. A shop with no orders yet reads the labels alone; nothing
-       * here is a made-up example.
-       */}
-      <s-modal
-        id={REFERENCE_PATTERNS_MODAL_ID}
-        heading="Ready references"
-        ref={(element) => {
-          referencePatterns.current =
-            (element as { hideOverlay?: () => void }) ?? null;
-        }}
-      >
-        <s-stack direction="block" gap="none">
-          {ORDER_REFERENCE_PATTERNS.map((option, index) => {
-            const inUse =
-              option.pattern === form.customerOrderTemplate ||
-              (option.pattern === defaultPattern &&
-                form.customerOrderTemplate.trim() === "");
-            const produced = sampleContext
-              ? orderReferenceFor(option.pattern, sampleContext).reference
-              : null;
 
-            return (
-              <s-stack key={option.id} direction="block" gap="none">
-                {index === 0 ? null : <s-divider />}
-                <s-clickable
-                  inlineSize="100%"
-                  borderRadius="base"
-                  paddingInline="small-200"
-                  paddingBlock="small-300"
-                  accessibilityLabel={
-                    produced
-                      ? `${option.label}. Would produce ${produced}.`
-                      : option.label
-                  }
-                  onClick={() => {
-                    set("customerOrderTemplate", option.pattern);
-                    referencePatterns.current?.hideOverlay?.();
-                  }}
-                >
-                  <s-grid
-                    gridTemplateColumns="1fr auto"
-                    gap="small-200"
-                    alignItems="center"
-                  >
-                    <s-stack direction="block" gap="small-500">
-                      <s-text type="strong">{option.label}</s-text>
-                      {produced ? (
-                        <s-text color="subdued">{produced}</s-text>
-                      ) : null}
-                    </s-stack>
-                    {inUse ? (
-                      <s-icon type="check" />
-                    ) : (
-                      <s-box inlineSize="20px" />
-                    )}
-                  </s-grid>
-                </s-clickable>
-              </s-stack>
-            );
-          })}
-        </s-stack>
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          command="--hide"
-          commandFor={REFERENCE_PATTERNS_MODAL_ID}
-        >
-          Close
-        </s-button>
-      </s-modal>
+      {/*
+       * The two ways in that do not involve typing, the same pair the product
+       * name pattern offers: what the fields are, and four patterns already
+       * written. Modals rather than disclosures because both are lists to read
+       * or pick from rather than prose about the control.
+       */}
+      <PatternFieldsModal
+        id={REFERENCE_FIELDS_MODAL_ID}
+        heading="What you can put in a reference"
+        resolvedAgainst={
+          sample ? `order ${sample.name}` : "one of your own orders"
+        }
+        groups={referenceRows("")}
+      />
+
+      <ReferencePatternsModal
+        id={REFERENCE_PATTERNS_MODAL_ID}
+        current={form.customerOrderTemplate}
+        defaultPattern={defaultPattern}
+        sample={sampleContext}
+        onChoose={(pattern) => set("customerOrderTemplate", pattern)}
+      />
 
       <s-modal id={HELP_MODAL_ID} heading="About order sync">
         <s-stack direction="block" gap="base">
@@ -710,7 +657,7 @@ export default function OrderSyncSettings() {
                   onChange={(next) => set("customerOrderTemplate", next)}
                   registry={ORDER_REFERENCE_REGISTRY}
                   rows={referenceRows}
-                  details={`Leave it empty for the default, ${defaultPattern}.`}
+                  details="Type a word — order, number, email — and the field offers itself. Leave it empty to use the default."
                   {...(badFields.length > 0
                     ? {
                         error: `${badFields.map((field) => `{${field}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
@@ -718,7 +665,21 @@ export default function OrderSyncSettings() {
                     : {})}
                 />
 
-                <s-stack direction="inline" gap="small-300">
+                {/*
+                 * The same two buttons the name pattern carries, in the same
+                 * order. Typing a word offers the fields on its own — no brace,
+                 * no syntax — but that only helps once somebody has started, so
+                 * the full list stays one click away for anyone who has not.
+                 */}
+                <s-stack direction="inline" gap="base" alignItems="center">
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={REFERENCE_FIELDS_MODAL_ID}
+                  >
+                    What you can put in a reference
+                  </s-button>
                   <s-button
                     type="button"
                     variant="secondary"

@@ -82,6 +82,8 @@ import {
 } from "~/domain/readiness";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
 import { PatternEditor } from "~/web/components/pattern-editor";
+import { PatternFieldsModal } from "~/web/components/pattern-fields-modal";
+import { ReferencePatternsModal } from "~/web/components/reference-patterns-modal";
 import { ReadinessList } from "~/web/components/readiness-list";
 import { INHERIT, toDirection } from "~/web/lib/locations";
 import { saveLocationMapping } from "~/web/lib/locations.server";
@@ -146,6 +148,10 @@ function previousStep(step: Step): Step {
 
 /** Long enough that reloading the page a few times sends one job, not five. */
 const REFRESH_THROTTLE_SECONDS = 5 * 60;
+
+/** The two lists behind the reference pattern, named as the settings page names them. */
+const REFERENCE_FIELDS_MODAL_ID = "setup-reference-fields";
+const REFERENCE_PATTERNS_MODAL_ID = "setup-ready-reference-patterns";
 
 /* -------------------------------------------------------------------------- */
 /* Loader                                                                     */
@@ -1453,8 +1459,52 @@ function OrdersStep({
                   onChange={setTemplate}
                   registry={ORDER_REFERENCE_REGISTRY}
                   rows={referenceRows}
-                  details={`Leave it empty for the default, ${orders.defaultTemplate}.`}
+                  details="Type a word — order, number, email — and the field offers itself. Leave it empty to use the default."
                   {...(templateError ? { error: templateError } : {})}
+                />
+
+                {/*
+                 * The same two ways in the settings page offers, and the same
+                 * ones the product name pattern has: typing a word offers the
+                 * fields on its own, and for anyone who has not started typing,
+                 * the full list and four ready references are one click away.
+                 */}
+                <s-stack direction="inline" gap="base" alignItems="center">
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={REFERENCE_FIELDS_MODAL_ID}
+                  >
+                    What you can put in a reference
+                  </s-button>
+                  <s-button
+                    type="button"
+                    variant="secondary"
+                    command="--show"
+                    commandFor={REFERENCE_PATTERNS_MODAL_ID}
+                  >
+                    Start from a ready pattern
+                  </s-button>
+                </s-stack>
+
+                <PatternFieldsModal
+                  id={REFERENCE_FIELDS_MODAL_ID}
+                  heading="What you can put in a reference"
+                  resolvedAgainst={
+                    orders.sample
+                      ? `order ${orders.sample.name}`
+                      : "one of your own orders"
+                  }
+                  groups={referenceRows("")}
+                />
+
+                <ReferencePatternsModal
+                  id={REFERENCE_PATTERNS_MODAL_ID}
+                  current={template}
+                  defaultPattern={orders.defaultTemplate}
+                  sample={sampleContext}
+                  onChoose={setTemplate}
                 />
               </s-box>
             ) : (

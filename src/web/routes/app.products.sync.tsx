@@ -66,6 +66,7 @@ import { Advanced } from "~/web/components/advanced";
 import { AdvancedSection } from "~/web/components/advanced-section";
 import { Dropdown } from "~/web/components/dropdown";
 import { PatternEditor } from "~/web/components/pattern-editor";
+import { PatternFieldsModal } from "~/web/components/pattern-fields-modal";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
 import { OverwriteWarning } from "~/web/components/overwrite-warning";
 import { formatDateTime } from "~/web/lib/datetime";
@@ -1010,53 +1011,18 @@ export default function ProductSyncSettings() {
 
       {/*
        * What a name can be built from, for a merchant who does not yet know
-       * there is anything to type. The list under the field only appears once
-       * they have started, which is no help at all before they have.
+       * there is anything to type. The same component the order reference
+       * pattern uses, so the answer to "what can I put in here" looks the same
+       * wherever it is asked.
        */}
-      <s-modal id={FIELDS_MODAL_ID} heading="What you can put in a name">
-        <s-stack direction="block" gap="base">
-          <s-paragraph>
-            Start typing any of these in the name and it will offer itself. Each
-            one shows what it comes to for one of your own products.
-          </s-paragraph>
-
-          {pickerGroups(registry, "", patternSample ?? null).map((group) => (
-            <s-stack key={group.id} direction="block" gap="none">
-              <s-box paddingBlock="small-300">
-                <s-text color="subdued" type="strong">
-                  {group.label}
-                </s-text>
-              </s-box>
-              {group.rows.map((row) => (
-                <s-box key={row.field.id} paddingBlock="small-400">
-                  <s-grid
-                    gridTemplateColumns="1fr auto"
-                    gap="base"
-                    alignItems="center"
-                  >
-                    <s-text>{row.field.label}</s-text>
-                    <s-text color="subdued">
-                      {row.value === null
-                        ? ""
-                        : row.value === ""
-                          ? "empty here"
-                          : row.value}
-                    </s-text>
-                  </s-grid>
-                </s-box>
-              ))}
-            </s-stack>
-          ))}
-        </s-stack>
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          command="--hide"
-          commandFor={FIELDS_MODAL_ID}
-        >
-          Close
-        </s-button>
-      </s-modal>
+      <PatternFieldsModal
+        id={FIELDS_MODAL_ID}
+        heading="What you can put in a name"
+        resolvedAgainst={
+          patternSample ? `${patternSample.sku}` : "one of your own products"
+        }
+        groups={pickerRowsFor("")}
+      />
 
       <s-modal id={PREVIEW_MODAL_ID} heading="What changes in MetaKocka">
         <s-stack direction="block" gap="base">
