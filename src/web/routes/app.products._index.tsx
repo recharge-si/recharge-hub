@@ -425,13 +425,11 @@ export default function Products() {
             )}
 
             {/*
-             * A button, not a link. This is the way out of this card to the
-             * only place any of it can be changed, and as a line of blue text
-             * under a paragraph it read as a footnote.
+             * No button out of this card. Settings is in the page header now,
+             * which is where a merchant looks for it and where every other area
+             * keeps it — a second button to the same page turns the card into a
+             * menu entry for a page the header already offers.
              */}
-            <s-button variant="secondary" href="/app/products/sync">
-              Change these settings
-            </s-button>
           </s-stack>
         </s-section>
 
