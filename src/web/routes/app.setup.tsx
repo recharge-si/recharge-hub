@@ -59,6 +59,7 @@ import {
 } from "~/adapters/metakocka/errors";
 import { discoverPaymentTypes } from "~/adapters/metakocka/payment-types";
 import { validateProfitCenter } from "~/adapters/metakocka/profit-centers";
+import { findProductByCode } from "~/adapters/metakocka/stock";
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
@@ -320,6 +321,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       orders: {
         template: settings.customerOrderTemplate ?? "",
         defaultTemplate: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+        shippingProductCode: settings.shippingProductCode ?? "",
         sample: recent
           ? {
               name: `#${recent.shopifyOrderNumber}`,
@@ -656,6 +658,73 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       } satisfies StepResult;
     }
 
+    /*
+     * The shipping article, asked for here and required here.
+     *
+     * A MetaKocka sales order carries products, and a shipping charge is not
+     * one — so without an article to write it against, every order that
+     * charges postage reaches MetaKocka short of the postage and is reported
+     * rather than counted as reconciled. That is a poor thing to discover
+     * after the first real order, and this is the screen whose whole job is to
+     * ask the questions that have to be answered before orders start flowing.
+     *
+     * Checked against MetaKocka, exactly as the settings screen checks it, and
+     * with the same three answers: absent is refused, unknown is accepted and
+     * said so, and this app never creates the article itself.
+     */
+    const shippingProductCode = String(
+      formData.get("shippingProductCode") ?? "",
+    ).trim();
+
+    if (shippingProductCode === "") {
+      return {
+        ok: false,
+        field: "shippingProductCode",
+        message:
+          "Enter the MetaKocka product a shipping charge is written against. Without one, every order that charges postage reaches MetaKocka short of it.",
+      } satisfies StepResult;
+    }
+
+    {
+      const access = await requireCredential(principal);
+      if (!access.ok) {
+        return {
+          ok: false,
+          field: "shippingProductCode",
+          message:
+            access.reason === "not_permitted"
+              ? access.message
+              : "MetaKocka is not connected, so the shipping product could not be checked.",
+        } satisfies StepResult;
+      }
+
+      try {
+        const lookup = await findProductByCode(
+          new MetakockaClient(
+            {
+              companyId: access.credential.companyId,
+              secretKey: access.credential.secretKey,
+            },
+            { timeoutMs: 30_000 },
+          ),
+          shippingProductCode,
+        );
+
+        if (lookup.status === "absent") {
+          return {
+            ok: false,
+            field: "shippingProductCode",
+            message: `MetaKocka has no product with the code "${shippingProductCode}". Create the article there first — this app never creates one from an order line.`,
+          } satisfies StepResult;
+        }
+      } catch (error) {
+        // A check that could not run is not a wrong answer. The settings screen
+        // takes the same view, and the code is checked again whenever it is
+        // saved there.
+        if (!(error instanceof MetakockaError)) throw error;
+      }
+    }
+
     const fallback = String(formData.get("fallback") ?? "").trim();
     if (fallback === "") {
       return {
@@ -744,6 +813,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         template === "" || template === DEFAULT_CUSTOMER_ORDER_TEMPLATE
           ? null
           : template,
+      shippingProductCode,
     });
 
     await replacePaymentTypeMaps(principal, entries);
@@ -1336,6 +1406,7 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
 interface OrdersData {
   template: string;
   defaultTemplate: string;
+  shippingProductCode: string;
   sample: { name: string; number: string; id: string } | null;
   profitCenter: string;
   register: string[];
@@ -1359,6 +1430,9 @@ function OrdersStep({
   const [mapping, setMapping] = useState(orders.mapping);
   const [fallback, setFallback] = useState(orders.fallback);
   const [profitCenter, setProfitCenter] = useState(orders.profitCenter);
+  const [shippingProductCode, setShippingProductCode] = useState(
+    orders.shippingProductCode,
+  );
 
   const errorFor = (field: string) =>
     result && !result.ok && result.field === field ? result.message : undefined;
@@ -1541,6 +1615,38 @@ function OrdersStep({
                     : "Sent on every sales order. Leave empty to let MetaKocka use the company setting. It is checked against MetaKocka when you continue."
                 }
                 error={errorFor("profitCenter")}
+              />
+            </s-box>
+          </s-stack>
+        </s-section>
+
+        {/*
+         * Shipping, asked for before the first order rather than after it.
+         *
+         * A MetaKocka sales order carries products and a shipping charge is not
+         * one, so it needs an article of its own or the postage simply is not
+         * on the document. Required here, and checked against MetaKocka when
+         * you continue — the settings page checks the same code the same way.
+         */}
+        <s-section heading="Shipping">
+          <s-stack direction="block" gap="base">
+            <s-paragraph>
+              Postage is written against a MetaKocka product of its own.
+              Without one, every order that charges postage reaches MetaKocka
+              short of it and is reported rather than counted as reconciled.
+            </s-paragraph>
+
+            <s-box maxInlineSize="520px">
+              <s-text-field
+                name="shippingProductCode"
+                label="Shipping product code"
+                placeholder="e.g. SHIPPING"
+                value={shippingProductCode}
+                onChange={(event) =>
+                  setShippingProductCode(event.currentTarget.value)
+                }
+                details="The code exactly as MetaKocka holds it. This app never creates the article for you."
+                error={errorFor("shippingProductCode")}
               />
             </s-box>
           </s-stack>

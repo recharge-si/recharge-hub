@@ -70,6 +70,14 @@ deliberate — there is no safe default for which article an accountant expects
 postage on — but it means every shop has a setup step before its orders reconcile
 commercially.
 
+**Guided setup now asks for the shipping article and refuses to continue without
+one**, checked against MetaKocka the way the settings screen checks it. A shop
+set up from now on therefore starts with postage representable. Readiness is
+deliberately unchanged: for a shop that finished setup before this, a missing
+shipping article stays a note on a working Orders component rather than a red
+one, because it is a per-order condition and not a broken integration. The
+discount setting keeps its safe default and is not asked for during setup.
+
 Line-level discounts are still not represented: they are parsed and stored, and
 they appear in the value reconciliation as a named unrepresented term. Folding
 them into `discount_value` alongside the order-level discount is the obvious
