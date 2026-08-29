@@ -52,8 +52,10 @@ name:
 Home              /app                  operations dashboard
 Orders            /app/orders           list, and /app/orders/settings
 Needs attention   /app/exceptions
-Products          /app/products         and /app/products/sync
-Locations         /app/locations        warehouses, stock direction, profit centres
+Products          /app/products         status, and /app/products/sync for settings
+Locations         /app/locations        warehouses and stock, and
+                                        /app/locations/settings for the defaults
+                                        and the profit centre register
 Settings          /app/settings         hub; /app/settings/metakocka is the connection
 ```
 
@@ -63,6 +65,14 @@ Settings. Three routes moved and redirect: `/app/settings/sales-orders` to
 `/app/orders/settings/payments`, `/app/settings/supply-sources` to
 `/app/locations`. `tests/unit/route-table.test.ts` asserts the table, including
 that `/app/orders/settings` out-ranks `/app/orders/:orderId`.
+
+**An area is a page you land on plus a settings page behind its header
+button.** Orders, Products and Locations are all built that way: the landing
+page answers "is this working" with a breakdown and what is happening now, and
+the settings page answers "what was it told to do". That is why the locations
+route is `app.locations._index.tsx` rather than `app.locations.tsx` — a leaf
+route with a child becomes a parent layout, and this one has no outlet to
+render it in.
 
 **Every redirect under `/app` goes through `redirectWithin`** in
 `src/web/lib/redirects.ts`, which carries the request's query string and lets

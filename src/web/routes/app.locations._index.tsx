@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -17,16 +16,8 @@ import {
   isConnected,
   requireCredential,
 } from "~/adapters/db/repositories/metakocka-credential.server";
-import {
-  listProfitCenters,
-  removeProfitCenter,
-  saveProfitCenter,
-  sourcesUsingProfitCenter,
-} from "~/adapters/db/repositories/profit-center.server";
-import {
-  getSupplyDefaults,
-  saveSupplyDefaults,
-} from "~/adapters/db/repositories/supply-setting.server";
+import { listProfitCenters } from "~/adapters/db/repositories/profit-center.server";
+import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import {
   listCachedWarehouses,
   listSupplySources,
@@ -37,18 +28,17 @@ import {
   MetakockaError,
   describeForMerchant,
 } from "~/adapters/metakocka/errors";
-import { validateProfitCenter } from "~/adapters/metakocka/profit-centers";
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { listLocations } from "~/adapters/shopify/locations";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
+import { DistributionBars } from "~/web/components/distribution-bars";
 import { RecentActivity } from "~/web/components/recent-activity";
-import { describeDirection } from "~/domain/readiness";
 import { describeEvent, describeSyncBriefly } from "~/web/lib/activity";
 import { formatDateTime } from "~/web/lib/datetime";
-import { INHERIT, toDirection } from "~/web/lib/locations";
+import { INHERIT } from "~/web/lib/locations";
 import { saveLocationMapping } from "~/web/lib/locations.server";
 import {
   METAKOCKA_REGISTERS_URL,
@@ -385,33 +375,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* Re-check the profit centre register                                    */
   /* ---------------------------------------------------------------------- */
 
-  if (intent === "refresh-profit-centers") {
-    const access = await requireCredential(principal);
-    if (!access.ok) {
-      return fail(
-        "register",
-        access.reason === "not_permitted"
-          ? access.message
-          : "Connect MetaKocka first, then check again.",
-      );
-    }
-
-    // Queued rather than awaited: this is one MetaKocka round trip per entry
-    // plus a control, which is minutes for a large register (section 2.5).
-    await enqueueThrottled(
-      QUEUES.reloadProfitCenters,
-      { shopDomain: principal.shopDomain },
-      `profit-centers:${principal.shopDomain}`,
-      REFRESH_THROTTLE_SECONDS,
-    );
-
-    return {
-      ok: true,
-      scope: "register" as const,
-      message: "Checking the register against MetaKocka.",
-    };
-  }
-
   /* ---------------------------------------------------------------------- */
   /* Sync stock now                                                         */
   /* ---------------------------------------------------------------------- */
@@ -432,148 +395,6 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       message: jobId
         ? "Syncing stock in the background. Reload in a minute."
         : "A sync is already running. Its result appears below.",
-    };
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /* Sync defaults                                                          */
-  /* ---------------------------------------------------------------------- */
-
-  if (intent === "save-defaults") {
-    const direction = toDirection(String(formData.get("direction") ?? "none"));
-    const profitCenter =
-      String(formData.get("profitCenter") ?? "").trim() || null;
-
-    const { updated, blocked } = await saveSupplyDefaults(principal, {
-      defaultStockDirection: direction,
-      defaultProfitCenter: profitCenter,
-    });
-
-    await appendEvent(principal, {
-      entityType: "supply_source",
-      event: "supply_defaults.saved",
-      detail: { direction, profitCenter, updated },
-    });
-
-    if (blocked.length > 0) {
-      // Section 7: one writer per Shopify location. Saying nothing would leave
-      // the merchant believing the default reached locations it did not.
-      return fail(
-        "defaults",
-        `Saved. ${blocked.join(", ")} kept ${blocked.length === 1 ? "its" : "their"} setting, because another warehouse already writes to that location.`,
-      );
-    }
-
-    return {
-      ok: true,
-      scope: "defaults" as const,
-      message:
-        updated === 0
-          ? "Saved the defaults."
-          : `Saved. ${updated} ${updated === 1 ? "location follows" : "locations follow"} them.`,
-    };
-  }
-
-  /* ---------------------------------------------------------------------- */
-  /* Add or remove a profit centre                                          */
-  /* ---------------------------------------------------------------------- */
-
-  if (intent === "add-profit-center") {
-    const value = String(formData.get("value") ?? "").trim();
-    if (!value) {
-      return fail("register", "Enter the name exactly as MetaKocka has it.");
-    }
-
-    const access = await requireCredential(principal);
-    if (!access.ok) {
-      return fail(
-        "register",
-        access.reason === "not_permitted"
-          ? access.message
-          : "Connect MetaKocka first, then add a centre.",
-      );
-    }
-    const credential = access.credential;
-
-    try {
-      const client = new MetakockaClient(
-        { companyId: credential.companyId, secretKey: credential.secretKey },
-        { timeoutMs: 30_000 },
-      );
-      const verdict = await validateProfitCenter(client, value);
-
-      if (verdict === "invalid") {
-        return fail(
-          "register",
-          `MetaKocka has no profit centre called "${value}". Add it in MetaKocka first.`,
-        );
-      }
-
-      await saveProfitCenter(principal, value, verdict);
-      await appendEvent(principal, {
-        entityType: "profit_center",
-        event: "profit_center.added",
-        detail: { value, verdict },
-      });
-
-      return {
-        ok: true,
-        scope: "register" as const,
-        warn: verdict === "unknown",
-        message:
-          verdict === "unknown"
-            ? `Added ${value}. MetaKocka could not confirm it.`
-            : `Added ${value}.`,
-      };
-    } catch (error) {
-      // Never a hard block. A centre we could not check is still a centre the
-      // merchant can see in MetaKocka, and refusing it would strand them on our
-      // inability to ask. It is stored unchecked and the copy says so.
-      if (error instanceof MetakockaError) {
-        await saveProfitCenter(principal, value, "unknown");
-        await appendEvent(principal, {
-          entityType: "profit_center",
-          event: "profit_center.added",
-          detail: { value, verdict: "unknown" },
-        });
-        return {
-          ok: true,
-          scope: "register" as const,
-          warn: true,
-          message: `Added ${value}. MetaKocka did not answer, so it is unchecked.`,
-        };
-      }
-      throw error;
-    }
-  }
-
-  if (intent === "remove-profit-center") {
-    const value = String(formData.get("value") ?? "").trim();
-    const defaults = await getSupplyDefaults(principal);
-
-    if (defaults.defaultProfitCenter === value) {
-      return fail("register", "This is the default. Change the default first.");
-    }
-
-    const inUse = await sourcesUsingProfitCenter(principal, value);
-    if (inUse.length > 0) {
-      return fail(
-        "register",
-        `${inUse.join(", ")} still ${inUse.length === 1 ? "uses" : "use"} it. Change ${inUse.length === 1 ? "that location" : "those locations"} first.`,
-      );
-    }
-
-    await removeProfitCenter(principal, value);
-    await appendEvent(principal, {
-      entityType: "profit_center",
-      event: "profit_center.removed",
-      detail: { value },
-    });
-
-    return {
-      ok: true,
-      scope: "register" as const,
-      message: `Removed ${value}.`,
     };
   }
 
@@ -685,8 +506,6 @@ type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
 const HELP_MODAL_ID = "about-locations";
 const EDITOR_MODAL_ID = "location-editor";
 const CONNECT_MODAL_ID = "warehouse-connect";
-const REGISTER_MODAL_ID = "profit-center-register";
-const SAVE_BAR_ID = "sync-defaults-save-bar";
 
 interface LocationDraft {
   mark: string;
@@ -699,7 +518,6 @@ export default function Locations() {
     connected,
     defaults: savedDefaults,
     profitCenters,
-    checking,
     locations,
     unconnected,
     syncing,
@@ -708,25 +526,20 @@ export default function Locations() {
   } = useLoaderData<typeof loader>();
 
   /**
-   * Four fetchers, because four different things on this page can be in flight
-   * and each has its own place to report.
+   * Two fetchers, because two different things on this page can be in flight
+   * and each has its own place to report: a location dialog, and the buttons on
+   * the page itself.
    *
    * Nothing here is a submittable `<Form>`. The page this replaced held several,
    * and a form that can be submitted by anything other than a person pressing a
    * button eventually is: the event log showed saves nobody asked for.
    */
-  const defaultsFetcher = useFetcher<typeof action>();
   const locationFetcher = useFetcher<typeof action>();
-  const registerFetcher = useFetcher<typeof action>();
   const pageFetcher = useFetcher<typeof action>();
-  const revalidator = useRevalidator();
 
-  const savingDefaults = defaultsFetcher.state !== "idle";
   const savingLocation = locationFetcher.state !== "idle";
-  const savingRegister = registerFetcher.state !== "idle";
   const busy = pageFetcher.state !== "idle";
 
-  const [draft, setDraft] = useState(savedDefaults);
   const [editing, setEditing] = useState<string | null>(null);
   const [connecting, setConnecting] = useState<string | null>(null);
   const [location, setLocation] = useState<LocationDraft>({
@@ -737,7 +550,6 @@ export default function Locations() {
   const [connectTo, setConnectTo] = useState("");
   const [advanced, setAdvanced] = useState(false);
   const [showUnconnected, setShowUnconnected] = useState(false);
-  const [newCenter, setNewCenter] = useState("");
 
   const editor = useRef<Overlay | null>(null);
   const connector = useRef<Overlay | null>(null);
@@ -753,46 +565,6 @@ export default function Locations() {
    */
   const openDialog = useRef<"editor" | "connect" | null>(null);
 
-  /* --- Sync defaults, on the contextual save bar (section 2.6) ----------- */
-
-  /**
-   * The stored values are the truth, but only once they have actually changed.
-   * The loader hands back a fresh object on every run, and it runs after every
-   * save and on every revalidation; keyed on identity this threw away whatever
-   * the merchant had chosen each time.
-   */
-  const savedKey = JSON.stringify(savedDefaults);
-  const appliedKey = useRef(savedKey);
-  useEffect(() => {
-    if (appliedKey.current === savedKey) return;
-    appliedKey.current = savedKey;
-    setDraft(savedDefaults);
-  }, [savedKey, savedDefaults]);
-
-  /**
-   * The bar is driven from the page's own idea of dirty.
-   *
-   * `data-save-bar` listens for change events on a form's fields, and every
-   * value here lives in a hidden input written by React, which fires none. The
-   * bar simply never appeared.
-   */
-  const dirty = JSON.stringify(draft) !== savedKey;
-
-  useEffect(() => {
-    if (typeof shopify === "undefined") return;
-    if (dirty) void shopify.saveBar.show(SAVE_BAR_ID);
-    else void shopify.saveBar.hide(SAVE_BAR_ID);
-  }, [dirty]);
-
-  // Leaving with the bar up would leave it up over the next page.
-  useEffect(
-    () => () => {
-      if (typeof shopify !== "undefined")
-        void shopify.saveBar.hide(SAVE_BAR_ID);
-    },
-    [],
-  );
-
   /* --- Dialogs close on success, and only on success --------------------- */
 
   useEffect(() => {
@@ -805,45 +577,31 @@ export default function Locations() {
   }, [locationFetcher.data]);
 
   useEffect(() => {
-    const result = registerFetcher.data;
-    if (!result?.ok) return;
-    setNewCenter("");
-    if (typeof shopify !== "undefined") shopify.toast.show(result.message);
-  }, [registerFetcher.data]);
-
-  useEffect(() => {
-    const result = defaultsFetcher.data ?? pageFetcher.data;
+    const result = pageFetcher.data;
     if (!result?.ok) return;
     if (typeof shopify !== "undefined") shopify.toast.show(result.message);
-  }, [defaultsFetcher.data, pageFetcher.data]);
-
-  /**
-   * The register check runs in a background job, so the page has to look again
-   * to see it. It checks for a minute and stops: a check that has not landed by
-   * then has failed, the nightly run will try again, and a page that polls for
-   * as long as it stays open is worse than a slightly old list.
-   */
-  const revalidatorRef = useRef(revalidator);
-  revalidatorRef.current = revalidator;
-
-  useEffect(() => {
-    if (!checking) return;
-
-    let checks = 0;
-    const timer = setInterval(() => {
-      checks += 1;
-      if (checks > 12) {
-        clearInterval(timer);
-        return;
-      }
-      const current = revalidatorRef.current;
-      if (current.state === "idle") current.revalidate();
-    }, 5000);
-
-    return () => clearInterval(timer);
-  }, [checking]);
+  }, [pageFetcher.data]);
 
   /* --- Derived ----------------------------------------------------------- */
+
+  /*
+   * How the store's locations stand. Ordered by how much they want a person:
+   * failing first, then not connected, then the ordinary two. A status nobody
+   * is in is left out rather than drawn as a zero.
+   */
+  const statusBreakdown = (
+    [
+      ["error", "Failing"],
+      ["not_connected", "Not connected to a warehouse"],
+      ["syncing", "Syncing"],
+      ["paused", "Connected, not syncing"],
+    ] as const
+  )
+    .map(([status, name]) => ({
+      name,
+      count: locations.filter((row) => row.status === status).length,
+    }))
+    .filter((row) => row.count > 0);
 
   const edited = locations.find((row) => row.id === editing) ?? null;
   const connectingWarehouse =
@@ -915,13 +673,6 @@ export default function Locations() {
     }),
   ];
 
-  const invalidDefault =
-    savedDefaults.profitCenter !== "" &&
-    profitCenters.some(
-      (entry) => entry.value === savedDefaults.profitCenter && !entry.isValid,
-    );
-
-  const uncheckedCount = profitCenters.filter((entry) => !entry.checked).length;
   const rejected = profitCenters.filter((entry) => !entry.isValid);
 
   const openEditor = (row: (typeof locations)[number]) => {
@@ -969,10 +720,6 @@ export default function Locations() {
 
   const locationResult =
     locationFetcher.data?.scope === "location" ? locationFetcher.data : null;
-  const registerResult =
-    registerFetcher.data?.scope === "register" ? registerFetcher.data : null;
-  const defaultsResult =
-    defaultsFetcher.data?.scope === "defaults" ? defaultsFetcher.data : null;
   const pageResult =
     pageFetcher.data?.scope === "page" ? pageFetcher.data : null;
 
@@ -981,6 +728,19 @@ export default function Locations() {
       <s-link slot="breadcrumb-actions" href="/app">
         Home
       </s-link>
+
+      {/*
+       * Settings in the header, the same as Products. This page is what stock
+       * is doing; the settings page is what every location was told to do
+       * unless it says otherwise.
+       */}
+      <s-button
+        slot="secondary-actions"
+        icon="settings"
+        href="/app/locations/settings"
+      >
+        Settings
+      </s-button>
 
       {/*
        * Page-level explanation behind a header action rather than a card: it is
@@ -994,27 +754,6 @@ export default function Locations() {
       >
         Help
       </s-button>
-
-      {/*
-       * The contextual save bar (section 2.6), driven explicitly. The primary
-       * button is Save and the plain one is Discard: that is how App Bridge
-       * tells them apart.
-       */}
-      <ui-save-bar id={SAVE_BAR_ID}>
-        <button
-          variant="primary"
-          onClick={() =>
-            defaultsFetcher.submit(
-              { intent: "save-defaults", ...draft },
-              { method: "post" },
-            )
-          }
-          {...(savingDefaults ? { loading: "" } : {})}
-        >
-          Save
-        </button>
-        <button onClick={() => setDraft(savedDefaults)}>Discard</button>
-      </ui-save-bar>
 
       <s-modal id={HELP_MODAL_ID} heading="About locations">
         <s-stack direction="block" gap="base">
@@ -1246,134 +985,6 @@ export default function Locations() {
         </s-button>
       </s-modal>
 
-      {/* --- Profit centre register --------------------------------------- */}
-
-      <s-modal id={REGISTER_MODAL_ID} heading="Profit centres">
-        <s-stack direction="block" gap="large">
-          {registerResult && !registerResult.ok ? (
-            <s-banner tone="critical" heading="That did not work">
-              <s-paragraph>{registerResult.message}</s-paragraph>
-            </s-banner>
-          ) : null}
-
-          {registerResult?.warn ? (
-            <s-banner tone="warning" heading="Not checked">
-              <s-paragraph>{registerResult.message}</s-paragraph>
-            </s-banner>
-          ) : null}
-
-          {/*
-           * A field, a button and the list. Why a register exists at all, and
-           * why it has to be typed, are in the page's Help: this dialog is
-           * opened to do something, and three paragraphs of preamble are read
-           * once and in the way every time after that.
-           *
-           * The link stays. It sits beside Add because that is the moment it
-           * is needed: the name has to match MetaKocka exactly, so looking it
-           * up is part of the task rather than background reading.
-           */}
-          <s-stack direction="block" gap="base">
-            <s-text-field
-              name="value"
-              label="Name in MetaKocka"
-              details="Type it exactly as MetaKocka has it."
-              value={newCenter}
-              onChange={(e) => setNewCenter(e.currentTarget.value)}
-            />
-            <s-stack direction="inline" gap="base" alignItems="center">
-              <s-button
-                variant="secondary"
-                onClick={() =>
-                  registerFetcher.submit(
-                    { intent: "add-profit-center", value: newCenter },
-                    { method: "post" },
-                  )
-                }
-                {...(savingRegister || newCenter.trim() === ""
-                  ? { loading: savingRegister, disabled: true }
-                  : {})}
-              >
-                Add
-              </s-button>
-              <s-link href={METAKOCKA_REGISTERS_URL} target="_blank">
-                Open registers in MetaKocka
-              </s-link>
-            </s-stack>
-          </s-stack>
-
-          {profitCenters.length === 0 ? (
-            <s-text color="subdued">Nothing in the register yet.</s-text>
-          ) : (
-            <s-table variant="auto">
-              <s-table-header-row>
-                <s-table-header listSlot="primary">Name</s-table-header>
-                <s-table-header listSlot="labeled">Status</s-table-header>
-                <s-table-header listSlot="labeled">Action</s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {profitCenters.map((entry) => (
-                  <s-table-row key={entry.value}>
-                    <s-table-cell>
-                      <s-text type="strong">{entry.value}</s-text>
-                    </s-table-cell>
-                    <s-table-cell>
-                      {!entry.isValid ? (
-                        <s-badge tone="critical">Not in MetaKocka</s-badge>
-                      ) : entry.checked ? (
-                        <s-badge tone="success">Checked</s-badge>
-                      ) : (
-                        <s-badge tone="neutral">Not checked</s-badge>
-                      )}
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-button
-                        variant="tertiary"
-                        tone="critical"
-                        accessibilityLabel={`Remove ${entry.value}`}
-                        onClick={() =>
-                          registerFetcher.submit(
-                            {
-                              intent: "remove-profit-center",
-                              value: entry.value,
-                            },
-                            { method: "post" },
-                          )
-                        }
-                        {...(savingRegister ? { disabled: true } : {})}
-                      >
-                        Remove
-                      </s-button>
-                    </s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
-          )}
-        </s-stack>
-
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          command="--hide"
-          commandFor={REGISTER_MODAL_ID}
-        >
-          Done
-        </s-button>
-        <s-button
-          slot="secondary-actions"
-          variant="secondary"
-          onClick={() =>
-            registerFetcher.submit(
-              { intent: "refresh-profit-centers" },
-              { method: "post" },
-            )
-          }
-          {...(savingRegister || !connected ? { disabled: true } : {})}
-        >
-          Check again
-        </s-button>
-      </s-modal>
-
       <s-stack direction="block" gap="large">
         {/*
          * One page-level banner at a time, so two never sit together (section
@@ -1386,39 +997,24 @@ export default function Locations() {
           <s-banner tone="critical" heading="That did not work">
             <s-paragraph>{pageResult.message}</s-paragraph>
           </s-banner>
-        ) : defaultsResult && !defaultsResult.ok ? (
-          <s-banner tone="warning" heading="Saved, with an exception">
-            <s-paragraph>{defaultsResult.message}</s-paragraph>
-          </s-banner>
         ) : rejected.length > 0 ? (
+          /*
+           * A profit centre MetaKocka no longer has refuses orders, so it stays
+           * visible here even though the register itself moved to Settings. The
+           * button goes there rather than opening a dialog this page no longer
+           * owns — the register is a setting, and it is edited where the
+           * settings are.
+           *
+           * The quieter "nothing in the register has been checked" notice went
+           * with it: that is housekeeping, and it belongs on the page that
+           * keeps house.
+           */
           <s-banner tone="warning" heading="Profit centres to check">
             <s-paragraph>
               {`MetaKocka no longer has ${rejected.map((entry) => entry.value).join(", ")}. Orders using ${rejected.length === 1 ? "it" : "them"} will be refused.`}
             </s-paragraph>
-            <s-button
-              slot="primary-action"
-              command="--show"
-              commandFor={REGISTER_MODAL_ID}
-            >
+            <s-button slot="primary-action" href="/app/locations/settings">
               Open the register
-            </s-button>
-          </s-banner>
-        ) : uncheckedCount > 0 && !checking ? (
-          <s-banner tone="warning" heading="Register not checked">
-            <s-paragraph>
-              {`${uncheckedCount} ${uncheckedCount === 1 ? "profit centre has" : "profit centres have"} not been checked against MetaKocka.`}
-            </s-paragraph>
-            <s-button
-              slot="primary-action"
-              onClick={() =>
-                registerFetcher.submit(
-                  { intent: "refresh-profit-centers" },
-                  { method: "post" },
-                )
-              }
-              {...(!connected ? { disabled: true } : {})}
-            >
-              Retry
             </s-button>
           </s-banner>
         ) : null}
@@ -1427,20 +1023,9 @@ export default function Locations() {
 
         <s-section heading="Stock sync">
           {/*
-           * The count sits in the section's own header slot, beside the
-           * heading, rather than as the first thing in the body. It describes
-           * the card; reading it as a line of content meant reading past it to
-           * reach the two buttons that actually do something.
-           *
-           * Neutral, not green. It is the normal state, and colour marks
-           * exceptions (docs/ui-conventions.md). Not being connected is an
-           * exception, so that one keeps its tone.
+           * Not being connected is an exception and keeps its badge; the counts
+           * do not, because a breakdown says more than one of them can.
            */}
-          <s-badge slot="secondary-actions" tone="neutral">
-            {syncing === 1
-              ? "1 location syncing"
-              : `${syncing} locations syncing`}
-          </s-badge>
           {connected ? null : (
             <s-badge slot="secondary-actions" tone="caution">
               MetaKocka not connected
@@ -1448,6 +1033,21 @@ export default function Locations() {
           )}
 
           <s-stack direction="block" gap="base">
+            {/*
+             * Where the locations stand, as a breakdown rather than one count
+             * in the header and the rest left to be worked out from the table
+             * below. The same component Products and the home page use, so a
+             * breakdown looks the same wherever this app draws one.
+             *
+             * Each count appears once: the table states which locations, this
+             * states how many, and neither repeats the other.
+             */}
+            <DistributionBars
+              rows={statusBreakdown}
+              unit="location"
+              empty="This store has no locations yet."
+            />
+
             <s-paragraph>
               Syncing copies quantities in the background. It also runs on a
               schedule.
@@ -1486,77 +1086,6 @@ export default function Locations() {
         </s-section>
 
         {/* --- Stock ------------------------------------------------------- */}
-
-        <s-section heading="Stock">
-          <s-stack direction="block" gap="large">
-            <s-text color="subdued">
-              Every location follows these unless you change it.
-            </s-text>
-
-            <s-stack direction="block" gap="small-400">
-              <Dropdown
-                name="direction"
-                label="Where do you normally count stock?"
-                details="The side you count is copied to the other."
-                value={draft.direction}
-                options={[
-                  { value: "mk_to_shopify", label: "MetaKocka (recommended)" },
-                  { value: "shopify_to_mk", label: "Shopify" },
-                  { value: "none", label: "Do not synchronize stock" },
-                ]}
-                onChange={(next) =>
-                  setDraft((current) => ({ ...current, direction: next }))
-                }
-              />
-              <s-text color="subdued">
-                {describeDirection(toDirection(draft.direction)).flow
-                  ? `Stock flows ${describeDirection(toDirection(draft.direction)).flow}.`
-                  : "No stock is copied in either direction."}
-              </s-text>
-            </s-stack>
-
-            <s-stack direction="block" gap="base">
-              {checking ? (
-                <s-stack direction="block" gap="small-400">
-                  <s-text type="strong">Default profit centre</s-text>
-                  <s-stack
-                    direction="inline"
-                    gap="small-200"
-                    alignItems="center"
-                  >
-                    <s-spinner accessibilityLabel="Checking" />
-                    <s-text color="subdued">Checking with MetaKocka</s-text>
-                  </s-stack>
-                </s-stack>
-              ) : (
-                <Dropdown
-                  name="profitCenter"
-                  label="Default profit centre"
-                  details="Sent to MetaKocka on every order."
-                  value={draft.profitCenter}
-                  options={centerOptions}
-                  onChange={(next) =>
-                    setDraft((current) => ({ ...current, profitCenter: next }))
-                  }
-                  {...(invalidDefault
-                    ? {
-                        error:
-                          "MetaKocka no longer has this centre. Choose another one.",
-                      }
-                    : {})}
-                />
-              )}
-
-              <s-button
-                variant="tertiary"
-                command="--show"
-                commandFor={REGISTER_MODAL_ID}
-              >
-                Manage profit centres
-              </s-button>
-            </s-stack>
-          </s-stack>
-        </s-section>
 
         {/* --- Locations --------------------------------------------------- */}
 

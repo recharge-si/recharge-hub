@@ -84,9 +84,24 @@ describe("route table", () => {
     expect(await fileFor("/app/products")).toBe(
       "routes/app.products._index.tsx",
     );
-    expect(await fileFor("/app/locations")).toBe("routes/app.locations.tsx");
+    expect(await fileFor("/app/locations")).toBe(
+      "routes/app.locations._index.tsx",
+    );
     expect(await fileFor("/app/settings")).toBe(
       "routes/app.settings._index.tsx",
+    );
+  });
+
+  it("gives each area's settings a page under the area itself", async () => {
+    // Locations became a layoutless pair the way Orders already was: the page
+    // you land on, and the settings behind its header button. Without the
+    // rename to `_index`, `app.locations.tsx` would be a parent layout with no
+    // outlet and the settings page would render as a blank locations page.
+    expect(await fileFor("/app/locations/settings")).toBe(
+      "routes/app.locations.settings.tsx",
+    );
+    expect(await fileFor("/app/products/sync")).toBe(
+      "routes/app.products.sync.tsx",
     );
   });
 
