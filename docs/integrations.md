@@ -49,6 +49,9 @@ either build T-08 or drop the scope (see T-07).
 
 ### Configuration and authentication
 
+- Disconnecting MetaKocka erases this app's data for the store and restarts
+  guided setup (`resetShop`); MetaKocka itself is never called or changed.
+  See `docs/architecture.md` § Disconnecting resets the store.
 - `shopify.app.toml` is the single Partner-app configuration and webhook source.
 - `shopify.web.toml` tells the CLI how to start the local web/worker pair.
 - `src/adapters/shopify/shopify.server.ts` configures token exchange, encrypted

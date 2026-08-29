@@ -98,6 +98,34 @@ Shopify location to a MetaKocka warehouse, shared by the locations page and
 guided setup, because "one writer per location" is not an invariant worth having
 two of.
 
+### Disconnecting resets the store
+
+Disconnect on `/app/settings/metakocka` calls `resetShop`, which deletes the
+`shop` row — every shop-scoped table cascades from it — removes the
+`idempotency_key` rows that are keyed by domain rather than by foreign key,
+and creates the shop again as a fresh install. The Shopify `session` stays:
+the app is still installed and the merchant is still looking at it. The new
+row has no `setup_completed_at`, so guided setup runs from the first step and
+both MetaKocka writers refuse until it is finished again.
+
+It is written as one delete rather than a list of tables on purpose: a list
+is a thing that goes stale the next time a table is added, and the failure is
+silent. `tests/db/disconnect-reset.test.ts` covers the two tables that do not
+cascade.
+
+It erases because almost everything here is derived from the company being
+disconnected — warehouse marks and their stock directions, profit centres,
+payment-type maps, the SKU register, cached registers. Keeping them and
+connecting a *different* company files documents against marks that company
+has never heard of, and MetaKocka accepts an unknown warehouse mark silently
+and files against the company default. A stale mapping is worse than none.
+
+**Nothing is sent to MetaKocka and nothing is deleted there.** Documents this
+app filed are the merchant's accounting records; what goes is this app's copy.
+Because it is unrecoverable, the button is behind typing the company ID, and
+the server checks it again rather than trusting the disabled state of a
+button.
+
 ### Stock direction is answered before activation, not after
 
 The stock step asks where the shop counts stock and then asks it again per

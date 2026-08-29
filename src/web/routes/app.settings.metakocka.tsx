@@ -2,6 +2,7 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useEffect, useRef, useState } from "react";
 import {
   Form,
+  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
@@ -13,13 +14,14 @@ import { z } from "zod";
 
 import {
   NotPermittedError,
-  disconnect,
+  assertMayDisconnect,
   getCredential,
   getCredentialSummary,
   markVerified,
   saveCredential,
 } from "~/adapters/db/repositories/metakocka-credential.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { resetShop } from "~/adapters/db/repositories/shop.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import {
   MetakockaError,
@@ -99,17 +101,55 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   try {
     if (intent === "disconnect") {
-      await disconnect(principal);
+      assertMayDisconnect(principal);
+
+      const connection = await getCredentialSummary(principal);
+
+      if (!connection.connected) {
+        return {
+          ok: false,
+          intent: "disconnect",
+          message: "There is no MetaKocka connection to disconnect.",
+        } satisfies ActionResult;
+      }
+
+      /*
+       * The company ID, typed back.
+       *
+       * Disconnecting erases everything this app holds for the store, which
+       * is not a thing to do by mis-clicking a button next to “Test
+       * connection”. Typing the id also names what is being disconnected,
+       * which matters for a merchant who has more than one company.
+       */
+      const typed = String(formData.get("confirmCompanyId") ?? "").trim();
+      if (typed !== connection.companyId) {
+        return {
+          ok: false,
+          intent: "disconnect",
+          message: `Type the company ID ${connection.companyId} exactly to confirm. Nothing was erased.`,
+        } satisfies ActionResult;
+      }
+
+      await resetShop(principal);
+
+      // The old event log went with everything else. This is the first line
+      // of the new one, and it records the one thing a merchant will want to
+      // check later: what was disconnected, and when.
       await appendEvent(principal, {
         entityType: "metakocka_credential",
         event: "metakocka.disconnected",
+        detail: { companyId: connection.companyId },
       });
 
-      return {
-        ok: true,
-        intent: "disconnect",
-        message: "MetaKocka disconnected. No orders will be sent to the ERP.",
-      } satisfies ActionResult;
+      // Setup is unfinished again by construction, so send the merchant
+      // there rather than leaving them on a settings page for a connection
+      // that no longer exists.
+      return redirect(
+        "/app/setup?note=" +
+          encodeURIComponent(
+            `Disconnected ${connection.companyId} and erased this app's data for the store. Nothing in MetaKocka was changed.`,
+          ),
+      );
     }
 
     if (intent === "test") {
@@ -413,24 +453,78 @@ export default function MetakockaSettings() {
                 </s-button>
               </Form>
 
-              {summary?.connected ? (
-                <Form method="post">
-                  <input type="hidden" name="intent" value="disconnect" />
-                  <s-button
-                    type="submit"
-                    variant="secondary"
-                    tone="critical"
-                    {...(busy ? { disabled: true } : {})}
-                  >
-                    Disconnect
-                  </s-button>
-                </Form>
-              ) : null}
             </s-stack>
           </s-stack>
         </s-section>
+
+        {summary?.connected ? (
+          <s-section heading="Disconnect">
+            <s-stack direction="block" gap="base">
+              <s-paragraph>
+                Disconnecting erases everything this app holds for this
+                store: the connection, the warehouse and location mappings
+                and their stock directions, profit centres, payment mappings,
+                the product register, order history and the activity log.
+                Setup starts again from the first step.
+              </s-paragraph>
+
+              <s-paragraph>
+                <s-text type="strong">Nothing in MetaKocka is changed.</s-text>{" "}
+                Documents this app has already filed stay exactly as they are;
+                what is erased is this app&rsquo;s own copy.
+              </s-paragraph>
+
+              <DisconnectForm companyId={summary.companyId} busy={busy} />
+            </s-stack>
+          </s-section>
+        ) : null}
       </s-stack>
     </s-page>
+  );
+}
+
+/**
+ * Disconnect, behind the company ID.
+ *
+ * Its own component because it holds the typed value, and a `useState` in
+ * the page would re-render every field on the connection form on each
+ * keystroke.
+ */
+function DisconnectForm({
+  companyId,
+  busy,
+}: {
+  companyId: string | null;
+  busy: boolean;
+}) {
+  const [typed, setTyped] = useState("");
+  const matches = companyId !== null && typed.trim() === companyId;
+
+  return (
+    <Form method="post">
+      <input type="hidden" name="intent" value="disconnect" />
+      <s-stack direction="block" gap="base">
+        <s-box maxInlineSize="320px">
+          <s-text-field
+            name="confirmCompanyId"
+            label="Type the company ID to confirm"
+            value={typed}
+            onChange={(event) => setTyped(event.currentTarget.value)}
+            details={`This connection is company ${companyId ?? ""}.`}
+          />
+        </s-box>
+
+        {/* Checked again on the server: this only stops the obvious mistake. */}
+        <s-button
+          type="submit"
+          variant="secondary"
+          tone="critical"
+          {...(busy || !matches ? { disabled: true } : {})}
+        >
+          Disconnect and erase
+        </s-button>
+      </s-stack>
+    </Form>
   );
 }
 
