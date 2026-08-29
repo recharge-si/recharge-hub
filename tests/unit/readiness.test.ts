@@ -41,6 +41,7 @@ function facts(over: Partial<ReadinessFacts> = {}): ReadinessFacts {
     orders: {
       shippingProductCode: "SHIPPING",
       discountRepresentation: "document_discount_value",
+      salesOrderSplit: "per_warehouse",
     },
     products: { matched: 40, unmatched: 0 },
     setupCompletedAt: new Date("2026-08-26T09:00:00Z"),
@@ -205,6 +206,35 @@ describe("computeReadiness", () => {
     expect(warehouses.reason).toContain("Partner Supply");
   });
 
+  /*
+   * A shop writing one unsplit sales order files orders with no warehouse on
+   * them at all, so telling it that nothing can be filed until a location is
+   * mapped is simply untrue. The mapping still matters — stock synchronization
+   * has nowhere to run without it — so the component stays required and only
+   * the reason changes.
+   */
+  it("gives an unsplit shop the stock reason for an unmapped location", () => {
+    const readiness = computeReadiness(
+      facts({
+        warehouses: { connectedCount: 0, incompleteNames: [] },
+        orders: {
+          shippingProductCode: "SHIPPING",
+          discountRepresentation: "document_discount_value",
+          salesOrderSplit: "single",
+        },
+      }),
+    );
+
+    const warehouses = componentOf(readiness, "warehouses");
+    expect(warehouses.status).toBe("needs_attention");
+    expect(warehouses.required).toBe(true);
+    expect(warehouses.reason).toContain("stock can be synchronized");
+    expect(warehouses.reason).not.toContain("before an order can be filed");
+
+    // And orders are not reported as waiting on it, because they are not.
+    expect(componentOf(readiness, "orders").status).toBe("ready");
+  });
+
   it("blocks activation while payments have no fallback", () => {
     const readiness = computeReadiness(
       facts({
@@ -285,6 +315,7 @@ describe("computeReadiness", () => {
         orders: {
           shippingProductCode: null,
           discountRepresentation: "none",
+          salesOrderSplit: "per_warehouse",
         },
       }),
     );

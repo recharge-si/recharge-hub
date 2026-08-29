@@ -15,6 +15,22 @@ import { shopDomainOf, type Principal } from "~/domain/types";
  */
 
 export type AllocationMode = "shopify_locations" | "stock_rules";
+/**
+ * Whether one Shopify order becomes one MetaKocka sales order or several.
+ *
+ * `per_warehouse` is what this connector has always done: MetaKocka's
+ * `warehouse` is a document-level attribute (§3), so an order shipping from two
+ * warehouses can only be described as two sales orders linked by their
+ * `buyer_order`.
+ *
+ * `single` is the other honest answer. One document carries every line of the
+ * Shopify order and **no warehouse mark at all**, so MetaKocka files it against
+ * the company default. Nothing is allocated, nothing is split, and the ERP no
+ * longer says which warehouse the goods left from — which is precisely the
+ * trade a merchant who does not run their warehouses in MetaKocka wants to
+ * make.
+ */
+export type SalesOrderSplit = "per_warehouse" | "single";
 export type PaymentEntryMode = "per_transaction" | "aggregate";
 export type DiscountRepresentation = "none" | "document_discount_value";
 
@@ -28,6 +44,14 @@ export interface SalesOrderSettings {
    * default template; see `domain/orders/reference`.
    */
   customerOrderTemplate: string | null;
+  /**
+   * Whether the order is split across its warehouses at all.
+   *
+   * `allocationMode` above answers "which system decides the warehouse", and
+   * under `single` there is no warehouse to decide: the question does not
+   * arise, so the setting is kept but has no effect.
+   */
+  salesOrderSplit: SalesOrderSplit;
   allocationMode: AllocationMode;
   obsoleteDocumentPolicy: ObsoleteDocumentPolicy;
   syncPayments: boolean;
@@ -53,6 +77,10 @@ export interface SalesOrderSettings {
  *    behaviour until the merchant says otherwise. Note this gates *content*
  *    changes only: a payment arriving against a paid document is the payment
  *    path doing its job, not a rewrite of the order.
+ *  - `salesOrderSplit` splits per warehouse, because MetaKocka's `warehouse`
+ *    is document-level and a single document for a two-warehouse order can
+ *    only name one of them — which leaves the ERP's stock wrong about goods it
+ *    actually shipped. A shop that does not want the split says so.
  *  - `allocationMode` follows Shopify, because a merchant moving a line to
  *    another location in the Shopify admin is stating where it ships from, and
  *    an ERP that ignores that describes the wrong warehouse. Stock rules still
@@ -70,6 +98,7 @@ export const SALES_ORDER_DEFAULTS: SalesOrderSettings = {
   updateOnChange: true,
   updateAfterPaid: false,
   customerOrderTemplate: null,
+  salesOrderSplit: "per_warehouse",
   allocationMode: "shopify_locations",
   obsoleteDocumentPolicy: "empty",
   syncPayments: true,
@@ -104,6 +133,7 @@ export async function getSalesOrderSettings(
       updateOnChange: true,
       updateAfterPaid: true,
       customerOrderTemplate: true,
+      salesOrderSplit: true,
       allocationMode: true,
       obsoleteDocumentPolicy: true,
       syncPayments: true,

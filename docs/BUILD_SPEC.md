@@ -794,7 +794,10 @@ yet. See `docs/project-status.md` T-08.
 
 ### 8.4 MetaKocka sales orders
 
-One job per supply source. Each job:
+`sales_order_setting.sales_order_split` decides how many documents an order
+becomes.
+
+**`per_warehouse` (default).** One job per supply source. Each job:
 
 - builds `count_code` = `SH-{orderNumber}-{sourceCode}`
 - checks `metakocka_document` for that `count_code`; if a successful row exists, **return
@@ -808,6 +811,22 @@ One job per supply source. Each job:
   and B2B orders
 - sends `price` or `price_with_tax` according to Shopify's tax-inclusive setting
 - records request and response bodies regardless of outcome
+
+**`single`.** One job for the whole order, keyed by `WHOLE_ORDER_DOCUMENT` and
+stored with `metakocka_document.supply_source_id = NULL`. It does everything
+above except the warehouse: `count_code` is the order reference with no source
+suffix, every line of the order is on the one document at full quantity, no
+`warehouse` mark is sent — so MetaKocka files it against the company default —
+`profit_center` comes from `supply_setting.default_profit_center` and no
+`delivery_type` is sent. Nothing is allocated, so §8.2 does not run and
+`allocation_mode` has no effect. Every other rule here — the `count_code` claim,
+the ambiguous-write lookup, the update policy of §8.8, the money split of §8.6,
+the payments of §8.7 and the verification of §8.10 — is unchanged.
+
+This is a merchant's choice and it has a stated cost: MetaKocka no longer
+records which warehouse the goods left from. It is offered because a shop that
+does not keep its warehouses in MetaKocka gets nothing from the split except two
+documents per order, each filed against a warehouse nobody meant to use.
 
 Do **not** set `create_invoice` in v1. Invoicing stays a merchant decision.
 

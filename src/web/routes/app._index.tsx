@@ -191,7 +191,7 @@ export default function Home() {
   const { dashboard, readiness, attention, events } =
     useLoaderData<typeof loader>();
 
-  const { counts, series, warehouseShares, splitOrders, windowDays } =
+  const { counts, series, warehouseShares, splitOrders, unsplit, windowDays } =
     dashboard;
   const openExceptions = dashboard.openExceptionsByKind.reduce(
     (sum, entry) => sum + entry.count,
@@ -380,20 +380,29 @@ export default function Home() {
           </s-stack>
         </s-section>
 
-        <s-section heading="Where orders were filed">
-          <s-stack direction="block" gap="base">
-            <DistributionBars
-              rows={warehouseShares}
-              unit="sales order"
-              empty={`No sales orders in the last ${windowDays} days.`}
-            />
-            {splitOrders > 0 ? (
-              <s-text color="subdued">
-                {`${splitOrders} ${splitOrders === 1 ? "order was" : "orders were"} fulfilled from more than one warehouse, so ${splitOrders === 1 ? "it became" : "they became"} a sales order per warehouse.`}
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-section>
+{/*
+         * A breakdown by warehouse, for a shop that has warehouses on its
+         * documents. One that writes a single sales order per Shopify order
+         * does not, and a chart of one bar labelled "Unknown warehouse" would
+         * be stating something untrue about their setup rather than saying
+         * nothing.
+         */}
+        {unsplit ? null : (
+          <s-section heading="Where orders were filed">
+            <s-stack direction="block" gap="base">
+              <DistributionBars
+                rows={warehouseShares}
+                unit="sales order"
+                empty={`No sales orders in the last ${windowDays} days.`}
+              />
+              {splitOrders > 0 ? (
+                <s-text color="subdued">
+                  {`${splitOrders} ${splitOrders === 1 ? "order was" : "orders were"} fulfilled from more than one warehouse, so ${splitOrders === 1 ? "it became" : "they became"} a sales order per warehouse.`}
+                </s-text>
+              ) : null}
+            </s-stack>
+          </s-section>
+        )}
 
         <s-section heading="Recent activity">
           <RecentActivity

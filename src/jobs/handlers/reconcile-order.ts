@@ -36,6 +36,7 @@ import {
 } from "~/domain/orders/canonical";
 import {
   planDocuments,
+  WHOLE_ORDER_DOCUMENT,
   sameLines,
   type DocumentAction,
   type ExistingDocument,
@@ -346,10 +347,23 @@ async function reconcileUnderLock(
   /* Where each line ships from                                             */
   /* ---------------------------------------------------------------------- */
 
+  /**
+   * Whether this shop splits an order across its warehouses at all.
+   *
+   * The whole section below is about deciding which warehouse each part of an
+   * order comes from, and a shop on `single` has said it does not want that
+   * question answered: one sales order carries the order, with no warehouse
+   * mark, and MetaKocka files it against the company default. So none of it
+   * runs — not the fulfilment-order read, not the allocator, and not the
+   * exceptions that report a location nothing maps, which would otherwise
+   * report a mapping this shop has no use for.
+   */
+  const wholeOrder = settings.salesOrderSplit === "single";
+
   let assignments: FulfillmentAssignment[] = [];
   let unreadableLocation = false;
 
-  if (settings.allocationMode === "shopify_locations") {
+  if (!wholeOrder && settings.allocationMode === "shopify_locations") {
     const read = await fetchFulfillmentAssignments(admin, head.shopifyOrderId);
     assignments = read.assignments;
     unreadableLocation = read.hasUnreadableLocation;
@@ -363,21 +377,22 @@ async function reconcileUnderLock(
    * documents are still reconciled against that allocation — the merchant chose
    * the warehouses, not the quantities.
    */
-  const plan = head.allocationLockedAt
-    ? null
-    : await planAllocations(principal, {
-        orderId,
-        lines: order.lines.map((line) => ({
-          orderLineId: line.id,
-          shopifyLineItemId: line.shopifyLineItemId,
-          sku: line.sku,
-          title: line.title,
-          quantity: line.quantity,
-        })),
-        canonicalLines,
-        assignments,
-        mode: settings.allocationMode,
-      });
+  const plan =
+    head.allocationLockedAt || wholeOrder
+      ? null
+      : await planAllocations(principal, {
+          orderId,
+          lines: order.lines.map((line) => ({
+            orderLineId: line.id,
+            shopifyLineItemId: line.shopifyLineItemId,
+            sku: line.sku,
+            title: line.title,
+            quantity: line.quantity,
+          })),
+          canonicalLines,
+          assignments,
+          mode: settings.allocationMode,
+        });
 
   /*
    * Where every Shopify quantity went.
@@ -386,12 +401,56 @@ async function reconcileUnderLock(
    * person pinned the sources by hand, so a locked order is classified by the
    * same rules rather than skipping the question.
    */
-  const classification =
-    plan?.classification ??
-    classifyQuantities(
-      canonicalLines,
-      await persistedAllocations(orderId, canonicalLines),
-    );
+  const classification = wholeOrder
+    ? /*
+       * One document, every unit on it.
+       *
+       * The classification answers "for every unit the customer bought, where
+       * is it?", and for an unsplit order the answer is the same for all of
+       * them: on the single sales order. It is stated here rather than derived
+       * from allocations because there are none — an unsplit order is never
+       * allocated to a warehouse — and the verification pass still has to be
+       * able to check that every unit reached MetaKocka.
+       */
+      classifyQuantities(canonicalLines, [
+        {
+          shopifyLocationId: null,
+          supplySourceId: null,
+          disposition: "managed",
+          lines: canonicalLines.map((line) => ({
+            shopifyLineItemId: line.shopifyLineItemId,
+            quantity: line.quantity,
+          })),
+        },
+      ])
+    : (plan?.classification ??
+      classifyQuantities(
+        canonicalLines,
+        await persistedAllocations(orderId, canonicalLines),
+      ));
+
+  /*
+   * Allocations left over from a shop that used to split.
+   *
+   * Cleared rather than left behind: they name warehouses no document carries
+   * any more, and the order page reads them to say where each line is
+   * fulfilled from. `allocated` is the honest status — nothing is waiting on a
+   * decision, because there is no decision to make.
+   */
+  if (wholeOrder) {
+    const stale = await prisma.allocation.count({
+      where: { orderLine: { orderId } },
+    });
+    // Only when there is something to clear. An unsplit order never gains
+    // allocations, so on every pass after the first this would otherwise be a
+    // transaction that deletes nothing and rewrites the order's status.
+    if (stale > 0) await replaceAllocations(principal, orderId, [], "allocated");
+
+    await closeExceptionsFor(principal, orderId, [
+      "insufficient_stock",
+      "unmapped_location",
+    ]);
+  }
 
   if (plan) {
     const coverage = planCoverage(canonicalLines, plan);
@@ -479,18 +538,36 @@ async function reconcileUnderLock(
   /* What MetaKocka should hold, against what it does                       */
   /* ---------------------------------------------------------------------- */
 
-  const shares = await computeDocumentShares(orderId);
+  const shares = await computeDocumentShares(orderId, { wholeOrder });
   await applyPrimaryDocument(
     orderId,
-    shares.find((share) => share.isPrimary)?.sourceId ?? null,
+    wholeOrder ? null : (shares.find((share) => share.isPrimary)?.sourceId ?? null),
+    { wholeOrder },
   );
 
-  const desiredBySource = await desiredDocumentLines(orderId);
+  const desiredBySource = wholeOrder
+    ? await wholeOrderLines(orderId)
+    : await desiredDocumentLines(orderId);
   const existingRows = await listDocumentsForReconciliation(principal, orderId);
+
+  /**
+   * The key a stored document is compared under.
+   *
+   * A row with no supply source means two different things depending on the
+   * shop. Under a split shop it is a document the order takes nothing from any
+   * more, which is what null means to the planner and what gets it retired.
+   * Under an unsplit shop it is *the* document, so it takes the sentinel and is
+   * matched against the desired one. A row that still names a source under an
+   * unsplit shop keeps that source and is therefore retired — which is the
+   * right thing: the shop stopped splitting, so the per-warehouse documents it
+   * left behind stop describing the order.
+   */
+  const documentKey = (supplySourceId: string | null): string | null =>
+    wholeOrder ? (supplySourceId ?? WHOLE_ORDER_DOCUMENT) : supplySourceId;
 
   const existing: ExistingDocument[] = existingRows.map((row) => ({
     documentId: row.id,
-    supplySourceId: row.supplySourceId,
+    supplySourceId: documentKey(row.supplySourceId),
     countCode: row.countCode,
     status: row.status,
     present: row.status === "written" && row.mkId !== null,
@@ -527,9 +604,10 @@ async function reconcileUnderLock(
         shares,
         retiredSourceIds,
         countCodeBySource: new Map(
-          existingRows
-            .filter((row) => row.supplySourceId)
-            .map((row) => [row.supplySourceId!, row.countCode]),
+          existingRows.flatMap((row) => {
+            const key = documentKey(row.supplySourceId);
+            return key ? [[key, row.countCode] as [string, string]] : [];
+          }),
         ),
         strategy: settings.paymentAllocation,
         entryMode: settings.paymentEntryMode,
@@ -651,7 +729,7 @@ async function reconcileUnderLock(
      * back leaves one document, not three.
      */
     const row = existingRows.find(
-      (entry) => entry.supplySourceId === action.supplySourceId,
+      (entry) => documentKey(entry.supplySourceId) === action.supplySourceId,
     );
     if (row?.retiredAt) await reviveDocument(row.id);
 
@@ -814,6 +892,7 @@ async function reconcileUnderLock(
     event: "order.reconciled",
     detail: {
       reason: options.reason,
+      salesOrderSplit: settings.salesOrderSplit,
       allocationMode: settings.allocationMode,
       actions: actions.map((action) =>
         action.kind === "retire"
@@ -934,6 +1013,37 @@ async function desiredDocumentLines(
   }
 
   return bySource;
+}
+
+/**
+ * What the one document of an unsplit order should hold.
+ *
+ * Read from the order's own lines rather than from allocations, because an
+ * unsplit order has none: there is no warehouse to allocate to, and the
+ * document carries what the customer bought. Two lines with the same SKU are
+ * summed for the same reason `desiredDocumentLines` sums them — a MetaKocka
+ * document is compared by SKU and quantity, so two descriptions of the same
+ * content have to compare equal.
+ */
+async function wholeOrderLines(
+  orderId: string,
+): Promise<Map<string, { sku: string; quantity: number }[]>> {
+  const lines = await prisma.orderLine.findMany({
+    where: { orderId },
+    select: { sku: true, quantity: true },
+  });
+
+  const document: { sku: string; quantity: number }[] = [];
+  for (const line of lines) {
+    if (line.quantity <= 0) continue;
+    const existing = document.find((entry) => entry.sku === line.sku);
+    if (existing) existing.quantity += line.quantity;
+    else document.push({ sku: line.sku, quantity: line.quantity });
+  }
+
+  return document.length > 0
+    ? new Map([[WHOLE_ORDER_DOCUMENT, document]])
+    : new Map();
 }
 
 // Re-exported for the tests that pin the planner's behaviour against real

@@ -111,6 +111,17 @@ export interface ReadinessFacts {
   orders: {
     shippingProductCode: string | null;
     discountRepresentation: "none" | "document_discount_value";
+    /**
+     * Whether one Shopify order becomes one MetaKocka sales order or several.
+     *
+     * Read by the *warehouses* component, not by the orders one, because it
+     * changes what a missing warehouse mapping means: a shop writing one
+     * unsplit sales order files orders perfectly well without any mapping at
+     * all. Mapping still matters — stock synchronization is the other half of
+     * this connector and has nowhere to run without it — so the component stays
+     * required and only stops claiming the wrong reason.
+     */
+    salesOrderSplit: "per_warehouse" | "single";
   };
   products: {
     matched: number;
@@ -183,7 +194,9 @@ function warehousesOf(facts: ReadinessFacts): ReadinessComponent {
       status: "needs_attention",
       summary: "No locations connected",
       reason:
-        "A Shopify location has to point at a MetaKocka warehouse before an order can be filed anywhere.",
+        facts.orders.salesOrderSplit === "single"
+          ? "A Shopify location has to point at a MetaKocka warehouse before stock can be synchronized. Sales orders are unaffected: this shop writes one for the whole order, with no warehouse on it."
+          : "A Shopify location has to point at a MetaKocka warehouse before an order can be filed anywhere.",
     };
   }
 
@@ -351,7 +364,19 @@ function ordersOf(
     action: { label: "Open order settings", href: READINESS_ROUTES.orders },
   };
 
-  if (metakocka.status !== "ready" || warehouses.status !== "ready") {
+  /*
+   * A warehouse mapping only gates orders for a shop that splits them.
+   *
+   * A shop writing one sales order for the whole Shopify order puts no
+   * warehouse on it, so an unmapped location stops nothing here — it stops
+   * stock synchronization, which the warehouses component says in its own
+   * words. Reporting orders as waiting on it would colour a working
+   * integration red and send the merchant to fix something orders do not use.
+   */
+  const waitingOnWarehouses =
+    facts.orders.salesOrderSplit !== "single" && warehouses.status !== "ready";
+
+  if (metakocka.status !== "ready" || waitingOnWarehouses) {
     return {
       ...base,
       status: "needs_attention",

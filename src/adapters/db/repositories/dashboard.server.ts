@@ -70,6 +70,14 @@ export interface DashboardData {
    */
   warehouseShares: WarehouseShare[];
   splitOrders: number;
+  /**
+   * True while this shop writes one sales order per Shopify order.
+   *
+   * The two figures above are a breakdown by warehouse, and such a shop has no
+   * warehouse on any document. The caller shows something else rather than a
+   * bar chart of one unnamed bar.
+   */
+  unsplit: boolean;
   /** How many days `series` and `warehouseShares` cover. */
   windowDays: number;
 }
@@ -111,6 +119,7 @@ export async function getDashboard(
     documentsBySource,
     documentsByOrder,
     sources,
+    salesOrderSetting,
   ] = await Promise.all([
     prisma.order.count({
       where: {
@@ -252,6 +261,19 @@ export async function getDashboard(
       where: { shop: { domain } },
       select: { id: true, name: true },
     }),
+
+    /*
+     * Whether this shop splits an order across warehouses at all.
+     *
+     * The distribution below is a breakdown by warehouse, and a shop writing
+     * one sales order per Shopify order has no warehouse on any of them — so
+     * the honest thing is to say the breakdown does not apply rather than to
+     * draw one bar and label it with a guess.
+     */
+    prisma.salesOrderSetting.findFirst({
+      where: { shop: { domain } },
+      select: { salesOrderSplit: true },
+    }),
   ]);
 
   const buckets = new Map<string, DaySeriesPoint>();
@@ -326,6 +348,8 @@ export async function getDashboard(
     totalOrders,
     warehouseShares,
     splitOrders,
+    /** True while this shop writes one sales order for a whole Shopify order. */
+    unsplit: salesOrderSetting?.salesOrderSplit === "single",
     windowDays: days,
   };
 }

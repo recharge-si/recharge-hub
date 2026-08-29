@@ -210,8 +210,37 @@ Three safety boundaries hold this together:
   `order.sync_state = inconsistent` with the per-SKU difference and **never**
   repaired by writing another document.
 
+### How many documents an order becomes
+
+`sales_order_setting.sales_order_split` decides whether an order is split across
+warehouses at all:
+
+- `per_warehouse` (default): one MetaKocka sales order per warehouse the order
+  ships from, each carrying that warehouse's mark, linked by `buyer_order`. This
+  is the only shape in which the ERP holds where goods actually left from, and
+  everything in *Warehouse allocation* below applies.
+- `single`: one sales order carrying every line of the Shopify order, with **no
+  warehouse mark**, so MetaKocka files it against the company default. Nothing
+  is allocated — the reconciler does not read fulfilment orders, does not run
+  the allocator, clears any allocation rows a previous split left behind, and
+  classifies every quantity as `managed` against the one document. The profit
+  centre comes from `supply_setting.default_profit_center`; no delivery type is
+  sent. `allocation_mode` has no effect.
+
+The document is keyed by `WHOLE_ORDER_DOCUMENT` (`domain/orders/reconcile`)
+through the reconciler, the money split and the payment plan, all of which key
+by supply source; the stored `metakocka_document.supply_source_id` is null,
+which is what it means — this document belongs to no warehouse. Its
+`count_code` is the order reference itself, with no source suffix.
+
+Changing the setting is a normal reconciliation, not a migration: the documents
+that no longer describe the order are retired under
+`sales_order_setting.obsolete_document_policy` and the new shape is written, on
+each order's next pass.
+
 ### Warehouse allocation
 
+Under `sales_order_split = per_warehouse`,
 `sales_order_setting.allocation_mode` decides where an order's warehouse split
 comes from:
 

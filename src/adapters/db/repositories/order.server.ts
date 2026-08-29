@@ -537,10 +537,33 @@ export async function claimDocument(
  * job that died before claiming its row never created one, so a split order
  * lost half its documents and still turned green. Completeness is a claim
  * about the allocation, so it is measured against the allocation.
+ *
+ * `wholeOrder` is the unsplit shop, where there is no allocation to measure
+ * against: one document carries the whole order and holds no supply source, so
+ * completeness is simply whether that document was written.
  */
 export async function markOrderWrittenIfComplete(
   orderId: string,
+  options: { wholeOrder?: boolean } = {},
 ): Promise<void> {
+  if (options.wholeOrder) {
+    const written = await prisma.metakockaDocument.count({
+      where: {
+        orderId,
+        supplySourceId: null,
+        status: "written",
+        retiredAt: null,
+      },
+    });
+    if (written === 0) return;
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { status: "written" },
+    });
+    return;
+  }
+
   const allocated = await prisma.allocation.findMany({
     where: { orderLine: { orderId }, supplySourceId: { not: null } },
     select: { supplySourceId: true },
@@ -1304,7 +1327,29 @@ export async function productsForSkus(
 export async function applyPrimaryDocument(
   orderId: string,
   primarySourceId: string | null,
+  options: { wholeOrder?: boolean } = {},
 ): Promise<void> {
+  /*
+   * The unsplit shop, where the primary document is the one with no source.
+   *
+   * "No supply source" is the identity of that document rather than the absence
+   * of an answer, so it cannot be addressed by `primarySourceId` — null there
+   * already means "this order has no primary at all".
+   */
+  if (options.wholeOrder) {
+    await prisma.$transaction([
+      prisma.metakockaDocument.updateMany({
+        where: { orderId, supplySourceId: { not: null }, isPrimary: true },
+        data: { isPrimary: false },
+      }),
+      prisma.metakockaDocument.updateMany({
+        where: { orderId, supplySourceId: null, isPrimary: false },
+        data: { isPrimary: true },
+      }),
+    ]);
+    return;
+  }
+
   /*
    * Only rows whose flag actually differs.
    *

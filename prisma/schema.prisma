@@ -756,6 +756,26 @@ enum AllocationMode {
   @@map("allocation_mode")
 }
 
+/// Whether one Shopify order becomes one MetaKocka sales order or several.
+///
+/// MetaKocka's `warehouse` is document-level, so an order fulfilled from two
+/// warehouses can only be described as two documents. That is the default, and
+/// it is the only shape that keeps ERP stock right.
+///
+/// `single` is the answer for a shop that does not want its ERP to hold the
+/// split at all: one sales order carrying every line of the Shopify order, with
+/// **no warehouse mark on it**, so MetaKocka files it against the company
+/// default. It is a deliberate trade — the ERP no longer says which warehouse
+/// the goods left from — and it is the merchant's to make.
+enum SalesOrderSplit {
+  /// One sales order per warehouse the order ships from.
+  per_warehouse
+  /// One sales order for the whole order, with no warehouse on it.
+  single
+
+  @@map("sales_order_split")
+}
+
 /// What to do with a MetaKocka document this order no longer takes anything
 /// from (docs/BUILD_SPEC.md §8.8, `domain/orders/reconcile`).
 enum ObsoleteDocumentPolicy {
@@ -1389,6 +1409,17 @@ model SalesOrderSetting {
   /// should follow. Stock rules still fill in whatever Shopify has not
   /// assigned — a digital line, a third-party fulfilment this app cannot read.
   allocationMode AllocationMode @default(shopify_locations) @map("allocation_mode")
+
+  /// Whether one Shopify order becomes one MetaKocka sales order or several.
+  ///
+  /// `per_warehouse` by default, because MetaKocka's `warehouse` is
+  /// document-level and splitting is the only way an ERP can hold where goods
+  /// actually left from. `single` writes one document for the whole order with
+  /// no warehouse mark, for shops that keep their stock somewhere else and want
+  /// the sales order to mirror the Shopify order one for one. Under `single`
+  /// nothing is allocated to a warehouse at all, so `allocationMode` above has
+  /// no effect.
+  salesOrderSplit SalesOrderSplit @default(per_warehouse) @map("sales_order_split")
 
   /// What happens to a document this order stops taking anything from.
   obsoleteDocumentPolicy ObsoleteDocumentPolicy @default(empty) @map("obsolete_document_policy")

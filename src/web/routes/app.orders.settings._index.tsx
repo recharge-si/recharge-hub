@@ -141,6 +141,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 };
 
 /** The form's own vocabulary, narrowed before anything is stored. */
+function readSplit(
+  raw: FormDataEntryValue | null,
+): SalesOrderSettings["salesOrderSplit"] {
+  return raw === "single" ? "single" : "per_warehouse";
+}
+
 function readMode(
   raw: FormDataEntryValue | null,
 ): SalesOrderSettings["allocationMode"] {
@@ -256,6 +262,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       pattern === "" || pattern === DEFAULT_CUSTOMER_ORDER_TEMPLATE
         ? null
         : pattern,
+    salesOrderSplit: readSplit(formData.get("salesOrderSplit")),
     allocationMode: readMode(formData.get("allocationMode")),
     obsoleteDocumentPolicy: readObsolete(
       formData.get("obsoleteDocumentPolicy"),
@@ -306,6 +313,7 @@ export default function OrderSyncSettings() {
     form.updateOnChange !== settings.updateOnChange ||
     form.updateAfterPaid !== settings.updateAfterPaid ||
     form.customerOrderTemplate !== (settings.customerOrderTemplate ?? "") ||
+    form.salesOrderSplit !== settings.salesOrderSplit ||
     form.allocationMode !== settings.allocationMode ||
     form.obsoleteDocumentPolicy !== settings.obsoleteDocumentPolicy ||
     form.syncPayments !== settings.syncPayments ||
@@ -325,7 +333,11 @@ export default function OrderSyncSettings() {
   const blocking = !status.activated
     ? "Setup has not been finished, so nothing is sent to MetaKocka yet."
     : status.orders !== "ready"
-      ? "Orders cannot be filed until the MetaKocka connection works and at least one Shopify location points at a warehouse."
+      ? // A warehouse mapping is not what stops an unsplit shop: its documents
+        // carry no warehouse. What stops it is the connection.
+        settings.salesOrderSplit === "single"
+        ? "Orders cannot be filed until the MetaKocka connection works."
+        : "Orders cannot be filed until the MetaKocka connection works and at least one Shopify location points at a warehouse."
       : null;
 
   // Open already when this shop has a pattern of its own, closed when it is on
@@ -349,8 +361,13 @@ export default function OrderSyncSettings() {
   const restoreRecommended = () =>
     setForm((current) => ({ ...current, ...recommended }));
 
+  /** True while this shop writes one sales order for a whole Shopify order. */
+  const unsplit = form.salesOrderSplit === "single";
+
   const advancedSummary = [
-    `Warehouse from ${form.allocationMode === "shopify_locations" ? "Shopify" : "stock levels"}`,
+    unsplit
+      ? "Not split by warehouse"
+      : `Warehouse from ${form.allocationMode === "shopify_locations" ? "Shopify" : "stock levels"}`,
     form.updateOnChange
       ? "changed orders update the sales order"
       : "changed orders are reported",
@@ -417,6 +434,7 @@ export default function OrderSyncSettings() {
         updateOnChange: form.updateOnChange ? "on" : "",
         updateAfterPaid: form.updateAfterPaid ? "on" : "",
         customerOrderTemplate: form.customerOrderTemplate,
+        salesOrderSplit: form.salesOrderSplit,
         allocationMode: form.allocationMode,
         obsoleteDocumentPolicy: form.obsoleteDocumentPolicy,
         syncPayments: form.syncPayments ? "on" : "",
@@ -481,9 +499,10 @@ export default function OrderSyncSettings() {
             edited, moved to another location, refunded — this app reads the
             order back from Shopify, works out what MetaKocka should hold for
             it, and changes only the difference. It never creates a second sales
-            order for an order that already has one. An order fulfilled from
-            more than one warehouse gets one sales order per warehouse, and
-            those are updated afterwards rather than duplicated.
+            order for an order that already has one.{" "}
+            {unsplit
+              ? "This shop writes one sales order for the whole order, whatever it ships from, and updates that one afterwards rather than duplicating it."
+              : "An order fulfilled from more than one warehouse gets one sales order per warehouse, and those are updated afterwards rather than duplicated."}
           </s-paragraph>
           <s-paragraph>
             MetaKocka has no way to change part of a document. An update
@@ -546,7 +565,11 @@ export default function OrderSyncSettings() {
              */}
             <SettingRow
               label="Automatic order synchronization"
-              summary="Shopify orders become MetaKocka sales orders, one per warehouse an order ships from."
+              summary={
+                unsplit
+                  ? "Shopify orders become MetaKocka sales orders, one for each order."
+                  : "Shopify orders become MetaKocka sales orders, one per warehouse an order ships from."
+              }
               action={
                 running ? (
                   <s-text color="subdued">Active</s-text>
@@ -599,6 +622,106 @@ export default function OrderSyncSettings() {
                 </s-button>
               }
             />
+          </s-stack>
+        </s-section>
+
+        {/* ---------------------------------------------------------------
+         * How many sales orders one Shopify order becomes.
+         *
+         * Not in the advanced card, and deliberately. Everything in there is
+         * right for almost every shop and wrong for a few; this is a genuine
+         * fork that depends on something only the merchant knows — whether
+         * their MetaKocka company keeps stock per warehouse at all — and it
+         * changes the shape of every document the app writes. A merchant who
+         * came here to answer it should not have to open a disclosure first.
+         * --------------------------------------------------------------- */}
+        <s-section heading="Sales orders">
+          <s-stack direction="block" gap="base">
+            <s-choice-list
+              name="salesOrderSplit"
+              label="How many sales orders one Shopify order becomes"
+              values={[form.salesOrderSplit]}
+              onChange={(event) =>
+                set(
+                  "salesOrderSplit",
+                  event.currentTarget.values[0] === "single"
+                    ? "single"
+                    : "per_warehouse",
+                )
+              }
+            >
+              <s-choice value="per_warehouse">
+                One for each warehouse it ships from
+                <s-text slot="details">
+                  Each sales order is filed against its own MetaKocka warehouse,
+                  and they are linked by the order reference.
+                </s-text>
+              </s-choice>
+              <s-choice value="single">
+                One for the whole order
+                <s-text slot="details">
+                  A single sales order carrying every line, with no warehouse on
+                  it. MetaKocka files it against the company default.
+                </s-text>
+              </s-choice>
+            </s-choice-list>
+
+            {/*
+             * The overwrite-risk pattern from docs/ui-conventions.md: a banner
+             * only in the unsaved-changes state, naming what will actually
+             * happen to documents MetaKocka already holds.
+             */}
+            {form.salesOrderSplit !== settings.salesOrderSplit ? (
+              <s-banner
+                tone="warning"
+                heading="This changes the sales orders MetaKocka already holds"
+              >
+                <s-paragraph>
+                  {form.salesOrderSplit === "single"
+                    ? "From the next time each order is checked, its per-warehouse sales orders are replaced by one sales order for the whole order. The old ones are dealt with by your setting for a sales order the Shopify order no longer uses — their lines removed by default, and never deleted without you asking."
+                    : "From the next time each order is checked, each order is split again across the warehouses it ships from. The single sales order it has now is dealt with by your setting for a sales order the Shopify order no longer uses, and new ones are written per warehouse."}
+                </s-paragraph>
+                <s-paragraph>
+                  Orders already sent are only rebuilt when something changes
+                  them or you check them by hand. Nothing is re-sent in bulk.
+                </s-paragraph>
+              </s-banner>
+            ) : null}
+
+            {unsplit ? (
+              <s-text color="subdued">
+                Warehouses are still mapped on the{" "}
+                <s-link href="/app/locations">Locations</s-link> page, because
+                that is what stock synchronization uses. They just do not appear
+                on the sales order.
+              </s-text>
+            ) : null}
+
+            <LearnMore label="What each one means in MetaKocka">
+              <s-paragraph>
+                <s-text type="strong">One for each warehouse.</s-text>{" "}
+                MetaKocka&rsquo;s warehouse is a property of the whole document,
+                so an order shipping from two warehouses can only be described
+                as two sales orders. Each one says where its goods left from,
+                which is what keeps stock in MetaKocka right, and the two carry
+                the same customer&rsquo;s order reference so they can be found
+                together.
+              </s-paragraph>
+              <s-paragraph>
+                <s-text type="strong">One for the whole order.</s-text> One
+                sales order per Shopify order, whatever it ships from, with no
+                warehouse on it — so MetaKocka applies the company default. For
+                shops that do not run their warehouses in MetaKocka, or that
+                want the two systems to show one document each. The trade is
+                real: MetaKocka no longer records which warehouse the goods left
+                from, and this app stops choosing one.
+              </s-paragraph>
+              <s-paragraph>
+                Everything else is the same either way. Changed orders are still
+                rebuilt, payments still recorded, and the quantities still
+                checked against what Shopify says the customer bought.
+              </s-paragraph>
+            </LearnMore>
           </s-stack>
         </s-section>
 
@@ -698,10 +821,10 @@ export default function OrderSyncSettings() {
             <LearnMore label="What this reference is used for">
               <s-paragraph>
                 This is what MetaKocka shows as <em>Customer&rsquo;s order</em>{" "}
-                on the sales order. It is also how the sales orders of one
-                Shopify order are linked to each other when the order ships from
-                more than one warehouse, and how this app finds a document again
-                if a write times out.
+                on the sales order.{" "}
+                {unsplit
+                  ? "It is also how this app finds a document again if a write times out."
+                  : "It is also how the sales orders of one Shopify order are linked to each other when the order ships from more than one warehouse, and how this app finds a document again if a write times out."}
               </s-paragraph>
               <s-paragraph>
                 It is a reference, not an identity. This app matches orders by
@@ -830,94 +953,111 @@ export default function OrderSyncSettings() {
             <s-stack direction="block" gap="base">
               <s-heading>Warehouse</s-heading>
 
-              <s-choice-list
-                name="allocationMode"
-                label="Which system decides the warehouse"
-                values={[form.allocationMode]}
-                onChange={(event) =>
-                  set(
-                    "allocationMode",
-                    (event.currentTarget.values[0] ?? "shopify_locations") ===
-                      "stock_rules"
-                      ? "stock_rules"
-                      : "shopify_locations",
-                  )
-                }
-              >
-                <s-choice value="shopify_locations">
-                  Shopify
-                  <s-text slot="details">
-                    Follow the location Shopify has assigned each item to.
-                  </s-text>
-                </s-choice>
-                <s-choice value="stock_rules">
-                  Stock levels
-                  <s-text slot="details">
-                    Choose from the stock this app has read: own warehouses
-                    first, then partners.
-                  </s-text>
-                </s-choice>
-              </s-choice-list>
-
               {/*
-               * The overwrite-risk pattern from docs/ui-conventions.md: one
-               * standing line under the control, plus a banner that renders
-               * only in the unsaved-changes state, naming what will actually
-               * change.
-               *
-               * Changing this authority restructures documents — that is the
-               * whole point of it — so the merchant sees the consequence before
-               * saving rather than discovering it on their next order.
+               * The question only exists for a shop that splits. Stating that
+               * rather than showing a disabled control: the setting is kept,
+               * because a shop switching back should find its old answer, and a
+               * greyed-out radio pair invites a merchant to work out why it
+               * will not move.
                */}
-              {form.allocationMode !== settings.allocationMode ? (
-                <s-banner
-                  tone="warning"
-                  heading="This changes which warehouse orders are filed against"
-                >
-                  <s-paragraph>
-                    {form.allocationMode === "shopify_locations"
-                      ? "From the next time each order is checked, its MetaKocka sales orders will be rebuilt to match the locations Shopify has assigned. Orders currently filed against a warehouse this app chose from stock levels will move, and a sales order left with nothing on it is reported for you to cancel or credit."
-                      : "From the next time each order is checked, warehouses will be chosen from stock levels again and Shopify's own location assignment will be ignored. Orders currently following Shopify may move to a different MetaKocka warehouse."}
-                  </s-paragraph>
-                  <s-paragraph>
-                    Orders already sent are only rebuilt when something changes
-                    them or you check them by hand. Nothing is re-sent in bulk.
-                  </s-paragraph>
-                </s-banner>
-              ) : null}
+              {unsplit ? (
+                <s-text color="subdued">
+                  This shop writes one sales order for the whole order, with no
+                  warehouse on it, so there is no warehouse to choose. Change
+                  that under <s-text type="strong">Sales orders</s-text> above.
+                </s-text>
+              ) : (
+                <>
+                  <s-choice-list
+                    name="allocationMode"
+                    label="Which system decides the warehouse"
+                    values={[form.allocationMode]}
+                    onChange={(event) =>
+                      set(
+                        "allocationMode",
+                        (event.currentTarget.values[0] ?? "shopify_locations") ===
+                          "stock_rules"
+                          ? "stock_rules"
+                          : "shopify_locations",
+                      )
+                    }
+                  >
+                    <s-choice value="shopify_locations">
+                      Shopify
+                      <s-text slot="details">
+                        Follow the location Shopify has assigned each item to.
+                      </s-text>
+                    </s-choice>
+                    <s-choice value="stock_rules">
+                      Stock levels
+                      <s-text slot="details">
+                        Choose from the stock this app has read: own warehouses
+                        first, then partners.
+                      </s-text>
+                    </s-choice>
+                  </s-choice-list>
 
-              {/*
-               * A sentence with a link rather than another Manage button: the
-               * card above already carries the row that goes to this page, and
-               * two buttons to one place is how a page starts to read as a
-               * menu.
-               */}
-              <s-text color="subdued">
-                Which MetaKocka warehouse a Shopify location means is set on the{" "}
-                <s-link href="/app/locations">Locations</s-link> page.
-              </s-text>
+                  {/*
+                   * The overwrite-risk pattern from docs/ui-conventions.md: one
+                   * standing line under the control, plus a banner that renders
+                   * only in the unsaved-changes state, naming what will actually
+                   * change.
+                   *
+                   * Changing this authority restructures documents — that is the
+                   * whole point of it — so the merchant sees the consequence before
+                   * saving rather than discovering it on their next order.
+                   */}
+                  {form.allocationMode !== settings.allocationMode ? (
+                    <s-banner
+                      tone="warning"
+                      heading="This changes which warehouse orders are filed against"
+                    >
+                      <s-paragraph>
+                        {form.allocationMode === "shopify_locations"
+                          ? "From the next time each order is checked, its MetaKocka sales orders will be rebuilt to match the locations Shopify has assigned. Orders currently filed against a warehouse this app chose from stock levels will move, and a sales order left with nothing on it is reported for you to cancel or credit."
+                          : "From the next time each order is checked, warehouses will be chosen from stock levels again and Shopify's own location assignment will be ignored. Orders currently following Shopify may move to a different MetaKocka warehouse."}
+                      </s-paragraph>
+                      <s-paragraph>
+                        Orders already sent are only rebuilt when something changes
+                        them or you check them by hand. Nothing is re-sent in bulk.
+                      </s-paragraph>
+                    </s-banner>
+                  ) : null}
 
-              <LearnMore label="How the warehouse is chosen">
-                <s-paragraph>
-                  <s-text type="strong">Shopify.</s-text> Moving an item to
-                  another location in Shopify moves it to the mapped MetaKocka
-                  warehouse, and the total across the sales orders stays exactly
-                  what the customer ordered. Anything Shopify has not assigned —
-                  a digital item, a fulfilment service this app cannot see —
-                  falls back to stock levels.
-                </s-paragraph>
-                <s-paragraph>
-                  <s-text type="strong">Stock levels.</s-text> Ignores
-                  Shopify&rsquo;s assignment. For stores whose Shopify locations
-                  do not correspond to how goods are actually warehoused. Stores
-                  that were already running before Shopify locations were
-                  supported stay on this until they choose otherwise.
-                </s-paragraph>
-                <s-paragraph>
-                  A location with no warehouse mapped is reported rather than
-                  guessed at.
-                </s-paragraph>
-              </LearnMore>
+                  {/*
+                   * A sentence with a link rather than another Manage button: the
+                   * card above already carries the row that goes to this page, and
+                   * two buttons to one place is how a page starts to read as a
+                   * menu.
+                   */}
+                  <s-text color="subdued">
+                    Which MetaKocka warehouse a Shopify location means is set on the{" "}
+                    <s-link href="/app/locations">Locations</s-link> page.
+                  </s-text>
+
+                  <LearnMore label="How the warehouse is chosen">
+                    <s-paragraph>
+                      <s-text type="strong">Shopify.</s-text> Moving an item to
+                      another location in Shopify moves it to the mapped MetaKocka
+                      warehouse, and the total across the sales orders stays exactly
+                      what the customer ordered. Anything Shopify has not assigned —
+                      a digital item, a fulfilment service this app cannot see —
+                      falls back to stock levels.
+                    </s-paragraph>
+                    <s-paragraph>
+                      <s-text type="strong">Stock levels.</s-text> Ignores
+                      Shopify&rsquo;s assignment. For stores whose Shopify locations
+                      do not correspond to how goods are actually warehoused. Stores
+                      that were already running before Shopify locations were
+                      supported stay on this until they choose otherwise.
+                    </s-paragraph>
+                    <s-paragraph>
+                      A location with no warehouse mapped is reported rather than
+                      guessed at.
+                    </s-paragraph>
+                  </LearnMore>
+                </>
+              )}
             </s-stack>
 
             <s-divider />

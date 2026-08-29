@@ -24,6 +24,7 @@ import {
 } from "~/adapters/db/repositories/order.server";
 import { replaceApplicationsForDocument } from "~/adapters/db/repositories/order-payment.server";
 import { isSyncActivated } from "~/adapters/db/repositories/shop.server";
+import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import { listCachedWarehouses } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
@@ -52,6 +53,7 @@ import {
 } from "~/jobs/orders/payment-reconciler";
 import { resolvePaymentType } from "~/jobs/payment";
 import { parsePartnerOverride } from "~/domain/orders/partner";
+import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
 
@@ -83,6 +85,13 @@ export const writeMetakockaOrderJobSchema = z.object({
  * One job per source, because `warehouse` and `profit_center` are
  * document-level (§3): a split order is N documents, not one document with
  * mixed lines.
+ *
+ * A shop on `sales_order_split = single` has no sources to run per: the job is
+ * called once with `WHOLE_ORDER_DOCUMENT` and writes one document carrying
+ * every line of the order with **no warehouse mark**, which MetaKocka then
+ * files against the company default. Everything else below — the count-code
+ * claim, the ambiguous-write recovery, the update policy, the payment shares —
+ * is the same code and the same rules; only the grouping differs.
  *
  * The order of operations is not arbitrary, and each step exists because of
  * something MetaKocka verifiably does:
@@ -155,13 +164,24 @@ export async function writeMetakockaOrderFor(
   const shopDomain = principal.shopDomain;
   const log = getLogger();
 
+  /**
+   * Whether this is the one document of an unsplit order.
+   *
+   * The caller decides — the reconciler reads `sales_order_split` — and passes
+   * the sentinel rather than a source id. Read once here, so every branch below
+   * asks the same question in the same way.
+   */
+  const wholeOrder = supplySourceId === WHOLE_ORDER_DOCUMENT;
+
   const order = await getOrderDetail(principal, orderId);
   if (!order) return;
 
-  const source = await prisma.supplySource.findFirst({
-    where: { id: supplySourceId, shop: { domain: shopDomainOf(principal) } },
-  });
-  if (!source) return;
+  const source = wholeOrder
+    ? null
+    : await prisma.supplySource.findFirst({
+        where: { id: supplySourceId, shop: { domain: shopDomainOf(principal) } },
+      });
+  if (!wholeOrder && !source) return;
 
   /*
    * The activation boundary (the product UX brief, section 11).
@@ -199,12 +219,22 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
-  // Which lines this source is responsible for, and how many of each.
-  const perSourceLines = order.lines.flatMap((line) =>
-    line.allocations
-      .filter((allocation) => allocation.supplySourceId === supplySourceId)
-      .map((allocation) => ({ line, quantity: allocation.quantity })),
-  );
+  /*
+   * Which lines this document is responsible for, and how many of each.
+   *
+   * An unsplit order takes the order's own lines at full quantity: nothing was
+   * allocated, because nothing was split. That deliberately includes quantity
+   * Shopify is fulfilling through a service this app cannot see — with no
+   * warehouse on the document there is no ERP stock to misstate, and a merchant
+   * who asked for one sales order per Shopify order meant all of it.
+   */
+  const perSourceLines = wholeOrder
+    ? order.lines.map((line) => ({ line, quantity: line.quantity }))
+    : order.lines.flatMap((line) =>
+        line.allocations
+          .filter((allocation) => allocation.supplySourceId === supplySourceId)
+          .map((allocation) => ({ line, quantity: allocation.quantity })),
+      );
 
   if (perSourceLines.length === 0) return;
 
@@ -260,24 +290,32 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
-  // §3: an unknown warehouse mark is accepted silently and the document is
-  // filed against the company default. Validating it here is the only thing
-  // that turns a silent mis-filing into something a merchant can see.
-  const warehouses = await listCachedWarehouses(principal);
-  const markIsKnown =
-    !source.metakockaWarehouse ||
-    warehouses.some(
-      (warehouse) => warehouse.mark === source.metakockaWarehouse,
-    );
+  /*
+   * §3: an unknown warehouse mark is accepted silently and the document is
+   * filed against the company default. Validating it here is the only thing
+   * that turns a silent mis-filing into something a merchant can see.
+   *
+   * There is nothing to validate for an unsplit order. It carries no mark, and
+   * being filed against the company default is what it is asking for rather
+   * than something going quietly wrong.
+   */
+  if (source) {
+    const warehouses = await listCachedWarehouses(principal);
+    const markIsKnown =
+      !source.metakockaWarehouse ||
+      warehouses.some(
+        (warehouse) => warehouse.mark === source.metakockaWarehouse,
+      );
 
-  if (!markIsKnown) {
-    await raiseException(principal, {
-      orderId,
-      kind: "warehouse_invalid",
-      message: `MetaKocka has no warehouse with the mark "${source.metakockaWarehouse}", and it accepts an unknown mark without complaining — the order would be filed against the company default. Reload the warehouse list and check the mapping for ${source.name}.`,
-      detail: { mark: source.metakockaWarehouse, source: source.name },
-    });
-    return;
+    if (!markIsKnown) {
+      await raiseException(principal, {
+        orderId,
+        kind: "warehouse_invalid",
+        message: `MetaKocka has no warehouse with the mark "${source.metakockaWarehouse}", and it accepts an unknown mark without complaining — the order would be filed against the company default. Reload the warehouse list and check the mapping for ${source.name}.`,
+        detail: { mark: source.metakockaWarehouse, source: source.name },
+      });
+      return;
+    }
   }
 
   // The addresses come from the stored payload rather than being kept as
@@ -343,11 +381,23 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
-  const countCode = `${order.customerOrderRef}-${source.code}`;
+  /*
+   * The document's code.
+   *
+   * A split order suffixes the source, because the codes of an order's sibling
+   * documents have to differ. An unsplit order has no sibling and no source to
+   * name, so its code is the order reference itself — which is also its
+   * `buyer_order`, so the ambiguous-write lookup below matches on the nose.
+   */
+  const countCode = source
+    ? `${order.customerOrderRef}-${source.code}`
+    : order.customerOrderRef;
 
   const claim = await claimDocument(principal, {
     orderId,
-    supplySourceId,
+    // Null is the stored truth for an unsplit document: it belongs to no
+    // warehouse. The sentinel exists only to key it in memory.
+    supplySourceId: source ? supplySourceId : null,
     countCode,
     isPrimary: false,
   });
@@ -367,7 +417,7 @@ export async function writeMetakockaOrderFor(
   // source alone, so the same answer comes out however the jobs interleave —
   // and it is computed by the same function the payment job uses, so the two
   // can never disagree about what a document is worth.
-  const shares = await computeDocumentShares(orderId);
+  const shares = await computeDocumentShares(orderId, { wholeOrder });
 
   /*
    * A document worth less than nothing is not written.
@@ -423,7 +473,10 @@ export async function writeMetakockaOrderFor(
    */
   await applyPrimaryDocument(
     orderId,
-    shares.find((entry) => entry.isPrimary)?.sourceId ?? null,
+    wholeOrder
+      ? null
+      : (shares.find((entry) => entry.isPrimary)?.sourceId ?? null),
+    { wholeOrder },
   );
 
   /*
@@ -475,6 +528,19 @@ export async function writeMetakockaOrderFor(
     companyId: credential.companyId,
     secretKey: credential.secretKey,
   });
+
+  /*
+   * The two document-level attributes a supply source would have supplied.
+   *
+   * An unsplit document has no source to read them from, so the profit centre
+   * comes from the shop default — the same value every inherited source carries
+   * — and the delivery type is simply not sent, because there is no shop-level
+   * answer to invent one from and MetaKocka has its own.
+   */
+  const supplyDefaults = wholeOrder ? await getSupplyDefaults(principal) : null;
+
+  /** What the audit trail calls this document's origin. */
+  const sourceLabel = source?.name ?? "the whole order, unsplit";
 
   /*
    * §8.7, and it goes into the create rather than following it: MetaKocka
@@ -580,9 +646,17 @@ export async function writeMetakockaOrderFor(
     // separately rather than one being reused for both (§8.4).
     receiver: parsed?.receiver ?? null,
     salesPricelistCode: productSettings.pricelistCode,
-    warehouse: source.metakockaWarehouse,
-    profitCenter: source.metakockaProfitCenter,
-    deliveryType: source.defaultDeliveryType,
+    /*
+     * No warehouse for an unsplit order, and that is the setting doing its job:
+     * MetaKocka files a document with no mark against the company default,
+     * which is exactly what a shop that does not keep its warehouses here has
+     * asked for.
+     */
+    warehouse: source ? source.metakockaWarehouse : null,
+    profitCenter: source
+      ? source.metakockaProfitCenter
+      : (supplyDefaults?.defaultProfitCenter ?? null),
+    deliveryType: source ? source.defaultDeliveryType : null,
     notes: isPrimary && parsed?.note ? parsed.note : null,
     shippingLine,
     discountValueMinor,
@@ -821,10 +895,14 @@ export async function writeMetakockaOrderFor(
       await recordDocumentPaymentState(claim!.id, desiredPayment, new Date());
       await touchDocumentReconciled(claim!.id, new Date());
 
-      await prisma.allocation.updateMany({
-        where: { supplySourceId, orderLine: { orderId } },
-        data: { status: "written_to_metakocka" },
-      });
+      // Nothing to move for an unsplit order: it has no allocation rows,
+      // because it was never allocated to a warehouse.
+      if (source) {
+        await prisma.allocation.updateMany({
+          where: { supplySourceId, orderLine: { orderId } },
+          data: { status: "written_to_metakocka" },
+        });
+      }
 
       // The document now says what the order says, so nothing about the
       // difference still needs a person.
@@ -846,7 +924,7 @@ export async function writeMetakockaOrderFor(
         detail: {
           countCode,
           mkId: existing.mkId,
-          source: source!.name,
+          source: sourceLabel,
           lines: perSourceLines.length,
           paymentKept: existing.paymentMarkedAt !== null,
         },
@@ -932,10 +1010,14 @@ export async function writeMetakockaOrderFor(
         },
       });
 
-      await prisma.allocation.updateMany({
-        where: { supplySourceId, orderLine: { orderId } },
-        data: { status: "written_to_metakocka" },
-      });
+      // Nothing to move for an unsplit order: it has no allocation rows,
+      // because it was never allocated to a warehouse.
+      if (source) {
+        await prisma.allocation.updateMany({
+          where: { supplySourceId, orderLine: { orderId } },
+          data: { status: "written_to_metakocka" },
+        });
+      }
 
       await closeExceptionsFor(principal, orderId, [...WRITE_FAILURE_KINDS]);
 
@@ -956,13 +1038,13 @@ export async function writeMetakockaOrderFor(
         detail: {
           countCode,
           mkId: found.mkId,
-          source: source!.name,
+          source: sourceLabel,
           reason:
             "an earlier attempt had no recorded outcome, and the document was found in MetaKocka by its order reference",
         },
       });
 
-      await markOrderWrittenIfComplete(orderId);
+      await markOrderWrittenIfComplete(orderId, { wholeOrder });
 
       log.info(
         { shop: shopDomain, orderId, countCode, mkId: found.mkId },
@@ -986,10 +1068,12 @@ export async function writeMetakockaOrderFor(
       detail: { countCode, answeredCountCode: found.countCode },
     });
 
-    await prisma.allocation.updateMany({
-      where: { supplySourceId, orderLine: { orderId } },
-      data: { status: "failed" },
-    });
+    if (source) {
+      await prisma.allocation.updateMany({
+        where: { supplySourceId, orderLine: { orderId } },
+        data: { status: "failed" },
+      });
+    }
     await prisma.order.update({
       where: { id: orderId },
       data: { status: "needs_attention" },
@@ -1033,13 +1117,12 @@ export async function writeMetakockaOrderFor(
       responseBody: result,
     });
 
-    await prisma.allocation.updateMany({
-      where: {
-        supplySourceId,
-        orderLine: { orderId },
-      },
-      data: { status: "written_to_metakocka" },
-    });
+    if (source) {
+      await prisma.allocation.updateMany({
+        where: { supplySourceId, orderLine: { orderId } },
+        data: { status: "written_to_metakocka" },
+      });
+    }
 
     // Bring the stored rows in line with what was sent, so the order page and
     // the decision trail do not keep showing the superseded derivation.
@@ -1062,7 +1145,7 @@ export async function writeMetakockaOrderFor(
       detail: {
         countCode,
         mkId: result.mkId,
-        source: source.name,
+        source: sourceLabel,
         isPrimary,
         lines: perSourceLines.length,
       },
@@ -1078,7 +1161,7 @@ export async function writeMetakockaOrderFor(
     // Once every source the allocation names has a written document, the
     // order is done. Measured against the allocation, not against the rows
     // that happen to exist (see markOrderWrittenIfComplete).
-    await markOrderWrittenIfComplete(orderId);
+    await markOrderWrittenIfComplete(orderId, { wholeOrder });
 
     log.info(
       { shop: shopDomain, orderId, countCode, mkId: result.mkId },
@@ -1121,13 +1204,15 @@ export async function writeMetakockaOrderFor(
         orderId,
         kind,
         message: describeForMerchant(error),
-        detail: { countCode, source: source.name, oprCode: error.oprCode },
+        detail: { countCode, source: sourceLabel, oprCode: error.oprCode },
       });
 
-      await prisma.allocation.updateMany({
-        where: { supplySourceId, orderLine: { orderId } },
-        data: { status: "failed" },
-      });
+      if (source) {
+        await prisma.allocation.updateMany({
+          where: { supplySourceId, orderLine: { orderId } },
+          data: { status: "failed" },
+        });
+      }
       await prisma.order.update({
         where: { id: orderId },
         data: { status: "needs_attention" },

@@ -120,7 +120,10 @@ third base URL and a dedicated adapter.
 ### Important observed constraints
 
 - One sales order has one warehouse and profit centre; split allocation creates
-  one document per supply source.
+  one document per supply source. A shop on
+  `sales_order_setting.sales_order_split = single` writes one document for the
+  whole order with **no** warehouse mark instead, which MetaKocka files against
+  the company default.
 - MetaKocka does not enforce `count_code` uniqueness. Never retry an ambiguous
   write without resolving whether it succeeded.
 - An unknown warehouse mark is silently replaced by the company default, so

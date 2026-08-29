@@ -64,6 +64,7 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
         syncPayments: true,
         shippingProductCode: true,
         discountRepresentation: true,
+        salesOrderSplit: true,
       },
     }),
     prisma.sku.groupBy({
@@ -147,6 +148,7 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
       shippingProductCode: salesOrderSetting?.shippingProductCode ?? null,
       discountRepresentation:
         salesOrderSetting?.discountRepresentation ?? "none",
+      salesOrderSplit: salesOrderSetting?.salesOrderSplit ?? "per_warehouse",
     },
     products: {
       matched: skuCount("matched"),

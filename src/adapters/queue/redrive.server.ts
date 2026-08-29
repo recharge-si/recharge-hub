@@ -1,6 +1,7 @@
 import type { ExceptionKind } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
+import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { shopDomainOf, type Principal } from "~/domain/types";
@@ -204,6 +205,24 @@ export async function redriveOrder(
     else if (order.financialStatus === "paid" && unpaid.length > 0)
       chosen = "payment";
     else chosen = "refresh";
+  }
+
+  /*
+   * A shop that writes one sales order per Shopify order has nothing to
+   * allocate and no per-source write to queue.
+   *
+   * Both of those are steps *inside* the reconciliation loop for such a shop,
+   * and the loop is what the merchant is actually asking for. Without this the
+   * button still worked — allocation is a doorway into the same loop — but it
+   * told them it was "choosing supply sources again", which is not a thing
+   * their shop does.
+   */
+  const { salesOrderSplit } = await getSalesOrderSettings(principal);
+  if (
+    salesOrderSplit === "single" &&
+    (chosen === "allocate" || chosen === "write")
+  ) {
+    chosen = "reconcile";
   }
 
   if (chosen === "none") {

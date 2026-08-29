@@ -37,6 +37,7 @@ import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import {
   getSalesOrderSettings,
   saveSalesOrderSettings,
+  type SalesOrderSettings,
 } from "~/adapters/db/repositories/sales-order-setting.server";
 import {
   getSetupState,
@@ -320,6 +321,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       stock: null,
       orders: {
         template: settings.customerOrderTemplate ?? "",
+        split: settings.salesOrderSplit,
         defaultTemplate: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
         shippingProductCode: settings.shippingProductCode ?? "",
         sample: recent
@@ -813,6 +815,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         template === "" || template === DEFAULT_CUSTOMER_ORDER_TEMPLATE
           ? null
           : template,
+      // Narrowed rather than cast: anything the form did not send means the
+      // default, which is the shape this connector has always written.
+      salesOrderSplit:
+        formData.get("salesOrderSplit") === "single" ? "single" : "per_warehouse",
       shippingProductCode,
     });
 
@@ -1405,6 +1411,7 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
 
 interface OrdersData {
   template: string;
+  split: SalesOrderSettings["salesOrderSplit"];
   defaultTemplate: string;
   shippingProductCode: string;
   sample: { name: string; number: string; id: string } | null;
@@ -1426,6 +1433,7 @@ function OrdersStep({
   busy: boolean;
 }) {
   const [template, setTemplate] = useState(orders.template);
+  const [split, setSplit] = useState(orders.split);
   const [customising, setCustomising] = useState(orders.template !== "");
   const [mapping, setMapping] = useState(orders.mapping);
   const [fallback, setFallback] = useState(orders.fallback);
@@ -1496,10 +1504,57 @@ function OrdersStep({
           <s-stack direction="block" gap="base">
             <s-paragraph>
               Shopify orders are created as MetaKocka sales orders
-              automatically. An order fulfilled from more than one warehouse
-              gets one sales order per warehouse, and the quantities always add
-              up to what the customer bought.
+              automatically, and the quantities always add up to what the
+              customer bought.
             </s-paragraph>
+
+            {/*
+             * The one structural question about order sync, asked before the
+             * first order rather than discovered after it.
+             *
+             * A merchant who does not keep warehouses in MetaKocka would
+             * otherwise meet the split as a surprise: two documents for one
+             * order, each filed against a warehouse they never meant to use.
+             * Asking here costs one answer and saves that.
+             *
+             * The value travels in a hidden input, as the reference pattern
+             * does, because this step is a real form and one control feeding
+             * one field is easier to reason about than trusting each web
+             * component's own form participation.
+             */}
+            <input type="hidden" name="salesOrderSplit" value={split} />
+            <s-choice-list
+              label="How many sales orders one Shopify order becomes"
+              values={[split]}
+              onChange={(event) =>
+                setSplit(
+                  event.currentTarget.values[0] === "single"
+                    ? "single"
+                    : "per_warehouse",
+                )
+              }
+            >
+              <s-choice value="per_warehouse">
+                One for each warehouse it ships from
+                <s-text slot="details">
+                  Each sales order is filed against its own MetaKocka warehouse.
+                  Keeps stock in MetaKocka right for shops that warehouse there.
+                </s-text>
+              </s-choice>
+              <s-choice value="single">
+                One for the whole order
+                <s-text slot="details">
+                  A single sales order carrying every line, with no warehouse on
+                  it, so MetaKocka applies the company default.
+                </s-text>
+              </s-choice>
+            </s-choice-list>
+
+            <s-text color="subdued">
+              {split === "single"
+                ? "You can change this later on the order settings page. Warehouses are still mapped in the previous step, because stock synchronization uses them — they just do not appear on the sales order."
+                : "You can change this later on the order settings page."}
+            </s-text>
 
             <s-stack direction="block" gap="small-400">
               <s-text type="strong">Order reference</s-text>
@@ -1509,8 +1564,9 @@ function OrdersStep({
                   : "Shopify order number."}
               </s-text>
               <s-text color="subdued">
-                This is what MetaKocka shows as Customer&rsquo;s order, and what
-                links the sales orders of one Shopify order to each other.
+                {split === "single"
+                  ? "This is what MetaKocka shows as Customer\u2019s order, and how this app finds a sales order again if a write times out."
+                  : "This is what MetaKocka shows as Customer\u2019s order, and what links the sales orders of one Shopify order to each other."}
               </s-text>
             </s-stack>
 
