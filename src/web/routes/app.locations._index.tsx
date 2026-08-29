@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -19,7 +19,6 @@ import {
 import { listProfitCenters } from "~/adapters/db/repositories/profit-center.server";
 import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import {
-  listCachedWarehouses,
   listSupplySources,
   replaceCachedWarehouses,
 } from "~/adapters/db/repositories/supply-source.server";
@@ -31,15 +30,12 @@ import {
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
-import { listLocations } from "~/adapters/shopify/locations";
 import { authenticate } from "~/adapters/shopify/shopify.server";
-import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
 import { DistributionBars } from "~/web/components/distribution-bars";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent, describeSyncBriefly } from "~/web/lib/activity";
 import { formatDateTime } from "~/web/lib/datetime";
-import { INHERIT } from "~/web/lib/locations";
-import { saveLocationMapping } from "~/web/lib/locations.server";
+import { loadLocationRows } from "~/web/lib/locations.server";
 import {
   METAKOCKA_REGISTERS_URL,
   METAKOCKA_WAREHOUSES_URL,
@@ -102,25 +98,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  const [
-    warehouses,
-    sources,
-    locations,
-    connected,
-    events,
-    defaults,
-    profitCenters,
-  ] = await Promise.all([
-    listCachedWarehouses(principal),
-    listSupplySources(principal),
-    listLocations(admin),
-    isConnected(principal),
-    recentEvents(principal, 120),
-    getSupplyDefaults(principal),
-    listProfitCenters(principal),
-  ]);
+  const [sources, connected, events, defaults, profitCenters] =
+    await Promise.all([
+      listSupplySources(principal),
+      isConnected(principal),
+      recentEvents(principal, 120),
+      getSupplyDefaults(principal),
+      listProfitCenters(principal),
+    ]);
 
-  const warehouseByMark = new Map(warehouses.map((w) => [w.mark, w]));
   const nameBySourceId = new Map(
     sources.map((source) => [source.id, source.name]),
   );
@@ -147,71 +133,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     });
   }
 
-  // A source counts as this location's connection only while its warehouse is
-  // still one MetaKocka returns. A source left over from a deleted warehouse
-  // syncs nothing, and showing it as connected would explain none of that.
-  const sourceByLocation = new Map(
-    sources
-      .filter(
-        (source) =>
-          source.shopifyLocationId !== null &&
-          source.metakockaWarehouse !== null &&
-          warehouseByMark.has(source.metakockaWarehouse),
-      )
-      .map((source) => [source.shopifyLocationId!, source]),
-  );
-
-  const locationRows = locations.map((location) => {
-    const source = sourceByLocation.get(location.id) ?? null;
-    const warehouse = source?.metakockaWarehouse
-      ? (warehouseByMark.get(source.metakockaWarehouse) ?? null)
-      : null;
-    const lastSync = source ? (lastBySourceId.get(source.id) ?? null) : null;
-
-    /*
-     * The location's own record of its last run, not the activity log.
-     *
-     * The log only ever had entries the job managed to write, and a run that
-     * threw wrote none — so the location that had failed every attempt for nine
-     * hours looked exactly like one that had never had a problem. The outcome
-     * is now recorded on the location whether the run worked or not, which is
-     * the only version of this that can report a failure.
-     */
-    const status: LocationStatus = !warehouse
-      ? "not_connected"
-      : source?.lastSyncOk === false
-        ? "error"
-        : lastSync && !lastSync.ok
-          ? "error"
-          : source && source.stockDirection !== "none" && source.enabled
-            ? "syncing"
-            : "paused";
-
-    return {
-      id: location.id,
-      name: location.name,
-      isActive: location.isActive,
-      fulfillmentServiceName: location.fulfillmentServiceName,
-      sourceId: source?.id ?? null,
-      warehouseMark: warehouse?.mark ?? "",
-      warehouseName: warehouse?.name ?? null,
-      direction: String(source?.stockDirection ?? "none"),
-      directionInherited: source?.stockDirectionInherited ?? true,
-      profitCenter: source?.metakockaProfitCenter ?? "",
-      profitCenterInherited: source?.profitCenterInherited ?? true,
-      status,
-      lastSync,
-      // What went wrong and how long it has been going wrong, so the row says
-      // something a merchant can act on rather than just turning red.
-      syncMessage: source?.lastSyncOk === false ? source.lastSyncMessage : null,
-      syncFailures: source?.syncFailures ?? 0,
-      syncCheckedAt: source?.lastSyncAt?.toISOString() ?? null,
-    };
-  });
-
-  const connectedMarks = new Set(
-    locationRows.map((row) => row.warehouseMark).filter(Boolean),
-  );
+  const { locations: locationRows, unconnected, syncedAt } =
+    await loadLocationRows(admin, principal, lastBySourceId);
 
   /**
    * Check the register once when nothing in it has ever been checked.
@@ -246,14 +169,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
     checking,
     locations: locationRows,
-    unconnected: warehouses
-      .filter((warehouse) => !connectedMarks.has(warehouse.mark))
-      .map((warehouse) => ({
-        mark: warehouse.mark,
-        name: warehouse.name,
-        isMain: warehouse.isMain,
-        isActive: warehouse.isActive,
-      })),
+    unconnected,
     syncing: locationRows.filter((row) => row.status === "syncing").length,
     recent: stockEvents.slice(0, 6).map((event) => {
       const described = describeEvent(
@@ -269,7 +185,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ok: described.ok,
       };
     }),
-    syncedAt: warehouses[0]?.syncedAt.toISOString() ?? null,
+    syncedAt,
   };
 };
 
@@ -398,54 +314,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     };
   }
 
-  /* ---------------------------------------------------------------------- */
-  /* Connect or edit one location                                           */
-  /* ---------------------------------------------------------------------- */
-
-  if (intent !== "save-location") {
-    return fail("page", "That action is not available. Reload the page.");
-  }
-
   /*
-   * The rules live in `web/lib/locations.server`, because guided setup connects
-   * locations too and one writer per Shopify location is not an invariant worth
-   * having two implementations of.
+   * Connecting and editing a location moved to the settings page with the rest
+   * of what a merchant changes. This page reads.
    */
-  const locationId = String(formData.get("location") ?? "").trim();
-  const outcome = await saveLocationMapping(principal, {
-    shopifyLocationId: locationId,
-    warehouseMark: String(formData.get("warehouse") ?? ""),
-    locationName: String(formData.get("locationName") ?? ""),
-    direction: String(formData.get("direction") ?? INHERIT),
-    profitCenter: String(formData.get("profitCenter") ?? INHERIT),
-    viaConnect: String(formData.get("via") ?? "") === "connect",
-  });
-
-  return {
-    ok: outcome.ok,
-    scope: "location" as const,
-    locationId,
-    message: outcome.message,
-  };
+  return fail("page", "That action is not available. Reload the page.");
 };
 
 /* -------------------------------------------------------------------------- */
 /* Copy                                                                       */
 /* -------------------------------------------------------------------------- */
-
-/** One word for where stock is counted. Used in labels and inherited hints. */
-const DIRECTION_LABEL: Record<string, string> = {
-  mk_to_shopify: "MetaKocka",
-  shopify_to_mk: "Shopify",
-  none: "Do not synchronize stock",
-};
-
-/** Per choice, so the modal needs no explanatory paragraphs. */
-const DIRECTION_HELP: Record<string, string> = {
-  mk_to_shopify: "Shopify on hand is set from MetaKocka.",
-  shopify_to_mk: "The MetaKocka warehouse is set from Shopify.",
-  none: "Neither side is changed.",
-};
 
 /**
  * The badge marking whichever side is counted.
@@ -496,27 +374,11 @@ function shortDateTime(iso: string): string {
   });
 }
 
-/** The part of the Polaris modal element this page drives from code. */
-// Optional: a custom element is a plain HTMLElement until the browser upgrades
-// it, and a ref is set before that happens. These calls all follow a user
-// action so the element has long since upgraded, but the types should not
-// promise something that is only true later.
-type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
-
 const HELP_MODAL_ID = "about-locations";
-const EDITOR_MODAL_ID = "location-editor";
-const CONNECT_MODAL_ID = "warehouse-connect";
-
-interface LocationDraft {
-  mark: string;
-  direction: string;
-  profitCenter: string;
-}
 
 export default function Locations() {
   const {
     connected,
-    defaults: savedDefaults,
     profitCenters,
     locations,
     unconnected,
@@ -526,55 +388,18 @@ export default function Locations() {
   } = useLoaderData<typeof loader>();
 
   /**
-   * Two fetchers, because two different things on this page can be in flight
-   * and each has its own place to report: a location dialog, and the buttons on
-   * the page itself.
+   * One fetcher: the two buttons on this page. Everything a merchant changes
+   * about a location happens on the settings page now.
    *
    * Nothing here is a submittable `<Form>`. The page this replaced held several,
    * and a form that can be submitted by anything other than a person pressing a
    * button eventually is: the event log showed saves nobody asked for.
    */
-  const locationFetcher = useFetcher<typeof action>();
   const pageFetcher = useFetcher<typeof action>();
 
-  const savingLocation = locationFetcher.state !== "idle";
   const busy = pageFetcher.state !== "idle";
 
-  const [editing, setEditing] = useState<string | null>(null);
-  const [connecting, setConnecting] = useState<string | null>(null);
-  const [location, setLocation] = useState<LocationDraft>({
-    mark: "",
-    direction: INHERIT,
-    profitCenter: INHERIT,
-  });
-  const [connectTo, setConnectTo] = useState("");
-  const [advanced, setAdvanced] = useState(false);
   const [showUnconnected, setShowUnconnected] = useState(false);
-
-  const editor = useRef<Overlay | null>(null);
-  const connector = useRef<Overlay | null>(null);
-
-  /*
-   * Which dialog is up, so a save closes that one and only that one.
-   *
-   * Both dialogs share `locationFetcher`, and a success used to hide both. The
-   * element for a dialog that was never opened is still mounted and still takes
-   * the call, and this component set is known to push a modal back -- dimmed,
-   * with nothing on top -- when it believes another one is open above it. Not
-   * worth finding out the hard way a second time (see components/dropdown.tsx).
-   */
-  const openDialog = useRef<"editor" | "connect" | null>(null);
-
-  /* --- Dialogs close on success, and only on success --------------------- */
-
-  useEffect(() => {
-    const result = locationFetcher.data;
-    if (!result?.ok) return;
-    if (openDialog.current === "editor") editor.current?.hideOverlay?.();
-    if (openDialog.current === "connect") connector.current?.hideOverlay?.();
-    openDialog.current = null;
-    if (typeof shopify !== "undefined") shopify.toast.show(result.message);
-  }, [locationFetcher.data]);
 
   useEffect(() => {
     const result = pageFetcher.data;
@@ -603,123 +428,8 @@ export default function Locations() {
     }))
     .filter((row) => row.count > 0);
 
-  const edited = locations.find((row) => row.id === editing) ?? null;
-  const connectingWarehouse =
-    unconnected.find((w) => w.mark === connecting) ?? null;
-
-  const defaultDirectionLabel =
-    DIRECTION_LABEL[savedDefaults.direction] ?? DIRECTION_LABEL.none!;
-  const defaultCenterLabel = savedDefaults.profitCenter || "None";
-
-  const centerOptions: DropdownOption[] = [
-    { value: "", label: "None" },
-    ...profitCenters
-      // INHERIT can never be a real name, so it can never be ambiguous.
-      .filter((entry) => entry.value !== INHERIT)
-      .map((entry) => ({
-        value: entry.value,
-        label: entry.isValid
-          ? entry.value
-          : `${entry.value} (no longer in MetaKocka)`,
-      })),
-  ];
-
-  const warehouseOptions: DropdownOption[] = [
-    { value: "", label: "Not connected" },
-    ...unconnected.map((w) => ({ value: w.mark, label: w.name })),
-    // The one this location already holds is not in `unconnected`, so it has to
-    // be added back or the dialog would open showing nothing chosen.
-    ...(edited?.warehouseMark
-      ? [
-          {
-            value: edited.warehouseMark,
-            label: edited.warehouseName ?? edited.warehouseMark,
-          },
-        ]
-      : []),
-  ];
-
-  /*
-   * Only locations that have no warehouse yet.
-   *
-   * This is the mirror of the warehouse list in the editor, which offers the
-   * unconnected warehouses and nothing else. Offering a taken location here
-   * made the dialog look like it could do something it should not: choosing one
-   * would quietly move its warehouse off it, and a merchant connecting a new
-   * warehouse is not asking to disconnect an old one. Changing which warehouse
-   * a location uses is what Edit on that location is for.
-   *
-   * Parenthetical notes rather than the em-dash chain this replaced, and both
-   * are worth keeping: an inactive location cannot be sold from, and one owned
-   * by a fulfilment service is one section 7 forbids this app to write.
-   */
-  const freeLocations = locations.filter((row) => row.warehouseMark === "");
-
-  const locationOptions: DropdownOption[] = [
-    { value: "", label: "Choose a location" },
-    ...freeLocations.map((row) => {
-      const notes = [
-        row.isActive ? null : "inactive",
-        row.fulfillmentServiceName
-          ? `fulfilled by ${row.fulfillmentServiceName}`
-          : null,
-      ].filter(Boolean);
-
-      return {
-        value: row.id,
-        label:
-          notes.length > 0 ? `${row.name} (${notes.join(", ")})` : row.name,
-      };
-    }),
-  ];
-
   const rejected = profitCenters.filter((entry) => !entry.isValid);
 
-  const openEditor = (row: (typeof locations)[number]) => {
-    openDialog.current = "editor";
-    setEditing(row.id);
-    setAdvanced(!row.directionInherited || !row.profitCenterInherited);
-    setLocation({
-      mark: row.warehouseMark,
-      direction: row.directionInherited ? INHERIT : row.direction,
-      profitCenter: row.profitCenterInherited ? INHERIT : row.profitCenter,
-    });
-  };
-
-  const saveLocation = () => {
-    if (!edited) return;
-    locationFetcher.submit(
-      {
-        intent: "save-location",
-        location: edited.id,
-        locationName: edited.name,
-        warehouse: location.mark,
-        direction: location.direction,
-        profitCenter: location.profitCenter,
-      },
-      { method: "post" },
-    );
-  };
-
-  const saveConnection = () => {
-    if (!connectingWarehouse) return;
-    const target = locations.find((row) => row.id === connectTo);
-    locationFetcher.submit(
-      {
-        intent: "save-location",
-        via: "connect",
-        location: connectTo,
-        locationName: target?.name ?? "",
-        warehouse: connectingWarehouse.mark,
-        direction: INHERIT,
-        profitCenter: INHERIT,
-      },
-      { method: "post" },
-    );
-  };
-
-  const locationResult =
-    locationFetcher.data?.scope === "location" ? locationFetcher.data : null;
   const pageResult =
     pageFetcher.data?.scope === "page" ? pageFetcher.data : null;
 
@@ -797,193 +507,6 @@ export default function Locations() {
         </s-button>
       </s-modal>
 
-      {/* --- Per-location editor ------------------------------------------ */}
-
-      <s-modal
-        id={EDITOR_MODAL_ID}
-        heading={edited ? edited.name : "Location"}
-        ref={(element: Overlay | null) => {
-          editor.current = element;
-        }}
-      >
-        <s-stack direction="block" gap="large">
-          {locationResult &&
-          !locationResult.ok &&
-          locationResult.locationId === edited?.id ? (
-            <s-banner tone="critical" heading="That did not save">
-              <s-paragraph>{locationResult.message}</s-paragraph>
-            </s-banner>
-          ) : null}
-
-          <Dropdown
-            name="warehouse"
-            label="MetaKocka warehouse"
-            details="Stock and orders for this location use this warehouse."
-            value={location.mark}
-            options={warehouseOptions}
-            onChange={(next) =>
-              setLocation((current) => ({ ...current, mark: next }))
-            }
-          />
-
-          {/*
-           * Progressive disclosure rather than a Collapsible: `s-*` has no
-           * collapsible element, and a button that shows a box is the same
-           * thing without inventing layout of our own (section 2.6).
-           */}
-          <s-stack direction="block" gap="base">
-            <s-button
-              variant="tertiary"
-              icon={advanced ? "chevron-up" : "chevron-down"}
-              onClick={() => setAdvanced((open) => !open)}
-              accessibilityLabel={
-                advanced ? "Hide advanced settings" : "Show advanced settings"
-              }
-            >
-              Advanced
-            </s-button>
-
-            {advanced ? (
-              <s-stack direction="block" gap="large">
-                <s-choice-list
-                  name="direction"
-                  label="Stock source of truth"
-                  values={[location.direction]}
-                  /*
-                   * Read the event before the updater, not inside it.
-                   *
-                   * A function passed to a setter is called by React during the
-                   * next render, and `currentTarget` is null by then. Closing
-                   * over the event here crashed the page on the first choice
-                   * made: "Cannot read properties of null (reading 'values')".
-                   */
-                  onChange={(e) => {
-                    const next = e.currentTarget.values[0] ?? INHERIT;
-                    setLocation((current) => ({ ...current, direction: next }));
-                  }}
-                >
-                  <s-choice value={INHERIT}>
-                    Use the default
-                    <s-text slot="details">{`Currently ${defaultDirectionLabel}.`}</s-text>
-                  </s-choice>
-                  <s-choice value="mk_to_shopify">
-                    MetaKocka
-                    <s-text slot="details">
-                      {DIRECTION_HELP.mk_to_shopify}
-                    </s-text>
-                  </s-choice>
-                  <s-choice value="shopify_to_mk">
-                    Shopify
-                    <s-text slot="details">
-                      {DIRECTION_HELP.shopify_to_mk}
-                    </s-text>
-                  </s-choice>
-                  <s-choice value="none">
-                    Do not sync stock
-                    <s-text slot="details">{DIRECTION_HELP.none}</s-text>
-                  </s-choice>
-                </s-choice-list>
-
-                <Dropdown
-                  name="profitCenter"
-                  label="Profit centre"
-                  details="Sent to MetaKocka on this location's orders."
-                  value={location.profitCenter}
-                  options={[
-                    {
-                      value: INHERIT,
-                      label: `Using default: ${defaultCenterLabel}`,
-                    },
-                    ...centerOptions,
-                  ]}
-                  onChange={(next) =>
-                    setLocation((current) => ({
-                      ...current,
-                      profitCenter: next,
-                    }))
-                  }
-                />
-              </s-stack>
-            ) : null}
-          </s-stack>
-        </s-stack>
-
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          onClick={saveLocation}
-          {...(savingLocation ? { loading: true, disabled: true } : {})}
-        >
-          Save
-        </s-button>
-        <s-button
-          slot="secondary-actions"
-          variant="secondary"
-          command="--hide"
-          commandFor={EDITOR_MODAL_ID}
-        >
-          Cancel
-        </s-button>
-      </s-modal>
-
-      {/* --- Connect an unconnected warehouse ----------------------------- */}
-
-      <s-modal
-        id={CONNECT_MODAL_ID}
-        heading={
-          connectingWarehouse
-            ? `Connect ${connectingWarehouse.name}`
-            : "Connect"
-        }
-        ref={(element: Overlay | null) => {
-          connector.current = element;
-        }}
-      >
-        <s-stack direction="block" gap="large">
-          {locationResult &&
-          !locationResult.ok &&
-          locationResult.locationId === connectTo ? (
-            <s-banner tone="critical" heading="That did not save">
-              <s-paragraph>{locationResult.message}</s-paragraph>
-            </s-banner>
-          ) : null}
-
-          {freeLocations.length === 0 ? (
-            <s-paragraph>
-              Every location already has a warehouse. Edit a location above to
-              change which warehouse it uses.
-            </s-paragraph>
-          ) : (
-            <Dropdown
-              name="location"
-              label="Shopify location"
-              details="The warehouse takes the sync defaults once connected."
-              value={connectTo}
-              options={locationOptions}
-              onChange={setConnectTo}
-            />
-          )}
-        </s-stack>
-
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          onClick={saveConnection}
-          {...(savingLocation || !connectTo
-            ? { loading: savingLocation, disabled: true }
-            : {})}
-        >
-          Connect
-        </s-button>
-        <s-button
-          slot="secondary-actions"
-          variant="secondary"
-          command="--hide"
-          commandFor={CONNECT_MODAL_ID}
-        >
-          Cancel
-        </s-button>
-      </s-modal>
 
       <s-stack direction="block" gap="large">
         {/*
@@ -1186,13 +709,18 @@ export default function Locations() {
                       </s-badge>
                     </s-table-cell>
 
+                    {/*
+                     * Edit goes to the settings page, opening this location
+                     * there. Editing a mapping is changing a setting, and it
+                     * happens where the settings are — the alternative is one
+                     * page that both reports and edits, which is the split this
+                     * area was given for a reason.
+                     */}
                     <s-table-cell>
                       <s-button
-                        variant="tertiary"
+                        variant="secondary"
                         accessibilityLabel={`Edit ${row.name}`}
-                        command="--show"
-                        commandFor={EDITOR_MODAL_ID}
-                        onClick={() => openEditor(row)}
+                        href={`/app/locations/settings?location=${encodeURIComponent(row.id)}`}
                       >
                         Edit
                       </s-button>
@@ -1210,9 +738,15 @@ export default function Locations() {
           <s-section heading="MetaKocka warehouses not connected">
             <s-stack direction="block" gap="base">
               <s-button
-                variant="tertiary"
+                type="button"
+                variant="secondary"
                 icon={showUnconnected ? "chevron-up" : "chevron-down"}
                 onClick={() => setShowUnconnected((open) => !open)}
+                accessibilityLabel={
+                  showUnconnected
+                    ? "Hide the warehouses that are not connected"
+                    : "Show the warehouses that are not connected"
+                }
               >
                 {unconnected.length === 1
                   ? "1 warehouse"
@@ -1249,15 +783,9 @@ export default function Locations() {
                         </s-table-cell>
                         <s-table-cell>
                           <s-button
-                            variant="tertiary"
+                            variant="secondary"
                             accessibilityLabel={`Connect ${warehouse.name}`}
-                            command="--show"
-                            commandFor={CONNECT_MODAL_ID}
-                            onClick={() => {
-                              openDialog.current = "connect";
-                              setConnecting(warehouse.mark);
-                              setConnectTo("");
-                            }}
+                            href={`/app/locations/settings?connect=${encodeURIComponent(warehouse.mark)}`}
                           >
                             Connect
                           </s-button>

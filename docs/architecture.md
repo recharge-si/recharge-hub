@@ -53,9 +53,9 @@ Home              /app                  operations dashboard
 Orders            /app/orders           list, and /app/orders/settings
 Needs attention   /app/exceptions
 Products          /app/products         status, and /app/products/sync for settings
-Locations         /app/locations        warehouses and stock, and
-                                        /app/locations/settings for the defaults
-                                        and the profit centre register
+Locations         /app/locations        how stock is going, and
+                                        /app/locations/settings for the mappings,
+                                        the defaults and the profit centres
 Settings          /app/settings         hub; /app/settings/metakocka is the connection
 ```
 

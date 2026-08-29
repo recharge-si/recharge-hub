@@ -1,3 +1,5 @@
+import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
+
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import {
@@ -7,6 +9,7 @@ import {
   upsertSupplySource,
   writerForDirection,
 } from "~/adapters/db/repositories/supply-source.server";
+import { listLocations } from "~/adapters/shopify/locations";
 import type { Principal } from "~/domain/types";
 import { INHERIT, codeForMark, toDirection } from "~/web/lib/locations";
 
@@ -192,4 +195,121 @@ export async function saveLocationMapping(
   });
 
   return { ok: true, message: `Saved ${warehouse.name}.` };
+}
+
+/** How one location's stock sync is going, in one word. */
+export type LocationStatus = "not_connected" | "syncing" | "paused" | "error";
+
+/** What a stock run last did for one supply source, as a row states it. */
+export interface LastSync {
+  at: string;
+  text: string;
+  ok: boolean;
+}
+
+/**
+ * Every Shopify location with whatever MetaKocka warehouse it is connected to.
+ *
+ * Read by both location pages — the one you land on, which lists them, and the
+ * settings page, which edits them — so it is written once. Two implementations
+ * of "is this location connected" is two pages disagreeing about whether stock
+ * is moving.
+ *
+ * `lastBySourceId` is what the activity log says each source last did, and it is
+ * the caller's because only one of the two pages reads the log. A caller with
+ * nothing to say passes an empty map and the rows carry no last-sync line.
+ */
+export async function loadLocationRows(
+  admin: AdminApiContext,
+  principal: Principal,
+  lastBySourceId: Map<string, LastSync> = new Map(),
+) {
+  const [warehouses, sources, locations] = await Promise.all([
+    listCachedWarehouses(principal),
+    listSupplySources(principal),
+    listLocations(admin),
+  ]);
+
+  const warehouseByMark = new Map(warehouses.map((w) => [w.mark, w]));
+
+  // A source counts as this location's connection only while its warehouse is
+  // still one MetaKocka returns. A source left over from a deleted warehouse
+  // syncs nothing, and showing it as connected would explain none of that.
+  const sourceByLocation = new Map(
+    sources
+      .filter(
+        (source) =>
+          source.shopifyLocationId !== null &&
+          source.metakockaWarehouse !== null &&
+          warehouseByMark.has(source.metakockaWarehouse),
+      )
+      .map((source) => [source.shopifyLocationId!, source]),
+  );
+
+  const locationRows = locations.map((location) => {
+    const source = sourceByLocation.get(location.id) ?? null;
+    const warehouse = source?.metakockaWarehouse
+      ? (warehouseByMark.get(source.metakockaWarehouse) ?? null)
+      : null;
+    const lastSync = source ? (lastBySourceId.get(source.id) ?? null) : null;
+
+    /*
+     * The location's own record of its last run, not the activity log.
+     *
+     * The log only ever had entries the job managed to write, and a run that
+     * threw wrote none — so the location that had failed every attempt for nine
+     * hours looked exactly like one that had never had a problem. The outcome
+     * is now recorded on the location whether the run worked or not, which is
+     * the only version of this that can report a failure.
+     */
+    const status: LocationStatus = !warehouse
+      ? "not_connected"
+      : source?.lastSyncOk === false
+        ? "error"
+        : lastSync && !lastSync.ok
+          ? "error"
+          : source && source.stockDirection !== "none" && source.enabled
+            ? "syncing"
+            : "paused";
+
+    return {
+      id: location.id,
+      name: location.name,
+      isActive: location.isActive,
+      fulfillmentServiceName: location.fulfillmentServiceName,
+      sourceId: source?.id ?? null,
+      warehouseMark: warehouse?.mark ?? "",
+      warehouseName: warehouse?.name ?? null,
+      direction: String(source?.stockDirection ?? "none"),
+      directionInherited: source?.stockDirectionInherited ?? true,
+      profitCenter: source?.metakockaProfitCenter ?? "",
+      profitCenterInherited: source?.profitCenterInherited ?? true,
+      status,
+      lastSync,
+      // What went wrong and how long it has been going wrong, so the row says
+      // something a merchant can act on rather than just turning red.
+      syncMessage: source?.lastSyncOk === false ? source.lastSyncMessage : null,
+      syncFailures: source?.syncFailures ?? 0,
+      syncCheckedAt: source?.lastSyncAt?.toISOString() ?? null,
+    };
+  });
+
+
+  const connectedMarks = new Set(
+    locationRows.map((row) => row.warehouseMark).filter(Boolean),
+  );
+
+  return {
+    locations: locationRows,
+    unconnected: warehouses
+      .filter((warehouse) => !connectedMarks.has(warehouse.mark))
+      .map((warehouse) => ({
+        mark: warehouse.mark,
+        name: warehouse.name,
+        isMain: warehouse.isMain,
+        isActive: warehouse.isActive,
+      })),
+    /** When the warehouse list itself was last read from MetaKocka. */
+    syncedAt: warehouses[0]?.syncedAt.toISOString() ?? null,
+  };
 }
