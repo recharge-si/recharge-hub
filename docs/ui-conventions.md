@@ -48,6 +48,25 @@ Applies to name overwrite and price overwrite identically. Neither is special.
   never a control. A toggle that only ever reflects something else is a lie with
   a checkbox next to it.
 
+## Disclosure
+Three shapes, one look. `Advanced` folds a setting away under the heading that gives it
+meaning; `AdvancedSection` collects the page-level rarities into a closed card of its own;
+`LearnMore` folds the prose that explains a control. Each is a bordered secondary button
+with a chevron — never a bare word with a click handler — and the two that hide settings
+say what those settings currently are while closed, so opening is for changing rather than
+for checking.
+
+Long explanation belongs behind one of these or in the page's Help modal, never standing in
+the card. A control states its answer in one line; the reasoning, the edge case and what
+MetaKocka does with it are one click away.
+
+## Setting rows
+A setting another page owns, or one whose current value is a sentence, is a row: its name,
+what it says now, and the control that changes it, aligned down the card. Three rows read
+as a column of answers; the same three as paragraphs with buttons after them read as three
+cards that happen to be adjacent. Rows stack under their label on a narrow card, by
+container query — a card is narrower than the window it is in.
+
 ## Page header
 Every page that owns a background process opens with the same component:
 healthy / needs attention · when it last ran and the outcome · automatic or manual ·
