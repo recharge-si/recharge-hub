@@ -2,7 +2,6 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useEffect, useRef, useState } from "react";
 import {
   Form,
-  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
@@ -22,6 +21,7 @@ import {
 } from "~/adapters/db/repositories/metakocka-credential.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { resetShop } from "~/adapters/db/repositories/shop.server";
+import { redirectWithin } from "~/web/lib/redirects";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import {
   MetakockaError,
@@ -144,12 +144,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Setup is unfinished again by construction, so send the merchant
       // there rather than leaving them on a settings page for a connection
       // that no longer exists.
-      return redirect(
-        "/app/setup?note=" +
-          encodeURIComponent(
-            `Disconnected ${connection.companyId} and erased this app's data for the store. Nothing in MetaKocka was changed.`,
-          ),
-      );
+      return redirectWithin(request, "/app/setup", {
+        step: undefined,
+        note: `Disconnected ${connection.companyId} and erased this app's data for the store. Nothing in MetaKocka was changed.`,
+      });
     }
 
     if (intent === "test") {

@@ -1,4 +1,6 @@
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import { type LoaderFunctionArgs } from "react-router";
+
+import { redirectWithin } from "~/web/lib/redirects";
 
 /**
  * Payment types moved under Orders -> Settings, beside the order behaviour they
@@ -6,6 +8,7 @@ import { redirect, type LoaderFunctionArgs } from "react-router";
  * this page is linked from exception guidance a merchant may have open.
  */
 export const loader = ({ request }: LoaderFunctionArgs) => {
-  const search = new URL(request.url).search;
-  throw redirect(`/app/orders/settings/payments${search}`);
+  // Through the shared helper, so a moved route keeps `host` and the rest
+  // of what embeds it the same way every other redirect here does.
+  throw redirectWithin(request, "/app/orders/settings/payments");
 };

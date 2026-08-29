@@ -64,6 +64,22 @@ Settings. Three routes moved and redirect: `/app/settings/sales-orders` to
 `/app/locations`. `tests/unit/route-table.test.ts` asserts the table, including
 that `/app/orders/settings` out-ranks `/app/orders/:orderId`.
 
+**Every redirect under `/app` goes through `redirectWithin`** in
+`src/web/lib/redirects.ts`, which carries the request's query string and lets
+the caller set or remove single parameters. Shopify opens the app as a
+document request carrying `host`, `embedded`, `shop` and `id_token`; `host` is
+what App Bridge initialises from and `id_token` is what `authenticate.admin`
+reads, so a redirect that builds a fresh URL loses both and the merchant gets a
+blank frame rather than an error.
+
+It hides well, which is why it is a rule and not a review comment: in-app
+navigation is a client-side fetch and the already-running App Bridge does not
+care what the redirect said, so every path a person clicks through looks
+right. Only a redirect on the *first* document request shows it — which is
+Home sending a shop with nothing configured to guided setup, the one redirect
+a merchant meets before anything else. `/auth/login` is the exception: it is
+the un-embedded document and has no admin frame to preserve.
+
 ### One readiness model
 
 `src/domain/readiness/` computes six components — MetaKocka, warehouses, stock,

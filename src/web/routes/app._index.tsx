@@ -1,6 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
-  redirect,
   useLoaderData,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -20,6 +19,7 @@ import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
 import { exceptionAction } from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
+import { redirectWithin } from "~/web/lib/redirects";
 
 /**
  * The operations dashboard.
@@ -65,7 +65,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   if (shop.setupCompletedAt === null && shop.setupStep === null) {
     const readiness = await getReadiness(principal);
     if (componentOf(readiness, "metakocka").status === "needs_attention") {
-      throw redirect("/app/setup");
+      /*
+       * With the query string, because this is the one redirect that runs
+       * on the first document request. Dropping it takes `host` with it,
+       * App Bridge never initialises, and guided setup renders into a
+       * blank frame. See `redirectWithin`.
+       */
+      throw redirectWithin(request, "/app/setup");
     }
   }
 

@@ -2,7 +2,6 @@ import { boundary } from "@shopify/shopify-app-react-router/server";
 import { useState } from "react";
 import {
   Form,
-  redirect,
   useActionData,
   useLoaderData,
   useNavigation,
@@ -82,6 +81,7 @@ import { Dropdown, type DropdownOption } from "~/web/components/dropdown";
 import { ReadinessList } from "~/web/components/readiness-list";
 import { INHERIT, toDirection } from "~/web/lib/locations";
 import { saveLocationMapping } from "~/web/lib/locations.server";
+import { redirectWithin } from "~/web/lib/redirects";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
 import {
   isOwnershipKnown,
@@ -376,11 +376,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
    * ever.
    */
   const go = (to: Step, note?: string) =>
-    redirect(
-      note
-        ? `/app/setup?step=${to}&note=${encodeURIComponent(note)}`
-        : `/app/setup?step=${to}`,
-    );
+    // Built on the request's own query string: `host` and the rest of what
+    // embeds this page have to survive every step. `note` is set or removed
+    // rather than left alone, so last step's note does not follow the
+    // merchant through the whole wizard.
+    redirectWithin(request, "/app/setup", { step: to, note });
 
   if (intent === "back") {
     const to = previousStep(step);
@@ -790,7 +790,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       });
     }
 
-    throw redirect("/app");
+    // Neither the step nor a note belongs on the home page.
+    throw redirectWithin(request, "/app", {
+      step: undefined,
+      note: undefined,
+    });
   }
 
   return {

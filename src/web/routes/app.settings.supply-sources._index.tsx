@@ -1,4 +1,6 @@
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import { type LoaderFunctionArgs } from "react-router";
+
+import { redirectWithin } from "~/web/lib/redirects";
 
 /**
  * Locations moved out of Settings and became a top-level area (the product UX
@@ -9,6 +11,7 @@ import { redirect, type LoaderFunctionArgs } from "react-router";
  * deep link keeps whatever it was pointing at.
  */
 export const loader = ({ request }: LoaderFunctionArgs) => {
-  const search = new URL(request.url).search;
-  throw redirect(`/app/locations${search}`);
+  // Through the shared helper, so a moved route keeps `host` and the rest
+  // of what embeds it the same way every other redirect here does.
+  throw redirectWithin(request, "/app/locations");
 };

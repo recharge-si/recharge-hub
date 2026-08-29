@@ -1,4 +1,6 @@
-import { redirect, type LoaderFunctionArgs } from "react-router";
+import { type LoaderFunctionArgs } from "react-router";
+
+import { redirectWithin } from "~/web/lib/redirects";
 
 /**
  * Order sync stopped being a settings page of its own and became Orders ->
@@ -10,6 +12,7 @@ import { redirect, type LoaderFunctionArgs } from "react-router";
  * page that owns those settings now.
  */
 export const loader = ({ request }: LoaderFunctionArgs) => {
-  const search = new URL(request.url).search;
-  throw redirect(`/app/orders/settings${search}`);
+  // Through the shared helper, so a moved route keeps `host` and the rest
+  // of what embeds it the same way every other redirect here does.
+  throw redirectWithin(request, "/app/orders/settings");
 };
