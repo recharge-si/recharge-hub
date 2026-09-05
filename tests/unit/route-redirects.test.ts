@@ -102,18 +102,72 @@ describe("old settings routes", () => {
  * an error — which is what happened to a shop with nothing configured, where
  * opening the app redirects straight to guided setup on the first document
  * request. Every in-app redirect goes through this.
+ *
+ * The exception is `id_token` on a redirect thrown from an *action*: the token
+ * is single-use and already spent, and React Router re-fetches the next loader
+ * from the client, so carrying it makes that fetch present a stale token and be
+ * turned away — the "Handling response" that stalled guided setup after a step
+ * was saved.
  */
 describe("redirectWithin", () => {
   const EMBEDDED =
     "https://example.test/app?embedded=1&shop=demo.myshopify.com&host=abc&id_token=xyz";
 
-  it("carries what embeds the page", () => {
+  it("carries what embeds the page on a document request", () => {
+    // A GET is the first document request; `id_token` is what lets guided setup
+    // authenticate without a bounce, so it rides along with `host` and `shop`.
     const response = redirectWithin(new Request(EMBEDDED), "/app/setup");
 
     expect(response.status).toBe(302);
     expect(response.headers.get("location")).toBe(
       "/app/setup?embedded=1&shop=demo.myshopify.com&host=abc&id_token=xyz",
     );
+  });
+
+  it("drops the spent session token when an action redirects", () => {
+    // The bug: after saving a setup step the app threw a redirect carrying the
+    // just-spent `id_token`, the client re-fetched the next step's loader with
+    // that stale token, and the embedded-auth handshake answered with the empty
+    // response the library renders as "Handling response". The durable
+    // embedding parameters still have to survive.
+    const response = redirectWithin(
+      new Request(EMBEDDED, { method: "POST" }),
+      "/app/setup",
+      { step: "orders" },
+    );
+
+    const location = new URL(
+      response.headers.get("location")!,
+      "https://example.test",
+    );
+    expect(location.searchParams.has("id_token")).toBe(false);
+    expect(location.searchParams.get("host")).toBe("abc");
+    expect(location.searchParams.get("shop")).toBe("demo.myshopify.com");
+    expect(location.searchParams.get("embedded")).toBe("1");
+    expect(location.searchParams.get("step")).toBe("orders");
+  });
+
+  it("drops React Router's single-fetch markers when an action redirects", () => {
+    // `_routes`, `_data` and `index` belong to the request that carried them,
+    // never to a redirect target the client will navigate to next.
+    const response = redirectWithin(
+      new Request(
+        "https://example.test/app/setup.data?host=abc&_routes=routes%2Fapp.setup&_data=x&index=&step=stock",
+        { method: "POST" },
+      ),
+      "/app/setup",
+      { step: "orders" },
+    );
+
+    const location = new URL(
+      response.headers.get("location")!,
+      "https://example.test",
+    );
+    expect(location.searchParams.has("_routes")).toBe(false);
+    expect(location.searchParams.has("_data")).toBe(false);
+    expect(location.searchParams.has("index")).toBe(false);
+    expect(location.searchParams.get("host")).toBe("abc");
+    expect(location.searchParams.get("step")).toBe("orders");
   });
 
   it("sets what the caller names, keeping the rest", () => {

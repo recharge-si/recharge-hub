@@ -90,6 +90,18 @@ Home sending a shop with nothing configured to guided setup, the one redirect
 a merchant meets before anything else. `/auth/login` is the exception: it is
 the un-embedded document and has no admin frame to preserve.
 
+The token carries only on a document redirect (a GET). On a redirect thrown
+from an **action**, `redirectWithin` drops `id_token` and React Router's
+single-fetch markers (`_routes`, `_data`, `index`). The session token is
+single-use and spent the moment `authenticate.admin` reads it, and React Router
+answers a form submission by throwing the redirect and re-fetching the next
+step's loader from the client. Baking the just-spent token into that URL makes
+the follow-up request present a stale token: the loader is turned away with an
+empty-bodied 401, which the library's error boundary renders as the literal
+string "Handling response". This is what stalled guided setup after a step's
+answers had already been saved. Dropping the token lets App Bridge mint a fresh
+one for the next request.
+
 ### One readiness model
 
 `src/domain/readiness/` computes six components — MetaKocka, warehouses, stock,
