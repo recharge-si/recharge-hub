@@ -1,3 +1,4 @@
+import { useEffect } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   Outlet,
@@ -54,20 +55,19 @@ export default function AppLayout() {
 export function ErrorBoundary() {
   const error = useRouteError();
   const stale = describeStaleSessionError(error);
-  if (stale) {
-    return (
-      <s-banner tone="critical" heading={stale.heading}>
-        <s-paragraph>{stale.message}</s-paragraph>
-        {stale.recover === "navigate" ? (
-          <s-button onClick={() => window.location.assign("/app")}>
-            Continue
-          </s-button>
-        ) : (
-          <s-button onClick={() => window.location.reload()}>Reload</s-button>
-        )}
-      </s-banner>
-    );
+
+  // Auto-redirect on stale session (seamless re-auth, no error screen shown).
+  useEffect(() => {
+    if (stale?.recover === "navigate") {
+      window.location.assign("/app");
+    }
+  }, [stale?.recover]);
+
+  // If redirecting, show nothing while the navigation happens.
+  if (stale?.recover === "navigate") {
+    return null;
   }
+
   return boundary.error(error);
 }
 
