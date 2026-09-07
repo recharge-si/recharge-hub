@@ -67,7 +67,7 @@ const COPY: Record<string, ExceptionCopy> = {
     label: "Location not mapped",
     short: "fulfilled from an unmapped location",
     guidance:
-      "Shopify is fulfilling part of the order from a location with no MetaKocka warehouse, so those lines were not sent. Map it on the Supply sources page, then reconcile the order again.",
+      "Shopify is fulfilling part of the order from a location with no MetaKocka warehouse, so those lines were not sent. Map it on the Locations page, then reconcile the order again.",
   },
   voided_payment: {
     label: "Payment voided",
@@ -97,7 +97,7 @@ const COPY: Record<string, ExceptionCopy> = {
     label: "Changed after it was sent",
     short: "changed after being sent to MetaKocka",
     guidance:
-      "Shopify's version of the order no longer matches the document in MetaKocka. Correct it there, then use \"Mark as sorted in MetaKocka\" on the order so it stops being reported.",
+      'Shopify\'s version of the order no longer matches the document in MetaKocka. Correct it there, then use "Mark as sorted in MetaKocka" on the order so it stops being reported.',
   },
   stock_sync_failed: {
     label: "Stock not syncing",
@@ -141,6 +141,12 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "The order has no tax lines to derive a rate from. Set the rate in MetaKocka, or check the tax settings for that market.",
   },
+  commercial_representation_missing: {
+    label: "Shipping or discount has nowhere to go",
+    short: "carrying shipping or a discount MetaKocka cannot show",
+    guidance:
+      "The goods were sent, but MetaKocka has no article for the postage or no way to show the discount, so the sales order is short by that amount. Choose a shipping product and a discount representation in the order settings, then reconcile the order again. Nothing is guessed.",
+  },
   job_failed: {
     label: "Background work stopped",
     short: "whose background work stopped",
@@ -157,6 +163,51 @@ const FALLBACK: ExceptionCopy = {
 
 export function describeExceptionKind(kind: string): ExceptionCopy {
   return COPY[kind] ?? FALLBACK;
+}
+
+/**
+ * Where a merchant goes to make this stop being true.
+ *
+ * docs/BUILD_SPEC.md section 2.7 is explicit that a feature which can only be
+ * completed on an external site is not done, and section 11 asks every
+ * exception to be solvable from inside the app. Guidance that names a page and
+ * does not link to it is halfway there: the home page shows a handful of these
+ * with no room for a paragraph, so each kind carries the one place that fixes
+ * it.
+ *
+ * Null means the fix is on the order itself, which is where the caller falls
+ * back to. Nothing here links outside the app.
+ */
+export interface ExceptionAction {
+  label: string;
+  href: string;
+}
+
+const ACTIONS: Record<string, ExceptionAction> = {
+  unmapped_payment_gateway: {
+    label: "Configure payments",
+    href: "/app/orders/settings/payments",
+  },
+  unmapped_location: { label: "Configure location", href: "/app/locations" },
+  warehouse_invalid: { label: "Configure location", href: "/app/locations" },
+  profit_center_rejected: {
+    label: "Configure location",
+    href: "/app/locations",
+  },
+  stock_sync_failed: { label: "Open locations", href: "/app/locations" },
+  sku_not_in_metakocka: { label: "Open products", href: "/app/products" },
+  commercial_representation_missing: {
+    label: "Open order settings",
+    href: "/app/orders/settings",
+  },
+  tax_undeterminable: {
+    label: "Open order settings",
+    href: "/app/orders/settings",
+  },
+};
+
+export function exceptionAction(kind: string): ExceptionAction | null {
+  return ACTIONS[kind] ?? null;
 }
 
 /** How many open exceptions one category loads at once, and grows by on "Load more". */

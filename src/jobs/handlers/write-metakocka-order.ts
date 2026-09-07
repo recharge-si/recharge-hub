@@ -23,6 +23,8 @@ import {
   touchDocumentReconciled,
 } from "~/adapters/db/repositories/order.server";
 import { replaceApplicationsForDocument } from "~/adapters/db/repositories/order-payment.server";
+import { isSyncActivated } from "~/adapters/db/repositories/shop.server";
+import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import { listCachedWarehouses } from "~/adapters/db/repositories/supply-source.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { taxFactorFromPercent } from "~/adapters/metakocka/products";
@@ -51,6 +53,8 @@ import {
 } from "~/jobs/orders/payment-reconciler";
 import { resolvePaymentType } from "~/jobs/payment";
 import { parsePartnerOverride } from "~/domain/orders/partner";
+import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
+import { salesOrderNumberFor } from "~/domain/orders/reference";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
 
@@ -82,6 +86,13 @@ export const writeMetakockaOrderJobSchema = z.object({
  * One job per source, because `warehouse` and `profit_center` are
  * document-level (§3): a split order is N documents, not one document with
  * mixed lines.
+ *
+ * A shop on `sales_order_split = single` has no sources to run per: the job is
+ * called once with `WHOLE_ORDER_DOCUMENT` and writes one document carrying
+ * every line of the order with **no warehouse mark**, which MetaKocka then
+ * files against the company default. Everything else below — the count-code
+ * claim, the ambiguous-write recovery, the update policy, the payment shares —
+ * is the same code and the same rules; only the grouping differs.
  *
  * The order of operations is not arbitrary, and each step exists because of
  * something MetaKocka verifiably does:
@@ -154,13 +165,48 @@ export async function writeMetakockaOrderFor(
   const shopDomain = principal.shopDomain;
   const log = getLogger();
 
+  /**
+   * Whether this is the one document of an unsplit order.
+   *
+   * The caller decides — the reconciler reads `sales_order_split` — and passes
+   * the sentinel rather than a source id. Read once here, so every branch below
+   * asks the same question in the same way.
+   */
+  const wholeOrder = supplySourceId === WHOLE_ORDER_DOCUMENT;
+
   const order = await getOrderDetail(principal, orderId);
   if (!order) return;
 
-  const source = await prisma.supplySource.findFirst({
-    where: { id: supplySourceId, shop: { domain: shopDomainOf(principal) } },
-  });
-  if (!source) return;
+  const source = wholeOrder
+    ? null
+    : await prisma.supplySource.findFirst({
+        where: { id: supplySourceId, shop: { domain: shopDomainOf(principal) } },
+      });
+  if (!wholeOrder && !source) return;
+
+  /*
+   * The activation boundary (the product UX brief, section 11).
+   *
+   * Guided setup saves the MetaKocka credentials at its second step, so between
+   * there and Finish setup a shop is connected without having chosen its
+   * warehouses or its payment types. A sales order filed then is filed against
+   * answers nobody finished giving, and nothing in this system deletes a
+   * MetaKocka document. So the order is left alone; Finish setup enqueues a
+   * reconciliation sweep that picks up everything that arrived meanwhile.
+   *
+   * No exception is raised, because this is not a failure — it is a merchant
+   * partway through setup, which the home page is already saying.
+   *
+   * Shops that were synchronizing before this existed were back-filled by
+   * `20260826080000_setup_state`, so nothing stops for them.
+   */
+  if (!(await isSyncActivated(principal))) {
+    log.info(
+      { shop: shopDomain, orderId },
+      "Order not written to MetaKocka: setup has not been finished",
+    );
+    return;
+  }
 
   const productSettings = await getProductSyncSetting(principal);
   const credential = await getCredential(principal);
@@ -174,12 +220,22 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
-  // Which lines this source is responsible for, and how many of each.
-  const perSourceLines = order.lines.flatMap((line) =>
-    line.allocations
-      .filter((allocation) => allocation.supplySourceId === supplySourceId)
-      .map((allocation) => ({ line, quantity: allocation.quantity })),
-  );
+  /*
+   * Which lines this document is responsible for, and how many of each.
+   *
+   * An unsplit order takes the order's own lines at full quantity: nothing was
+   * allocated, because nothing was split. That deliberately includes quantity
+   * Shopify is fulfilling through a service this app cannot see — with no
+   * warehouse on the document there is no ERP stock to misstate, and a merchant
+   * who asked for one sales order per Shopify order meant all of it.
+   */
+  const perSourceLines = wholeOrder
+    ? order.lines.map((line) => ({ line, quantity: line.quantity }))
+    : order.lines.flatMap((line) =>
+        line.allocations
+          .filter((allocation) => allocation.supplySourceId === supplySourceId)
+          .map((allocation) => ({ line, quantity: allocation.quantity })),
+      );
 
   if (perSourceLines.length === 0) return;
 
@@ -235,24 +291,32 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
-  // §3: an unknown warehouse mark is accepted silently and the document is
-  // filed against the company default. Validating it here is the only thing
-  // that turns a silent mis-filing into something a merchant can see.
-  const warehouses = await listCachedWarehouses(principal);
-  const markIsKnown =
-    !source.metakockaWarehouse ||
-    warehouses.some(
-      (warehouse) => warehouse.mark === source.metakockaWarehouse,
-    );
+  /*
+   * §3: an unknown warehouse mark is accepted silently and the document is
+   * filed against the company default. Validating it here is the only thing
+   * that turns a silent mis-filing into something a merchant can see.
+   *
+   * There is nothing to validate for an unsplit order. It carries no mark, and
+   * being filed against the company default is what it is asking for rather
+   * than something going quietly wrong.
+   */
+  if (source) {
+    const warehouses = await listCachedWarehouses(principal);
+    const markIsKnown =
+      !source.metakockaWarehouse ||
+      warehouses.some(
+        (warehouse) => warehouse.mark === source.metakockaWarehouse,
+      );
 
-  if (!markIsKnown) {
-    await raiseException(principal, {
-      orderId,
-      kind: "warehouse_invalid",
-      message: `MetaKocka has no warehouse with the mark "${source.metakockaWarehouse}", and it accepts an unknown mark without complaining — the order would be filed against the company default. Reload the warehouse list and check the mapping for ${source.name}.`,
-      detail: { mark: source.metakockaWarehouse, source: source.name },
-    });
-    return;
+    if (!markIsKnown) {
+      await raiseException(principal, {
+        orderId,
+        kind: "warehouse_invalid",
+        message: `MetaKocka has no warehouse with the mark "${source.metakockaWarehouse}", and it accepts an unknown mark without complaining — the order would be filed against the company default. Reload the warehouse list and check the mapping for ${source.name}.`,
+        detail: { mark: source.metakockaWarehouse, source: source.name },
+      });
+      return;
+    }
   }
 
   // The addresses come from the stored payload rather than being kept as
@@ -318,12 +382,49 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
-  const countCode = `${order.customerOrderRef}-${source.code}`;
+  /*
+   * The app's internal claim key — **not** necessarily what MetaKocka is told.
+   *
+   * It is derived from `customer_order_ref`, which is frozen at intake, plus
+   * the source code where there is one, so it is stable and collision-free
+   * whatever the merchant does to their numbering settings. The unique index it
+   * is claimed under is the only duplicate guard this connector has (§3, §8.4),
+   * which is exactly why it must not follow a setting a merchant can change.
+   */
+  const countCode = source
+    ? `${order.customerOrderRef}-${source.code}`
+    : order.customerOrderRef;
+
+  /*
+   * The number the document is written under, which is what MetaKocka's screen
+   * shows as *Sales ord. no.*
+   *
+   * Null means the merchant has handed numbering to MetaKocka: no `count_code`
+   * is sent and the ERP's own sequence answers. Otherwise it is rendered from
+   * their pattern, defaulting to the customer's order reference — which is what
+   * every document written before this setting existed carries, so nothing
+   * renumbers.
+   */
+  const proposedNumber = salesOrderNumberFor({
+    numbering: salesOrderSettings.salesOrderNumbering,
+    template: salesOrderSettings.salesOrderNumberTemplate,
+    customerOrderRef: order.customerOrderRef,
+    context: {
+      name: parsed?.orderName ?? null,
+      number: order.shopifyOrderNumber,
+      id: order.shopifyOrderId,
+      customerEmail: parsed?.customerEmail ?? null,
+    },
+    sourceCode: source?.code ?? null,
+  });
 
   const claim = await claimDocument(principal, {
     orderId,
-    supplySourceId,
+    // Null is the stored truth for an unsplit document: it belongs to no
+    // warehouse. The sentinel exists only to key it in memory.
+    supplySourceId: source ? supplySourceId : null,
     countCode,
+    sentCountCode: proposedNumber,
     isPrimary: false,
   });
 
@@ -337,12 +438,31 @@ export async function writeMetakockaOrderFor(
     return;
   }
 
+  /**
+   * The number this write actually uses, settled once.
+   *
+   * The claim wins over what was just proposed, because the claim is what was
+   * recorded the first time this document was attempted — a pattern changed in
+   * between must not renumber a document MetaKocka already holds.
+   */
+  const sentCountCode = claim.sentCountCode ?? proposedNumber;
+
+  /**
+   * What to call this document when telling the merchant something about it.
+   *
+   * Its number when it has one, and otherwise the order reference — which is
+   * the `buyer_order` MetaKocka is verifiably searchable by (§3), so it is
+   * still something they can act on. Never the internal claim key, which means
+   * nothing on their screen.
+   */
+  const documentLabel = sentCountCode ?? order.customerOrderRef;
+
   // §8.6: shipping, COD surcharge and order-level discount belong to exactly
   // one document. Which one is decided from the whole order, not from this
   // source alone, so the same answer comes out however the jobs interleave —
   // and it is computed by the same function the payment job uses, so the two
   // can never disagree about what a document is worth.
-  const shares = await computeDocumentShares(orderId);
+  const shares = await computeDocumentShares(orderId, { wholeOrder });
 
   /*
    * A document worth less than nothing is not written.
@@ -398,7 +518,10 @@ export async function writeMetakockaOrderFor(
    */
   await applyPrimaryDocument(
     orderId,
-    shares.find((entry) => entry.isPrimary)?.sourceId ?? null,
+    wholeOrder
+      ? null
+      : (shares.find((entry) => entry.isPrimary)?.sourceId ?? null),
+    { wholeOrder },
   );
 
   /*
@@ -450,6 +573,19 @@ export async function writeMetakockaOrderFor(
     companyId: credential.companyId,
     secretKey: credential.secretKey,
   });
+
+  /*
+   * The two document-level attributes a supply source would have supplied.
+   *
+   * An unsplit document has no source to read them from, so the profit centre
+   * comes from the shop default — the same value every inherited source carries
+   * — and the delivery type is simply not sent, because there is no shop-level
+   * answer to invent one from and MetaKocka has its own.
+   */
+  const supplyDefaults = wholeOrder ? await getSupplyDefaults(principal) : null;
+
+  /** What the audit trail calls this document's origin. */
+  const sourceLabel = source?.name ?? "the whole order, unsplit";
 
   /*
    * §8.7, and it goes into the create rather than following it: MetaKocka
@@ -540,7 +676,9 @@ export async function writeMetakockaOrderFor(
       : null;
 
   const salesOrder: SalesOrderInput = {
-    countCode,
+    // The number, not the claim key. Null omits the field and lets MetaKocka
+    // number the document itself.
+    countCode: sentCountCode,
     // §3, verified: `buyer_order` is what links sibling documents.
     buyerOrder: order.customerOrderRef,
     docDate: order.receivedAt,
@@ -555,9 +693,17 @@ export async function writeMetakockaOrderFor(
     // separately rather than one being reused for both (§8.4).
     receiver: parsed?.receiver ?? null,
     salesPricelistCode: productSettings.pricelistCode,
-    warehouse: source.metakockaWarehouse,
-    profitCenter: source.metakockaProfitCenter,
-    deliveryType: source.defaultDeliveryType,
+    /*
+     * No warehouse for an unsplit order, and that is the setting doing its job:
+     * MetaKocka files a document with no mark against the company default,
+     * which is exactly what a shop that does not keep its warehouses here has
+     * asked for.
+     */
+    warehouse: source ? source.metakockaWarehouse : null,
+    profitCenter: source
+      ? source.metakockaProfitCenter
+      : (supplyDefaults?.defaultProfitCenter ?? null),
+    deliveryType: source ? source.defaultDeliveryType : null,
     notes: isPrimary && parsed?.note ? parsed.note : null,
     shippingLine,
     discountValueMinor,
@@ -618,8 +764,8 @@ export async function writeMetakockaOrderFor(
      * through the update policy.
      */
     const contentChanged = !sameDocument(
-      withoutPayments(existing.requestBody),
-      withoutPayments(desired),
+      contentOnly(existing.requestBody),
+      contentOnly(desired),
     );
     const paymentsChanged = !sameDocument(
       paymentsOf(existing.requestBody),
@@ -654,7 +800,21 @@ export async function writeMetakockaOrderFor(
       try {
         const { body: sent, verified } = await replaceDocumentPayments(client, {
           mkId: existing.mkId,
-          body: existing.requestBody as Record<string, unknown>,
+          /*
+           * The recorded body, plus the number the document is filed under.
+           *
+           * MetaKocka treats an update as a replacement (§3), and the body
+           * recorded for a document the ERP numbered itself carries no
+           * `count_code` — it had none to send. Replaying it as-is would ask
+           * MetaKocka to replace a numbered document from a body with no
+           * number, and what it does with that is not something §3 verified.
+           * Sending back the number it gave us cannot be wrong: it is the one
+           * the document already has.
+           */
+          body: {
+            ...(existing.requestBody as Record<string, unknown>),
+            ...(sentCountCode ? { count_code: sentCountCode } : {}),
+          },
           payments:
             desiredPayment.kind === "ledger"
               ? desiredPayment.payments
@@ -718,8 +878,8 @@ export async function writeMetakockaOrderFor(
           await raiseException(principal, {
             orderId,
             kind: "payment_write_failed",
-            message: `MetaKocka refused the payment for ${countCode}. ${describeForMerchant(error)} The sales order itself is unchanged. Record the payment in MetaKocka by hand or fix the cause and retry.`,
-            detail: { countCode, oprCode: error.oprCode },
+            message: `MetaKocka refused the payment for ${documentLabel}. ${describeForMerchant(error)} The sales order itself is unchanged. Record the payment in MetaKocka by hand or fix the cause and retry.`,
+            detail: { countCode, sentCountCode, oprCode: error.oprCode },
           });
           return;
         }
@@ -746,8 +906,8 @@ export async function writeMetakockaOrderFor(
       await raiseException(principal, {
         orderId,
         kind: "order_diverged",
-        message: `Order ${order!.shopifyOrderNumber} has changed in Shopify since ${countCode} was sent, and the MetaKocka document was not updated because ${blocked}. Correct it in MetaKocka by hand, or change this on the Sales orders settings page.`,
-        detail: { countCode, reason: blocked },
+        message: `Order ${order!.shopifyOrderNumber} has changed in Shopify since ${documentLabel} was sent, and the MetaKocka document was not updated because ${blocked}. Correct it in MetaKocka by hand, or change this on the Sales orders settings page.`,
+        detail: { countCode, sentCountCode, reason: blocked },
       });
 
       await prisma.metakockaDocument.update({
@@ -796,10 +956,14 @@ export async function writeMetakockaOrderFor(
       await recordDocumentPaymentState(claim!.id, desiredPayment, new Date());
       await touchDocumentReconciled(claim!.id, new Date());
 
-      await prisma.allocation.updateMany({
-        where: { supplySourceId, orderLine: { orderId } },
-        data: { status: "written_to_metakocka" },
-      });
+      // Nothing to move for an unsplit order: it has no allocation rows,
+      // because it was never allocated to a warehouse.
+      if (source) {
+        await prisma.allocation.updateMany({
+          where: { supplySourceId, orderLine: { orderId } },
+          data: { status: "written_to_metakocka" },
+        });
+      }
 
       // The document now says what the order says, so nothing about the
       // difference still needs a person.
@@ -821,7 +985,7 @@ export async function writeMetakockaOrderFor(
         detail: {
           countCode,
           mkId: existing.mkId,
-          source: source!.name,
+          source: sourceLabel,
           lines: perSourceLines.length,
           paymentKept: existing.paymentMarkedAt !== null,
         },
@@ -852,8 +1016,8 @@ export async function writeMetakockaOrderFor(
         await raiseException(principal, {
           orderId,
           kind: "order_diverged",
-          message: `Order ${order!.shopifyOrderNumber} changed in Shopify, and MetaKocka refused the update to ${countCode}. ${describeForMerchant(error)} The document is unchanged. Correct it in MetaKocka by hand.`,
-          detail: { countCode, oprCode: error.oprCode },
+          message: `Order ${order!.shopifyOrderNumber} changed in Shopify, and MetaKocka refused the update to ${documentLabel}. ${describeForMerchant(error)} The document is unchanged. Correct it in MetaKocka by hand.`,
+          detail: { countCode, sentCountCode, oprCode: error.oprCode },
         });
         return;
       }
@@ -896,10 +1060,33 @@ export async function writeMetakockaOrderFor(
 
     if (found === null) return false;
 
-    if (found.countCode === countCode) {
+    /*
+     * Is the document MetaKocka answered with ours?
+     *
+     * When this app chose the number, the answer is exactly whether the numbers
+     * match, and a sibling answering is "could not tell" (§3: which of several
+     * documents sharing a `buyer_order` answers is not documented).
+     *
+     * When **MetaKocka** chose it there is no number of ours to compare — so
+     * the question is answered structurally instead. An unsplit order has one
+     * document and only one, so anything found under its reference is that
+     * document. A split order does not have that guarantee, and guessing would
+     * risk adopting a sibling's `mk_id` as this document's, so it stops and
+     * asks. That is the honest cost of handing numbering to the ERP, and it is
+     * paid only by a write whose outcome was already unknown.
+     */
+    const isOurs = sentCountCode
+      ? found.countCode === sentCountCode
+      : wholeOrder;
+
+    if (isOurs) {
       await recordDocumentResult(claim!.id, {
         status: "written",
         mkId: found.mkId,
+        // Same as a fresh write: adopt the number MetaKocka is holding it under.
+        ...(sentCountCode
+          ? {}
+          : { sentCountCode: found.countCode ?? found.docNumber }),
         responseBody: {
           recovered: true,
           mkId: found.mkId,
@@ -907,10 +1094,14 @@ export async function writeMetakockaOrderFor(
         },
       });
 
-      await prisma.allocation.updateMany({
-        where: { supplySourceId, orderLine: { orderId } },
-        data: { status: "written_to_metakocka" },
-      });
+      // Nothing to move for an unsplit order: it has no allocation rows,
+      // because it was never allocated to a warehouse.
+      if (source) {
+        await prisma.allocation.updateMany({
+          where: { supplySourceId, orderLine: { orderId } },
+          data: { status: "written_to_metakocka" },
+        });
+      }
 
       await closeExceptionsFor(principal, orderId, [...WRITE_FAILURE_KINDS]);
 
@@ -931,13 +1122,13 @@ export async function writeMetakockaOrderFor(
         detail: {
           countCode,
           mkId: found.mkId,
-          source: source!.name,
+          source: sourceLabel,
           reason:
             "an earlier attempt had no recorded outcome, and the document was found in MetaKocka by its order reference",
         },
       });
 
-      await markOrderWrittenIfComplete(orderId);
+      await markOrderWrittenIfComplete(orderId, { wholeOrder });
 
       log.info(
         { shop: shopDomain, orderId, countCode, mkId: found.mkId },
@@ -957,14 +1148,22 @@ export async function writeMetakockaOrderFor(
     await raiseException(principal, {
       orderId,
       kind: "metakocka_write_failed",
-      message: `An earlier attempt to send ${countCode} to MetaKocka got no answer, so it may or may not exist there — and because this order has more than one document, the lookup could not tell. Check in MetaKocka whether a sales order ${countCode} exists: if it does not, retry this order; if it does, mark this as resolved.`,
-      detail: { countCode, answeredCountCode: found.countCode },
+      message: sentCountCode
+        ? `An earlier attempt to send ${sentCountCode} to MetaKocka got no answer, so it may or may not exist there — and because this order has more than one document, the lookup could not tell. Check in MetaKocka whether a sales order ${sentCountCode} exists: if it does not, retry this order; if it does, mark this as resolved.`
+        : `An earlier attempt to send part of order ${order!.shopifyOrderNumber} to MetaKocka got no answer, so it may or may not exist there. MetaKocka numbers this shop's sales orders itself, so this app has no number of its own to look for, and the document it found under ${order!.customerOrderRef} (${found.countCode ?? "unnumbered"}) belongs to one of the order's warehouses without saying which. Check in MetaKocka which of this order's sales orders exist: if one is missing, retry this order; if they are all there, mark this as resolved.`,
+      detail: {
+        countCode,
+        sentCountCode,
+        answeredCountCode: found.countCode,
+      },
     });
 
-    await prisma.allocation.updateMany({
-      where: { supplySourceId, orderLine: { orderId } },
-      data: { status: "failed" },
-    });
+    if (source) {
+      await prisma.allocation.updateMany({
+        where: { supplySourceId, orderLine: { orderId } },
+        data: { status: "failed" },
+      });
+    }
     await prisma.order.update({
       where: { id: orderId },
       data: { status: "needs_attention" },
@@ -1004,17 +1203,30 @@ export async function writeMetakockaOrderFor(
     await recordDocumentResult(claim.id, {
       status: "written",
       mkId: result.mkId,
+      /*
+       * The number MetaKocka chose, when this app sent none.
+       *
+       * Recorded from its own answer rather than assumed, and this is what
+       * makes the setting safe past the first write: every later update sends
+       * the same number back — rather than omitting the field and relying on
+       * behaviour §3 has not verified — and every message about the document
+       * names something the merchant can find on their screen. `count_code`
+       * first because that is the field MetaKocka's own form labels *Sales ord.
+       * no.*; `doc_number` is the fallback for a response that names only that.
+       */
+      ...(sentCountCode
+        ? {}
+        : { sentCountCode: result.countCode ?? result.docNumber }),
       requestBody: body,
       responseBody: result,
     });
 
-    await prisma.allocation.updateMany({
-      where: {
-        supplySourceId,
-        orderLine: { orderId },
-      },
-      data: { status: "written_to_metakocka" },
-    });
+    if (source) {
+      await prisma.allocation.updateMany({
+        where: { supplySourceId, orderLine: { orderId } },
+        data: { status: "written_to_metakocka" },
+      });
+    }
 
     // Bring the stored rows in line with what was sent, so the order page and
     // the decision trail do not keep showing the superseded derivation.
@@ -1037,7 +1249,7 @@ export async function writeMetakockaOrderFor(
       detail: {
         countCode,
         mkId: result.mkId,
-        source: source.name,
+        source: sourceLabel,
         isPrimary,
         lines: perSourceLines.length,
       },
@@ -1053,7 +1265,7 @@ export async function writeMetakockaOrderFor(
     // Once every source the allocation names has a written document, the
     // order is done. Measured against the allocation, not against the rows
     // that happen to exist (see markOrderWrittenIfComplete).
-    await markOrderWrittenIfComplete(orderId);
+    await markOrderWrittenIfComplete(orderId, { wholeOrder });
 
     log.info(
       { shop: shopDomain, orderId, countCode, mkId: result.mkId },
@@ -1096,13 +1308,20 @@ export async function writeMetakockaOrderFor(
         orderId,
         kind,
         message: describeForMerchant(error),
-        detail: { countCode, source: source.name, oprCode: error.oprCode },
+        detail: {
+          countCode,
+          sentCountCode,
+          source: sourceLabel,
+          oprCode: error.oprCode,
+        },
       });
 
-      await prisma.allocation.updateMany({
-        where: { supplySourceId, orderLine: { orderId } },
-        data: { status: "failed" },
-      });
+      if (source) {
+        await prisma.allocation.updateMany({
+          where: { supplySourceId, orderLine: { orderId } },
+          data: { status: "failed" },
+        });
+      }
       await prisma.order.update({
         where: { id: orderId },
         data: { status: "needs_attention" },
@@ -1409,10 +1628,30 @@ async function recordDocumentPaymentState(
   );
 }
 
-/** A document body with its payments removed, for comparing content alone. */
-export function withoutPayments(body: unknown): unknown {
+/**
+ * What a document body says about the *order*, with everything that is not the
+ * order removed.
+ *
+ * `mark_paid` is out because a payment arriving is the payment path doing its
+ * job rather than the order having changed, and conflating the two put the
+ * merchant's update policy in front of every second capture.
+ *
+ * `count_code` is out for a different reason, and without it a shop that lets
+ * MetaKocka number its documents would rewrite every one of them exactly once.
+ * Such a document is created with no number, MetaKocka answers with one, and it
+ * is recorded — so the *next* body legitimately carries a `count_code` the
+ * first did not, and a content comparison would read the ERP's own answer as a
+ * change to the order. It is not one: the number is settled at claim time and
+ * frozen thereafter, so it can never differ from what the document already
+ * holds in a way an update should chase.
+ */
+export function contentOnly(body: unknown): unknown {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
-  const { mark_paid: _ignored, ...rest } = body as Record<string, unknown>;
+  const {
+    mark_paid: _payments,
+    count_code: _number,
+    ...rest
+  } = body as Record<string, unknown>;
   return rest;
 }
 

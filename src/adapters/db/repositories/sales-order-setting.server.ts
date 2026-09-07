@@ -15,6 +15,37 @@ import { shopDomainOf, type Principal } from "~/domain/types";
  */
 
 export type AllocationMode = "shopify_locations" | "stock_rules";
+/**
+ * Whether one Shopify order becomes one MetaKocka sales order or several.
+ *
+ * `per_warehouse` is what this connector has always done: MetaKocka's
+ * `warehouse` is a document-level attribute (§3), so an order shipping from two
+ * warehouses can only be described as two sales orders linked by their
+ * `buyer_order`.
+ *
+ * `single` is the other honest answer. One document carries every line of the
+ * Shopify order and **no warehouse mark at all**, so MetaKocka files it against
+ * the company default. Nothing is allocated, nothing is split, and the ERP no
+ * longer says which warehouse the goods left from — which is precisely the
+ * trade a merchant who does not run their warehouses in MetaKocka wants to
+ * make.
+ */
+export type SalesOrderSplit = "per_warehouse" | "single";
+/**
+ * Who decides the number MetaKocka shows as *Sales ord. no.*
+ *
+ * `app` sends a `count_code` this app renders, which is what this connector has
+ * always done: the document reads `SH-1050` and matches the reference the
+ * merchant sees on both sides. `metakocka` sends none, so the ERP's own
+ * sequence answers — `1/2026` — which is what a merchant whose accountant
+ * expects MetaKocka's numbering needs.
+ *
+ * Neither is an identity question. `count_code` is verifiably not unique in
+ * MetaKocka (§3), so this app never identified anything by it: identity is the
+ * Shopify order id and the internal `(shop_id, count_code)` claim, and that
+ * claim is unaffected by this setting.
+ */
+export type SalesOrderNumbering = "app" | "metakocka";
 export type PaymentEntryMode = "per_transaction" | "aggregate";
 export type DiscountRepresentation = "none" | "document_discount_value";
 
@@ -28,6 +59,25 @@ export interface SalesOrderSettings {
    * default template; see `domain/orders/reference`.
    */
   customerOrderTemplate: string | null;
+  /**
+   * Whether the order is split across its warehouses at all.
+   *
+   * `allocationMode` above answers "which system decides the warehouse", and
+   * under `single` there is no warehouse to decide: the question does not
+   * arise, so the setting is kept but has no effect.
+   */
+  salesOrderSplit: SalesOrderSplit;
+  salesOrderNumbering: SalesOrderNumbering;
+  /**
+   * The pattern the document number is rendered from, under `app` numbering.
+   *
+   * Null means *the same as the customer's order reference*. That is the
+   * default rather than a copy of `DEFAULT_CUSTOMER_ORDER_TEMPLATE`, because
+   * the two would then drift apart the moment a merchant customised one of
+   * them — and every document written before this setting existed carries the
+   * customer's order reference, so following it is also what keeps them right.
+   */
+  salesOrderNumberTemplate: string | null;
   allocationMode: AllocationMode;
   obsoleteDocumentPolicy: ObsoleteDocumentPolicy;
   syncPayments: boolean;
@@ -53,6 +103,15 @@ export interface SalesOrderSettings {
  *    behaviour until the merchant says otherwise. Note this gates *content*
  *    changes only: a payment arriving against a paid document is the payment
  *    path doing its job, not a rewrite of the order.
+ *  - `salesOrderSplit` splits per warehouse, because MetaKocka's `warehouse`
+ *    is document-level and a single document for a two-warehouse order can
+ *    only name one of them — which leaves the ERP's stock wrong about goods it
+ *    actually shipped. A shop that does not want the split says so.
+ *  - `salesOrderNumbering` is the app's, because a merchant who has just
+ *    connected the two systems is best served by a document whose number they
+ *    can read off the Shopify order. Handing the numbering to MetaKocka is the
+ *    right answer for a shop whose books are kept there and is not something to
+ *    decide on their behalf.
  *  - `allocationMode` follows Shopify, because a merchant moving a line to
  *    another location in the Shopify admin is stating where it ships from, and
  *    an ERP that ignores that describes the wrong warehouse. Stock rules still
@@ -70,6 +129,9 @@ export const SALES_ORDER_DEFAULTS: SalesOrderSettings = {
   updateOnChange: true,
   updateAfterPaid: false,
   customerOrderTemplate: null,
+  salesOrderSplit: "per_warehouse",
+  salesOrderNumbering: "app",
+  salesOrderNumberTemplate: null,
   allocationMode: "shopify_locations",
   obsoleteDocumentPolicy: "empty",
   syncPayments: true,
@@ -104,6 +166,9 @@ export async function getSalesOrderSettings(
       updateOnChange: true,
       updateAfterPaid: true,
       customerOrderTemplate: true,
+      salesOrderSplit: true,
+      salesOrderNumbering: true,
+      salesOrderNumberTemplate: true,
       allocationMode: true,
       obsoleteDocumentPolicy: true,
       syncPayments: true,

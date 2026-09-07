@@ -38,7 +38,7 @@ export interface OrderReferenceContext {
  * The default, and the value every order written before this setting existed
  * already carries. Changing it must not change existing orders.
  */
-export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = "SH-{{order.number}}";
+export const DEFAULT_CUSTOMER_ORDER_TEMPLATE = "SH-{order.number}";
 
 interface Placeholder {
   readonly token: string;
@@ -54,27 +54,68 @@ interface Placeholder {
 export const ORDER_REFERENCE_PLACEHOLDERS: readonly Placeholder[] = [
   {
     token: "order.name",
-    label: "Shopify order name, such as #1050",
+    label: "Order name",
     of: (context) => context.name,
   },
   {
     token: "order.number",
-    label: "Shopify order number, such as 1050",
+    label: "Order number",
     of: (context) => context.number,
   },
   {
     token: "order.id",
-    label: "Shopify order id",
+    label: "Order id",
     of: (context) => context.id,
   },
   {
     token: "customer.email",
-    label: "Customer email address, when the order has one",
+    label: "Customer email",
     of: (context) => context.customerEmail,
   },
 ];
 
-const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}/g;
+/**
+ * `{order.number}`, and `{{order.number}}` for what is already stored.
+ *
+ * One brace is the syntax the pattern editor reads and writes, and it is the
+ * same one the product name patterns use — one syntax for the two patterns a
+ * merchant edits rather than one each. Two braces was what this shipped with,
+ * so it still renders: a template stored months ago has to keep producing the
+ * reference the documents in MetaKocka already carry.
+ *
+ * The doubled form is matched first, or `{{order.number}}` would be read as a
+ * brace, a field and a brace.
+ */
+const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}|\{\s*([a-zA-Z0-9_.]+)\s*\}/g;
+
+/**
+ * Ready-made references, and what each one is for.
+ *
+ * Patterns, not examples: the settings screen renders each against one of the
+ * merchant's own orders, so choosing one is a decision about their data rather
+ * than about syntax — the same as the product name patterns.
+ */
+export interface OrderReferencePattern {
+  id: string;
+  /** Short enough to read at a glance on a row. */
+  label: string;
+  pattern: string;
+}
+
+export const ORDER_REFERENCE_PATTERNS: readonly OrderReferencePattern[] = [
+  {
+    id: "sh-number",
+    label: "SH and the order number",
+    pattern: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
+  },
+  { id: "number", label: "Order number", pattern: "{order.number}" },
+  { id: "name", label: "Order name", pattern: "{order.name}" },
+  {
+    id: "sh-name",
+    label: "SH and the order name",
+    pattern: "SH-{order.name}",
+  },
+];
 
 const BY_TOKEN = new Map(
   ORDER_REFERENCE_PLACEHOLDERS.map((placeholder) => [
@@ -87,7 +128,7 @@ const BY_TOKEN = new Map(
 export function unknownPlaceholders(template: string): string[] {
   const found = new Set<string>();
   for (const match of template.matchAll(PLACEHOLDER_PATTERN)) {
-    const token = match[1] ?? "";
+    const token = match[1] ?? match[2] ?? "";
     if (!BY_TOKEN.has(token)) found.add(token);
   }
   return [...found];
@@ -115,8 +156,8 @@ export function renderOrderReference(
 ): string {
   const rendered = template.replace(
     PLACEHOLDER_PATTERN,
-    (whole, rawToken: string) => {
-      const placeholder = BY_TOKEN.get(rawToken);
+    (whole, doubled: string | undefined, single: string | undefined) => {
+      const placeholder = BY_TOKEN.get(doubled ?? single ?? "");
       if (!placeholder) return whole;
       return placeholder.of(context) ?? "";
     },
@@ -160,4 +201,55 @@ export function orderReferenceFor(
     reference: renderOrderReference(DEFAULT_CUSTOMER_ORDER_TEMPLATE, context),
     usedFallback: true,
   };
+}
+
+/**
+ * The number a MetaKocka sales order is written under (`count_code`).
+ *
+ * MetaKocka's screen labels this *Sales ord. no.* It is a number and never an
+ * identity: §3 verified that MetaKocka does not enforce uniqueness on it, so
+ * this app has never looked anything up by it and does not start here. The
+ * identity remains the Shopify order id and the internal
+ * `(shop_id, count_code)` claim on `metakocka_document`, which is derived from
+ * the frozen `customer_order_ref` and is untouched by any of this.
+ *
+ * Three things decide the answer, in this order:
+ *
+ *  1. **A merchant who has handed numbering to MetaKocka gets null**, and the
+ *     caller then sends no `count_code` at all. That is the whole mechanism:
+ *     MetaKocka's own sequence answers, which is what a shop whose books are
+ *     kept there wants on its documents.
+ *  2. **No template means the customer's order reference**, which is what every
+ *     document written before this setting existed carries. Following that
+ *     value rather than re-rendering the default template is deliberate: a
+ *     merchant who customised their reference gets a document number that still
+ *     matches it, and the two can never drift apart.
+ *  3. **A split order suffixes the supply source's code**, because two sibling
+ *     documents cannot share a number and the merchant is not being asked to
+ *     write a template that guarantees that.
+ *
+ * The `usedFallback` rule of `orderReferenceFor` applies to a custom template
+ * exactly as it does to a reference: a pattern that renders to nothing for this
+ * particular order falls back rather than producing a document with a blank
+ * number, which MetaKocka would fill in with its own — silently, and only for
+ * the orders that tripped it.
+ */
+export function salesOrderNumberFor(input: {
+  /** `null` when the merchant has handed numbering to MetaKocka. */
+  template: string | null;
+  numbering: "app" | "metakocka";
+  /** The order's frozen reference, used when there is no template of its own. */
+  customerOrderRef: string;
+  context: OrderReferenceContext;
+  /** The supply source's code, or null for a document with no warehouse. */
+  sourceCode: string | null;
+}): string | null {
+  if (input.numbering === "metakocka") return null;
+
+  const base = input.template?.trim()
+    ? orderReferenceFor(input.template, input.context).reference
+    : input.customerOrderRef;
+
+  const number = input.sourceCode ? `${base}-${input.sourceCode}` : base;
+  return number.slice(0, MAX_ORDER_REFERENCE_LENGTH);
 }

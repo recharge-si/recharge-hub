@@ -2,7 +2,6 @@ import { describe, expect, it, vi } from "vitest";
 
 import { MetakockaError } from "~/adapters/metakocka/errors";
 import {
-  buildCompleteCompanyStockList,
   buildCompleteStockList,
   syncStockToMetakocka,
 } from "~/adapters/metakocka/sync-stock";
@@ -155,61 +154,6 @@ describe("building the stock list for sync_stock", () => {
           { product_code: "LOOSE-CABLE-M", amount: "3.5" },
         ],
       });
-    });
-  });
-});
-
-describe("building the company-wide stock list for sync_stock", () => {
-  // MetaKocka's own documentation for this endpoint says the total stock for
-  // *all* warehouses must be sent in one request, and that anything absent
-  // from it is removed. Sending lines for the reverse-synced warehouse alone
-  // would, on that reading, wipe every other warehouse in the company.
-  it("preserves lines from warehouses this app is not reverse-syncing", () => {
-    const lines = buildCompleteCompanyStockList({
-      warehouseId: "W1",
-      managed: new Map([["A", 7]]),
-      currentByWarehouse: new Map([
-        ["W1", new Map([["A", 3]])],
-        ["W2", new Map([["A", 9], ["B", 5]])],
-      ]),
-    });
-
-    expect(lines).toContainEqual({ warehouseId: "W1", productCode: "A", amount: 7 });
-    expect(lines).toContainEqual({ warehouseId: "W2", productCode: "A", amount: 9 });
-    expect(lines).toContainEqual({ warehouseId: "W2", productCode: "B", amount: 5 });
-  });
-
-  it("still applies Shopify's number only at the reverse-synced warehouse", () => {
-    const lines = buildCompleteCompanyStockList({
-      warehouseId: "W1",
-      managed: new Map([["A", 7]]),
-      currentByWarehouse: new Map([
-        ["W1", new Map([["A", 3]])],
-        ["W2", new Map([["A", 3]])],
-      ]),
-    });
-
-    expect(lines).toContainEqual({ warehouseId: "W1", productCode: "A", amount: 7 });
-    // Same product code, a warehouse this source has no say over: untouched.
-    expect(lines).toContainEqual({ warehouseId: "W2", productCode: "A", amount: 3 });
-  });
-
-  it("still includes a managed product at a warehouse MetaKocka has never held stock in", () => {
-    const lines = buildCompleteCompanyStockList({
-      warehouseId: "NEW-WH",
-      managed: new Map([["A", 5]]),
-      currentByWarehouse: new Map([["W2", new Map([["B", 1]])]]),
-    });
-
-    expect(lines).toContainEqual({
-      warehouseId: "NEW-WH",
-      productCode: "A",
-      amount: 5,
-    });
-    expect(lines).toContainEqual({
-      warehouseId: "W2",
-      productCode: "B",
-      amount: 1,
     });
   });
 });

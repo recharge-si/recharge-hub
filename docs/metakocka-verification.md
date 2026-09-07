@@ -25,7 +25,7 @@ sanitized response under `tests/fixtures/metakocka/` before code depends on it.
 | Document update   | Update behaves as replacement; omitted lines disappear                          | Replay a complete recorded body and read it back              |
 | Payment types     | Invalid `payment_type` returns the accepted value set                           | Discover/cache the register from the rejection                |
 | Stock write       | `sync_stock` removes omitted products and can report success for an empty no-op | Send and verify a complete warehouse list                     |
-| Stock write scope | Documented (not yet live-verified): all warehouses must be sent in one request  | Send and verify a complete *company* list, not one warehouse  |
+| Stock write scope | Documented (not yet live-verified): all warehouses must be sent in one request  | Write only the warehouse Shopify owns; watch `stock_remove_list` |
 | Read-back         | `get_document` has no sales-order status or tracking field                      | Tracking design remains blocked on another source             |
 
 ## Inventory reservation
@@ -46,6 +46,25 @@ already computes available from on-hand and committed quantities, so copying
 `warehouse_stock` returns `stock_list`, includes `amount`, `reserved_amount`,
 and `free_amount` without an extra flag, and filters `product_code_list` by the
 product's `code` rather than internal `count_code`.
+
+**`wh_id_list` is not verified to filter server-side.** No `warehouse_stock`
+response has been recorded, the request sends a bare id to a parameter named
+as a list, and every caller reads the result as one warehouse's stock. A
+response that also carried another warehouse was therefore folded in as
+though it belonged to the one asked for — harmless-looking in the
+`mk_to_shopify` direction, and the cause of doubled ERP stock in the
+`shopify_to_mk` one, where each warehouse's map goes into a single
+company-wide `sync_stock` request and every warehouse received every
+warehouse's products. `listWarehouseStock` now drops rows whose
+`warehouse_id` is not the one requested, logs a warning naming how many it
+dropped, and refuses outright when rows came back and none of them were for
+the requested warehouse — that combination means the id this app holds is
+not the id MetaKocka answers with, and an empty result would be read as
+“everything is at zero”.
+
+Record a `warehouse_stock` response from the designated test company for a
+company with more than one warehouse and settle whether `wh_id_list` filters,
+and in what shape it wants the ids.
 
 ## Sales-order identity and routing
 
@@ -131,6 +150,14 @@ the pricelist's basis with integer-minor-unit arithmetic.
 Additional observations:
 
 - `product_list` omits `pricelist` unless `return_pricelist: "true"` is sent.
+- **`product_code_list` is not verified to filter `product_list`.** It is
+  recorded on `warehouse_stock` and was assumed to work the same way here. A
+  merchant whose shipping article exists was told MetaKocka had no product with
+  that code, so `findProductByCode` now treats a miss from the filtered call as
+  no answer at all: it reads the catalogue, matches ignoring case and
+  surrounding space, and reports "absent" only after reaching the end of the
+  list. A catalogue longer than ten pages returns "unknown", which the settings
+  screen saves rather than refuses.
 - UI-created products have an internal `count_code`; matching uses product
   `code`, and updates use `mk_id`.
 - `sales_pricelist_code` persists on a sales order and records which catalogue
@@ -309,12 +336,20 @@ codes and amounts when MetaKocka echoes them.
 2026-08-26 — a public documentation read, not a live company call):
 
 - "The total stock for all warehouses must be sent in one request." Read
-  together with the omission-removes rule above, this implies a warehouse
+  together with the omission-removes rule above, this could mean a warehouse
   missing from the request is treated the same as a product missing from a
-  warehouse that is present: removed. The adapter now builds and sends one
-  list covering every cached warehouse for this reason
-  (`buildCompleteCompanyStockList`), not only the warehouse being
-  reverse-synced.
+  warehouse that is present: removed.
+
+  The connector briefly acted on that reading and sent every cached
+  warehouse in one request. **That has been reverted.** Acting on it meant a
+  Shopify-counted location filing an inventory document that also restated
+  every MetaKocka-counted warehouse in the company — a write to warehouses
+  docs/BUILD_SPEC.md §7 reserves to the merchant, and a lost update on
+  anything they changed between our read and our write. Set against that,
+  the omission risk is unobserved, applies once rather than every cycle, and
+  announces itself in `stock_remove_list`. The one live `sync_stock` probe on
+  record was a single-warehouse write against a two-warehouse company and
+  reported no other loss.
 - A response can include `stock_remove_list`, naming what was removed for
   being absent from the request. Because the list this adapter sends is meant
   to be complete, a non-empty `stock_remove_list` is treated as a failure —
@@ -325,11 +360,13 @@ codes and amounts when MetaKocka echoes them.
   nothing today depends on the field it adds.
 
 None of the three items above has been checked against the designated test
-company. Do this before depending further on the company-wide write: confirm
-that omitting a whole warehouse from a real `sync_stock` request actually
-zeroes it (or find that it does not, and that the single-warehouse behaviour
-was safe all along), and record a sanitized multi-warehouse request/response
-pair under `tests/fixtures/metakocka/`.
+company. Confirm whether omitting a whole warehouse from a real `sync_stock`
+request actually zeroes it, and record a sanitized multi-warehouse
+request/response pair under `tests/fixtures/metakocka/`. If it does zero it,
+the fix is not to go back to writing warehouses this app does not own: it is
+to send the authoritative warehouses together and echo the rest under an
+explicit merchant-visible setting, because filing inventory documents
+against a merchant's own warehouses is a decision they get to make.
 
 ## Outstanding approved-test-company work
 
@@ -344,9 +381,10 @@ pair under `tests/fixtures/metakocka/`.
 7. Shipping service-line, document `discount_value`, and per-line `discount`
    semantics.
 8. Whether `sync_stock` actually removes stock from a warehouse omitted from
-   the request entirely, as its documentation implies — the reverse-sync
-   handler now sends every cached warehouse on that assumption and this has
-   not been checked live.
+   the request entirely, as its documentation implies. The reverse-sync
+   handler now sends only the warehouse Shopify is authoritative for, so this
+   is the one assumption still carrying risk; `stock_remove_list` is the
+   detector until it is probed.
 9. Whether a zero-amount `mark_paid` entry leaves a visible zero payment row in
    the MetaKocka UI, or removes the payment outright. `sum_paid` disappears
    either way, which is what the connector reads, but a merchant looking at the

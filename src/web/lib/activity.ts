@@ -308,7 +308,7 @@ export function describeEvent(
     case "metakocka.disconnected":
       return {
         title: "MetaKocka",
-        text: "Disconnected. Nothing is sent to the ERP until it is connected again.",
+        text: "Disconnected, and everything this app held for the store was erased. Nothing in MetaKocka was changed.",
         ok: true,
       };
 

@@ -8,18 +8,15 @@ import {
   indexOfField,
   insertField,
   makeTextAtom,
-  nameFor,
-  pickerGroups,
   removeAtom,
-  settingsFromTemplate,
   stripHolders,
   triggerAt,
   toAtoms,
   toDisplay,
   type Atom,
   type FieldDef,
+  type PickerGroup,
   type PickerRow,
-  type VariantFacts,
 } from "~/domain/products/template";
 
 /**
@@ -71,9 +68,24 @@ export interface PatternEditorProps {
   details?: string;
   value: string;
   onChange: (value: string) => void;
+  /**
+   * Every field a chip can stand for, which is what the chips are labelled
+   * from. The picker's own rows come from `rows`, because what a field is
+   * worth depends on what the pattern is written about.
+   */
   registry: FieldDef[];
-  /** One of the merchant's own products, or null when there are none. */
-  sample: VariantFacts | null;
+  /**
+   * The fields to offer for what is being typed, grouped for the list, each
+   * carrying what it comes to for one real record of the merchant's.
+   *
+   * A function rather than a fixed list, so this control serves both patterns
+   * a merchant edits: a product name over a variant, and an order reference
+   * over an order. Everything else here is about the syntax, which is the same
+   * one for both.
+   */
+  rows: (query: string) => PickerGroup[];
+  /** What the pattern comes to for one real record, or null when there is none. */
+  preview?: string | null;
   error?: string;
 }
 
@@ -175,7 +187,8 @@ export function PatternEditor({
   value,
   onChange,
   registry,
-  sample,
+  rows: rowsFor,
+  preview,
   error,
 }: PatternEditorProps) {
   const labelId = `pattern-label-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
@@ -197,15 +210,10 @@ export function PatternEditor({
   const [announcement, setAnnouncement] = useState("");
 
   const groups = useMemo(
-    () => (open ? pickerGroups(registry, query, sample) : []),
-    [open, query, registry, sample],
+    () => (open ? rowsFor(query) : []),
+    [open, query, rowsFor],
   );
   const rows = useMemo(() => flattenGroups(groups), [groups]);
-
-  const resolved = useMemo(
-    () => (sample ? nameFor(settingsFromTemplate(value), sample).name : null),
-    [value, sample],
-  );
 
   /* Rewrite only when the value changed for a reason other than typing. */
   useEffect(() => {
@@ -279,9 +287,7 @@ export function PatternEditor({
       const key = trigger ? `${at.atom}:${trigger.start}` : null;
 
       if (trigger && key !== dismissed) {
-        const matches = flattenGroups(
-          pickerGroups(registry, trigger.query, sample),
-        );
+        const matches = flattenGroups(rowsFor(trigger.query));
         if (trigger.explicit || matches.length > 0) {
           setOpen(true);
           setQuery(trigger.query);
@@ -637,10 +643,8 @@ export function PatternEditor({
       {error ? <s-text tone="critical">{error}</s-text> : null}
       {details ? <s-text color="subdued">{details}</s-text> : null}
 
-      {/* What the pattern comes to for one of their own products. */}
-      {resolved ? (
-        <s-text color="subdued">{`${sample?.sku}: ${resolved}`}</s-text>
-      ) : null}
+      {/* What the pattern comes to for one of their own records. */}
+      {preview ? <s-text color="subdued">{preview}</s-text> : null}
     </s-stack>
   );
 }

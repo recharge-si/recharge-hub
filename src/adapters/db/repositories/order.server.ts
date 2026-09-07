@@ -389,6 +389,21 @@ export function isDefinitiveRejection(responseBody: unknown): boolean {
 
 export interface DocumentClaim {
   id: string;
+  /**
+   * The number this document is written under, as already recorded.
+   *
+   * Set once, when the row is created, and returned unchanged on every later
+   * claim of the same row — which is what freezes it. A merchant who changes
+   * their numbering pattern therefore changes the numbering of orders that
+   * arrive from then on, not the number of a document MetaKocka already holds,
+   * for the same reason `customer_order_ref` is frozen at intake: a document's
+   * number is an accounting record.
+   *
+   * Null means no number has been settled yet — either this is a fresh claim
+   * under MetaKocka's own numbering, where the ERP answers with one, or a write
+   * that has not happened.
+   */
+  sentCountCode: string | null;
   alreadyWritten: boolean;
   /** True when this claim re-takes a row a previous attempt left behind. */
   reclaimed: boolean;
@@ -406,7 +421,15 @@ export async function claimDocument(
   input: {
     orderId: string;
     supplySourceId: string | null;
+    /** The internal claim key. Never sent; see `metakocka_document`. */
     countCode: string;
+    /**
+     * The number to write the document under, or null to let MetaKocka choose.
+     *
+     * Only applied when the row is created. A re-claim keeps whatever was
+     * settled the first time.
+     */
+    sentCountCode: string | null;
     isPrimary: boolean;
   },
 ): Promise<DocumentClaim | null> {
@@ -420,6 +443,7 @@ export async function claimDocument(
       updatedAt: true,
       claimedAt: true,
       responseBody: true,
+      sentCountCode: true,
     },
   });
 
@@ -440,6 +464,7 @@ export async function claimDocument(
 
       return {
         id: existing.id,
+        sentCountCode: existing.sentCountCode,
         alreadyWritten: false,
         reclaimed: true,
         previousRejection: isDefinitiveRejection(existing.responseBody),
@@ -488,6 +513,7 @@ export async function claimDocument(
       if (taken.count === 1) {
         return {
           id: existing.id,
+          sentCountCode: existing.sentCountCode,
           alreadyWritten: false,
           reclaimed: true,
           previousRejection: false,
@@ -497,6 +523,7 @@ export async function claimDocument(
 
     return {
       id: existing.id,
+      sentCountCode: existing.sentCountCode,
       alreadyWritten: true,
       reclaimed: false,
       previousRejection: false,
@@ -510,14 +537,16 @@ export async function claimDocument(
         orderId: input.orderId,
         supplySourceId: input.supplySourceId,
         countCode: input.countCode,
+        sentCountCode: input.sentCountCode,
         isPrimary: input.isPrimary,
         status: "pending",
         claimedAt: new Date(),
       },
-      select: { id: true },
+      select: { id: true, sentCountCode: true },
     });
     return {
       id: created.id,
+      sentCountCode: created.sentCountCode,
       alreadyWritten: false,
       reclaimed: false,
       previousRejection: false,
@@ -537,10 +566,33 @@ export async function claimDocument(
  * job that died before claiming its row never created one, so a split order
  * lost half its documents and still turned green. Completeness is a claim
  * about the allocation, so it is measured against the allocation.
+ *
+ * `wholeOrder` is the unsplit shop, where there is no allocation to measure
+ * against: one document carries the whole order and holds no supply source, so
+ * completeness is simply whether that document was written.
  */
 export async function markOrderWrittenIfComplete(
   orderId: string,
+  options: { wholeOrder?: boolean } = {},
 ): Promise<void> {
+  if (options.wholeOrder) {
+    const written = await prisma.metakockaDocument.count({
+      where: {
+        orderId,
+        supplySourceId: null,
+        status: "written",
+        retiredAt: null,
+      },
+    });
+    if (written === 0) return;
+
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { status: "written" },
+    });
+    return;
+  }
+
   const allocated = await prisma.allocation.findMany({
     where: { orderLine: { orderId }, supplySourceId: { not: null } },
     select: { supplySourceId: true },
@@ -588,6 +640,15 @@ export async function recordDocumentResult(
   input: {
     status: "written" | "failed";
     mkId?: string | null;
+    /**
+     * The number MetaKocka answered with, for a document it numbered itself.
+     *
+     * Recorded so the ERP's own number is known from the first write onwards:
+     * every later update sends the same one back rather than omitting it and
+     * relying on unverified behaviour, and every message that names the
+     * document names something the merchant can find.
+     */
+    sentCountCode?: string | null;
     requestBody?: unknown;
     responseBody?: unknown;
   },
@@ -597,6 +658,7 @@ export async function recordDocumentResult(
     data: {
       status: input.status,
       ...(input.mkId ? { mkId: input.mkId } : {}),
+      ...(input.sentCountCode ? { sentCountCode: input.sentCountCode } : {}),
       ...(input.requestBody !== undefined
         ? { requestBody: input.requestBody as Prisma.InputJsonValue }
         : {}),
@@ -1304,7 +1366,29 @@ export async function productsForSkus(
 export async function applyPrimaryDocument(
   orderId: string,
   primarySourceId: string | null,
+  options: { wholeOrder?: boolean } = {},
 ): Promise<void> {
+  /*
+   * The unsplit shop, where the primary document is the one with no source.
+   *
+   * "No supply source" is the identity of that document rather than the absence
+   * of an answer, so it cannot be addressed by `primarySourceId` — null there
+   * already means "this order has no primary at all".
+   */
+  if (options.wholeOrder) {
+    await prisma.$transaction([
+      prisma.metakockaDocument.updateMany({
+        where: { orderId, supplySourceId: { not: null }, isPrimary: true },
+        data: { isPrimary: false },
+      }),
+      prisma.metakockaDocument.updateMany({
+        where: { orderId, supplySourceId: null, isPrimary: false },
+        data: { isPrimary: true },
+      }),
+    ]);
+    return;
+  }
+
   /*
    * Only rows whose flag actually differs.
    *
@@ -1430,6 +1514,7 @@ export async function listDocumentsForReconciliation(
       id: true,
       supplySourceId: true,
       countCode: true,
+      sentCountCode: true,
       status: true,
       mkId: true,
       isPrimary: true,

@@ -20,6 +20,10 @@ export interface DashboardCounts {
   allocatedToday: number;
   needsAttention: number;
   writtenToday: number;
+  /** Payments this app recorded on a MetaKocka document today. */
+  paymentsToday: number;
+  /** Products whose stock this app moved today, either direction. */
+  stockUpdatesToday: number;
 }
 
 export interface DaySeriesPoint {
@@ -28,6 +32,12 @@ export interface DaySeriesPoint {
   received: number;
   written: number;
   needsAttention: number;
+}
+
+/** Where the window's sales orders were filed. */
+export interface WarehouseShare {
+  name: string;
+  count: number;
 }
 
 export interface DashboardData {
@@ -50,6 +60,26 @@ export interface DashboardData {
   lastOrderSyncAt: string | null;
   ordersAwaitingPayment: number;
   totalOrders: number;
+  /**
+   * Which warehouses the window's sales orders were filed against, largest
+   * first, and how many orders needed more than one of them.
+   *
+   * The second number is the thing this connector exists for and the thing no
+   * other screen answers: an order split across two warehouses is two MetaKocka
+   * documents that have to add up to one Shopify order.
+   */
+  warehouseShares: WarehouseShare[];
+  splitOrders: number;
+  /**
+   * True while this shop writes one sales order per Shopify order.
+   *
+   * The two figures above are a breakdown by warehouse, and such a shop has no
+   * warehouse on any document. The caller shows something else rather than a
+   * bar chart of one unnamed bar.
+   */
+  unsplit: boolean;
+  /** How many days `series` and `warehouseShares` cover. */
+  windowDays: number;
 }
 
 function startOfUtcDay(date: Date): Date {
@@ -84,6 +114,12 @@ export async function getDashboard(
     lastStockEvent,
     lastOrderSync,
     ordersAwaitingPayment,
+    paymentsToday,
+    stockEventsToday,
+    documentsBySource,
+    documentsByOrder,
+    sources,
+    salesOrderSetting,
   ] = await Promise.all([
     prisma.order.count({
       where: {
@@ -175,6 +211,69 @@ export async function getDashboard(
         documents: { some: { status: "written", paymentMarkedAt: null } },
       },
     }),
+
+    prisma.metakockaDocument.count({
+      where: { shop: { domain }, paymentMarkedAt: { gte: today } },
+    }),
+
+    /*
+     * Today's stock runs, so the count can be of products rather than of jobs.
+     * A handful of rows: the sweep runs every five minutes and writes one entry
+     * per location that actually did something.
+     */
+    prisma.eventLog.findMany({
+      where: {
+        shop: { domain },
+        at: { gte: today },
+        event: { in: ["inventory.synced", "inventory.written_to_metakocka"] },
+      },
+      select: { detail: true },
+    }),
+
+    /*
+     * Where the window's documents were filed, and how many orders needed more
+     * than one warehouse. Two group-bys over an indexed range, not a query per
+     * order.
+     */
+    prisma.metakockaDocument.groupBy({
+      by: ["supplySourceId"],
+      where: {
+        shop: { domain },
+        status: "written",
+        retiredAt: null,
+        createdAt: { gte: windowStart },
+      },
+      _count: { _all: true },
+    }),
+
+    prisma.metakockaDocument.groupBy({
+      by: ["orderId"],
+      where: {
+        shop: { domain },
+        status: "written",
+        retiredAt: null,
+        createdAt: { gte: windowStart },
+      },
+      _count: { _all: true },
+    }),
+
+    prisma.supplySource.findMany({
+      where: { shop: { domain } },
+      select: { id: true, name: true },
+    }),
+
+    /*
+     * Whether this shop splits an order across warehouses at all.
+     *
+     * The distribution below is a breakdown by warehouse, and a shop writing
+     * one sales order per Shopify order has no warehouse on any of them — so
+     * the honest thing is to say the breakdown does not apply rather than to
+     * draw one bar and label it with a guess.
+     */
+    prisma.salesOrderSetting.findFirst({
+      where: { shop: { domain } },
+      select: { salesOrderSplit: true },
+    }),
   ]);
 
   const buckets = new Map<string, DaySeriesPoint>();
@@ -199,8 +298,40 @@ export async function getDashboard(
     if (order.status === "needs_attention") bucket.needsAttention += 1;
   }
 
+  const stockUpdatesToday = stockEventsToday.reduce((sum, event) => {
+    const detail = (event.detail ?? {}) as Record<string, unknown>;
+    const part = ["written", "stocked", "fromShopify"].reduce((inner, key) => {
+      const value = Number(detail[key] ?? 0);
+      return inner + (Number.isFinite(value) ? value : 0);
+    }, 0);
+    return sum + part;
+  }, 0);
+
+  const sourceNames = new Map(
+    sources.map((source) => [source.id, source.name]),
+  );
+  const warehouseShares = documentsBySource
+    .map((group) => ({
+      name: group.supplySourceId
+        ? (sourceNames.get(group.supplySourceId) ?? "Unknown warehouse")
+        : "Unknown warehouse",
+      count: group._count._all,
+    }))
+    .sort((a, b) => b.count - a.count || a.name.localeCompare(b.name));
+
+  const splitOrders = documentsByOrder.filter(
+    (group) => group._count._all > 1,
+  ).length;
+
   return {
-    counts: { receivedToday, allocatedToday, needsAttention, writtenToday },
+    counts: {
+      receivedToday,
+      allocatedToday,
+      needsAttention,
+      writtenToday,
+      paymentsToday,
+      stockUpdatesToday,
+    },
     series: [...buckets.values()],
     openExceptionsByKind: exceptionGroups.map((group) => ({
       kind: group.kind,
@@ -211,8 +342,14 @@ export async function getDashboard(
     lastStockSyncOk: lastStockEvent
       ? lastStockEvent.event !== "inventory.sync_skipped"
       : null,
-    lastOrderSyncAt: lastOrderSync?.ordersReconciledThrough?.toISOString() ?? null,
+    lastOrderSyncAt:
+      lastOrderSync?.ordersReconciledThrough?.toISOString() ?? null,
     ordersAwaitingPayment,
     totalOrders,
+    warehouseShares,
+    splitOrders,
+    /** True while this shop writes one sales order for a whole Shopify order. */
+    unsplit: salesOrderSetting?.salesOrderSplit === "single",
+    windowDays: days,
   };
 }

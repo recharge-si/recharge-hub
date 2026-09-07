@@ -69,6 +69,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: true,
     });
     expect(first?.reclaimed).toBe(false);
@@ -78,6 +79,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: true,
     });
     expect(second?.reclaimed ?? false).toBe(false);
@@ -92,6 +94,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: true,
     });
     await backdateClaim(countCode, CLAIM_LEASE_MS + 60_000);
@@ -100,6 +103,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: true,
     });
 
@@ -122,6 +126,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: false,
     });
     await backdateClaim(countCode, CLAIM_LEASE_MS + 60_000);
@@ -133,6 +138,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: true,
     });
 
@@ -148,6 +154,7 @@ describeDatabase("the count_code claim lease", () => {
       orderId,
       supplySourceId: tenant.supplySourceId,
       countCode,
+      sentCountCode: countCode,
       isPrimary: true,
     });
     await applyPrimaryDocument(orderId, tenant.supplySourceId);

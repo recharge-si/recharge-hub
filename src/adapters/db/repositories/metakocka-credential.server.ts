@@ -236,19 +236,15 @@ export async function markVerified(principal: Principal): Promise<void> {
 }
 
 /**
- * CLAUDE.md section 2.7: the connection can be disconnected from inside Shopify
- * at any time. This deletes the credentials outright rather than flagging them
- * disabled, so a disconnected shop holds no ERP key.
+ * CLAUDE.md section 2.7: the connection can be disconnected from inside
+ * Shopify at any time.
+ *
+ * Disconnecting no longer means deleting this row on its own — it means
+ * `resetShop` in the shop repository, because everything this app stores is
+ * derived from the company being disconnected and a stale mapping is worse
+ * than no mapping. This function is the permission check for that: the guard
+ * lives with the secrets it protects, and the caller does the deleting.
  */
-export async function disconnect(principal: Principal): Promise<void> {
+export function assertMayDisconnect(principal: Principal): void {
   assertMayHandleSecrets(principal, "disconnect");
-
-  await prisma.metakockaCredential.deleteMany({
-    where: { shop: { domain: shopDomainOf(principal) } },
-  });
-
-  getLogger().info(
-    { shop: shopDomainOf(principal) },
-    "MetaKocka connection removed",
-  );
 }

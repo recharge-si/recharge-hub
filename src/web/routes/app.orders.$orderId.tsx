@@ -21,6 +21,7 @@ import {
   stockForOrder,
 } from "~/adapters/db/repositories/order.server";
 import { listLedger } from "~/adapters/db/repositories/order-payment.server";
+import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import { metakockaDocumentUrl } from "~/adapters/metakocka/documents";
 import { redriveOrder } from "~/adapters/queue/redrive.server";
 import {
@@ -67,7 +68,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Both only exist so the two things that used to be impossible on this page
   // are possible: choosing a source by hand, and giving MetaKocka a customer
   // for an order Shopify has no address on.
-  const [sources, stock, products, ledger] = await Promise.all([
+  const [settings, sources, stock, products, ledger] = await Promise.all([
+    getSalesOrderSettings(principal),
     listAllocatableSources(principal),
     stockForOrder(principal, order.id),
     /*
@@ -121,6 +123,14 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const shopifyParty = parseOrderSafe(order.rawPayload);
 
   return {
+    /**
+     * Whether this shop splits an order across its warehouses at all.
+     *
+     * A shop writing one sales order per Shopify order has no warehouse on its
+     * documents and no allocation behind them, so everything on this page about
+     * where a line is fulfilled from is a question that does not arise.
+     */
+    unsplit: settings.salesOrderSplit === "single",
     sources: sources.map((source) => ({
       id: source.id,
       name: source.name,
@@ -224,6 +234,17 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       })),
       documents: order.documents.map((document) => ({
         id: document.id,
+        /**
+         * What MetaKocka calls this document, which is not always what this app
+         * calls it.
+         *
+         * `count_code` is the app's internal claim key; `sent_count_code` is
+         * the number the document actually carries — the two are the same
+         * string only while the app is the one numbering them. A document
+         * claimed but never written has no number at all, and saying so beats
+         * showing an internal key the merchant cannot find anywhere.
+         */
+        number: document.sentCountCode,
         countCode: document.countCode,
         mkId: document.mkId,
         status: document.status,
@@ -515,7 +536,7 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function OrderDetail() {
-  const { order, sources, partnerOverride, hasShopifyAddress, payments } =
+  const { order, unsplit, sources, partnerOverride, hasShopifyAddress, payments } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
@@ -754,11 +775,27 @@ export default function OrderDetail() {
           * columns into a labelled list at 375px rather than letting the page
           * scroll sideways (§2.6).
           */}
-        <s-section heading="Lines and where they are fulfilled from">
+        <s-section
+          heading={
+            unsplit ? "Lines" : "Lines and where they are fulfilled from"
+          }
+        >
           <Form method="post">
             <input type="hidden" name="intent" value="allocate-by-hand" />
 
             <s-stack direction="block" gap="base">
+              {/*
+               * An unsplit shop is told what it already chose, once, and
+               * offered nothing to change here. Leaving the picker in place
+               * would let a merchant assign a warehouse that no document is
+               * going to carry, which is worse than not offering it.
+               */}
+              {unsplit ? (
+                <s-text color="subdued">
+                  This shop sends one sales order for the whole order, with no
+                  warehouse on it, so nothing here is allocated to a warehouse.
+                </s-text>
+              ) : (
               <s-stack
                 direction="inline"
                 gap="base"
@@ -800,6 +837,7 @@ export default function OrderDetail() {
                   </s-button>
                 )}
               </s-stack>
+              )}
 
               {/*
                 * One choice for the whole order.
@@ -842,7 +880,9 @@ export default function OrderDetail() {
                   <s-table-header listSlot="primary">Product</s-table-header>
                   <s-table-header listSlot="kicker">SKU</s-table-header>
                   <s-table-header listSlot="labeled">Tax</s-table-header>
-                  <s-table-header listSlot="inline">From</s-table-header>
+                  {unsplit ? null : (
+                    <s-table-header listSlot="inline">From</s-table-header>
+                  )}
                   <s-table-header listSlot="labeled">Quantity</s-table-header>
                   <s-table-header listSlot="secondary" format="currency">
                     Price
@@ -909,6 +949,7 @@ export default function OrderDetail() {
                         <s-text>{formatTaxRate(line.taxFactor)}</s-text>
                       </s-table-cell>
 
+                      {unsplit ? null : (
                       <s-table-cell>
                         {editingSources ? (
                           <s-stack
@@ -1007,6 +1048,7 @@ export default function OrderDetail() {
                           </s-stack>
                         )}
                       </s-table-cell>
+                      )}
 
                       <s-table-cell>{String(line.quantity)}</s-table-cell>
 
@@ -1030,7 +1072,7 @@ export default function OrderDetail() {
                 * explanation, and printing one for every such line is what
                 * buried the ones that do.
                 */}
-              {!editingSources && splitLines.length > 0 ? (
+              {!unsplit && !editingSources && splitLines.length > 0 ? (
                 <s-stack direction="block" gap="small-400">
                   <s-text type="strong">Why these lines were split</s-text>
                   {splitLines.flatMap((line) =>
@@ -1291,7 +1333,11 @@ export default function OrderDetail() {
                       gap="small-300"
                       alignItems="center"
                     >
-                      <s-text type="strong">{document.countCode}</s-text>
+                      <s-text type="strong">
+                        {document.number ??
+                          document.mkDocNumber ??
+                          "Not numbered yet"}
+                      </s-text>
                       {document.isPrimary ? (
                         <s-badge tone="info">Primary</s-badge>
                       ) : null}

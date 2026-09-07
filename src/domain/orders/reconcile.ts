@@ -27,7 +27,25 @@ export interface DesiredDocumentLine {
   quantity: number;
 }
 
+/**
+ * The key of the one document an unsplit order has.
+ *
+ * A shop on `sales_order_split = single` writes one sales order for the whole
+ * Shopify order and no warehouse mark on it, so there is no supply source to
+ * key its document by — the stored row's `supply_source_id` is null, which is
+ * exactly what it means: this document belongs to no warehouse.
+ *
+ * Null is not usable as a map key here, and it already means something else in
+ * `ExistingDocument`: a row with no source under a *split* shop is a document
+ * the order no longer takes anything from, which is retired. So the caller
+ * substitutes this sentinel for null when — and only when — the shop is
+ * unsplit, and everything below goes on treating a document key as a string.
+ * Prefixed and bracketed so it can never collide with a cuid.
+ */
+export const WHOLE_ORDER_DOCUMENT = "[whole-order]";
+
 export interface DesiredDocument {
+  /** A supply source id, or `WHOLE_ORDER_DOCUMENT` for an unsplit shop. */
   supplySourceId: string;
   lines: DesiredDocumentLine[];
 }
@@ -36,6 +54,14 @@ export interface DesiredDocument {
 export interface ExistingDocument {
   documentId: string;
   supplySourceId: string | null;
+  /**
+   * What to call this document when telling somebody about it.
+   *
+   * The number MetaKocka holds it under — which is the app's internal claim key
+   * only when the app chose the number. Nothing here looks a document *up* by
+   * it: documents are addressed by `documentId` and grouped by supply source,
+   * so this travels only into the actions and the messages they produce.
+   */
   countCode: string;
   status: "pending" | "written" | "failed";
   /** Whether MetaKocka has actually acknowledged it with an id. */

@@ -31,8 +31,20 @@ Completed work belongs in Git history, not in this file.
   `sync_stock` safeguards
 - Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
   visibility, dashboard, orders, and exceptions UI
-- 491 fixture-driven tests across pure domain, adapters, presentation helpers,
-  and the order-to-MetaKocka vertical slice
+- Five-area information architecture with settings under the thing they
+  configure, and redirects from the three routes that moved
+- Guided setup at `/app/setup`: connect and verify MetaKocka, choose where stock
+  is counted, map locations to warehouses, order reference, profit centre and
+  payment types, then an explicit Finish that activates synchronization
+- One readiness model (`domain/readiness`) shared by Home, the settings hub,
+  guided setup and the order settings page, computed from our own tables
+- An activation boundary (`shop.setup_completed_at`) both MetaKocka writers
+  respect, so opening setup never starts writing
+- 753 fixture-driven tests across pure domain, adapters, presentation helpers,
+  the route table, and the order-to-MetaKocka vertical slice, plus PostgreSQL
+  tests for the reconciliation lock, the `count_code` claim, the payment
+  ledger's unique index, activation idempotency and the one-writer-per-location
+  rule
 
 ## Product and integration gaps
 
@@ -58,11 +70,38 @@ deliberate — there is no safe default for which article an accountant expects
 postage on — but it means every shop has a setup step before its orders reconcile
 commercially.
 
+**Guided setup now asks for the shipping article and refuses to continue without
+one**, checked against MetaKocka the way the settings screen checks it. A shop
+set up from now on therefore starts with postage representable. Readiness is
+deliberately unchanged: for a shop that finished setup before this, a missing
+shipping article stays a note on a working Orders component rather than a red
+one, because it is a per-order condition and not a broken integration. The
+discount setting keeps its safe default and is not asked for during setup.
+
 Line-level discounts are still not represented: they are parsed and stored, and
 they appear in the value reconciliation as a named unrepresented term. Folding
 them into `discount_value` alongside the order-level discount is the obvious
 next step and has not been done, because it changes what each *line* appears to
 have cost and that is a merchant-visible accounting decision.
+
+### T-20 — Two deliberate readiness choices worth revisiting
+
+Both are product decisions rather than bugs, and both are visible in
+`domain/readiness`:
+
+- **A payment method this store has used, unmapped, is a caution and not a
+  block.** What blocks Finish setup is the *fallback* being unchosen, because
+  the fallback is the merchant's own answer for every method with no row of its
+  own and is what makes an unmapped one safe rather than silent. A shop can
+  therefore finish setup with, say, cash on delivery falling back to the card
+  type. Readiness names the methods that fall back so it is not invisible.
+  Requiring an explicit row per used gateway is the stricter reading of the
+  brief and would block shops whose register genuinely has one entry.
+- **The API user email is required by guided setup and only required by
+  readiness when a location is counted in Shopify.** `sync_stock` is the only
+  call that needs it, so a shop that never writes stock into MetaKocka is not
+  held up by it after setup — but setup asks for it once, up front, because
+  discovering it later means an inventory sync that silently publishes nothing.
 
 ### T-18 — Existing shops keep stock-rules allocation until they opt in
 
@@ -74,8 +113,8 @@ restructure those documents the next time anything unrelated touched the order.
 
 Migration `20260826050000_existing_shops_keep_stock_rules` therefore pins every
 shop that existed at that moment to `stock_rules`. Shops created afterwards have
-no row and inherit the new default. Switching is one control on the Order sync
-settings page, which shows what will change before it is saved.
+no row and inherit the new default. Switching is one control in the
+advanced order settings, which shows what will change before it is saved.
 
 Nothing is re-sent in bulk either way: an order is only rebuilt when something
 changes it or a merchant checks it by hand.
@@ -174,16 +213,46 @@ Probe the designated test company for `get_document` by shared `buyer_order` and
 `search` by exact `count_code`. Until response shapes are recorded, recovery
 must treat a sibling result as inconclusive and never blindly resend.
 
-### T-16 — Company-wide `sync_stock` write is unverified against a live company
+### T-16 — Whether `sync_stock` empties a warehouse left out of the request
 
-`pushShopifyStockIntoMetakocka` now sends every cached warehouse in one
-`sync_stock` request, not only the reverse-synced one, on the strength of that
-endpoint's own documentation ("the total stock for all warehouses must be sent
-in one request") rather than a live probe. The designated test company has not
-been used to confirm that omitting a whole warehouse from the request actually
-removes its stock (or that it does not). See
-`docs/metakocka-verification.md` § `sync_stock` for what is documented versus
-verified, and record a sanitized multi-warehouse fixture once probed.
+`pushShopifyStockIntoMetakocka` writes one warehouse: the one Shopify is
+authoritative for. The endpoint's documentation ("the total stock for all
+warehouses must be sent in one request"), read together with its
+omission-removes rule, could mean every other warehouse in the company is
+emptied by that request. It has never been observed, and the alternative —
+sending every warehouse, which this briefly did — is a certain wrong write
+on every cycle to warehouses section 7 reserves to the merchant (T-20).
+
+Until it is probed on the designated test company, a non-empty
+`stock_remove_list` is the detector: the adapter treats it as a failure and
+the merchant is told. Record a sanitized multi-warehouse fixture once probed.
+The same probe settles T-19 below, and the two share a fixture.
+
+### T-20 — The app must not write a warehouse the merchant counts in MetaKocka
+
+Section 7 gives a `mk_to_shopify` warehouse to the merchant: this app reads
+it and never writes it. Sending every cached warehouse in a `sync_stock`
+request broke that — one Shopify-counted location filed an inventory document
+restating warehouses it had no say over, and reverted anything moved in the
+ERP between the read and the write. Fixed by writing only the authoritative
+warehouse.
+
+The open decision is what to do if T-16 proves omission really does empty a
+warehouse. Going back to writing warehouses this app does not own is not the
+answer; sending the authoritative warehouses together, and echoing the rest
+only under an explicit merchant-visible setting, is the shape to design.
+
+### T-19 — `warehouse_stock` server-side warehouse filtering is unverified
+
+`listWarehouseStock` sends `wh_id_list` and then drops any row naming a
+different warehouse, because nothing proves the parameter filters and the
+consequence of trusting it was doubled ERP stock on the `shopify_to_mk`
+path. The client-side filter makes that safe either way, but two things are
+still unknown: whether `wh_id_list` filters at all (if not, every read pays
+for the whole company's stock list), and what shape it wants ids in. A
+recorded multi-warehouse `warehouse_stock` response answers both. Until
+then, a `warehouse_stock returned rows for other warehouses` warning in the
+worker log is the signal that it does not filter.
 
 ### T-07 — Shopify access scopes before App Store review
 
@@ -255,6 +324,15 @@ The Built for Shopify checklist has not been walked requirement by requirement.
 The 375 px layout, screen-reader table semantics, save-bar behavior, hydration,
 and p75 LCP/CLS/INP budgets need browser measurement. Product loaders currently
 await Shopify catalogue queries; measure before changing them.
+
+This now includes the screens added or reorganized in the product UX pass:
+Home, `/app/setup`, `/app/settings`, and the regrouped order settings. Their
+grids use container queries rather than viewport media queries and their tables
+use `variant="auto"`, which is the same approach the existing screens take, but
+none of it has been measured in a browser. Guided setup's Continue button is a
+step action rather than a contextual save bar; the settings pages it writes to
+keep the save bar. Both readings are defensible and neither has been checked
+against a reviewer.
 
 ### Large modules should be split only along proven responsibilities
 

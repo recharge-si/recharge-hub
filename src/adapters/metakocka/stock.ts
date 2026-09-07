@@ -2,8 +2,10 @@ import { z } from "zod";
 
 import type { MetakockaClient } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
+import { MetakockaError } from "~/adapters/metakocka/errors";
 import type { ProductTypeFlags } from "~/adapters/metakocka/products";
 import { mkDecimal } from "~/adapters/metakocka/values";
+import { getLogger } from "~/adapters/observability/logger.server";
 
 /**
  * `warehouse_stock` and `product_list`.
@@ -57,10 +59,19 @@ const PAGE = 500;
  *
  * A live company can return more than one row for the same
  * `(warehouse_id, code)` pair — separate microlocations inside one physical
- * warehouse. A caller building a `Map` keyed by product code from the raw
- * rows would have the last microlocation silently overwrite the rest,
- * undercounting real stock by however much sat in the ones before it. Summed
- * here instead, once, so every caller sees the warehouse's true total.
+ * warehouse. Those are summed, so a caller sees the warehouse's true total
+ * rather than whichever microlocation happened to come last.
+ *
+ * **Only the warehouse that was asked for comes back.** `wh_id_list` is a
+ * server-side filter no recorded `warehouse_stock` response has ever proved,
+ * and every caller keys this result by product code alone — so a response
+ * that also carried another warehouse was folded in as though it belonged
+ * here. In the Shopify → MetaKocka direction that is not a display bug:
+ * `pushShopifyStockIntoMetakocka` builds one map per warehouse and sends all
+ * of them in a single `sync_stock` request, so every warehouse received every
+ * warehouse's stock and the company total for a product came out multiplied
+ * by the number of warehouses — two warehouses, exactly double. Filtering
+ * here, once, is what makes that impossible however `wh_id_list` behaves.
  */
 export async function listWarehouseStock(
   client: MetakockaClient,
@@ -76,7 +87,9 @@ export async function listWarehouseStock(
     free: number | null;
   }
 
-  const byKey = new Map<string, Aggregate>();
+  const byCode = new Map<string, Aggregate>();
+  /** Rows for another warehouse: proof `wh_id_list` did not filter. */
+  let foreign = 0;
 
   for (let offset = 0; offset < 200_000; offset += PAGE) {
     const response = await client.call(
@@ -86,12 +99,16 @@ export async function listWarehouseStock(
     );
 
     for (const row of response.stock_list) {
-      const key = `${row.warehouse_id}:${row.code}`;
+      if (row.warehouse_id !== warehouseMkId) {
+        foreign += 1;
+        continue;
+      }
+
       const reserved = row.reserved_amount ?? 0;
-      const existing = byKey.get(key);
+      const existing = byCode.get(row.code);
 
       if (!existing) {
-        byKey.set(key, {
+        byCode.set(row.code, {
           warehouseId: row.warehouse_id,
           code: row.code,
           title: row.title ?? null,
@@ -118,7 +135,35 @@ export async function listWarehouseStock(
     if (response.stock_list.length < PAGE) break;
   }
 
-  return [...byKey.values()].map((row) => ({
+  if (foreign > 0) {
+    // Dropped rather than trusted, so this is not fatal on its own — but it
+    // means every read here is paying for the whole company's stock list,
+    // and it is the one condition that makes the refusal below possible.
+    getLogger().warn(
+      { warehouseMkId, foreignRows: foreign, kept: byCode.size },
+      "warehouse_stock returned rows for other warehouses; wh_id_list did not filter",
+    );
+  }
+
+  /*
+   * Rows came back, and none of them were for the warehouse that was asked
+   * for.
+   *
+   * That is not an empty warehouse: an empty warehouse returns nothing at
+   * all. It means the `warehouse_id` MetaKocka answers with and the `mk_id`
+   * this app holds are not the same identifier — and every caller reads an
+   * empty result as “every product is at zero”, which publishes zero on-hand
+   * into Shopify or sends a `sync_stock` request that empties the warehouse.
+   * Refusing is the only safe answer.
+   */
+  if (foreign > 0 && byCode.size === 0) {
+    throw new MetakockaError(
+      `warehouse_stock returned ${foreign} row(s), none of them for warehouse ${warehouseMkId}. Stock was not read; reload the warehouse list and check this location's mapping.`,
+      { endpoint: ENDPOINTS.warehouseStock, kind: "exception" },
+    );
+  }
+
+  return [...byCode.values()].map((row) => ({
     warehouseId: row.warehouseId,
     code: row.code,
     title: row.title,
@@ -186,35 +231,107 @@ function typeOf(row: {
 }
 
 /**
- * One product, by the code the merchant typed.
+ * What a lookup by code can honestly conclude.
  *
- * For validating a shipping article on the settings screen, which is the one
- * place a merchant hands this app a MetaKocka code by hand. A code that does
- * not exist is refused there rather than on the next order, where it would
- * surface as a rejected sales order and a puzzle.
- *
- * `product_list` is filtered server-side by `product_code_list`, so this is one
- * small call rather than a walk of the catalogue.
+ * Three answers, not two. "Absent" is a claim about the merchant's catalogue
+ * and it refuses their save, so it is only returned when the whole catalogue
+ * was read and the code was not in it. Everything short of that — a filter
+ * that may not have been applied, a catalogue longer than this is willing to
+ * walk — is `unknown`, which is not an answer worth blocking a save over.
  */
-export async function findProductByCode(
-  client: MetakockaClient,
-  code: string,
-): Promise<MetakockaProduct | null> {
-  const response = await client.call(
-    ENDPOINTS.productList,
-    { limit: 5, offset: 0, product_code_list: [{ code }] },
-    productResponseSchema,
-  );
+export type ProductLookup =
+  | { status: "found"; product: MetakockaProduct }
+  | { status: "absent" }
+  | { status: "unknown" };
 
-  const row = response.product_list.find((entry) => entry.code === code);
-  if (!row) return null;
+/** Codes are compared the way a person reads them, not the way bytes compare. */
+function codeKey(value: string): string {
+  return value.trim().toLowerCase();
+}
 
+function productOf(row: {
+  mk_id: string;
+  code: string;
+  name?: string | undefined;
+  sales?: string | undefined;
+  purchasing?: string | undefined;
+  service?: string | undefined;
+}): MetakockaProduct {
   return {
     mkId: row.mk_id,
     code: row.code,
     name: row.name ?? null,
     type: typeOf(row),
   };
+}
+
+/**
+ * How far this will walk before it gives up and says it does not know. Ten
+ * pages is five thousand articles, which is more than a catalogue this app has
+ * ever been pointed at, and a bound is what stops one save request from
+ * reading an unbounded catalogue a page at a time.
+ */
+const MAX_LOOKUP_PAGES = 10;
+
+/**
+ * One product, by the code the merchant typed.
+ *
+ * For validating a shipping article on the settings screen, which is the one
+ * place a merchant hands this app a MetaKocka code by hand. A code that does
+ * not exist is worth catching there rather than on the next order, where it
+ * surfaces as a rejected sales order and a puzzle.
+ *
+ * It asks with `product_code_list` first, because when that filter is applied
+ * the answer costs one small call. **No recorded response proves `product_list`
+ * applies it** — it is verified on `warehouse_stock` and assumed here — so a
+ * miss proves nothing and is not reported as one: a merchant whose shipping
+ * article exists was told it did not, and their settings would not save. The
+ * miss falls through to reading the catalogue, which is the same walk
+ * `listProducts` does and is answering a question the merchant asked for.
+ *
+ * Matching ignores case and surrounding space, because "Shipping" typed as
+ * "SHIPPING" is the same article to everyone except a byte comparison.
+ */
+export async function findProductByCode(
+  client: MetakockaClient,
+  code: string,
+): Promise<ProductLookup> {
+  const wanted = codeKey(code);
+  if (wanted === "") return { status: "absent" };
+
+  const filtered = await client.call(
+    ENDPOINTS.productList,
+    { limit: PAGE, offset: 0, product_code_list: [{ code }] },
+    productResponseSchema,
+  );
+
+  const hit = filtered.product_list.find((row) => codeKey(row.code) === wanted);
+  if (hit) return { status: "found", product: productOf(hit) };
+
+  for (let page = 0; page < MAX_LOOKUP_PAGES; page += 1) {
+    const response = await client.call(
+      ENDPOINTS.productList,
+      { limit: PAGE, offset: page * PAGE },
+      productResponseSchema,
+    );
+
+    const row = response.product_list.find(
+      (entry) => codeKey(entry.code) === wanted,
+    );
+    if (row) {
+      getLogger().warn(
+        { code, page },
+        "product_code_list did not return the article the catalogue holds",
+      );
+      return { status: "found", product: productOf(row) };
+    }
+
+    // A short page is the end of the catalogue, and only then is "absent" a
+    // fact rather than a guess.
+    if (response.product_list.length < PAGE) return { status: "absent" };
+  }
+
+  return { status: "unknown" };
 }
 
 /** The whole product catalogue, paginated. */
@@ -231,12 +348,7 @@ export async function listProducts(
     );
 
     for (const row of response.product_list) {
-      products.push({
-        mkId: row.mk_id,
-        code: row.code,
-        name: row.name ?? null,
-        type: typeOf(row),
-      });
+      products.push(productOf(row));
     }
 
     if (response.product_list.length < PAGE) break;

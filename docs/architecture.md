@@ -42,6 +42,145 @@ ESLint enforces these import directions. External payloads are parsed at their
 adapter boundary, normally with Zod. `domain/` cannot read the clock or use
 randomness; callers inject time and inputs.
 
+## Merchant-facing shape
+
+Five areas in `s-app-nav`, each a job rather than a table. Every settings page
+lives with the thing it configures, so nothing in the navigation is a database
+name:
+
+```text
+Home              /app                  operations dashboard
+Orders            /app/orders           list, and /app/orders/settings
+Needs attention   /app/exceptions
+Products          /app/products         status, and /app/products/sync for settings
+Locations         /app/locations        how stock is going, and
+                                        /app/locations/settings for the mappings,
+                                        the defaults and the profit centres
+Settings          /app/settings         hub; /app/settings/metakocka is the connection
+```
+
+Guided setup is `/app/setup`, five steps, reachable again from Home and
+Settings. Three routes moved and redirect: `/app/settings/sales-orders` to
+`/app/orders/settings`, `/app/settings/payments` to
+`/app/orders/settings/payments`, `/app/settings/supply-sources` to
+`/app/locations`. `tests/unit/route-table.test.ts` asserts the table, including
+that `/app/orders/settings` out-ranks `/app/orders/:orderId`.
+
+**An area is a page you land on plus a settings page behind its header
+button.** Orders, Products and Locations are all built that way: the landing
+page answers "is this working" with a breakdown and what is happening now, and
+the settings page answers "what was it told to do". That is why the locations
+route is `app.locations._index.tsx` rather than `app.locations.tsx` — a leaf
+route with a child becomes a parent layout, and this one has no outlet to
+render it in.
+
+**Every redirect under `/app` goes through `redirectWithin`** in
+`src/web/lib/redirects.ts`, which carries the request's query string and lets
+the caller set or remove single parameters. Shopify opens the app as a
+document request carrying `host`, `embedded`, `shop` and `id_token`; `host` is
+what App Bridge initialises from and `id_token` is what `authenticate.admin`
+reads, so a redirect that builds a fresh URL loses both and the merchant gets a
+blank frame rather than an error.
+
+It hides well, which is why it is a rule and not a review comment: in-app
+navigation is a client-side fetch and the already-running App Bridge does not
+care what the redirect said, so every path a person clicks through looks
+right. Only a redirect on the *first* document request shows it — which is
+Home sending a shop with nothing configured to guided setup, the one redirect
+a merchant meets before anything else. `/auth/login` is the exception: it is
+the un-embedded document and has no admin frame to preserve.
+
+The token carries only on a document redirect (a GET). On a redirect thrown
+from an **action**, `redirectWithin` drops `id_token` and React Router's
+single-fetch markers (`_routes`, `_data`, `index`). The session token is
+single-use and spent the moment `authenticate.admin` reads it, and React Router
+answers a form submission by throwing the redirect and re-fetching the next
+step's loader from the client. Baking the just-spent token into that URL makes
+the follow-up request present a stale token: the loader is turned away with an
+empty-bodied 401, which the library's error boundary renders as the literal
+string "Handling response". This is what stalled guided setup after a step's
+answers had already been saved. Dropping the token lets App Bridge mint a fresh
+one for the next request.
+
+### One readiness model
+
+`src/domain/readiness/` computes six components — MetaKocka, warehouses, stock,
+orders, payments, products — each with a status, a summary, a reason and a place
+to act. It is pure; `adapters/db/repositories/readiness.server.ts` gathers the
+facts from our own tables in one parallel batch, so no screen waits on MetaKocka
+to say whether the shop is configured. Home, the settings hub, guided setup's
+review step and the order settings page all read that one answer.
+
+The gateways a shop has used come from `order.payment_gateway` rather than from
+Shopify, for the same reason.
+
+### The activation boundary
+
+`shop.setup_completed_at` records that a person pressed Finish setup, and
+nothing else. Guided setup saves each answer into the table that already owns it
+as the merchant gives it, so a shop can be connected and half-configured at the
+same moment; both MetaKocka writers — `writeMetakockaOrderFor` and
+`sync-inventory` — return early until that timestamp exists. Finish setup
+re-checks readiness from stored state, sets the timestamp with a conditional
+update, and enqueues the first order, stock and catalogue passes on throttled
+keys, so pressing it twice activates once.
+
+It is deliberately not a second answer to "is this shop configured":
+`domain/readiness` answers that from the configuration, and Finish setup refuses
+while readiness disagrees. `shop.setup_step` is where the wizard left off and
+decides nothing. Shops that already held MetaKocka credentials were back-filled
+by `20260826080000_setup_state`, so nothing that was synchronizing stopped.
+
+`src/web/lib/locations.server.ts` holds the one implementation of connecting a
+Shopify location to a MetaKocka warehouse, shared by the locations page and
+guided setup, because "one writer per location" is not an invariant worth having
+two of.
+
+### Disconnecting resets the store
+
+Disconnect on `/app/settings/metakocka` calls `resetShop`, which deletes the
+`shop` row — every shop-scoped table cascades from it — removes the
+`idempotency_key` rows that are keyed by domain rather than by foreign key,
+and creates the shop again as a fresh install. The Shopify `session` stays:
+the app is still installed and the merchant is still looking at it. The new
+row has no `setup_completed_at`, so guided setup runs from the first step and
+both MetaKocka writers refuse until it is finished again.
+
+It is written as one delete rather than a list of tables on purpose: a list
+is a thing that goes stale the next time a table is added, and the failure is
+silent. `tests/db/disconnect-reset.test.ts` covers the two tables that do not
+cascade.
+
+It erases because almost everything here is derived from the company being
+disconnected — warehouse marks and their stock directions, profit centres,
+payment-type maps, the SKU register, cached registers. Keeping them and
+connecting a *different* company files documents against marks that company
+has never heard of, and MetaKocka accepts an unknown warehouse mark silently
+and files against the company default. A stale mapping is worse than none.
+
+**Nothing is sent to MetaKocka and nothing is deleted there.** Documents this
+app filed are the merchant's accounting records; what goes is this app's copy.
+Because it is unrecoverable, the button is behind typing the company ID, and
+the server checks it again rather than trusting the disabled state of a
+button.
+
+### Stock direction is answered before activation, not after
+
+The stock step asks where the shop counts stock and then asks it again per
+location, defaulting to the shop answer. Both answers land on
+`supply_setting.default_stock_direction` and `supply_source.stock_direction`
+through the same `saveLocationMapping`, with `stock_direction_inherited`
+recording which one a location took.
+
+The per-location question is not a convenience. Finish setup starts the
+five-minute stock cycle, and the first run writes real quantities: MetaKocka's
+into Shopify, or Shopify's into an ERP inventory document. A store with one
+MetaKocka-counted warehouse and one Shopify-counted one could previously not
+say so until after activation, so the wrong direction had already been written
+for one of them by the time the merchant reached the Locations page — and
+neither an inventory document nor an overwritten on-hand is undone by
+correcting the setting afterwards.
+
 ## Important flows
 
 ### Order intake and the reconciliation loop
@@ -83,8 +222,53 @@ Three safety boundaries hold this together:
   `order.sync_state = inconsistent` with the per-SKU difference and **never**
   repaired by writing another document.
 
+### How many documents an order becomes
+
+`sales_order_setting.sales_order_split` decides whether an order is split across
+warehouses at all:
+
+- `per_warehouse` (default): one MetaKocka sales order per warehouse the order
+  ships from, each carrying that warehouse's mark, linked by `buyer_order`. This
+  is the only shape in which the ERP holds where goods actually left from, and
+  everything in *Warehouse allocation* below applies.
+- `single`: one sales order carrying every line of the Shopify order, with **no
+  warehouse mark**, so MetaKocka files it against the company default. Nothing
+  is allocated — the reconciler does not read fulfilment orders, does not run
+  the allocator, clears any allocation rows a previous split left behind, and
+  classifies every quantity as `managed` against the one document. The profit
+  centre comes from `supply_setting.default_profit_center`; no delivery type is
+  sent. `allocation_mode` has no effect.
+
+The document is keyed by `WHOLE_ORDER_DOCUMENT` (`domain/orders/reconcile`)
+through the reconciler, the money split and the payment plan, all of which key
+by supply source; the stored `metakocka_document.supply_source_id` is null,
+which is what it means — this document belongs to no warehouse. Its
+`count_code` is the order reference itself, with no source suffix.
+
+Changing the setting is a normal reconciliation, not a migration: the documents
+that no longer describe the order are retired under
+`sales_order_setting.obsolete_document_policy` and the new shape is written, on
+each order's next pass.
+
+### Sales order numbering
+
+`sales_order_setting.sales_order_numbering` decides who chooses the number
+MetaKocka shows as *Sales ord. no.* — `app`, from
+`sales_order_number_template` (null meaning the order's own
+`customer_order_ref`, plus the warehouse code on a split document), or
+`metakocka`, which sends no `count_code` and records whatever the ERP answers
+with.
+
+The split that makes this safe is in `metakocka_document`:
+`count_code` is the app's **internal claim key**, derived from the intake-frozen
+`customer_order_ref`, and remains the sole duplicate guard; `sent_count_code` is
+what MetaKocka actually holds. The number is settled at claim time and frozen,
+so changing the pattern renumbers nothing that exists. Every merchant-facing
+message and screen reads `sent_count_code`.
+
 ### Warehouse allocation
 
+Under `sales_order_split = per_warehouse`,
 `sales_order_setting.allocation_mode` decides where an order's warehouse split
 comes from:
 
@@ -160,13 +344,20 @@ location:
 - `shopify_to_mk`: Shopify `on_hand` is written through MetaKocka `sync_stock`.
 - `none`: this app writes neither side.
 
-The Shopify adapter refuses writes to locations this app does not own. The
-MetaKocka adapter sends a complete *company* snapshot — every cached
-warehouse, not only the one being reverse-synced — because `sync_stock`'s own
-documentation requires the total stock for all warehouses in one request and
-treats anything omitted, including a whole warehouse, as removed. Every
-warehouse but the one Shopify is authoritative for is echoed back exactly as
-read.
+The Shopify adapter refuses writes to locations this app does not own, and
+the MetaKocka write is bounded the same way: a `shopify_to_mk` sync sends a
+complete list for **its own warehouse only**. Within that warehouse the list
+is complete — managed products take Shopify's number, everything else
+MetaKocka holds there is echoed back verbatim — because `sync_stock` removes
+what it is not sent.
+
+It briefly sent every cached warehouse, on the strength of that endpoint's
+documentation asking for the total stock of all warehouses in one request.
+That made a Shopify-counted location file an inventory document restating
+the merchant's MetaKocka-counted warehouses, which is what one-writer
+ownership exists to prevent. The documented risk of leaving a warehouse out
+— that it is emptied — has never been observed and is announced by
+`stock_remove_list` if it happens (T-16, T-20 in `docs/project-status.md`).
 
 ### Catalogue and product names
 
@@ -195,7 +386,9 @@ exception. Schedule/register jobs rely on the next cadence and Sentry instead.
 The authoritative schema is `prisma/schema.prisma`; migrations are immutable
 history under `prisma/migrations/`. Major groups are:
 
-- tenancy and auth: `Shop`, encrypted `Session`, `MetakockaCredential`;
+- tenancy and auth: `Shop` (including `setup_completed_at`, the activation
+  boundary, and `setup_step`, guided setup's own place-keeping), encrypted
+  `Session`, `MetakockaCredential`;
 - audit and delivery: `EventLog`, `IdempotencyKey`, pg-boss queues;
 - supply and inventory: `SupplySource`, `SupplySetting`, `SupplyLevel`, cached
   warehouse/profit-centre registers;
@@ -221,6 +414,8 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
+| What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |
+| Guided setup step              | `src/web/routes/app.setup.tsx`; the settings it writes stay where they are |
 | Webhook                        | Thin route in `src/web/routes/`, shared verification helper, queue handler   |
 | Schema change                  | `prisma/schema.prisma` plus a new additive migration                         |
 | Current behavior or limitation | Owning document under `docs/` and `docs/project-status.md`                   |

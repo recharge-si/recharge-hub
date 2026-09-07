@@ -30,6 +30,43 @@ maintain elsewhere gets exactly this, and nothing more:
 3. No third statement of the same fact anywhere on the page.
 Applies to name overwrite and price overwrite identically. Neither is special.
 
+## Setup state
+- **One readiness model, one wording.** Whether a shop is configured is answered
+  by `domain/readiness` and nowhere else. A page that needs it renders
+  `ReadinessList` or reads a component from it; it never re-derives "configured"
+  from a credential row and a count.
+- **Healthy is calm.** No green banners and no green badges. A ready component
+  is a neutral badge and a sentence; the one that needs a person is the loudest
+  element on the screen and is the only one carrying a button.
+- **Configured and started are different questions.** Readiness answers the
+  first from the configuration; `shop.setup_completed_at` answers the second and
+  answers nothing else. A screen that reports one must not imply the other.
+- **State what another page owns; do not re-edit it.** A setting that belongs to
+  another screen appears as a line saying what it currently is, plus a link. Two
+  editable copies of one value is how two screens end up disagreeing.
+- **Stated, not switched.** A status that follows from other settings is a line,
+  never a control. A toggle that only ever reflects something else is a lie with
+  a checkbox next to it.
+
+## Disclosure
+Three shapes, one look. `Advanced` folds a setting away under the heading that gives it
+meaning; `AdvancedSection` collects the page-level rarities into a closed card of its own;
+`LearnMore` folds the prose that explains a control. Each is a bordered secondary button
+with a chevron — never a bare word with a click handler — and the two that hide settings
+say what those settings currently are while closed, so opening is for changing rather than
+for checking.
+
+Long explanation belongs behind one of these or in the page's Help modal, never standing in
+the card. A control states its answer in one line; the reasoning, the edge case and what
+MetaKocka does with it are one click away.
+
+## Setting rows
+A setting another page owns, or one whose current value is a sentence, is a row: its name,
+what it says now, and the control that changes it, aligned down the card. Three rows read
+as a column of answers; the same three as paragraphs with buttons after them read as three
+cards that happen to be adjacent. Rows stack under their label on a narrow card, by
+container query — a card is narrower than the window it is in.
+
 ## Page header
 Every page that owns a background process opens with the same component:
 healthy / needs attention · when it last ran and the outcome · automatic or manual ·
@@ -44,9 +81,15 @@ differently, that's a bug.
 - Explanatory prose is a last resort. One short sentence per card plus an optional help
   link. If a card needs two paragraphs to be understood, the layout is wrong.
 
-## Pattern cards
-A preset is a selectable card showing the name it produces for one of the merchant's real
-products. Never a bare text link.
+## Patterns
+A merchant edits two patterns — the product name and the order reference — and they are
+edited the same way: one syntax (`{field}`), one control (`PatternEditor`), fields as
+chips offered while typing, and every field showing what it comes to for a real record of
+theirs. The control knows the syntax and nothing about what the pattern is about; the page
+tells it which fields exist and what they resolve to.
+
+A preset is a selectable row showing what it produces for one of the merchant's real
+records. Never a bare text link.
 
 ## Custom controls
 Any control not built from the design system's primitives carries a real label, correct
@@ -73,9 +116,13 @@ differs it is given, because the code is not going to be renamed to match.
 | **Name** | The MetaKocka product's `name` — the thing this app writes. Never "title". | `name` |
 | **Title** | Shopify's customer-facing product title. Only ever an input to a name, never the output. | `product.title`, `{title}` |
 | **Name pattern** | What the merchant edits to decide how a name is built. Never "template" in copy. | `nameTemplate`, `TemplateNode[]` |
+| **Reference pattern** | What the merchant edits to decide how the order reference is built. Same syntax and same editor as a name pattern. | `customerOrderTemplate` |
 | **Field** | One piece of Shopify data a name pattern can insert. Never "token" in copy. | `FieldDef`, `kind: "token"` |
 | **Matching** | Reading both catalogues and pairing them by SKU. Writes nothing to MetaKocka. | job `sync-catalogue` |
 | **Name sync** | Writing names into MetaKocka, and creating products for unmatched SKUs when that is on. | job `sync-products` |
+| **Needs attention** | A condition a person has to deal with, on the exceptions queue and in readiness. Never "exception" in copy. | `Exception`, `exception_kind` |
+| **Setup** | The guided flow, and the state of being configured. Never "onboarding" in copy. | `/app/setup`, `setup_completed_at` |
+| **Payment method** | The Shopify side of a payment mapping, as a merchant reads it. "Gateway" is the handle beneath it and stays where the handle is shown. | `Order.paymentGateway`, `PaymentTypeMap.shopifyGateway` |
 | **Pricelist** | A MetaKocka pricelist, referenced by the `count_code` it already has there. Net or gross is a property of the pricelist, not of Shopify. | `pricelistCode` |
 
 Words that must not appear in merchant-facing copy: **article** (the build

@@ -15,7 +15,7 @@ probe evidence belong in `docs/metakocka-verification.md`.
 | SKU catalogue match                      | Shopify + MetaKocka → app   | `sync-catalogue` registry read                              |
 | MetaKocka product names/prices on opt-in | Shopify → MetaKocka         | `sync-products`; merchant-controlled and off by default     |
 | Inventory for `mk_to_shopify` locations  | MetaKocka → Shopify         | Physical `amount` to Shopify `on_hand`                      |
-| Inventory for `shopify_to_mk` locations  | Shopify → MetaKocka         | Complete-company `sync_stock` write                         |
+| Inventory for `shopify_to_mk` locations  | Shopify → MetaKocka         | Complete `sync_stock` write for that warehouse only         |
 | Fulfilment-order placement               | Planned app → Shopify       | Queue exists; no consumer yet                               |
 | Tracking                                 | Planned MetaKocka → Shopify | Blocked: verified sales-order payload has no tracking field |
 
@@ -49,6 +49,9 @@ either build T-08 or drop the scope (see T-07).
 
 ### Configuration and authentication
 
+- Disconnecting MetaKocka erases this app's data for the store and restarts
+  guided setup (`resetShop`); MetaKocka itself is never called or changed.
+  See `docs/architecture.md` § Disconnecting resets the store.
 - `shopify.app.toml` is the single Partner-app configuration and webhook source.
 - `shopify.web.toml` tells the CLI how to start the local web/worker pair.
 - `src/adapters/shopify/shopify.server.ts` configures token exchange, encrypted
@@ -117,7 +120,14 @@ third base URL and a dedicated adapter.
 ### Important observed constraints
 
 - One sales order has one warehouse and profit centre; split allocation creates
-  one document per supply source.
+  one document per supply source. A shop on
+  `sales_order_setting.sales_order_split = single` writes one document for the
+  whole order with **no** warehouse mark instead, which MetaKocka files against
+  the company default.
+- `count_code` is MetaKocka's *Sales ord. no.* and is optional on the wire:
+  omitting the field lets the ERP's own sequence number the document, which is
+  `sales_order_setting.sales_order_numbering = metakocka`. It is sent as absent,
+  never as an empty string.
 - MetaKocka does not enforce `count_code` uniqueness. Never retry an ambiguous
   write without resolving whether it succeeded.
 - An unknown warehouse mark is silently replaced by the company default, so
@@ -137,11 +147,18 @@ third base URL and a dedicated adapter.
 - Product lines are catalogue references. Sending `unit` can create a product
   accidentally, so order lines deliberately omit it.
 - Stock `sync_stock` removes omitted products and can report success for a
-  no-op, so the adapter sends and verifies a complete list. Its own
-  documentation says the total stock for *all* warehouses must be sent in one
-  request, so a reverse (`shopify_to_mk`) sync reads and re-sends every cached
-  warehouse in the company, not only the one it is authoritative for — see
-  `docs/metakocka-verification.md`.
+  no-op, so the adapter sends and verifies a complete list for the warehouse
+  it writes. It writes **only** the warehouse Shopify is authoritative for.
+  The endpoint's documentation asks for the total stock of all warehouses in
+  one request; sending them made a reverse sync restate the merchant's
+  MetaKocka-counted warehouses, which section 7 forbids. See
+  `docs/metakocka-verification.md` for the risk that trade accepts and how it
+  is detected.
+- `warehouse_stock` is read one warehouse at a time and `listWarehouseStock`
+  keeps only the rows naming that warehouse. A leaked row is not a display
+  error: it restates one warehouse's stock as another's, and it is what made
+  a two-warehouse company's ERP totals come out doubled. `wh_id_list` is not
+  verified to filter server-side.
 - The only MetaKocka webhook is a stock-change nudge with limited retries;
   scheduled reconciliation remains mandatory.
 

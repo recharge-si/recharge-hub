@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -65,7 +65,9 @@ import {
 import { Advanced } from "~/web/components/advanced";
 import { AdvancedSection } from "~/web/components/advanced-section";
 import { Dropdown } from "~/web/components/dropdown";
+import { LearnMore } from "~/web/components/learn-more";
 import { PatternEditor } from "~/web/components/pattern-editor";
+import { PatternFieldsModal } from "~/web/components/pattern-fields-modal";
 import { NamePreviewTable } from "~/web/components/name-preview-table";
 import { OverwriteWarning } from "~/web/components/overwrite-warning";
 import { formatDateTime } from "~/web/lib/datetime";
@@ -711,6 +713,24 @@ export default function ProductSyncSettings() {
     result && !result.ok && result.field === field ? result.message : undefined;
 
   const patternSample = samples[0] ?? null;
+
+  /*
+   * What the picker offers and what the name comes to, both resolved against
+   * one of the merchant's own variants. The editor itself knows the syntax and
+   * nothing about products, so this is where a product answers for itself.
+   */
+  const pickerRowsFor = useCallback(
+    (query: string) =>
+      pickerGroups(registry, query, (patternSample as VariantFacts) ?? null),
+    [registry, patternSample],
+  );
+
+  const resolvedName = patternSample
+    ? nameFor(
+        settingsFromTemplate(state.nameTemplate),
+        patternSample as VariantFacts,
+      ).name
+    : null;
   const loadingPricelists = refreshing || reloader.state !== "idle";
   const reloadFailed = reloader.data && !reloader.data.ok;
 
@@ -992,53 +1012,18 @@ export default function ProductSyncSettings() {
 
       {/*
        * What a name can be built from, for a merchant who does not yet know
-       * there is anything to type. The list under the field only appears once
-       * they have started, which is no help at all before they have.
+       * there is anything to type. The same component the order reference
+       * pattern uses, so the answer to "what can I put in here" looks the same
+       * wherever it is asked.
        */}
-      <s-modal id={FIELDS_MODAL_ID} heading="What you can put in a name">
-        <s-stack direction="block" gap="base">
-          <s-paragraph>
-            Start typing any of these in the name and it will offer itself. Each
-            one shows what it comes to for one of your own products.
-          </s-paragraph>
-
-          {pickerGroups(registry, "", patternSample ?? null).map((group) => (
-            <s-stack key={group.id} direction="block" gap="none">
-              <s-box paddingBlock="small-300">
-                <s-text color="subdued" type="strong">
-                  {group.label}
-                </s-text>
-              </s-box>
-              {group.rows.map((row) => (
-                <s-box key={row.field.id} paddingBlock="small-400">
-                  <s-grid
-                    gridTemplateColumns="1fr auto"
-                    gap="base"
-                    alignItems="center"
-                  >
-                    <s-text>{row.field.label}</s-text>
-                    <s-text color="subdued">
-                      {row.value === null
-                        ? ""
-                        : row.value === ""
-                          ? "empty here"
-                          : row.value}
-                    </s-text>
-                  </s-grid>
-                </s-box>
-              ))}
-            </s-stack>
-          ))}
-        </s-stack>
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          command="--hide"
-          commandFor={FIELDS_MODAL_ID}
-        >
-          Close
-        </s-button>
-      </s-modal>
+      <PatternFieldsModal
+        id={FIELDS_MODAL_ID}
+        heading="What you can put in a name"
+        resolvedAgainst={
+          patternSample ? `${patternSample.sku}` : "one of your own products"
+        }
+        groups={pickerRowsFor("")}
+      />
 
       <s-modal id={PREVIEW_MODAL_ID} heading="What changes in MetaKocka">
         <s-stack direction="block" gap="base">
@@ -1129,27 +1114,60 @@ export default function ProductSyncSettings() {
             </s-stack>
 
             {state.scheduleEnabled ? (
-              <s-box maxInlineSize="260px">
-                <s-number-field
-                  name="scheduleIntervalMinutes"
-                  // §2.8: labels state their units.
-                  label="Sync every (minutes)"
-                  min={15}
-                  max={10080}
-                  value={state.scheduleIntervalMinutes}
-                  onChange={(e) =>
-                    set({ scheduleIntervalMinutes: e.currentTarget.value })
-                  }
-                  details="Twelve hours by default. MetaKocka has no bulk endpoint, so a full sync is slow — hourly is plenty for most catalogues."
-                />
-              </s-box>
+              /*
+               * The interval's explanation is a sibling line, not the field's
+               * `details`: `details` is laid out to the field's own width, so a
+               * sentence under a 260px number box wraps into a narrow ragged
+               * column beside a lot of empty card. Every other explanation on
+               * this page sits at the card's left edge, and so does this one.
+               */
+              <s-stack direction="block" gap="small-400">
+                <s-box maxInlineSize="200px">
+                  <s-number-field
+                    name="scheduleIntervalMinutes"
+                    // §2.8: labels state their units.
+                    label="Sync every (minutes)"
+                    min={15}
+                    max={10080}
+                    value={state.scheduleIntervalMinutes}
+                    onChange={(e) =>
+                      set({ scheduleIntervalMinutes: e.currentTarget.value })
+                    }
+                  />
+                </s-box>
+                <s-text color="subdued">
+                  Twelve hours by default.
+                </s-text>
+              </s-stack>
             ) : null}
 
+            {/*
+             * Stock stays on the card rather than behind the disclosure: it is
+             * the answer to "does this schedule control my stock", and a
+             * merchant who does not think to ask is exactly the one who needs
+             * to read it.
+             */}
             <s-text color="subdued">
               Stock is separate and always automatic: it is read from MetaKocka
               every five minutes, and immediately when MetaKocka sends a stock
               update.
             </s-text>
+
+            <LearnMore label="How often is worth it">
+              <s-paragraph>
+                MetaKocka has no bulk endpoint, so a full sync reads the
+                catalogue a page at a time and is slow on a large one. Once or
+                twice a day suits most catalogues; anything from a quarter of an
+                hour to a week is accepted.
+              </s-paragraph>
+              <s-paragraph>
+                Matching is worth running on its own schedule even with product
+                sync off: a product renamed in MetaKocka, a SKU corrected in
+                Shopify or a variant added this morning all change what matches,
+                and a catalogue only as fresh as the last time somebody pressed
+                the button stops matching quietly.
+              </s-paragraph>
+            </LearnMore>
           </s-stack>
         </s-section>
 
@@ -1201,7 +1219,12 @@ export default function ProductSyncSettings() {
                     set({ nameTemplate: next });
                   }}
                   registry={registry}
-                  sample={patternSample ?? null}
+                  rows={pickerRowsFor}
+                  preview={
+                    resolvedName
+                      ? `${patternSample?.sku}: ${resolvedName}`
+                      : null
+                  }
                   {...(fieldError ? { error: fieldError } : {})}
                 />
 
@@ -1283,7 +1306,7 @@ export default function ProductSyncSettings() {
               </s-stack>
             </s-section>
 
-            <s-section heading="Creating products MetaKocka does not have">
+            <s-section heading="New products">
               <s-stack direction="block" gap="base">
                 <s-stack direction="block" gap="small-400">
                   <s-checkbox
@@ -1348,7 +1371,7 @@ export default function ProductSyncSettings() {
          * being synced, because every sales order carries them. The switch does
          * not: with name sync off the job returns before it could write a price.
          */}
-        <s-section heading="Prices and tax in MetaKocka">
+        <s-section heading="Prices and tax">
           <s-stack direction="block" gap="base">
             {/*
              * First in the section and set apart, because it is the only
@@ -1422,6 +1445,8 @@ export default function ProductSyncSettings() {
               </s-box>
             ) : null}
 
+            {state.enabled ? <s-divider /> : null}
+
             {reloadFailed ? (
               <s-banner tone="warning" heading="Could not read your pricelists">
                 <s-paragraph>{reloader.data?.message}</s-paragraph>
@@ -1449,9 +1474,21 @@ export default function ProductSyncSettings() {
                     ? { error: errorFor("pricelistCode") }
                     : {})}
                 />
-                <s-link href={METAKOCKA_PRICELISTS_URL} target="_blank">
-                  Open pricelists in MetaKocka
-                </s-link>
+                {/*
+                 * A button, not a bare link: standing on its own under a field
+                 * rather than inside a sentence, a line of blue text reads as a
+                 * caption. The order settings page settled this the same way.
+                 */}
+                <s-stack direction="inline">
+                  <s-button
+                    variant="secondary"
+                    href={METAKOCKA_PRICELISTS_URL}
+                    target="_blank"
+                    icon="external"
+                  >
+                    Open pricelists in MetaKocka
+                  </s-button>
+                </s-stack>
               </s-stack>
             ) : (
               <Dropdown
@@ -1538,6 +1575,8 @@ export default function ProductSyncSettings() {
                 </s-text>
               )}
             </s-stack>
+
+            <s-divider />
 
             <s-text-field
               name="taxPercent"

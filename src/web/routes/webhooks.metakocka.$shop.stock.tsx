@@ -9,8 +9,8 @@ import {
   metakockaWebhookUnauthorized,
   verifyMetakockaSignature,
 } from "~/adapters/metakocka/webhook";
-import { enqueueThrottled } from "~/adapters/queue/boss.server";
-import { QUEUES } from "~/adapters/queue/queues";
+import { enqueue } from "~/adapters/queue/boss.server";
+import { QUEUES, inventorySyncKey } from "~/adapters/queue/queues";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { serviceToken } from "~/domain/types";
 
@@ -96,15 +96,16 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
    * Collapse a burst.
    *
    * A delivery arriving in MetaKocka moves dozens of products at once and each
-   * one is its own event. Thirty seconds is long enough to fold them into a
-   * single sync and short enough that nobody notices the delay.
+   * one is its own event. `singletonKey` folds them into the one sync that is
+   * already waiting, and the key is shared with the five-minute tick so the
+   * two producers genuinely collapse into each other rather than only
+   * appearing to (see `inventorySyncKey`).
    */
   try {
-    await enqueueThrottled(
+    await enqueue(
       QUEUES.syncInventory,
       { shopDomain },
-      `inventory:${shopDomain}`,
-      30,
+      { singletonKey: inventorySyncKey(shopDomain) },
     );
 
     await appendEvent(principal, {

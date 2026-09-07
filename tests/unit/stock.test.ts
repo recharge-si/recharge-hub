@@ -59,12 +59,20 @@ describe("listWarehouseStock", () => {
     ]);
   });
 
-  it("keeps products at different warehouses separate", async () => {
+  it("drops rows for warehouses other than the one asked for", async () => {
+    /*
+     * The doubling bug. `wh_id_list` has never been proved to filter, and both
+     * callers key this result by product code alone — so another warehouse's
+     * row used to be folded in as though it were this warehouse's. The reverse
+     * sync then sent every warehouse's map in one `sync_stock` request, and a
+     * two-warehouse company had every product's total doubled.
+     */
     const fetchImpl = vi.fn(async () =>
       jsonResponse({
         stock_list: [
           { warehouse_id: "W1", mk_id: "loc-a", code: "SKU-A", amount: "3" },
           { warehouse_id: "W2", mk_id: "loc-b", code: "SKU-A", amount: "5" },
+          { warehouse_id: "W2", mk_id: "loc-b", code: "SKU-B", amount: "9" },
         ],
       }),
     );
@@ -74,9 +82,47 @@ describe("listWarehouseStock", () => {
       "W1",
     );
 
-    expect(rows).toHaveLength(2);
-    expect(rows.find((r) => r.warehouseId === "W1")?.amount).toBe(3);
-    expect(rows.find((r) => r.warehouseId === "W2")?.amount).toBe(5);
+    expect(rows).toEqual([
+      {
+        warehouseId: "W1",
+        code: "SKU-A",
+        title: null,
+        amount: 3,
+        reserved: 0,
+        free: 3,
+      },
+    ]);
+  });
+
+  it("refuses a response that carries rows but none for this warehouse", async () => {
+    // Not an empty warehouse — an empty warehouse answers with nothing at all.
+    // It means the id this app holds is not the id MetaKocka answers with, and
+    // an empty result would be read as “everything is at zero”.
+    const fetchImpl = vi.fn(async () =>
+      jsonResponse({
+        stock_list: [
+          { warehouse_id: "W2", mk_id: "loc-b", code: "SKU-A", amount: "5" },
+        ],
+      }),
+    );
+
+    await expect(
+      listWarehouseStock(
+        clientWith(fetchImpl as unknown as typeof fetch),
+        "W1",
+      ),
+    ).rejects.toThrow(/none of them for warehouse W1/);
+  });
+
+  it("returns nothing for a warehouse that genuinely holds nothing", async () => {
+    const fetchImpl = vi.fn(async () => jsonResponse({ stock_list: [] }));
+
+    await expect(
+      listWarehouseStock(
+        clientWith(fetchImpl as unknown as typeof fetch),
+        "W1",
+      ),
+    ).resolves.toEqual([]);
   });
 
   it("falls back to amount minus reserved when a microlocation omits free_amount", async () => {

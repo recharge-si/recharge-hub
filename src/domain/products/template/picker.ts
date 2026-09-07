@@ -146,7 +146,12 @@ export interface PickerRow {
 }
 
 export interface PickerGroup {
-  id: PickerGroupId;
+  /**
+   * A string rather than `PickerGroupId`, because the picker serves more than
+   * one kind of pattern: the order reference is a pattern over order fields
+   * and groups them its own way. It is only ever read as a key and a heading.
+   */
+  id: string;
   label: string;
   rows: PickerRow[];
 }
@@ -176,22 +181,44 @@ function matchesQuery(field: FieldDef, query: string): boolean {
  * The rows to show, grouped and in reading order. Empty groups are dropped, so
  * a shop with no metafield definitions never sees an empty Metafields heading.
  */
+/**
+ * The rows one flat list of fields produces for a query, each resolved against
+ * whatever the pattern is written about.
+ *
+ * Separate from `pickerGroups` because the grouping is the only part of this
+ * that is about a product: the order reference is a pattern too, over four
+ * order fields under one heading, and it needs the same matching and the same
+ * "here is what it comes to for a real record of yours" that make the picker
+ * worth reading.
+ *
+ * `resolve` returns null when there is nothing to resolve against — an empty
+ * catalogue, a shop with no orders yet — and never a stand-in value.
+ */
+export function pickerRows(
+  registry: FieldDef[],
+  query: string,
+  resolve: (fieldId: string) => string | null,
+): PickerRow[] {
+  const needle = query.trim().toLowerCase();
+
+  return registry
+    .filter((field) => matchesQuery(field, needle))
+    .map((field) => ({ field, value: resolve(field.id) }));
+}
+
 export function pickerGroups(
   registry: FieldDef[],
   query: string,
   facts: VariantFacts | null,
 ): PickerGroup[] {
-  const needle = query.trim().toLowerCase();
-
   return GROUP_ORDER.map(({ id, label }) => ({
     id,
     label,
-    rows: registry
-      .filter((field) => groupOf(field) === id && matchesQuery(field, needle))
-      .map((field) => ({
-        field,
-        value: facts ? (resolveField(field.id, facts) ?? "") : null,
-      })),
+    rows: pickerRows(
+      registry.filter((field) => groupOf(field) === id),
+      query,
+      (fieldId) => (facts ? (resolveField(fieldId, facts) ?? "") : null),
+    ),
   })).filter((group) => group.rows.length > 0);
 }
 

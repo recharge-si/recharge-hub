@@ -23,9 +23,10 @@ import {
   settingsFromTemplate,
   usesMetafields,
 } from "~/domain/products/template";
+import { DistributionBars } from "~/web/components/distribution-bars";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
-import { formatDateTime } from "~/web/lib/datetime";
+import { formatDateTime, formatInterval } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -115,6 +116,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       exampleName: sample ? nameFor(naming, sample).name : null,
       exampleSku: sample?.sku ?? null,
       lastRunAt: productSync.lastRunAt?.toISOString() ?? null,
+      scheduleEnabled: productSync.scheduleEnabled,
+      scheduleIntervalMinutes: productSync.scheduleIntervalMinutes,
     },
     status: latest ? { at: latest.at, text: latest.text, ok: latest.ok } : null,
     recent: described.slice(0, 6),
@@ -169,7 +172,17 @@ export default function Products() {
   const busy = syncer.state !== "idle";
   const lastRunAt = status?.at ?? productSync.lastRunAt;
 
-  const total = counts.matched + counts.unmatched + counts.ignored;
+  /*
+   * How the catalogue divides. A row that is zero is left out rather than
+   * drawn empty: "0 ignored" is not a fact anybody came here for, and an
+   * unmatched row of zero is the good news the card's own silence already
+   * carries.
+   */
+  const breakdown = [
+    { name: "Matched to a MetaKocka product", count: counts.matched },
+    { name: "Not matched", count: counts.unmatched },
+    { name: "Ignored", count: counts.ignored },
+  ].filter((row) => row.count > 0);
 
   // Confirmations are toasts, like the rest of the admin. Failures stay on the
   // page as a banner, because section 2.8 requires errors to persist.
@@ -183,6 +196,19 @@ export default function Products() {
       <s-link slot="breadcrumb-actions" href="/app">
         Home
       </s-link>
+
+      {/*
+       * Settings in the header, where a merchant looks for it, rather than only
+       * at the foot of the card that summarises it. This page is what is
+       * happening; the settings page is what it was told to do.
+       */}
+      <s-button
+        slot="secondary-actions"
+        icon="settings"
+        href="/app/products/sync"
+      >
+        Settings
+      </s-button>
 
       {/*
        * The explanation behind a header action, the same as the payment types
@@ -217,7 +243,7 @@ export default function Products() {
           <s-paragraph>
             Stock is not set here. Each location decides which side is counted.
           </s-paragraph>
-          <s-link href="/app/settings/supply-sources">Go to Locations</s-link>
+          <s-link href="/app/locations">Go to Locations</s-link>
         </s-stack>
         <s-button
           slot="primary-action"
@@ -244,28 +270,55 @@ export default function Products() {
 
         <s-section heading="Matching">
           <s-stack direction="block" gap="base">
-            {/* One count, stated once. The total is part of the sentence. */}
-            <s-text>
-              {total === 0
-                ? "No SKUs have been read yet."
-                : `${counts.matched} of ${total} SKUs are matched to a MetaKocka product.`}
-            </s-text>
+            {/*
+             * The catalogue as a breakdown rather than a sentence: how many
+             * SKUs there are, and how they divide. Each number appears once —
+             * the bars are the count, so there is no summary line restating
+             * them above (docs/ui-conventions.md).
+             *
+             * The same component the home page uses for warehouse shares, so
+             * two pages showing a breakdown show it the same way.
+             */}
+            <DistributionBars
+              rows={breakdown}
+              unit="SKU"
+              empty="No SKUs have been read yet."
+            />
 
-            <s-button
-              type="button"
-              variant="primary"
-              onClick={() =>
-                syncer.submit({ intent: "sync" }, { method: "post" })
-              }
-              {...(busy ? { disabled: true, loading: true } : {})}
-            >
-              Sync products
-            </s-button>
+            <s-stack direction="inline" gap="base" alignItems="center">
+              <s-button
+                type="button"
+                variant="primary"
+                onClick={() =>
+                  syncer.submit({ intent: "sync" }, { method: "post" })
+                }
+                {...(busy ? { disabled: true, loading: true } : {})}
+              >
+                Sync products
+              </s-button>
+            </s-stack>
 
+            {/*
+             * When it last ran, and what makes it run. This said syncing
+             * happens when you press the button and nothing else, which stops
+             * being true the moment a merchant turns the schedule on — and the
+             * page with the button was the one still claiming the button was
+             * the only way.
+             *
+             * The cadence, not a next-run time: the tick that fires it looks
+             * every quarter of an hour, and a time computed against the
+             * reader's own clock is a hydration mismatch waiting to happen.
+             */}
             <s-text color="subdued">
-              {lastRunAt
-                ? `Last synced ${formatDateTime(lastRunAt)}. Syncing runs when you press the button.`
-                : "Not synced yet. Syncing runs when you press the button."}
+              {`${
+                lastRunAt
+                  ? `Last synced ${formatDateTime(lastRunAt)}.`
+                  : "Not synced yet."
+              } ${
+                productSync.scheduleEnabled
+                  ? `It also runs on its own every ${formatInterval(productSync.scheduleIntervalMinutes)}.`
+                  : "Syncing runs when you press the button."
+              }`}
             </s-text>
           </s-stack>
         </s-section>
@@ -372,13 +425,11 @@ export default function Products() {
             )}
 
             {/*
-             * A button, not a link. This is the way out of this card to the
-             * only place any of it can be changed, and as a line of blue text
-             * under a paragraph it read as a footnote.
+             * No button out of this card. Settings is in the page header now,
+             * which is where a merchant looks for it and where every other area
+             * keeps it — a second button to the same page turns the card into a
+             * menu entry for a page the header already offers.
              */}
-            <s-button variant="secondary" href="/app/products/sync">
-              Change these settings
-            </s-button>
           </s-stack>
         </s-section>
 
