@@ -8,6 +8,7 @@ import {
 
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { AppBridgeNavigation } from "~/web/components/app-bridge-navigation";
+import { describeStaleSessionError } from "~/web/lib/route-errors";
 
 /**
  * Everything under /app is embedded in the Shopify admin and authenticated by
@@ -51,7 +52,17 @@ export default function AppLayout() {
 
 // Shopify needs React Router to catch its thrown responses so their headers survive.
 export function ErrorBoundary() {
-  return boundary.error(useRouteError());
+  const error = useRouteError();
+  const stale = describeStaleSessionError(error);
+  if (stale) {
+    return (
+      <s-banner tone="critical" heading={stale.heading}>
+        <s-paragraph>{stale.message}</s-paragraph>
+        <s-button onClick={() => window.location.reload()}>Reload</s-button>
+      </s-banner>
+    );
+  }
+  return boundary.error(error);
 }
 
 export const headers: HeadersFunction = (headersArgs) =>

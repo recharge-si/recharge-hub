@@ -102,6 +102,17 @@ string "Handling response". This is what stalled guided setup after a step's
 answers had already been saved. Dropping the token lets App Bridge mint a fresh
 one for the next request.
 
+That fix closed one specific trigger (the action-redirect case), but the
+underlying failure mode — an empty-body `ErrorResponse` from a stale or invalid
+session token on any client-side data fetch — could surface through other paths
+inside the library. The shared ErrorBoundary in `src/web/routes/app.tsx` now
+uses `describeStaleSessionError` (`src/web/lib/route-errors.ts`) to detect an
+empty-body `ErrorResponse` and render a real recovery action ("Reload") per
+§2.8 of `BUILD_SPEC.md`, instead of passing through to the library's literal
+"Handling response" text. Setup and other routes save progress per-step to the
+database, so a reload loses nothing — it is a safe recovery path and the
+merchant needs to be told that explicitly.
+
 ### One readiness model
 
 `src/domain/readiness/` computes six components — MetaKocka, warehouses, stock,
