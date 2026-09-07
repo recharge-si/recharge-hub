@@ -109,12 +109,13 @@ inside the library. When React Router fetches a loader as a data request (no
 Authorization header, no token in URL), `authenticate.admin` finds nothing to
 validate and throws a 401. The shared ErrorBoundary in `src/web/routes/app.tsx`
 now uses `describeStaleSessionError` (`src/web/lib/route-errors.ts`) to detect
-this and silently redirect to `/app` via `window.location.assign()`, which
-forces a document-level request that triggers the library's bounce page for
-re-authentication. No error screen is shown — the redirect happens
-transparently. Setup and other routes save progress per-step to the database,
-so re-authing and returning loses nothing. The merchant is never aware the
-session lapsed; they land back on the same step they left.
+this and silently redirect to the current page via `window.location.assign()`,
+which forces a document-level request that triggers the library's bounce page
+for re-authentication. No error screen is shown — the redirect happens
+transparently. After re-authing, the loader runs again with a fresh session
+and succeeds. The merchant stays in context (on the same page) rather than
+being dropped on the home page. Setup and other routes save progress per-step
+to the database, so the merchant is never aware the session lapsed.
 
 ### One readiness model
 

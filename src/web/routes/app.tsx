@@ -57,9 +57,13 @@ export function ErrorBoundary() {
   const stale = describeStaleSessionError(error);
 
   // Auto-redirect on stale session (seamless re-auth, no error screen shown).
+  // Redirect to the current page to force a document-level request, which triggers
+  // the library's bounce page for re-authentication. After re-auth, the loader
+  // runs again with a fresh session. This keeps the user in context, not dropped
+  // on the home page.
   useEffect(() => {
     if (stale?.recover === "navigate") {
-      window.location.assign("/app");
+      window.location.assign(window.location.href);
     }
   }, [stale?.recover]);
 
