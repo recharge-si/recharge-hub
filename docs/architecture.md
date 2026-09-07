@@ -105,13 +105,17 @@ one for the next request.
 That fix closed one specific trigger (the action-redirect case), but the
 underlying failure mode — an empty-body `ErrorResponse` from a stale or invalid
 session token on any client-side data fetch — could surface through other paths
-inside the library. The shared ErrorBoundary in `src/web/routes/app.tsx` now
-uses `describeStaleSessionError` (`src/web/lib/route-errors.ts`) to detect an
-empty-body `ErrorResponse` and render a real recovery action ("Reload") per
-§2.8 of `BUILD_SPEC.md`, instead of passing through to the library's literal
-"Handling response" text. Setup and other routes save progress per-step to the
-database, so a reload loses nothing — it is a safe recovery path and the
-merchant needs to be told that explicitly.
+inside the library. When React Router fetches a loader as a data request (no
+Authorization header, no token in URL), `authenticate.admin` finds nothing to
+validate and throws a 401. The shared ErrorBoundary in `src/web/routes/app.tsx`
+now uses `describeStaleSessionError` (`src/web/lib/route-errors.ts`) to detect
+this and redirect to `/app` via `window.location.assign()`, which forces a
+document-level request that triggers the library's bounce page for
+re-authentication. Setup and other routes save progress per-step to the
+database, so re-authing and returning loses nothing. The error message says
+"Redirecting to re-authenticate — you'll return to the same place with nothing
+lost" per §2.8 of `BUILD_SPEC.md`, instead of the literal "Handling response"
+text.
 
 ### One readiness model
 

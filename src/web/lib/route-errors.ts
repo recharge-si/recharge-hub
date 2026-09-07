@@ -10,16 +10,21 @@ import { isRouteErrorResponse } from "react-router";
  * The Shopify library's own paths (admin strategies, billing) and the app's
  * own error responses (e.g. 404s) always carry a body when they throw, so
  * only the empty-body case reaches this check. Detecting it here lets the
- * shared `/app` ErrorBoundary offer a real recovery action ("Reload") instead
- * of passing through to the library's fallback text.
+ * shared `/app` ErrorBoundary offer a real recovery action instead of passing
+ * through to the library's fallback text.
  *
- * Setup and other routes save progress per-step to the database, so a page
- * reload loses nothing — it is a safe and expected recovery path the merchant
- * should be told about.
+ * When React Router fetches a loader as a data request (client-side), it may
+ * lack a valid session token. The loader call `authenticate.admin` runs with
+ * no Authorization header and no token in the URL (the token was single-use
+ * and spent on the prior page load, and action redirects deliberately drop it).
+ * The library detects this and throws a 401. The recovery is to navigate to a
+ * URL that forces a document-level request, which triggers the library's
+ * bounce page for re-authentication.
  */
 export interface StaleSessionError {
   heading: string;
   message: string;
+  recover: "navigate" | "reload";
 }
 
 export function describeStaleSessionError(
@@ -29,6 +34,8 @@ export function describeStaleSessionError(
 
   return {
     heading: "Session expired",
-    message: "Reload the page to continue — nothing you entered was lost.",
+    message:
+      "Redirecting to re-authenticate — you'll return to the same place with nothing lost.",
+    recover: "navigate",
   };
 }

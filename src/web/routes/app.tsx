@@ -58,7 +58,13 @@ export function ErrorBoundary() {
     return (
       <s-banner tone="critical" heading={stale.heading}>
         <s-paragraph>{stale.message}</s-paragraph>
-        <s-button onClick={() => window.location.reload()}>Reload</s-button>
+        {stale.recover === "navigate" ? (
+          <s-button onClick={() => window.location.assign("/app")}>
+            Continue
+          </s-button>
+        ) : (
+          <s-button onClick={() => window.location.reload()}>Reload</s-button>
+        )}
       </s-banner>
     );
   }

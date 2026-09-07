@@ -22,8 +22,9 @@ describe("describeStaleSessionError", () => {
 
     expect(result).toBeTruthy();
     expect(result?.heading).toBe("Session expired");
-    expect(result?.message).toContain("Reload");
-    expect(result?.message).toContain("nothing you entered was lost");
+    expect(result?.recover).toBe("navigate");
+    expect(result?.message).toContain("Redirecting");
+    expect(result?.message).toContain("nothing lost");
   });
 
   it("leaves an ErrorResponse with a body untouched", () => {
@@ -53,5 +54,6 @@ describe("describeStaleSessionError", () => {
 
     expect(result).toBeTruthy();
     expect(result?.heading).toBe("Session expired");
+    expect(result?.recover).toBe("navigate");
   });
 });
