@@ -118,6 +118,12 @@ model Shop {
   orderPayments          OrderPayment[]
   metakockaDocuments     MetakockaDocument[]
   exceptions             Exception[]
+  taxSetting             TaxSetting?
+  vatRegistrations       VatRegistration[]
+  countryVatRates        CountryVatRate[]
+  taxMappings            TaxMapping[]
+  taxOverrides           TaxOverride[]
+  orderTaxSnapshots      OrderTaxSnapshot[]
 
   @@map("shop")
 }
@@ -868,8 +874,8 @@ model Order {
   /// Resolved before any document is written, so the several jobs of a split
   /// order all reference the same partner instead of racing to create their
   /// own. Null until it has been looked up.
-  metakockaPartnerMkId      String? @map("metakocka_partner_mk_id")
-  metakockaPartnerAddressId String? @map("metakocka_partner_address_id")
+  metakockaPartnerMkId      String?   @map("metakocka_partner_mk_id")
+  metakockaPartnerAddressId String?   @map("metakocka_partner_address_id")
   /// Claim making that lookup single-flight, in the mould of
   /// payment_claimed_at: taken before get_partner/add_partner, so two write
   /// jobs racing an unresolved order cannot both create the customer.
@@ -890,6 +896,9 @@ model Order {
   totalMinor    Int @map("total_minor")
   shippingMinor Int @default(0) @map("shipping_minor")
   discountMinor Int @default(0) @map("discount_minor")
+  /// Shopify's tax total for the order, minor units. What the tax decision
+  /// reconciles its lines against.
+  totalTaxMinor Int @default(0) @map("total_tax_minor")
 
   /// The Shopify payload as received. PII is redacted in place after 90 days by
   /// the retention job (section 2.4); the decision trail outlives it.
@@ -994,11 +1003,12 @@ model Order {
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 
-  shop       Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
-  lines      OrderLine[]
-  documents  MetakockaDocument[]
-  exceptions Exception[]
-  payments   OrderPayment[]
+  shop        Shop                @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  lines       OrderLine[]
+  documents   MetakockaDocument[]
+  exceptions  Exception[]
+  payments    OrderPayment[]
+  taxSnapshot OrderTaxSnapshot?
 
   @@unique([shopId, shopifyOrderId])
   @@index([shopId, syncState])
@@ -1023,8 +1033,19 @@ model OrderLine {
   /// it as `price` or `price_with_tax` according to the order's tax setting.
   /// The historical column name is retained to avoid a cosmetic migration.
   unitPriceWithTaxMinor Int     @map("unit_price_with_tax_minor")
-  /// Section 8.6: derived from the Shopify tax lines, never a product default.
+  /// The `tax_factor` this line is sent with: the MetaKocka mapping of its
+  /// decided rate (`order_tax_snapshot`), never a product default. Null until
+  /// the order has been decided, or while the rate is unmapped.
   taxFactor             String? @map("tax_factor")
+  /// The line's decided rate, treatment and source, materialised from the
+  /// snapshot for the screens and the verification. Canonical percentage
+  /// string and `TaxTreatment` / `TaxSource` names.
+  taxRateKey            String? @map("tax_rate_key")
+  taxTreatment          String? @map("tax_treatment")
+  taxSource             String? @map("tax_source")
+  /// Tax base and tax on this line, minor units, as decided.
+  taxableMinor          Int?    @map("taxable_minor")
+  taxMinor              Int?    @map("tax_minor")
   /// Line-level discounts stay with their line (section 8.6).
   discountMinor         Int     @default(0) @map("discount_minor")
 
@@ -1118,7 +1139,7 @@ model MetakockaDocument {
   /// collision-free whatever the merchant does to their numbering settings. It
   /// is derived from `order.customer_order_ref`, which is itself frozen at
   /// intake, so it never moves.
-  countCode String  @map("count_code")
+  countCode String @map("count_code")
 
   /// The number MetaKocka actually holds, and what its screen shows as
   /// *Sales ord. no.*
@@ -1134,7 +1155,7 @@ model MetakockaDocument {
   /// write landed and MetaKocka's answer did not name a number.
   sentCountCode String? @map("sent_count_code")
 
-  mkId      String? @map("mk_id")
+  mkId String? @map("mk_id")
 
   status DocumentStatus @default(pending)
 
@@ -1241,10 +1262,10 @@ model OrderPayment {
   amountMinor Int    @map("amount_minor")
   currency    String
 
-  gateway     String?
-  processedAt DateTime? @map("processed_at")
+  gateway             String?
+  processedAt         DateTime? @map("processed_at")
   /// The authorization a capture belongs to, or the sale a refund reverses.
-  parentTransactionId String? @map("parent_transaction_id")
+  parentTransactionId String?   @map("parent_transaction_id")
 
   /// The MetaKocka payment type this receipt resolved to, from the gateway
   /// mapping. Recorded per transaction because a single order can be paid
@@ -1337,6 +1358,17 @@ enum ExceptionKind {
   payment_unallocated
   /// Shopify assigned part of an order to a location with no supply source.
   unmapped_location
+  /// A VAT rate the order uses has no MetaKocka mapping (`tax_mapping`).
+  tax_mapping_missing
+  /// The order's VAT treatment — what kind of VAT event it is — could not be
+  /// told, including an unexplained 0% and a missing destination.
+  tax_treatment_unknown
+  /// The lines' tax does not add up to Shopify's order tax.
+  tax_reconciliation_failed
+  /// Shopify charged tax but gave no per-line breakdown to read the rate from.
+  tax_data_insufficient
+  /// Shopify charged a destination rate this configuration has no registration for.
+  vat_registration_configuration_error
 
   @@map("exception_kind")
 }
@@ -1594,4 +1626,254 @@ model SupplySetting {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("supply_setting")
+}
+
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Taxes and VAT (docs/BUILD_SPEC.md section 8.6; docs/architecture.md § Tax)
+ * Shopify's transaction tax is what an order is filed with. These tables hold
+ * the merchant's *context* — where they are registered, what rates they expect
+ * per country, which MetaKocka `tax_factor` each rate becomes — and the
+ * decision each order was actually made under, so a refund six months later
+ * reverses what was filed rather than what today's settings would compute.
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
+
+/// Where the configured home rate may stand in for a rate Shopify did not give.
+enum TaxFallbackScope {
+  /// Never. Every line needs a Shopify rate or an override.
+  none
+  /// On home-country orders only.
+  domestic
+  /// On home-country and EU consumer orders: origin VAT below the OSS threshold.
+  eu
+
+  @@map("tax_fallback_scope")
+}
+
+/// What a non-EU destination with no Shopify tax means.
+enum NonEuNoTaxPolicy {
+  /// Hold the order for a person. The safe default.
+  review
+  /// File it as an export at 0%.
+  export
+
+  @@map("non_eu_no_tax_policy")
+}
+
+model TaxSetting {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// ISO 3166-1 alpha-2 of the merchant's home country.
+  domesticCountry String  @default("SI") @map("domestic_country")
+  /// The home standard VAT rate as a canonical percentage string, "22".
+  ///
+  /// Migrated from `product_sync_setting.tax_percent`, which was the whole of
+  /// the tax configuration before this existed and is still what the product
+  /// sync writes into a created article's pricelist.
+  domesticRateKey String? @map("domestic_rate_key")
+
+  fallbackScope    TaxFallbackScope @default(domestic) @map("fallback_scope")
+  nonEuNoTaxPolicy NonEuNoTaxPolicy @default(review) @map("non_eu_no_tax_policy")
+
+  /// Whether the merchant reports EU consumer sales through the One Stop Shop.
+  /// Never inferred: a merchant says so.
+  ossEnabled Boolean @default(false) @map("oss_enabled")
+
+  /// Bumped on every change to any tax table, and recorded on every order's
+  /// snapshot, so "which configuration was this decided under" has an answer.
+  configVersion Int @default(1) @map("config_version")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("tax_setting")
+}
+
+enum VatRegistrationKind {
+  /// The home-country registration.
+  domestic
+  /// EU One Stop Shop, identified in `country`.
+  oss
+  /// A registration in another country, EU or not.
+  local
+
+  @@map("vat_registration_kind")
+}
+
+model VatRegistration {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  kind      VatRegistrationKind
+  country   String
+  vatNumber String?             @map("vat_number")
+  enabled   Boolean             @default(true)
+  notes     String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, kind, country])
+  @@map("vat_registration")
+}
+
+enum CountryVatRateKind {
+  standard
+  reduced
+  super_reduced
+  parking
+  zero
+  other
+
+  @@map("country_vat_rate_kind")
+}
+
+/// A merchant's own entry in the country rate table.
+///
+/// The reference rates ship with the app (`domain/tax/eu`); a row here replaces
+/// the reference row of its kind for that country, or adds a kind the reference
+/// does not list. Validation data, never a rate an order is filed with.
+model CountryVatRate {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  country String
+  kind    CountryVatRateKind
+  /// Canonical percentage string, "9.5".
+  rateKey String             @map("rate_key")
+  label   String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, country, kind])
+  @@map("country_vat_rate")
+}
+
+/// One VAT rate → the `tax_factor` MetaKocka is sent for it.
+///
+/// Section 3, verified: MetaKocka will not infer a line's tax and accepts a
+/// wrong factor without a word, so every rate an order uses must have been
+/// mapped by a person. A rate with no row here holds the order.
+model TaxMapping {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  /// Canonical percentage string, "22".
+  rateKey            String  @map("rate_key")
+  /// The decimal factor sent as `tax_factor`, "0.22".
+  metakockaTaxFactor String  @map("metakocka_tax_factor")
+  enabled            Boolean @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, rateKey])
+  @@map("tax_mapping")
+}
+
+enum TaxOverrideScope {
+  country
+  sku
+
+  @@map("tax_override_scope")
+}
+
+/// An intentional exception to what the engine would decide.
+///
+/// Visible on the order it applies to, auditable through the snapshot, and
+/// never silent: a line an override touched carries the override's id.
+model TaxOverride {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  scope     TaxOverrideScope
+  /// A country code or a SKU, per scope.
+  match     String
+  /// A `TaxTreatment` name, or null to keep the classified one.
+  treatment String?
+  /// Canonical percentage string, or null to keep the rate.
+  rateKey   String?          @map("rate_key")
+  reason    String
+  enabled   Boolean          @default(true)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, scope, match])
+  @@map("tax_override")
+}
+
+/// What an order's VAT decision was, and enough to say why (§44 of the brief).
+///
+/// Written when the order is decided and frozen once a document exists, so a
+/// refund, a re-read or a person can always answer "why did this order receive
+/// this VAT?" Holds no customer PII: a country, a VAT identifier of a business,
+/// rates, amounts and reasons. The §2.4 retention job leaves it alone.
+model OrderTaxSnapshot {
+  id      String @id @default(cuid())
+  shopId  String @map("shop_id")
+  orderId String @unique @map("order_id")
+
+  /// The `tax_setting.config_version` this was decided under.
+  configVersion  Int  @map("config_version")
+  /// The whole configuration as it was, so re-deciding an edited order or
+  /// reversing a refund uses the rules of the day, not today's.
+  configSnapshot Json @map("config_snapshot")
+
+  currency           String
+  taxesIncluded      Boolean @map("taxes_included")
+  destinationCountry String? @map("destination_country")
+  jurisdiction       String
+  customerKind       String  @map("customer_kind")
+  vatNumber          String? @map("vat_number")
+  /// The order's overall treatment, or MIXED.
+  treatment          String
+  /// The order's overall source, or MIXED.
+  source             String
+
+  taxableMinor    Int     @map("taxable_minor")
+  taxMinor        Int     @map("tax_minor")
+  shopifyTaxMinor Int     @map("shopify_tax_minor")
+  reconciled      Boolean
+  /// True when nothing blocking was found: the order may be sent.
+  ok              Boolean
+
+  /// Every distinct rate the order uses, canonical, for diagnostics.
+  rateKeys String[] @map("rate_keys")
+  /// The full `TaxDecision`: per-line decisions, shipping, issues.
+  decision Json
+  /// Refund reversals computed against this decision, appended as they arrive.
+  refunds  Json?
+
+  /// Set once a MetaKocka document was written under this decision. From then
+  /// on the snapshot is history and is never re-decided under new settings.
+  frozenAt  DateTime? @map("frozen_at")
+  decidedAt DateTime  @map("decided_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop  Shop  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, decidedAt])
+  @@index([shopId, ok])
+  @@map("order_tax_snapshot")
 }

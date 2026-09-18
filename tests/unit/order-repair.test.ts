@@ -113,10 +113,28 @@ describe("which job answers which problem", () => {
       "metakocka_write_failed",
       "profit_center_rejected",
       "warehouse_invalid",
-      "tax_undeterminable",
       "sku_not_in_metakocka",
     ] as const) {
       expect(TARGET_FOR_KIND[kind]).toBe("write");
+    }
+  });
+
+  it("answers a tax problem by deciding the order again, never by writing", () => {
+    /*
+     * The write reads the stored tax decision and refuses without a clean
+     * one. Only the reconciler re-decides, so once the merchant has mapped
+     * the rate or chosen the policy, reconciling is what makes the document
+     * follow.
+     */
+    for (const kind of [
+      "tax_undeterminable",
+      "tax_mapping_missing",
+      "tax_treatment_unknown",
+      "tax_reconciliation_failed",
+      "tax_data_insufficient",
+      "vat_registration_configuration_error",
+    ] as const) {
+      expect(TARGET_FOR_KIND[kind]).toBe("reconcile");
     }
   });
 

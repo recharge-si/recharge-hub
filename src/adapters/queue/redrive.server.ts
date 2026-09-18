@@ -63,7 +63,7 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
   sku_not_in_metakocka: "write",
   profit_center_rejected: "write",
   warehouse_invalid: "write",
-  tax_undeterminable: "write",
+  tax_undeterminable: "reconcile",
   metakocka_write_failed: "write",
   unmapped_payment_gateway: "auto",
   payment_write_failed: "payment",
@@ -125,6 +125,18 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
    * sync settings page; reconciling then writes it.
    */
   commercial_representation_missing: "reconcile",
+  /*
+   * Tax. The reconciler re-decides every order's VAT from the current
+   * configuration before it writes anything, so once the merchant has mapped
+   * the rate, chosen the policy or added the registration, reconciling is
+   * exactly the retry: the decision comes out clean and the document follows.
+   * "Write" would skip the decision and hit the same wall.
+   */
+  tax_mapping_missing: "reconcile",
+  tax_treatment_unknown: "reconcile",
+  tax_reconciliation_failed: "reconcile",
+  tax_data_insufficient: "reconcile",
+  vat_registration_configuration_error: "reconcile",
 };
 
 export interface RedriveResult {
