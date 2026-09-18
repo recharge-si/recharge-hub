@@ -362,23 +362,18 @@ docker compose exec postgres pg_dump -U recharge_hub -Fc recharge_hub > backup.d
 
 #### nginx
 
-`ops/nginx/recharge-hub.conf` is the site file: HTTP redirects to HTTPS, HTTPS
-proxies to the `WEB_PORT` upstream with `X-Forwarded-Proto` set. It adds no
-frame headers of its own because the app emits the Shopify
-`frame-ancestors` policy per request.
+`ops/nginx/recharge-hub.conf` is the site file, shaped like the other
+`*.time-4-action.com` sites on the host: HTTP redirects to HTTPS, HTTPS uses the
+shared `/etc/nginx/snippets/ssl-t4a.conf` certificate snippet and proxies to
+the `WEB_PORT` upstream with `X-Forwarded-Proto` set. It adds no frame headers
+of its own because the app emits the Shopify `frame-ancestors` policy per
+request.
 
 ```bash
-sudo dnf install -y nginx certbot python3-certbot-nginx   # EPEL
-sudo systemctl enable --now nginx
-sudo setsebool -P httpd_can_network_connect 1             # SELinux: let nginx reach 127.0.0.1:3192
-sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload
-sudo certbot certonly --nginx -d recharge-hub.time-4-action.com
+sudo setsebool -P httpd_can_network_connect 1   # SELinux: let nginx reach 127.0.0.1:3192
 sudo cp ops/nginx/recharge-hub.conf /etc/nginx/conf.d/
 sudo nginx -t && sudo systemctl reload nginx
 ```
-
-Certbot's systemd timer renews the certificate; nginx reloads through the
-certbot nginx plugin hook.
 
 #### Caddy instead of nginx
 
