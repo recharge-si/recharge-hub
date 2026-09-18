@@ -1,3 +1,7 @@
+import {
+  RouterContextProvider,
+  type LoaderFunctionArgs,
+} from "react-router";
 import { describe, expect, it } from "vitest";
 
 import { appEntryFor, isEmbeddedRequest } from "~/web/lib/app-entry";
@@ -19,6 +23,17 @@ const ORIGIN = "https://example.test";
 
 function get(path: string, headers: Record<string, string> = {}): Request {
   return new Request(`${ORIGIN}${path}`, { headers });
+}
+
+/** The framework argument object, built rather than asserted. */
+function args(request: Request, pattern: string): LoaderFunctionArgs {
+  return {
+    request,
+    url: new URL(request.url),
+    pattern,
+    params: {},
+    context: new RouterContextProvider(),
+  };
 }
 
 async function redirectOf(
@@ -76,11 +91,7 @@ describe("appEntryFor", () => {
 describe("the root route", () => {
   it("redirects an embedded request to /app with its query string intact", async () => {
     const result = await redirectOf(() =>
-      rootLoader({
-        request: get("/?shop=demo.myshopify.com&host=abc&embedded=1"),
-        params: {},
-        context: {},
-      }),
+      rootLoader(args(get("/?shop=demo.myshopify.com&host=abc&embedded=1"), "/")),
     );
     expect(result).toEqual({
       status: 302,
@@ -90,18 +101,14 @@ describe("the root route", () => {
 
   it("redirects an App Bridge data fetch to /app", async () => {
     const result = await redirectOf(() =>
-      rootLoader({
-        request: get("/", { authorization: "Bearer session" }),
-        params: {},
-        context: {},
-      }),
+      rootLoader(args(get("/", { authorization: "Bearer session" }), "/")),
     );
     expect(result).toEqual({ status: 302, location: "/app" });
   });
 
   it("redirects an outside request to the login form", async () => {
     const result = await redirectOf(() =>
-      rootLoader({ request: get("/"), params: {}, context: {} }),
+      rootLoader(args(get("/"), "/")),
     );
     expect(result).toEqual({ status: 302, location: "/auth/login" });
   });
@@ -110,11 +117,7 @@ describe("the root route", () => {
 describe("the login route", () => {
   it("never renders the form for a request from inside the admin", async () => {
     const result = await redirectOf(() =>
-      loginLoader({
-        request: get("/auth/login?host=abc&embedded=1&shop=demo.myshopify.com"),
-        params: {},
-        context: {},
-      }),
+      loginLoader(args(get("/auth/login?host=abc&embedded=1&shop=demo.myshopify.com"), "/auth/login")),
     );
     expect(result).toEqual({
       status: 302,
@@ -124,31 +127,21 @@ describe("the login route", () => {
 
   it("never renders the form for an App Bridge data fetch", async () => {
     const result = await redirectOf(() =>
-      loginLoader({
-        request: get("/auth/login", { authorization: "Bearer session" }),
-        params: {},
-        context: {},
-      }),
+      loginLoader(
+        args(get("/auth/login", { authorization: "Bearer session" }), "/auth/login"),
+      ),
     );
     expect(result).toEqual({ status: 302, location: "/app" });
   });
 
   it("renders the form for a plain outside request", async () => {
-    const data = await loginLoader({
-      request: get("/auth/login"),
-      params: {},
-      context: {},
-    });
+    const data = await loginLoader(args(get("/auth/login"), "/auth/login"));
     expect(data).toEqual({ errors: {} });
   });
 
   it("does not loop: a shop named on the login page goes to Shopify, not back to /app", async () => {
     const result = await redirectOf(() =>
-      loginLoader({
-        request: get("/auth/login?shop=demo.myshopify.com"),
-        params: {},
-        context: {},
-      }),
+      loginLoader(args(get("/auth/login?shop=demo.myshopify.com"), "/auth/login")),
     );
     expect(result?.status).toBe(302);
     expect(result?.location).not.toMatch(/^\/app/);
