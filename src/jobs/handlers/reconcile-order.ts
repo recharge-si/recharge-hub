@@ -20,6 +20,10 @@ import {
   reviveDocument,
 } from "~/adapters/db/repositories/order.server";
 import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
+import {
+  decideOrderTransfer,
+  describeTransferHold,
+} from "~/domain/orders/transfer";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { getLogger } from "~/adapters/observability/logger.server";
 import {
@@ -199,6 +203,8 @@ async function reconcileUnderLock(
       shopifyOrderNumber: true,
       shopifyDeletedAt: true,
       allocationLockedAt: true,
+      receivedAt: true,
+      _count: { select: { documents: true } },
     },
   });
   if (!head) return { kind: "skipped", reason: "the order no longer exists" };
@@ -341,6 +347,29 @@ async function reconcileUnderLock(
       at: now,
     });
     return { kind: "reconciled", orderId, actions: [], inconsistent: false };
+  }
+
+  /*
+   * The transfer switch.
+   *
+   * Everything above is this app's own mirror of Shopify — lines, ledger, the
+   * exceptions that describe the order — and is worth keeping current whether
+   * or not the ERP hears about it. Everything below decides what MetaKocka
+   * should hold and makes it so, and a merchant who turned transfer off has
+   * asked for none of that. The verdict is left untouched: `pending` is the
+   * truth for an order nothing has been decided about.
+   */
+  const transfer = decideOrderTransfer(settings, {
+    receivedAt: head.receivedAt,
+    hasDocuments: head._count.documents > 0,
+  });
+  if (!transfer.allowed) {
+    const reason = describeTransferHold(transfer.reason);
+    log.info(
+      { shop: shopDomain, orderId, hold: transfer.reason },
+      "Order not transferred to MetaKocka",
+    );
+    return { kind: "skipped", reason };
   }
 
   /* ---------------------------------------------------------------------- */

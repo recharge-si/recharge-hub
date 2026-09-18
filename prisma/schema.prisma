@@ -1415,6 +1415,22 @@ model SalesOrderSetting {
   id     String @id @default(cuid())
   shopId String @unique @map("shop_id")
 
+  /// Whether orders are transferred to MetaKocka at all.
+  ///
+  /// On by default. Off is a hard stop: nothing about any order — not a
+  /// document, not a payment — is written to the ERP while it is off, including
+  /// for orders MetaKocka already holds. Orders are still received and shown,
+  /// so nothing is lost. See `domain/orders/transfer`.
+  transferOrders Boolean @default(true) @map("transfer_orders")
+
+  /// Orders received before this moment with no document yet are left alone.
+  ///
+  /// Set when transfer is turned back on without its backlog: an order
+  /// received while it was off was handled some other way, and transferring
+  /// it later would duplicate it. An order MetaKocka already holds is never
+  /// held back by this. Null means there is no cut-off.
+  transferOrdersSince DateTime? @map("transfer_orders_since")
+
   /// Rewrite the MetaKocka document when the Shopify order changes.
   ///
   /// On by default, because the alternative is an ERP that is quietly wrong.

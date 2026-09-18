@@ -222,6 +222,29 @@ export interface OrderListOptions {
   search?: string;
 }
 
+/**
+ * Orders that would be sent if transfer were turned back on with its backlog:
+ * received since the cut-off, nothing written yet, and still an order in
+ * Shopify. Ids only; the caller counts them or queues them.
+ */
+export async function listOrdersAwaitingTransfer(
+  principal: Principal,
+  since: Date | null,
+): Promise<string[]> {
+  const rows = await prisma.order.findMany({
+    where: {
+      shop: { domain: shopDomainOf(principal) },
+      shopifyDeletedAt: null,
+      cancelledAt: null,
+      documents: { none: {} },
+      ...(since ? { receivedAt: { gte: since } } : {}),
+    },
+    select: { id: true },
+    orderBy: { receivedAt: "asc" },
+  });
+  return rows.map((row) => row.id);
+}
+
 export async function listOrders(
   principal: Principal,
   options: OrderListOptions = {},

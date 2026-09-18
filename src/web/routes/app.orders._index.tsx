@@ -9,6 +9,7 @@ import {
 } from "react-router";
 
 import { listOrders } from "~/adapters/db/repositories/order.server";
+import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown } from "~/web/components/dropdown";
 import { formatListDateTime } from "~/web/lib/datetime";
@@ -63,16 +64,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    * came back, there is a next page. A separate count query would double the
    * work to answer a question the extra row already answers.
    */
-  const rows = await listOrders(principal, {
-    limit: PAGE_SIZE + 1,
-    skip: (page - 1) * PAGE_SIZE,
-    ...(status ? { status } : {}),
-    ...(search ? { search } : {}),
-  });
+  const [rows, settings] = await Promise.all([
+    listOrders(principal, {
+      limit: PAGE_SIZE + 1,
+      skip: (page - 1) * PAGE_SIZE,
+      ...(status ? { status } : {}),
+      ...(search ? { search } : {}),
+    }),
+    getSalesOrderSettings(principal),
+  ]);
 
   const hasNextPage = rows.length > PAGE_SIZE;
 
   return {
+    transferOff: !settings.transferOrders,
     filters: { q: search, status },
     page,
     hasNextPage,
@@ -136,8 +141,23 @@ function fulfilment(order: OrderRowData): {
 }
 
 export default function Orders() {
-  const { orders, filters, page, hasNextPage, hasPreviousPage } =
+  const { orders, filters, page, hasNextPage, hasPreviousPage, transferOff } =
     useLoaderData<typeof loader>();
+
+  /*
+   * Said on the list itself, not only on the settings page that owns the
+   * switch: a merchant looking at a column of orders that never reach
+   * MetaKocka should not have to guess why.
+   */
+  const transferOffBanner = transferOff ? (
+    <s-banner tone="warning" heading="Order transfer is turned off">
+      <s-paragraph>
+        Orders are received and listed, but none are sent to MetaKocka until
+        transfer is turned back on in{" "}
+        <s-link href="/app/orders/settings">order settings</s-link>.
+      </s-paragraph>
+    </s-banner>
+  ) : null;
   const [, setSearchParams] = useSearchParams();
   const navigation = useNavigation();
 
@@ -198,6 +218,7 @@ export default function Orders() {
         <s-button slot="secondary-actions" href="/app/orders/settings">
           Settings
         </s-button>
+        {transferOffBanner}
         <s-section heading="No orders yet">
           <s-paragraph>
             Orders appear here as Shopify sends them. Each one is allocated to a
@@ -258,6 +279,8 @@ export default function Orders() {
           Close
         </s-button>
       </s-modal>
+
+      {transferOffBanner}
 
       <s-section accessibilityLabel="Orders">
         {/*

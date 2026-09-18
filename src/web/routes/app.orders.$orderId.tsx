@@ -131,6 +131,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
      * where a line is fulfilled from is a question that does not arise.
      */
     unsplit: settings.salesOrderSplit === "single",
+    transferOff: !settings.transferOrders,
     sources: sources.map((source) => ({
       id: source.id,
       name: source.name,
@@ -536,8 +537,15 @@ export const action = async ({ request, params }: ActionFunctionArgs) => {
 };
 
 export default function OrderDetail() {
-  const { order, unsplit, sources, partnerOverride, hasShopifyAddress, payments } =
-    useLoaderData<typeof loader>();
+  const {
+    order,
+    unsplit,
+    transferOff,
+    sources,
+    partnerOverride,
+    hasShopifyAddress,
+    payments,
+  } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
   const busy = navigation.state === "submitting";
@@ -607,6 +615,16 @@ export default function OrderDetail() {
             heading={result.ok ? "Queued" : "That did not work"}
           >
             <s-paragraph>{result.message}</s-paragraph>
+          </s-banner>
+        ) : null}
+
+        {transferOff ? (
+          <s-banner tone="warning" heading="Order transfer is turned off">
+            <s-paragraph>
+              This order is not sent to MetaKocka, and checking it with Shopify
+              updates only what this app shows. Turn transfer back on in{" "}
+              <s-link href="/app/orders/settings">order settings</s-link>.
+            </s-paragraph>
           </s-banner>
         ) : null}
 

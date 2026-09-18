@@ -10,6 +10,7 @@ import {
 
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { listOrdersAwaitingTransfer } from "~/adapters/db/repositories/order.server";
 import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import {
@@ -21,6 +22,8 @@ import {
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
 import { findProductByCode } from "~/adapters/metakocka/stock";
+import { enqueue } from "~/adapters/queue/boss.server";
+import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
   DEFAULT_CUSTOMER_ORDER_TEMPLATE,
@@ -111,8 +114,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     getSupplyDefaults(principal),
   ]);
 
+  /*
+   * What turning transfer back on would send, counted only while it is off.
+   *
+   * The number is the whole decision: "also transfer the 14 orders received
+   * while this was off" is a question a merchant can answer, and "also
+   * transfer the backlog" is not.
+   */
+  const awaitingTransfer = settings.transferOrders
+    ? 0
+    : (await listOrdersAwaitingTransfer(principal, settings.transferOrdersSince))
+        .length;
+
   return {
     settings,
+    awaitingTransfer,
     sample: recent
       ? {
           id: recent.shopifyOrderId,
@@ -201,6 +217,23 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const principal = principalFromSession(session);
 
   const formData = await request.formData();
+  const current = await getSalesOrderSettings(principal);
+
+  /*
+   * The transfer switch and its cut-off.
+   *
+   * Turning it off keeps whatever cut-off there was. Turning it on sets the
+   * cut-off to now unless the merchant asked for the backlog too, in which
+   * case the old cut-off stands and the backlog behind it is queued below.
+   * Saving with the switch unchanged never moves the cut-off: nothing about
+   * the other settings on this page decides which orders are sent.
+   */
+  const transferOrders = formData.get("transferOrders") === "on";
+  const transferBacklog = formData.get("transferBacklog") === "on";
+  const turningOn = transferOrders && !current.transferOrders;
+  const transferOrdersSince =
+    turningOn && !transferBacklog ? new Date() : current.transferOrdersSince;
+
   const updateOnChange = formData.get("updateOnChange") === "on";
   const updateAfterPaid = formData.get("updateAfterPaid") === "on";
   const pattern = String(formData.get("customerOrderTemplate") ?? "").trim();
@@ -299,6 +332,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   const settings: SalesOrderSettings = {
+    transferOrders,
+    transferOrdersSince,
     updateOnChange,
     // Meaningless on its own, and storing it as true while updates are off
     // would turn itself on the moment they were switched back.
@@ -339,17 +374,59 @@ export const action = async ({ request }: ActionFunctionArgs) => {
     detail: { ...settings },
   });
 
+  /*
+   * The backlog, queued rather than sent.
+   *
+   * Each order goes through the same reconciliation as a fresh one, one job
+   * each, so a shop with a month of orders behind the switch does not hold
+   * this request open while they are written. The singleton key keeps a
+   * double-save from queueing them twice.
+   */
+  let queued = 0;
+  if (turningOn && transferBacklog) {
+    const backlog = await listOrdersAwaitingTransfer(
+      principal,
+      current.transferOrdersSince,
+    );
+    for (const orderId of backlog) {
+      await enqueue(
+        QUEUES.reconcileOrder,
+        { shopDomain: session.shop, orderId, reason: "transfer-backlog" },
+        { singletonKey: `reconcile:${orderId}:backlog` },
+      );
+    }
+    queued = backlog.length;
+
+    if (queued > 0) {
+      await appendEvent(principal, {
+        entityType: "sales_order_setting",
+        event: "sales_order.backlog_queued",
+        detail: { orders: queued, since: current.transferOrdersSince },
+      });
+    }
+  }
+
+  const saved =
+    queued > 0
+      ? `Saved. ${queued === 1 ? "One order" : `${queued} orders`} received while transfer was off ${queued === 1 ? "is" : "are"} being transferred now.`
+      : turningOn
+        ? "Saved. New orders are transferred to MetaKocka from now on."
+        : !transferOrders && current.transferOrders
+          ? "Saved. Nothing is sent to MetaKocka until order transfer is turned back on."
+          : "Saved order sync settings.";
+
   return {
     ok: true,
     message: unconfirmedShippingCode
-      ? `Saved. MetaKocka did not answer whether "${shippingProductCode}" is one of its products, so check the code exists — an order with shipping is refused if it does not.`
-      : "Saved order sync settings.",
+      ? `${saved} MetaKocka did not answer whether "${shippingProductCode}" is one of its products, so check the code exists — an order with shipping is refused if it does not.`
+      : saved,
   };
 };
 
 export default function OrderSyncSettings() {
   const {
     settings,
+    awaitingTransfer,
     sample,
     defaultPattern,
     sampleSourceCode,
@@ -365,12 +442,16 @@ export default function OrderSyncSettings() {
     customerOrderTemplate: settings.customerOrderTemplate ?? "",
     salesOrderNumberTemplate: settings.salesOrderNumberTemplate ?? "",
     shippingProductCode: settings.shippingProductCode ?? "",
+    // Not a setting: a one-off instruction that travels with the save that
+    // turns transfer back on, and means nothing at any other time.
+    transferBacklog: false,
   });
 
   const set = <K extends keyof typeof form>(key: K, value: (typeof form)[K]) =>
     setForm((current) => ({ ...current, [key]: value }));
 
   const dirty =
+    form.transferOrders !== settings.transferOrders ||
     form.updateOnChange !== settings.updateOnChange ||
     form.updateAfterPaid !== settings.updateAfterPaid ||
     form.customerOrderTemplate !== (settings.customerOrderTemplate ?? "") ||
@@ -393,10 +474,13 @@ export default function OrderSyncSettings() {
    * rather than inline, so the row and the line under it cannot disagree about
    * what "not running" means.
    */
-  const running = status.activated && status.orders === "ready";
-  const blocking = !status.activated
-    ? "Setup has not been finished, so nothing is sent to MetaKocka yet."
-    : status.orders !== "ready"
+  const running =
+    status.activated && status.orders === "ready" && settings.transferOrders;
+  const blocking = !settings.transferOrders
+    ? "Order transfer is turned off, so nothing is sent to MetaKocka."
+    : !status.activated
+      ? "Setup has not been finished, so nothing is sent to MetaKocka yet."
+      : status.orders !== "ready"
       ? // A warehouse mapping is not what stops an unsplit shop: its documents
         // carry no warehouse. What stops it is the connection.
         settings.salesOrderSplit === "single"
@@ -522,6 +606,8 @@ export default function OrderSyncSettings() {
   const save = () =>
     saver.submit(
       {
+        transferOrders: form.transferOrders ? "on" : "",
+        transferBacklog: form.transferBacklog ? "on" : "",
         updateOnChange: form.updateOnChange ? "on" : "",
         updateAfterPaid: form.updateAfterPaid ? "on" : "",
         customerOrderTemplate: form.customerOrderTemplate,
@@ -545,7 +631,11 @@ export default function OrderSyncSettings() {
       customerOrderTemplate: settings.customerOrderTemplate ?? "",
       salesOrderNumberTemplate: settings.salesOrderNumberTemplate ?? "",
       shippingProductCode: settings.shippingProductCode ?? "",
+      transferBacklog: false,
     });
+
+  /** Whether this save would turn transfer back on. */
+  const turningOn = form.transferOrders && !settings.transferOrders;
 
   return (
     <s-page heading="Order settings">
@@ -660,12 +750,63 @@ export default function OrderSyncSettings() {
         <s-section heading="Order synchronization">
           <s-stack direction="block" gap="base">
             {/*
-             * Stated, not switched. There is no on/off control for order sync
-             * because there is no such setting: orders are synchronized once
-             * setup is finished and the configuration holds, which is what this
-             * line reports. A toggle that only ever reflected other settings
-             * would be a lie with a checkbox next to it.
+             * The one real switch on this page.
+             *
+             * Off is a hard stop: no sales order is written, updated or paid
+             * while it is off, including for orders MetaKocka already holds.
+             * Orders are still received and listed, and stock and the catalogue
+             * keep going, which is what a shop that wants the connector for
+             * those alone — or is not ready for the ERP to receive orders yet —
+             * is asking for.
              */}
+            <s-stack direction="block" gap="small-400">
+              <s-checkbox
+                name="transferOrders"
+                value="on"
+                label="Transfer orders to MetaKocka"
+                checked={form.transferOrders}
+                onChange={(event) =>
+                  set("transferOrders", event.currentTarget.checked)
+                }
+              />
+              <s-text color="subdued">
+                {form.transferOrders
+                  ? "Each order is written to MetaKocka as a sales order and kept up to date."
+                  : "Nothing about any order is sent to MetaKocka. Orders are still received and listed here, and stock and the catalogue keep synchronizing."}
+              </s-text>
+            </s-stack>
+
+            {turningOn && awaitingTransfer > 0 ? (
+              /*
+               * Asked once, at the moment it matters, with the number in the
+               * question. Orders received while transfer was off were handled
+               * some other way or not at all, and only the merchant knows
+               * which; sending them unasked would duplicate the first case.
+               */
+              <s-stack direction="block" gap="small-400">
+                <s-checkbox
+                  name="transferBacklog"
+                  value="on"
+                  label={
+                    awaitingTransfer === 1
+                      ? "Also transfer the one order received while this was off"
+                      : `Also transfer the ${awaitingTransfer} orders received while this was off`
+                  }
+                  checked={form.transferBacklog}
+                  onChange={(event) =>
+                    set("transferBacklog", event.currentTarget.checked)
+                  }
+                />
+                <s-text color="subdued">
+                  Leave this off if you entered them in MetaKocka yourself. They
+                  are then left alone for good; only orders from now on are
+                  sent.
+                </s-text>
+              </s-stack>
+            ) : null}
+
+            <s-divider />
+
             <SettingRow
               label="Automatic order synchronization"
               summary={

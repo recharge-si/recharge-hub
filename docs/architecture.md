@@ -237,6 +237,23 @@ Three safety boundaries hold this together:
   `order.sync_state = inconsistent` with the per-SKU difference and **never**
   repaired by writing another document.
 
+### The order-transfer switch
+
+`sales_order_setting.transfer_orders` (default on) is the one hard stop. Off
+means no sales order is written, updated or paid — including orders MetaKocka
+already holds — while orders keep being received and shown and stock and the
+catalogue keep synchronizing. `domain/orders/transfer` holds the rule; the
+reconciler applies it after its local mirror steps (order state, ledger,
+exceptions) and before anything that decides what the ERP should hold, and the
+`write-metakocka-order` queue entry applies it again for late retries.
+
+Turning it back on asks, when there is a backlog, whether to send the orders
+received while it was off. Yes queues one `reconcile-order` per order; no sets
+`transfer_orders_since` to now, and an order received before that with no
+document is left alone for good. An order that already has a document is never
+held back by the cut-off, so a document written before the switch went off keeps
+converging afterwards.
+
 ### How many documents an order becomes
 
 `sales_order_setting.sales_order_split` decides whether an order is split across

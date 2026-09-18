@@ -57,6 +57,7 @@ import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
 import { salesOrderNumberFor } from "~/domain/orders/reference";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
+import { decideOrderTransfer, describeTransferHold } from "~/domain/orders/transfer";
 
 /**
  * The kinds a failed write can be filed under. They describe one event — this
@@ -266,6 +267,27 @@ export async function writeMetakockaOrderFor(
    * reading a rejection.
    */
   const salesOrderSettings = await getSalesOrderSettings(principal);
+
+  /*
+   * The transfer switch, checked here as well as in the reconciler.
+   *
+   * The reconciler calls this inline and has already decided; the queue entry
+   * point is a retry that may fire long after the merchant turned transfer
+   * off, and a retry is exactly the write they asked not to happen. A queued
+   * write always concerns an order with a document row, so only the switch
+   * itself can hold it.
+   */
+  const transfer = decideOrderTransfer(salesOrderSettings, {
+    receivedAt: new Date(0),
+    hasDocuments: true,
+  });
+  if (!transfer.allowed) {
+    log.info(
+      { shop: shopDomain, orderId, hold: transfer.reason },
+      `Order not written to MetaKocka: ${describeTransferHold(transfer.reason)}`,
+    );
+    return;
+  }
 
   const matched = await prisma.sku.findMany({
     where: {

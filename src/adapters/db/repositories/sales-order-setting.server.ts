@@ -50,6 +50,16 @@ export type PaymentEntryMode = "per_transaction" | "aggregate";
 export type DiscountRepresentation = "none" | "document_discount_value";
 
 export interface SalesOrderSettings {
+  /**
+   * Whether orders are transferred to MetaKocka at all. Off is a hard stop;
+   * see `domain/orders/transfer` for the rule and the cut-off below.
+   */
+  transferOrders: boolean;
+  /**
+   * Orders received before this and not yet in MetaKocka are left alone. Set
+   * when transfer is turned back on without its backlog; null means no cut-off.
+   */
+  transferOrdersSince: Date | null;
   /** Rewrite the MetaKocka document when the Shopify order changes. */
   updateOnChange: boolean;
   /** Keep rewriting even after a payment has been recorded against it. */
@@ -95,6 +105,10 @@ export interface SalesOrderSettings {
 /**
  * The defaults, each chosen for a stated reason.
  *
+ *  - `transferOrders` on, because a connector whose whole purpose is filing
+ *    orders in the ERP should do so until told otherwise. Off exists for a
+ *    shop that wants stock and catalogue alone, or is not ready for the ERP to
+ *    receive orders yet.
  *  - `updateOnChange` on, because the alternative is an ERP holding quantities
  *    nobody agreed to, with an exception the merchant can read but not act on.
  *  - `updateAfterPaid` off, because a paid document is the one most likely to
@@ -126,6 +140,8 @@ export interface SalesOrderSettings {
  *    own value — what an accountant reading one document expects.
  */
 export const SALES_ORDER_DEFAULTS: SalesOrderSettings = {
+  transferOrders: true,
+  transferOrdersSince: null,
   updateOnChange: true,
   updateAfterPaid: false,
   customerOrderTemplate: null,
@@ -163,6 +179,8 @@ export async function getSalesOrderSettings(
   const row = await prisma.salesOrderSetting.findFirst({
     where: { shop: { domain: shopDomainOf(principal) } },
     select: {
+      transferOrders: true,
+      transferOrdersSince: true,
       updateOnChange: true,
       updateAfterPaid: true,
       customerOrderTemplate: true,
