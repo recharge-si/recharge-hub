@@ -205,6 +205,17 @@ has actually paid is right. Automatic credit notes, returns, and complaints
 remain phase 2, and deliberately so: representing a refund on a sales order
 would mean shrinking a recorded receipt.
 
+## Decisions taken
+
+### D-01 — Custom (single-merchant) distribution, 2026-09-18
+
+The app runs for one store only. The Dev Dashboard app is set to custom
+distribution for that store and `shopify.server.ts` uses
+`AppDistribution.SingleMerchant`. `docs/BUILD_SPEC.md` still describes a public
+App Store app; those requirements (review, Built for Shopify, listing) are not
+current goals. Custom distribution cannot be reverted on the same Partner app,
+so a public release would mean a new app and a re-install.
+
 ## Decisions requiring a human
 
 ### T-02/T-03 — Ambiguous MetaKocka document recovery
@@ -254,11 +265,12 @@ recorded multi-warehouse `warehouse_stock` response answers both. Until
 then, a `warehouse_stock returned rows for other warehouses` warning in the
 worker log is the signal that it does not filter.
 
-### T-07 — Shopify access scopes before App Store review
+### T-07 — Unused Shopify access scopes
 
 `write_products` and both merchant-managed fulfilment-order scopes are requested
-but their target features (T-09 and T-08) are absent. Either build those before
-review or remove the scopes and accept merchant re-consent if they return later.
+but their target features (T-09 and T-08) are absent. Harmless for a
+single-merchant install (D-01); revisit before any App Store submission: either
+build those features or remove the scopes and accept re-consent later.
 
 ### T-12 — Name-only partner matching can merge people
 

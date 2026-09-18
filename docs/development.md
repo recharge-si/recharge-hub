@@ -49,6 +49,22 @@ silently override webhook, API-version, and token-exchange settings. Avoid
 `shopify app dev --reset` unless intentionally selecting or creating another
 Partner app.
 
+## Local development against a separate app
+
+`shopify.app.toml` is the production configuration of a single-merchant app and
+has `automatically_update_urls_on_dev = false`, so `shopify app dev` would not
+be able to point the live app at a tunnel. For local work create a second
+Partner app (any name, e.g. "Recharge Hub dev") and link it into its own file:
+
+```bash
+npx shopify app config link --config dev   # writes shopify.app.dev.toml
+npx shopify app env pull --config dev
+npm run dev -- --config dev
+```
+
+`shopify.app.dev.toml` is ignored by Git. Never run `npm run deploy` with the
+dev config selected against the production app.
+
 ## Run locally
 
 ```bash

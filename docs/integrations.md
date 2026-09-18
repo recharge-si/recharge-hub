@@ -44,7 +44,7 @@ from here, including for testing; the manual procedure in
 
 `write_merchant_managed_fulfillment_orders` is currently requested and its
 feature (moving/splitting fulfilment orders, T-08) is not built. It is also what
-made the location-move end-to-end test possible. Decide before App Store review:
+made the location-move end-to-end test possible. Decide before any wider release:
 either build T-08 or drop the scope (see T-07).
 
 ### Configuration and authentication
@@ -55,7 +55,7 @@ either build T-08 or drop the scope (see T-07).
 - `shopify.app.toml` is the single Partner-app configuration and webhook source.
 - `shopify.web.toml` tells the CLI how to start the local web/worker pair.
 - `src/adapters/shopify/shopify.server.ts` configures token exchange, encrypted
-  Prisma session storage, App Store distribution, scopes, and the pinned Admin
+  Prisma session storage, single-merchant distribution, scopes, and the pinned Admin
   API version.
 - `tests/unit/api-version.test.ts` prevents the SDK client and webhook version
   from drifting apart.

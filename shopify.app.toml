@@ -1,20 +1,19 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
 client_id = "77a669bae44e293ff5b59dc85783bc71"
-name = "mk-sync"
-# TODO(deployment): replace with the real HTTPS origin of the deployed web
-# process, e.g. https://orders.example.com. Until then Shopify delivers every
-# webhook to this placeholder and the app hears nothing: the quarter-hourly
-# Admin API reconciler is the only path an order takes. Nothing else needs to
-# change when it is set - the routes, the queue and the handlers are already
-# wired and covered by tests/db/webhook-dispatch.test.ts. Run
-# `shopify app deploy` after changing it so the webhook subscriptions are
-# re-registered against the new origin.
-application_url = "https://shopify.dev/apps/default-app-home"
+name = "Recharge Hub"
+# Public origin of the deployed web process (Caddy, docs/development.md
+# § Production Compose). Must equal SHOPIFY_APP_URL and APP_DOMAIN on the
+# server. Run `npm run deploy` after changing it so the webhook subscriptions
+# are re-registered against the new origin.
+application_url = "https://recharge-hub.time-4-action.com"
 embedded = true
 
 [build]
-automatically_update_urls_on_dev = true
+# This config points at the live store. `shopify app dev` must never overwrite
+# its URLs with a tunnel; use a separate Partner app for local development
+# (docs/development.md § Local development against a separate app).
+automatically_update_urls_on_dev = false
 
 [webhooks]
 # Must equal API_VERSION in src/adapters/shopify/shopify.server.ts, which is
@@ -89,4 +88,8 @@ scopes = "read_products,write_products,read_inventory,write_inventory,read_locat
 use_legacy_install_flow = false
 
 [auth]
-redirect_urls = [ "https://shopify.dev/apps/default-app-home/api/auth" ]
+redirect_urls = [
+  "https://recharge-hub.time-4-action.com/auth/callback",
+  "https://recharge-hub.time-4-action.com/auth/shopify/callback",
+  "https://recharge-hub.time-4-action.com/api/auth/callback"
+]

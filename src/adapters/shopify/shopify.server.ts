@@ -30,7 +30,9 @@ const shopify = shopifyApp({
   appUrl: env.SHOPIFY_APP_URL,
   authPathPrefix: "/auth",
   sessionStorage: new EncryptedSessionStorage(prisma),
-  distribution: AppDistribution.AppStore,
+  // Custom distribution: installed on one merchant's store from the Dev
+  // Dashboard install link, never listed (docs/project-status.md § D-01).
+  distribution: AppDistribution.SingleMerchant,
   // CLAUDE.md section 9 gates the MetaKocka credentials screen to the shop
   // owner, and `associated_user.account_owner` is the only place Shopify
   // reports that. It arrives on an online session, so embedded requests ask for
