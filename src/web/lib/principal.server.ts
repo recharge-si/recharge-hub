@@ -11,12 +11,26 @@ import type { ShopSession } from "~/domain/types";
  * the user as not the owner: a screen that guards the ERP key defaults to
  * closed, never to open.
  */
+/**
+ * TODO(T-21): OWNER GATE DISABLED. Every signed-in staff account is treated as
+ * the owner, so any staff member can read and set the MetaKocka secret key.
+ * Accepted temporarily on 2026-09-18 because the merchant's organization
+ * administrators are not the store owner and Shopify reports no organization
+ * role to apps. Decide on the replacement (an ERP_ADMIN_EMAILS allowlist is the
+ * proposed one) before any further staff get access to the store. See
+ * docs/project-status.md T-21.
+ */
+const OWNER_GATE_DISABLED = true;
+
 export function principalFromSession(session: Session): ShopSession {
+  const user = session.onlineAccessInfo?.associated_user;
+
   return {
     kind: "shop",
     shopDomain: session.shop,
-    isShopOwner:
-      session.onlineAccessInfo?.associated_user?.account_owner === true,
+    isShopOwner: OWNER_GATE_DISABLED
+      ? user !== undefined
+      : user?.account_owner === true,
   };
 }
 

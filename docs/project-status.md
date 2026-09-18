@@ -218,6 +218,21 @@ so a public release would mean a new app and a re-install.
 
 ## Decisions requiring a human
 
+### T-21 — MetaKocka credentials gate is DISABLED (security, decide soon)
+
+`src/web/lib/principal.server.ts` has `OWNER_GATE_DISABLED = true`: every
+signed-in staff account counts as the store owner and can read or replace the
+MetaKocka secret key, contrary to `docs/BUILD_SPEC.md` section 9. Disabled on
+2026-09-18 because the people running the store are organization
+administrators, not the store owner, and Shopify exposes no organization role
+to apps (`StaffMemberPrivateData.permissions` and its `FULL` value are
+deprecated in 2026-07). Acceptable only while the store's staff list is the
+merchant's own trusted people. Before adding any further staff or
+collaborators, either re-enable the gate (flip the constant) and use the owner
+account, or replace it with an `ERP_ADMIN_EMAILS` allowlist read from the server
+environment and matched case-insensitively against `associated_user.email`.
+Remove this entry when done.
+
 ### T-02/T-03 — Ambiguous MetaKocka document recovery
 
 Probe the designated test company for `get_document` by shared `buyer_order` and
