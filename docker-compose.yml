@@ -54,8 +54,12 @@ services:
   web:
     <<: *app
     command: ["npm", "run", "start"]
-    expose:
-      - "3192"
+    ports:
+      # Loopback only: the host's nginx (ops/nginx/recharge-hub.conf) terminates
+      # TLS and proxies here. The container always listens on 3000; WEB_PORT is
+      # the host side. Run with `--profile caddy` instead on a VM with no
+      # reverse proxy of its own.
+      - "127.0.0.1:${WEB_PORT:-3192}:3000"
     depends_on:
       migrate:
         condition: service_completed_successfully
