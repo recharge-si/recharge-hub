@@ -123,8 +123,12 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
    */
   const awaitingTransfer = settings.transferOrders
     ? 0
-    : (await listOrdersAwaitingTransfer(principal, settings.transferOrdersSince))
-        .length;
+    : (
+        await listOrdersAwaitingTransfer(
+          principal,
+          settings.transferOrdersSince,
+        )
+      ).length;
 
   return {
     settings,
@@ -351,7 +355,8 @@ export const action = async ({ request }: ActionFunctionArgs) => {
      * default and is stored as null rather than as a copy of that pattern —
      * copying it would freeze the two apart the next time either changed.
      */
-    salesOrderNumberTemplate: numbering === "app" && numberPattern !== "" ? numberPattern : null,
+    salesOrderNumberTemplate:
+      numbering === "app" && numberPattern !== "" ? numberPattern : null,
     allocationMode: readMode(formData.get("allocationMode")),
     obsoleteDocumentPolicy: readObsolete(
       formData.get("obsoleteDocumentPolicy"),
@@ -481,12 +486,12 @@ export default function OrderSyncSettings() {
     : !status.activated
       ? "Setup has not been finished, so nothing is sent to MetaKocka yet."
       : status.orders !== "ready"
-      ? // A warehouse mapping is not what stops an unsplit shop: its documents
-        // carry no warehouse. What stops it is the connection.
-        settings.salesOrderSplit === "single"
-        ? "Orders cannot be filed until the MetaKocka connection works."
-        : "Orders cannot be filed until the MetaKocka connection works and at least one Shopify location points at a warehouse."
-      : null;
+        ? // A warehouse mapping is not what stops an unsplit shop: its documents
+          // carry no warehouse. What stops it is the connection.
+          settings.salesOrderSplit === "single"
+          ? "Orders cannot be filed until the MetaKocka connection works."
+          : "Orders cannot be filed until the MetaKocka connection works and at least one Shopify location points at a warehouse."
+        : null;
 
   // Open already when this shop has a pattern of its own, closed when it is on
   // the default and the sentence says everything.
@@ -652,7 +657,6 @@ export default function OrderSyncSettings() {
         Help
       </s-button>
 
-
       {/*
        * The two ways in that do not involve typing, the same pair the product
        * name pattern offers: what the fields are, and four patterns already
@@ -805,224 +809,356 @@ export default function OrderSyncSettings() {
               </s-stack>
             ) : null}
 
-            <s-divider />
-
-            <SettingRow
-              label="Automatic order synchronization"
-              summary={
-                unsplit
-                  ? "Shopify orders become MetaKocka sales orders, one for each order."
-                  : "Shopify orders become MetaKocka sales orders, one per warehouse an order ships from."
-              }
-              action={
-                running ? (
-                  <s-text color="subdued">Active</s-text>
-                ) : (
-                  <s-badge tone="critical">Not running</s-badge>
-                )
-              }
-            />
-
-            {blocking ? (
-              <s-text color="subdued" tone="critical">
-                {blocking}
-              </s-text>
-            ) : null}
-
-            <s-divider />
-
             {/*
-             * Two settings this page states and another page owns. A second
-             * editable copy here is how two screens end up disagreeing about
-             * one value (docs/ui-conventions.md: a card whose only content is a
-             * pointer elsewhere becomes a line, not a card).
+             * With transfer off, the rest of this page describes something
+             * that is not happening. It is hidden rather than disabled, and
+             * every value is kept: the form still carries it, the save still
+             * sends it, and it is all back the moment the box is ticked.
              */}
-            <SettingRow
-              label="Payment methods"
-              summary={status.paymentsSummary}
-              tone={status.paymentsNeedsAttention ? "critical" : "auto"}
-              action={
-                <s-button
-                  variant="secondary"
-                  href="/app/orders/settings/payments"
-                >
-                  Manage
-                </s-button>
-              }
-            />
+            {form.transferOrders ? (
+              <>
+                <s-divider />
 
-            <s-divider />
+                <SettingRow
+                  label="Automatic order synchronization"
+                  summary={
+                    unsplit
+                      ? "Shopify orders become MetaKocka sales orders, one for each order."
+                      : "Shopify orders become MetaKocka sales orders, one per warehouse an order ships from."
+                  }
+                  action={
+                    running ? (
+                      <s-text color="subdued">Active</s-text>
+                    ) : (
+                      <s-badge tone="critical">Not running</s-badge>
+                    )
+                  }
+                />
 
-            <SettingRow
-              label="Default profit centre"
-              summary={
-                status.defaultProfitCenter
-                  ? `${status.defaultProfitCenter}, on every sales order that has not overridden it.`
-                  : "None, so MetaKocka applies the company setting."
-              }
-              action={
-                <s-button variant="secondary" href="/app/locations">
-                  Manage
-                </s-button>
-              }
-            />
+                {blocking ? (
+                  <s-text color="subdued" tone="critical">
+                    {blocking}
+                  </s-text>
+                ) : null}
+
+                <s-divider />
+
+                {/*
+                 * Two settings this page states and another page owns. A second
+                 * editable copy here is how two screens end up disagreeing about
+                 * one value (docs/ui-conventions.md: a card whose only content is a
+                 * pointer elsewhere becomes a line, not a card).
+                 */}
+                <SettingRow
+                  label="Payment methods"
+                  summary={status.paymentsSummary}
+                  tone={status.paymentsNeedsAttention ? "critical" : "auto"}
+                  action={
+                    <s-button
+                      variant="secondary"
+                      href="/app/orders/settings/payments"
+                    >
+                      Manage
+                    </s-button>
+                  }
+                />
+
+                <s-divider />
+
+                <SettingRow
+                  label="Default profit centre"
+                  summary={
+                    status.defaultProfitCenter
+                      ? `${status.defaultProfitCenter}, on every sales order that has not overridden it.`
+                      : "None, so MetaKocka applies the company setting."
+                  }
+                  action={
+                    <s-button variant="secondary" href="/app/locations">
+                      Manage
+                    </s-button>
+                  }
+                />
+              </>
+            ) : null}
           </s-stack>
         </s-section>
 
-        {/* ---------------------------------------------------------------
-         * How many sales orders one Shopify order becomes.
-         *
-         * Not in the advanced card, and deliberately. Everything in there is
-         * right for almost every shop and wrong for a few; this is a genuine
-         * fork that depends on something only the merchant knows — whether
-         * their MetaKocka company keeps stock per warehouse at all — and it
-         * changes the shape of every document the app writes. A merchant who
-         * came here to answer it should not have to open a disclosure first.
-         * --------------------------------------------------------------- */}
-        <s-section heading="Sales orders">
-          <s-stack direction="block" gap="base">
-            <s-choice-list
-              name="salesOrderSplit"
-              label="How many sales orders one Shopify order becomes"
-              values={[form.salesOrderSplit]}
-              onChange={(event) =>
-                set(
-                  "salesOrderSplit",
-                  event.currentTarget.values[0] === "single"
-                    ? "single"
-                    : "per_warehouse",
-                )
-              }
-            >
-              <s-choice value="per_warehouse">
-                One for each warehouse it ships from
-                <s-text slot="details">
-                  Each sales order is filed against its own MetaKocka warehouse,
-                  and they are linked by the order reference.
-                </s-text>
-              </s-choice>
-              <s-choice value="single">
-                One for the whole order
-                <s-text slot="details">
-                  A single sales order carrying every line, with no warehouse on
-                  it. MetaKocka files it against the company default.
-                </s-text>
-              </s-choice>
-            </s-choice-list>
-
-            {/*
-             * The overwrite-risk pattern from docs/ui-conventions.md: a banner
-             * only in the unsaved-changes state, naming what will actually
-             * happen to documents MetaKocka already holds.
-             */}
-            {form.salesOrderSplit !== settings.salesOrderSplit ? (
-              <s-banner
-                tone="warning"
-                heading="This changes the sales orders MetaKocka already holds"
-              >
-                <s-paragraph>
-                  {form.salesOrderSplit === "single"
-                    ? "From the next time each order is checked, its per-warehouse sales orders are replaced by one sales order for the whole order. The old ones are dealt with by your setting for a sales order the Shopify order no longer uses — their lines removed by default, and never deleted without you asking."
-                    : "From the next time each order is checked, each order is split again across the warehouses it ships from. The single sales order it has now is dealt with by your setting for a sales order the Shopify order no longer uses, and new ones are written per warehouse."}
-                </s-paragraph>
-                <s-paragraph>
-                  Orders already sent are only rebuilt when something changes
-                  them or you check them by hand. Nothing is re-sent in bulk.
-                </s-paragraph>
-              </s-banner>
-            ) : null}
-
-            {unsplit ? (
-              <s-text color="subdued">
-                Warehouses are still mapped on the{" "}
-                <s-link href="/app/locations">Locations</s-link> page, because
-                that is what stock synchronization uses. They just do not appear
-                on the sales order.
-              </s-text>
-            ) : null}
-
-            <LearnMore label="What each one means in MetaKocka">
-              <s-paragraph>
-                <s-text type="strong">One for each warehouse.</s-text>{" "}
-                MetaKocka&rsquo;s warehouse is a property of the whole document,
-                so an order shipping from two warehouses can only be described
-                as two sales orders. Each one says where its goods left from,
-                which is what keeps stock in MetaKocka right, and the two carry
-                the same customer&rsquo;s order reference so they can be found
-                together.
-              </s-paragraph>
-              <s-paragraph>
-                <s-text type="strong">One for the whole order.</s-text> One
-                sales order per Shopify order, whatever it ships from, with no
-                warehouse on it — so MetaKocka applies the company default. For
-                shops that do not run their warehouses in MetaKocka, or that
-                want the two systems to show one document each. The trade is
-                real: MetaKocka no longer records which warehouse the goods left
-                from, and this app stops choosing one.
-              </s-paragraph>
-              <s-paragraph>
-                Everything else is the same either way. Changed orders are still
-                rebuilt, payments still recorded, and the quantities still
-                checked against what Shopify says the customer bought.
-              </s-paragraph>
-            </LearnMore>
-
-            <s-divider />
-
-            {/* -------------------------------------------------------------
-             * The document's own number — MetaKocka's *Sales ord. no.*
+        {form.transferOrders ? (
+          <>
+            {/* ---------------------------------------------------------------
+             * How many sales orders one Shopify order becomes.
              *
-             * It sits with the split rather than with the order reference,
-             * because both questions are about the document this app writes
-             * rather than about what it refers back to. The reference is what
-             * MetaKocka shows as *Customer's order* and links siblings by; this
-             * is the number the document is filed under, and a merchant whose
-             * books are kept in MetaKocka wants their own sequence there.
-             * ------------------------------------------------------------- */}
-            <s-choice-list
-              name="salesOrderNumbering"
-              label="Sales order number"
-              values={[form.salesOrderNumbering]}
-              onChange={(event) =>
-                set(
-                  "salesOrderNumbering",
-                  event.currentTarget.values[0] === "metakocka"
-                    ? "metakocka"
-                    : "app",
-                )
-              }
-            >
-              <s-choice value="app">
-                Number them from the Shopify order
-                <s-text slot="details">
-                  The sales order carries a number this app builds, so the same
-                  reference reads on both systems.
-                </s-text>
-              </s-choice>
-              <s-choice value="metakocka">
-                Let MetaKocka number them
-                <s-text slot="details">
-                  No number is sent, so MetaKocka&rsquo;s own sequence answers —
-                  1/2026, 2/2026, and on.
-                </s-text>
-              </s-choice>
-            </s-choice-list>
+             * Not in the advanced card, and deliberately. Everything in there is
+             * right for almost every shop and wrong for a few; this is a genuine
+             * fork that depends on something only the merchant knows — whether
+             * their MetaKocka company keeps stock per warehouse at all — and it
+             * changes the shape of every document the app writes. A merchant who
+             * came here to answer it should not have to open a disclosure first.
+             * --------------------------------------------------------------- */}
+            <s-section heading="Sales orders">
+              <s-stack direction="block" gap="base">
+                <s-choice-list
+                  name="salesOrderSplit"
+                  label="How many sales orders one Shopify order becomes"
+                  values={[form.salesOrderSplit]}
+                  onChange={(event) =>
+                    set(
+                      "salesOrderSplit",
+                      event.currentTarget.values[0] === "single"
+                        ? "single"
+                        : "per_warehouse",
+                    )
+                  }
+                >
+                  <s-choice value="per_warehouse">
+                    One for each warehouse it ships from
+                    <s-text slot="details">
+                      Each sales order is filed against its own MetaKocka
+                      warehouse, and they are linked by the order reference.
+                    </s-text>
+                  </s-choice>
+                  <s-choice value="single">
+                    One for the whole order
+                    <s-text slot="details">
+                      A single sales order carrying every line, with no
+                      warehouse on it. MetaKocka files it against the company
+                      default.
+                    </s-text>
+                  </s-choice>
+                </s-choice-list>
 
-            {form.salesOrderNumbering === "app" ? (
-              <>
+                {/*
+                 * The overwrite-risk pattern from docs/ui-conventions.md: a banner
+                 * only in the unsaved-changes state, naming what will actually
+                 * happen to documents MetaKocka already holds.
+                 */}
+                {form.salesOrderSplit !== settings.salesOrderSplit ? (
+                  <s-banner
+                    tone="warning"
+                    heading="This changes the sales orders MetaKocka already holds"
+                  >
+                    <s-paragraph>
+                      {form.salesOrderSplit === "single"
+                        ? "From the next time each order is checked, its per-warehouse sales orders are replaced by one sales order for the whole order. The old ones are dealt with by your setting for a sales order the Shopify order no longer uses — their lines removed by default, and never deleted without you asking."
+                        : "From the next time each order is checked, each order is split again across the warehouses it ships from. The single sales order it has now is dealt with by your setting for a sales order the Shopify order no longer uses, and new ones are written per warehouse."}
+                    </s-paragraph>
+                    <s-paragraph>
+                      Orders already sent are only rebuilt when something
+                      changes them or you check them by hand. Nothing is re-sent
+                      in bulk.
+                    </s-paragraph>
+                  </s-banner>
+                ) : null}
+
+                {unsplit ? (
+                  <s-text color="subdued">
+                    Warehouses are still mapped on the{" "}
+                    <s-link href="/app/locations">Locations</s-link> page,
+                    because that is what stock synchronization uses. They just
+                    do not appear on the sales order.
+                  </s-text>
+                ) : null}
+
+                <LearnMore label="What each one means in MetaKocka">
+                  <s-paragraph>
+                    <s-text type="strong">One for each warehouse.</s-text>{" "}
+                    MetaKocka&rsquo;s warehouse is a property of the whole
+                    document, so an order shipping from two warehouses can only
+                    be described as two sales orders. Each one says where its
+                    goods left from, which is what keeps stock in MetaKocka
+                    right, and the two carry the same customer&rsquo;s order
+                    reference so they can be found together.
+                  </s-paragraph>
+                  <s-paragraph>
+                    <s-text type="strong">One for the whole order.</s-text> One
+                    sales order per Shopify order, whatever it ships from, with
+                    no warehouse on it — so MetaKocka applies the company
+                    default. For shops that do not run their warehouses in
+                    MetaKocka, or that want the two systems to show one document
+                    each. The trade is real: MetaKocka no longer records which
+                    warehouse the goods left from, and this app stops choosing
+                    one.
+                  </s-paragraph>
+                  <s-paragraph>
+                    Everything else is the same either way. Changed orders are
+                    still rebuilt, payments still recorded, and the quantities
+                    still checked against what Shopify says the customer bought.
+                  </s-paragraph>
+                </LearnMore>
+
+                <s-divider />
+
+                {/* -------------------------------------------------------------
+                 * The document's own number — MetaKocka's *Sales ord. no.*
+                 *
+                 * It sits with the split rather than with the order reference,
+                 * because both questions are about the document this app writes
+                 * rather than about what it refers back to. The reference is what
+                 * MetaKocka shows as *Customer's order* and links siblings by; this
+                 * is the number the document is filed under, and a merchant whose
+                 * books are kept in MetaKocka wants their own sequence there.
+                 * ------------------------------------------------------------- */}
+                <s-choice-list
+                  name="salesOrderNumbering"
+                  label="Sales order number"
+                  values={[form.salesOrderNumbering]}
+                  onChange={(event) =>
+                    set(
+                      "salesOrderNumbering",
+                      event.currentTarget.values[0] === "metakocka"
+                        ? "metakocka"
+                        : "app",
+                    )
+                  }
+                >
+                  <s-choice value="app">
+                    Number them from the Shopify order
+                    <s-text slot="details">
+                      The sales order carries a number this app builds, so the
+                      same reference reads on both systems.
+                    </s-text>
+                  </s-choice>
+                  <s-choice value="metakocka">
+                    Let MetaKocka number them
+                    <s-text slot="details">
+                      No number is sent, so MetaKocka&rsquo;s own sequence
+                      answers — 1/2026, 2/2026, and on.
+                    </s-text>
+                  </s-choice>
+                </s-choice-list>
+
+                {form.salesOrderNumbering === "app" ? (
+                  <>
+                    <SettingRow
+                      label="Number pattern"
+                      summary={
+                        numberPreview && sample
+                          ? `Order ${sample.name} would be filed as ${numberPreview}.`
+                          : "By default, the same as the customer’s order reference."
+                      }
+                      action={
+                        customisingNumber ? null : (
+                          <s-button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => setCustomisingNumber(true)}
+                          >
+                            Customize
+                          </s-button>
+                        )
+                      }
+                    />
+
+                    {customisingNumber ? (
+                      <>
+                        <PatternEditor
+                          label="Sales order number pattern"
+                          value={form.salesOrderNumberTemplate}
+                          onChange={(next) =>
+                            set("salesOrderNumberTemplate", next)
+                          }
+                          registry={ORDER_REFERENCE_REGISTRY}
+                          rows={referenceRows}
+                          details="Leave it empty to use the customer’s order reference, which is what this app has always sent."
+                          {...(badNumberFields.length > 0
+                            ? {
+                                error: `${badNumberFields.map((field) => `{${field}}`).join(", ")} ${badNumberFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
+                              }
+                            : {})}
+                        />
+
+                        <s-stack
+                          direction="inline"
+                          gap="base"
+                          alignItems="center"
+                        >
+                          <s-button
+                            type="button"
+                            variant="secondary"
+                            command="--show"
+                            commandFor={NUMBER_FIELDS_MODAL_ID}
+                          >
+                            What you can put in a number
+                          </s-button>
+                        </s-stack>
+                      </>
+                    ) : null}
+
+                    {/*
+                     * The suffix, stated where it is decided rather than met in the
+                     * ERP. Only for a shop that splits, because only there is there
+                     * a second document that cannot share the number.
+                     */}
+                    {form.salesOrderSplit === "per_warehouse" ? (
+                      <s-text color="subdued">
+                        An order shipping from more than one warehouse gets one
+                        sales order per warehouse, so each number ends in that
+                        warehouse&rsquo;s code — they cannot share one.
+                      </s-text>
+                    ) : null}
+                  </>
+                ) : null}
+
+                {form.salesOrderNumbering !== settings.salesOrderNumbering ||
+                form.salesOrderNumberTemplate !==
+                  (settings.salesOrderNumberTemplate ?? "") ? (
+                  <s-banner tone="info" heading="Only orders from now on">
+                    <s-paragraph>
+                      Sales orders MetaKocka already holds keep the number they
+                      were written under. A document&rsquo;s number is an
+                      accounting record, so nothing is renumbered — including
+                      when an order is updated later.
+                    </s-paragraph>
+                  </s-banner>
+                ) : null}
+
+                <LearnMore label="What this number is, and is not">
+                  <s-paragraph>
+                    This is MetaKocka&rsquo;s <em>Sales ord. no.</em> — the
+                    number at the top of the document. It is separate from{" "}
+                    <em>Customer&rsquo;s order</em>, which is the reference back
+                    to Shopify and is set under Order references below.
+                  </s-paragraph>
+                  <s-paragraph>
+                    It is a number, never an identity. This app matches orders
+                    by their Shopify id and guards against duplicate documents
+                    with a key of its own that nothing here changes, so either
+                    choice is safe and switching is safe.
+                  </s-paragraph>
+                  <s-paragraph>
+                    With MetaKocka numbering them, this app records the number
+                    it chose the first time each document is written, and shows
+                    it wherever it names the document.
+                  </s-paragraph>
+                </LearnMore>
+              </s-stack>
+            </s-section>
+
+            {/* ---------------------------------------------------------------
+             * Order references.
+             *
+             * The pattern is a real setting and an unusual one to change, so the
+             * card opens on what it currently produces and the editor is one click
+             * away (docs/ui-conventions.md: raw syntax never reaches a merchant
+             * outside the field they are editing it in). A shop that has changed it
+             * opens on the editor, because hiding a value somebody set is its own
+             * kind of confusing.
+             * --------------------------------------------------------------- */}
+            <s-section heading="Order references">
+              <s-stack direction="block" gap="base">
                 <SettingRow
-                  label="Number pattern"
+                  label="Customer’s order"
                   summary={
-                    numberPreview && sample
-                      ? `Order ${sample.name} would be filed as ${numberPreview}.`
-                      : "By default, the same as the customer’s order reference."
+                    preview && sample
+                      ? `Order ${sample.name} would be filed in MetaKocka as ${preview.reference}.`
+                      : "A preview will appear here once this app has seen an order."
                   }
                   action={
-                    customisingNumber ? null : (
+                    customisingReference ? null : (
                       <s-button
                         type="button"
                         variant="secondary"
-                        onClick={() => setCustomisingNumber(true)}
+                        onClick={() => setCustomisingReference(true)}
                       >
                         Customize
                       </s-button>
@@ -1030,703 +1166,609 @@ export default function OrderSyncSettings() {
                   }
                 />
 
-                {customisingNumber ? (
+                {customisingReference ? (
                   <>
+                    {/*
+                     * The same control the product name pattern is edited in, and
+                     * for the same reasons: fields as chips rather than syntax to
+                     * be learnt, a list that offers them as you type, and each one
+                     * showing what it comes to for a real order of the merchant's.
+                     * Two patterns a merchant edits; one way of editing a pattern.
+                     *
+                     * No preview passed to it. What this pattern produces is stated
+                     * once, in the row above.
+                     */}
                     <PatternEditor
-                      label="Sales order number pattern"
-                      value={form.salesOrderNumberTemplate}
-                      onChange={(next) => set("salesOrderNumberTemplate", next)}
+                      label="Reference pattern"
+                      value={form.customerOrderTemplate}
+                      onChange={(next) => set("customerOrderTemplate", next)}
                       registry={ORDER_REFERENCE_REGISTRY}
                       rows={referenceRows}
-                      details="Leave it empty to use the customer’s order reference, which is what this app has always sent."
-                      {...(badNumberFields.length > 0
+                      details="Type a word — order, number, email — and the field offers itself. Leave it empty to use the default."
+                      {...(badFields.length > 0
                         ? {
-                            error: `${badNumberFields.map((field) => `{${field}}`).join(", ")} ${badNumberFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
+                            error: `${badFields.map((field) => `{${field}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
                           }
                         : {})}
                     />
 
+                    {/*
+                     * The same two buttons the name pattern carries, in the same
+                     * order. Typing a word offers the fields on its own — no brace,
+                     * no syntax — but that only helps once somebody has started, so
+                     * the full list stays one click away for anyone who has not.
+                     */}
                     <s-stack direction="inline" gap="base" alignItems="center">
                       <s-button
                         type="button"
                         variant="secondary"
                         command="--show"
-                        commandFor={NUMBER_FIELDS_MODAL_ID}
+                        commandFor={REFERENCE_FIELDS_MODAL_ID}
                       >
-                        What you can put in a number
+                        What you can put in a reference
+                      </s-button>
+                      <s-button
+                        type="button"
+                        variant="secondary"
+                        command="--show"
+                        commandFor={REFERENCE_PATTERNS_MODAL_ID}
+                      >
+                        Start from a ready pattern
                       </s-button>
                     </s-stack>
                   </>
                 ) : null}
 
-                {/*
-                 * The suffix, stated where it is decided rather than met in the
-                 * ERP. Only for a shop that splits, because only there is there
-                 * a second document that cannot share the number.
-                 */}
-                {form.salesOrderSplit === "per_warehouse" ? (
-                  <s-text color="subdued">
-                    An order shipping from more than one warehouse gets one sales
-                    order per warehouse, so each number ends in that
-                    warehouse&rsquo;s code — they cannot share one.
+                {/* Only when the fallback actually happened to this order. */}
+                {preview?.usedFallback ? (
+                  <s-text color="subdued" tone="critical">
+                    That pattern produced nothing for this order, so the default
+                    was used. Orders with no customer email fall back the same
+                    way.
                   </s-text>
                 ) : null}
-              </>
-            ) : null}
 
-            {form.salesOrderNumbering !== settings.salesOrderNumbering ||
-            form.salesOrderNumberTemplate !==
-              (settings.salesOrderNumberTemplate ?? "") ? (
-              <s-banner tone="info" heading="Only orders from now on">
-                <s-paragraph>
-                  Sales orders MetaKocka already holds keep the number they were
-                  written under. A document&rsquo;s number is an accounting
-                  record, so nothing is renumbered — including when an order is
-                  updated later.
-                </s-paragraph>
-              </s-banner>
-            ) : null}
-
-            <LearnMore label="What this number is, and is not">
-              <s-paragraph>
-                This is MetaKocka&rsquo;s <em>Sales ord. no.</em> — the number at
-                the top of the document. It is separate from{" "}
-                <em>Customer&rsquo;s order</em>, which is the reference back to
-                Shopify and is set under Order references below.
-              </s-paragraph>
-              <s-paragraph>
-                It is a number, never an identity. This app matches orders by
-                their Shopify id and guards against duplicate documents with a
-                key of its own that nothing here changes, so either choice is
-                safe and switching is safe.
-              </s-paragraph>
-              <s-paragraph>
-                With MetaKocka numbering them, this app records the number it
-                chose the first time each document is written, and shows it
-                wherever it names the document.
-              </s-paragraph>
-            </LearnMore>
-          </s-stack>
-        </s-section>
-
-        {/* ---------------------------------------------------------------
-         * Order references.
-         *
-         * The pattern is a real setting and an unusual one to change, so the
-         * card opens on what it currently produces and the editor is one click
-         * away (docs/ui-conventions.md: raw syntax never reaches a merchant
-         * outside the field they are editing it in). A shop that has changed it
-         * opens on the editor, because hiding a value somebody set is its own
-         * kind of confusing.
-         * --------------------------------------------------------------- */}
-        <s-section heading="Order references">
-          <s-stack direction="block" gap="base">
-            <SettingRow
-              label="Customer’s order"
-              summary={
-                preview && sample
-                  ? `Order ${sample.name} would be filed in MetaKocka as ${preview.reference}.`
-                  : "A preview will appear here once this app has seen an order."
-              }
-              action={
-                customisingReference ? null : (
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setCustomisingReference(true)}
-                  >
-                    Customize
-                  </s-button>
-                )
-              }
-            />
-
-            {customisingReference ? (
-              <>
-                {/*
-                 * The same control the product name pattern is edited in, and
-                 * for the same reasons: fields as chips rather than syntax to
-                 * be learnt, a list that offers them as you type, and each one
-                 * showing what it comes to for a real order of the merchant's.
-                 * Two patterns a merchant edits; one way of editing a pattern.
-                 *
-                 * No preview passed to it. What this pattern produces is stated
-                 * once, in the row above.
-                 */}
-                <PatternEditor
-                  label="Reference pattern"
-                  value={form.customerOrderTemplate}
-                  onChange={(next) => set("customerOrderTemplate", next)}
-                  registry={ORDER_REFERENCE_REGISTRY}
-                  rows={referenceRows}
-                  details="Type a word — order, number, email — and the field offers itself. Leave it empty to use the default."
-                  {...(badFields.length > 0
-                    ? {
-                        error: `${badFields.map((field) => `{${field}}`).join(", ")} ${badFields.length === 1 ? "is not a field" : "are not fields"} this app can fill in.`,
-                      }
-                    : {})}
-                />
-
-                {/*
-                 * The same two buttons the name pattern carries, in the same
-                 * order. Typing a word offers the fields on its own — no brace,
-                 * no syntax — but that only helps once somebody has started, so
-                 * the full list stays one click away for anyone who has not.
-                 */}
-                <s-stack direction="inline" gap="base" alignItems="center">
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    command="--show"
-                    commandFor={REFERENCE_FIELDS_MODAL_ID}
-                  >
-                    What you can put in a reference
-                  </s-button>
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    command="--show"
-                    commandFor={REFERENCE_PATTERNS_MODAL_ID}
-                  >
-                    Start from a ready pattern
-                  </s-button>
-                </s-stack>
-              </>
-            ) : null}
-
-            {/* Only when the fallback actually happened to this order. */}
-            {preview?.usedFallback ? (
-              <s-text color="subdued" tone="critical">
-                That pattern produced nothing for this order, so the default was
-                used. Orders with no customer email fall back the same way.
-              </s-text>
-            ) : null}
-
-            <LearnMore label="What this reference is used for">
-              <s-paragraph>
-                This is what MetaKocka shows as <em>Customer&rsquo;s order</em>{" "}
-                on the sales order.{" "}
-                {unsplit
-                  ? "It is also how this app finds a document again if a write times out."
-                  : "It is also how the sales orders of one Shopify order are linked to each other when the order ships from more than one warehouse, and how this app finds a document again if a write times out."}
-              </s-paragraph>
-              <s-paragraph>
-                It is a reference, not an identity. This app matches orders by
-                their Shopify id, so changing the pattern is safe and never
-                rewrites what MetaKocka already holds.
-              </s-paragraph>
-              {sample ? (
-                <s-paragraph>
-                  Orders already sent keep the reference they were sent with —
-                  including {sample.name}, which carries {sample.currentRef}.
-                  Changing this only affects orders that arrive from now on.
-                </s-paragraph>
-              ) : null}
-            </LearnMore>
-          </s-stack>
-        </s-section>
-
-        {/* ---------------------------------------------------------------
-         * Shipping and discounts: the two amounts on a Shopify order that are
-         * not products, and where each one goes.
-         * --------------------------------------------------------------- */}
-        <s-section heading="Shipping and discounts">
-          <s-stack direction="block" gap="base">
-            <s-box maxInlineSize="420px">
-              <s-text-field
-                name="shippingProductCode"
-                label="Shipping product code"
-                value={form.shippingProductCode}
-                placeholder="e.g. SHIPPING"
-                details="Checked against MetaKocka when you save."
-                onChange={(event) =>
-                  set("shippingProductCode", event.currentTarget.value)
-                }
-              />
-            </s-box>
-
-            <s-choice-list
-              name="discountRepresentation"
-              label="Discounts"
-              values={[form.discountRepresentation]}
-              onChange={(event) =>
-                set(
-                  "discountRepresentation",
-                  event.currentTarget.values[0] === "document_discount_value"
-                    ? "document_discount_value"
-                    : "none",
-                )
-              }
-            >
-              <s-choice value="document_discount_value">
-                Write the discount on the sales order
-                <s-text slot="details">
-                  The document total matches what the customer paid.
-                </s-text>
-              </s-choice>
-              <s-choice value="none">
-                Do not write discounts
-                <s-text slot="details">
-                  The goods are shown at full price and the order is reported.
-                </s-text>
-              </s-choice>
-            </s-choice-list>
-
-            {/*
-             * Contextual, and only while it is true of what is on screen: this
-             * is the consequence of the two answers above it, so it belongs
-             * with them rather than in a list of caveats somewhere else.
-             */}
-            {form.shippingProductCode.trim() === "" ||
-            form.discountRepresentation === "none" ? (
-              <s-banner
-                tone="warning"
-                heading="Orders will be reported as not fully reconciled"
-              >
-                <s-paragraph>
-                  {form.shippingProductCode.trim() === "" &&
-                  form.discountRepresentation === "none"
-                    ? "Shipping and discounts have nowhere to go."
-                    : form.shippingProductCode.trim() === ""
-                      ? "Shipping has nowhere to go."
-                      : "Discounts have nowhere to go."}{" "}
-                  An order carrying one is still sent — the goods are right —
-                  but MetaKocka will be short by that amount, and the order is
-                  reported rather than counted as reconciled. Nothing is
-                  guessed.
-                </s-paragraph>
-              </s-banner>
-            ) : null}
-
-            <LearnMore label="Why these are asked for">
-              <s-paragraph>
-                MetaKocka sales orders carry products. Shipping and discounts
-                are not products, so each needs somewhere to go before the sales
-                order can add up to what the customer was charged.
-              </s-paragraph>
-              <s-paragraph>
-                The shipping product code is the MetaKocka article a shipping
-                charge is written against. It has to exist in MetaKocka already
-                — this app never creates one from an order line.
-              </s-paragraph>
-              <s-paragraph>
-                A discount written on the sales order uses MetaKocka&rsquo;s own
-                discount field, as an amount, and comes off the document total.
-                Left unwritten, the sales order shows the goods at full price
-                and an order carrying a discount is reported as needing
-                attention, because MetaKocka will not match what the customer
-                was charged.
-              </s-paragraph>
-            </LearnMore>
-          </s-stack>
-        </s-section>
-
-        {/* ---------------------------------------------------------------
-         * Everything below is right for almost every shop and wrong for a few.
-         * Closed, the card still answers itself: the summary says what the
-         * settings inside currently are, so opening it is for changing rather
-         * than for checking.
-         *
-         * Inside, one subsection per question a merchant might arrive with —
-         * where things are fulfilled from, what happens when an order changes,
-         * how payments are recorded — divided so a long card still reads as a
-         * few short ones.
-         * --------------------------------------------------------------- */}
-        <AdvancedSection summary={advancedSummary}>
-          <s-stack direction="block" gap="large-100">
-            <s-stack direction="block" gap="base">
-              <s-heading>Warehouse</s-heading>
-
-              {/*
-               * The question only exists for a shop that splits. Stating that
-               * rather than showing a disabled control: the setting is kept,
-               * because a shop switching back should find its old answer, and a
-               * greyed-out radio pair invites a merchant to work out why it
-               * will not move.
-               */}
-              {unsplit ? (
-                <s-text color="subdued">
-                  This shop writes one sales order for the whole order, with no
-                  warehouse on it, so there is no warehouse to choose. Change
-                  that under <s-text type="strong">Sales orders</s-text> above.
-                </s-text>
-              ) : (
-                <>
-                  <s-choice-list
-                    name="allocationMode"
-                    label="Which system decides the warehouse"
-                    values={[form.allocationMode]}
-                    onChange={(event) =>
-                      set(
-                        "allocationMode",
-                        (event.currentTarget.values[0] ?? "shopify_locations") ===
-                          "stock_rules"
-                          ? "stock_rules"
-                          : "shopify_locations",
-                      )
-                    }
-                  >
-                    <s-choice value="shopify_locations">
-                      Shopify
-                      <s-text slot="details">
-                        Follow the location Shopify has assigned each item to.
-                      </s-text>
-                    </s-choice>
-                    <s-choice value="stock_rules">
-                      Stock levels
-                      <s-text slot="details">
-                        Choose from the stock this app has read: own warehouses
-                        first, then partners.
-                      </s-text>
-                    </s-choice>
-                  </s-choice-list>
-
-                  {/*
-                   * The overwrite-risk pattern from docs/ui-conventions.md: one
-                   * standing line under the control, plus a banner that renders
-                   * only in the unsaved-changes state, naming what will actually
-                   * change.
-                   *
-                   * Changing this authority restructures documents — that is the
-                   * whole point of it — so the merchant sees the consequence before
-                   * saving rather than discovering it on their next order.
-                   */}
-                  {form.allocationMode !== settings.allocationMode ? (
-                    <s-banner
-                      tone="warning"
-                      heading="This changes which warehouse orders are filed against"
-                    >
-                      <s-paragraph>
-                        {form.allocationMode === "shopify_locations"
-                          ? "From the next time each order is checked, its MetaKocka sales orders will be rebuilt to match the locations Shopify has assigned. Orders currently filed against a warehouse this app chose from stock levels will move, and a sales order left with nothing on it is reported for you to cancel or credit."
-                          : "From the next time each order is checked, warehouses will be chosen from stock levels again and Shopify's own location assignment will be ignored. Orders currently following Shopify may move to a different MetaKocka warehouse."}
-                      </s-paragraph>
-                      <s-paragraph>
-                        Orders already sent are only rebuilt when something changes
-                        them or you check them by hand. Nothing is re-sent in bulk.
-                      </s-paragraph>
-                    </s-banner>
+                <LearnMore label="What this reference is used for">
+                  <s-paragraph>
+                    This is what MetaKocka shows as{" "}
+                    <em>Customer&rsquo;s order</em> on the sales order.{" "}
+                    {unsplit
+                      ? "It is also how this app finds a document again if a write times out."
+                      : "It is also how the sales orders of one Shopify order are linked to each other when the order ships from more than one warehouse, and how this app finds a document again if a write times out."}
+                  </s-paragraph>
+                  <s-paragraph>
+                    It is a reference, not an identity. This app matches orders
+                    by their Shopify id, so changing the pattern is safe and
+                    never rewrites what MetaKocka already holds.
+                  </s-paragraph>
+                  {sample ? (
+                    <s-paragraph>
+                      Orders already sent keep the reference they were sent with
+                      — including {sample.name}, which carries{" "}
+                      {sample.currentRef}. Changing this only affects orders
+                      that arrive from now on.
+                    </s-paragraph>
                   ) : null}
-
-                  {/*
-                   * A sentence with a link rather than another Manage button: the
-                   * card above already carries the row that goes to this page, and
-                   * two buttons to one place is how a page starts to read as a
-                   * menu.
-                   */}
-                  <s-text color="subdued">
-                    Which MetaKocka warehouse a Shopify location means is set on the{" "}
-                    <s-link href="/app/locations">Locations</s-link> page.
-                  </s-text>
-
-                  <LearnMore label="How the warehouse is chosen">
-                    <s-paragraph>
-                      <s-text type="strong">Shopify.</s-text> Moving an item to
-                      another location in Shopify moves it to the mapped MetaKocka
-                      warehouse, and the total across the sales orders stays exactly
-                      what the customer ordered. Anything Shopify has not assigned —
-                      a digital item, a fulfilment service this app cannot see —
-                      falls back to stock levels.
-                    </s-paragraph>
-                    <s-paragraph>
-                      <s-text type="strong">Stock levels.</s-text> Ignores
-                      Shopify&rsquo;s assignment. For stores whose Shopify locations
-                      do not correspond to how goods are actually warehoused. Stores
-                      that were already running before Shopify locations were
-                      supported stay on this until they choose otherwise.
-                    </s-paragraph>
-                    <s-paragraph>
-                      A location with no warehouse mapped is reported rather than
-                      guessed at.
-                    </s-paragraph>
-                  </LearnMore>
-                </>
-              )}
-            </s-stack>
-
-            <s-divider />
-
-            <s-stack direction="block" gap="base">
-              <s-heading>Order changes</s-heading>
-
-              <s-stack direction="block" gap="small-400">
-                <s-checkbox
-                  name="updateOnChange"
-                  value="on"
-                  label="Update the MetaKocka sales order"
-                  checked={form.updateOnChange}
-                  onChange={(event) =>
-                    set("updateOnChange", event.currentTarget.checked)
-                  }
-                />
-                <s-text color="subdued">
-                  {form.updateOnChange
-                    ? "A changed order is rebuilt in MetaKocka and read back to confirm it."
-                    : "A changed order is reported, and the document is left exactly as it was."}
-                </s-text>
+                </LearnMore>
               </s-stack>
+            </s-section>
 
-              {form.updateOnChange ? (
-                <s-stack direction="block" gap="small-400">
-                  <s-checkbox
-                    name="updateAfterPaid"
-                    value="on"
-                    label="Update it even after the payment has been recorded"
-                    checked={form.updateAfterPaid}
+            {/* ---------------------------------------------------------------
+             * Shipping and discounts: the two amounts on a Shopify order that are
+             * not products, and where each one goes.
+             * --------------------------------------------------------------- */}
+            <s-section heading="Shipping and discounts">
+              <s-stack direction="block" gap="base">
+                <s-box maxInlineSize="420px">
+                  <s-text-field
+                    name="shippingProductCode"
+                    label="Shipping product code"
+                    value={form.shippingProductCode}
+                    placeholder="e.g. SHIPPING"
+                    details="Checked against MetaKocka when you save."
                     onChange={(event) =>
-                      set("updateAfterPaid", event.currentTarget.checked)
+                      set("shippingProductCode", event.currentTarget.value)
                     }
                   />
-                  <s-text color="subdued">
-                    Leave this off if you issue invoices from these sales
-                    orders.
-                  </s-text>
-                </s-stack>
-              ) : null}
+                </s-box>
 
-              <s-choice-list
-                name="obsoleteDocumentPolicy"
-                label="A sales order the Shopify order no longer uses"
-                values={[form.obsoleteDocumentPolicy]}
-                onChange={(event) =>
-                  set(
-                    "obsoleteDocumentPolicy",
-                    readObsoleteClient(event.currentTarget.values[0]),
-                  )
-                }
-              >
-                <s-choice value="empty">
-                  Remove its lines and report it
-                  <s-text slot="details">
-                    The document is kept; it may already be invoiced.
-                  </s-text>
-                </s-choice>
-                <s-choice value="report">
-                  Report it and change nothing
-                  <s-text slot="details">
-                    The goods stay on it in MetaKocka until you deal with it.
-                  </s-text>
-                </s-choice>
-                <s-choice value="delete_unpaid">
-                  Delete it when nothing has been paid against it
-                  <s-text slot="details">
-                    One carrying a payment has its lines removed instead.
-                  </s-text>
-                </s-choice>
-              </s-choice-list>
-
-              <LearnMore label="What happens to a changed order">
-                <s-paragraph>
-                  A quantity changed, a line added or removed, a price
-                  corrected: with updates on, the sales order in MetaKocka is
-                  rebuilt to match and read back to confirm it. With them off,
-                  the order is flagged as needing attention and the document is
-                  left exactly as it was.
-                </s-paragraph>
-                <s-paragraph>
-                  A paid document is the one most likely to have been invoiced,
-                  and rewriting an invoiced document changes an accounting
-                  record — which is why updating after payment is a separate
-                  answer. It covers changes to the order itself; a payment
-                  arriving later is always recorded.
-                </s-paragraph>
-                <s-paragraph>
-                  When every item moves to another warehouse, the sales order
-                  left behind is dealt with by the setting above: its lines
-                  removed so it stops holding goods this order no longer takes
-                  from there, left exactly as it is, or — only ever when nothing
-                  has been paid against it — deleted. You are told either way,
-                  and nothing else in this app deletes a MetaKocka document.
-                </s-paragraph>
-              </LearnMore>
-            </s-stack>
-
-            <s-divider />
-
-            <s-stack direction="block" gap="base">
-              <s-heading>Payments</s-heading>
-
-              <s-stack direction="block" gap="small-400">
-                <s-checkbox
-                  name="syncPayments"
-                  value="on"
-                  label="Record payments on the MetaKocka sales order"
-                  checked={form.syncPayments}
+                <s-choice-list
+                  name="discountRepresentation"
+                  label="Discounts"
+                  values={[form.discountRepresentation]}
                   onChange={(event) =>
-                    set("syncPayments", event.currentTarget.checked)
+                    set(
+                      "discountRepresentation",
+                      event.currentTarget.values[0] ===
+                        "document_discount_value"
+                        ? "document_discount_value"
+                        : "none",
+                    )
                   }
-                />
-                <s-text color="subdued">
-                  {form.syncPayments
-                    ? "Every successful Shopify payment is sent as its own entry."
-                    : "What has been paid is shown on the order page, and nothing is written to MetaKocka."}
-                </s-text>
+                >
+                  <s-choice value="document_discount_value">
+                    Write the discount on the sales order
+                    <s-text slot="details">
+                      The document total matches what the customer paid.
+                    </s-text>
+                  </s-choice>
+                  <s-choice value="none">
+                    Do not write discounts
+                    <s-text slot="details">
+                      The goods are shown at full price and the order is
+                      reported.
+                    </s-text>
+                  </s-choice>
+                </s-choice-list>
+
+                {/*
+                 * Contextual, and only while it is true of what is on screen: this
+                 * is the consequence of the two answers above it, so it belongs
+                 * with them rather than in a list of caveats somewhere else.
+                 */}
+                {form.shippingProductCode.trim() === "" ||
+                form.discountRepresentation === "none" ? (
+                  <s-banner
+                    tone="warning"
+                    heading="Orders will be reported as not fully reconciled"
+                  >
+                    <s-paragraph>
+                      {form.shippingProductCode.trim() === "" &&
+                      form.discountRepresentation === "none"
+                        ? "Shipping and discounts have nowhere to go."
+                        : form.shippingProductCode.trim() === ""
+                          ? "Shipping has nowhere to go."
+                          : "Discounts have nowhere to go."}{" "}
+                      An order carrying one is still sent — the goods are right
+                      — but MetaKocka will be short by that amount, and the
+                      order is reported rather than counted as reconciled.
+                      Nothing is guessed.
+                    </s-paragraph>
+                  </s-banner>
+                ) : null}
+
+                <LearnMore label="Why these are asked for">
+                  <s-paragraph>
+                    MetaKocka sales orders carry products. Shipping and
+                    discounts are not products, so each needs somewhere to go
+                    before the sales order can add up to what the customer was
+                    charged.
+                  </s-paragraph>
+                  <s-paragraph>
+                    The shipping product code is the MetaKocka article a
+                    shipping charge is written against. It has to exist in
+                    MetaKocka already — this app never creates one from an order
+                    line.
+                  </s-paragraph>
+                  <s-paragraph>
+                    A discount written on the sales order uses MetaKocka&rsquo;s
+                    own discount field, as an amount, and comes off the document
+                    total. Left unwritten, the sales order shows the goods at
+                    full price and an order carrying a discount is reported as
+                    needing attention, because MetaKocka will not match what the
+                    customer was charged.
+                  </s-paragraph>
+                </LearnMore>
               </s-stack>
+            </s-section>
 
-              {form.syncPayments ? (
-                <>
+            {/* ---------------------------------------------------------------
+             * Everything below is right for almost every shop and wrong for a few.
+             * Closed, the card still answers itself: the summary says what the
+             * settings inside currently are, so opening it is for changing rather
+             * than for checking.
+             *
+             * Inside, one subsection per question a merchant might arrive with —
+             * where things are fulfilled from, what happens when an order changes,
+             * how payments are recorded — divided so a long card still reads as a
+             * few short ones.
+             * --------------------------------------------------------------- */}
+            <AdvancedSection summary={advancedSummary}>
+              <s-stack direction="block" gap="large-100">
+                <s-stack direction="block" gap="base">
+                  <s-heading>Warehouse</s-heading>
+
+                  {/*
+                   * The question only exists for a shop that splits. Stating that
+                   * rather than showing a disabled control: the setting is kept,
+                   * because a shop switching back should find its old answer, and a
+                   * greyed-out radio pair invites a merchant to work out why it
+                   * will not move.
+                   */}
+                  {unsplit ? (
+                    <s-text color="subdued">
+                      This shop writes one sales order for the whole order, with
+                      no warehouse on it, so there is no warehouse to choose.
+                      Change that under{" "}
+                      <s-text type="strong">Sales orders</s-text> above.
+                    </s-text>
+                  ) : (
+                    <>
+                      <s-choice-list
+                        name="allocationMode"
+                        label="Which system decides the warehouse"
+                        values={[form.allocationMode]}
+                        onChange={(event) =>
+                          set(
+                            "allocationMode",
+                            (event.currentTarget.values[0] ??
+                              "shopify_locations") === "stock_rules"
+                              ? "stock_rules"
+                              : "shopify_locations",
+                          )
+                        }
+                      >
+                        <s-choice value="shopify_locations">
+                          Shopify
+                          <s-text slot="details">
+                            Follow the location Shopify has assigned each item
+                            to.
+                          </s-text>
+                        </s-choice>
+                        <s-choice value="stock_rules">
+                          Stock levels
+                          <s-text slot="details">
+                            Choose from the stock this app has read: own
+                            warehouses first, then partners.
+                          </s-text>
+                        </s-choice>
+                      </s-choice-list>
+
+                      {/*
+                       * The overwrite-risk pattern from docs/ui-conventions.md: one
+                       * standing line under the control, plus a banner that renders
+                       * only in the unsaved-changes state, naming what will actually
+                       * change.
+                       *
+                       * Changing this authority restructures documents — that is the
+                       * whole point of it — so the merchant sees the consequence before
+                       * saving rather than discovering it on their next order.
+                       */}
+                      {form.allocationMode !== settings.allocationMode ? (
+                        <s-banner
+                          tone="warning"
+                          heading="This changes which warehouse orders are filed against"
+                        >
+                          <s-paragraph>
+                            {form.allocationMode === "shopify_locations"
+                              ? "From the next time each order is checked, its MetaKocka sales orders will be rebuilt to match the locations Shopify has assigned. Orders currently filed against a warehouse this app chose from stock levels will move, and a sales order left with nothing on it is reported for you to cancel or credit."
+                              : "From the next time each order is checked, warehouses will be chosen from stock levels again and Shopify's own location assignment will be ignored. Orders currently following Shopify may move to a different MetaKocka warehouse."}
+                          </s-paragraph>
+                          <s-paragraph>
+                            Orders already sent are only rebuilt when something
+                            changes them or you check them by hand. Nothing is
+                            re-sent in bulk.
+                          </s-paragraph>
+                        </s-banner>
+                      ) : null}
+
+                      {/*
+                       * A sentence with a link rather than another Manage button: the
+                       * card above already carries the row that goes to this page, and
+                       * two buttons to one place is how a page starts to read as a
+                       * menu.
+                       */}
+                      <s-text color="subdued">
+                        Which MetaKocka warehouse a Shopify location means is
+                        set on the{" "}
+                        <s-link href="/app/locations">Locations</s-link> page.
+                      </s-text>
+
+                      <LearnMore label="How the warehouse is chosen">
+                        <s-paragraph>
+                          <s-text type="strong">Shopify.</s-text> Moving an item
+                          to another location in Shopify moves it to the mapped
+                          MetaKocka warehouse, and the total across the sales
+                          orders stays exactly what the customer ordered.
+                          Anything Shopify has not assigned — a digital item, a
+                          fulfilment service this app cannot see — falls back to
+                          stock levels.
+                        </s-paragraph>
+                        <s-paragraph>
+                          <s-text type="strong">Stock levels.</s-text> Ignores
+                          Shopify&rsquo;s assignment. For stores whose Shopify
+                          locations do not correspond to how goods are actually
+                          warehoused. Stores that were already running before
+                          Shopify locations were supported stay on this until
+                          they choose otherwise.
+                        </s-paragraph>
+                        <s-paragraph>
+                          A location with no warehouse mapped is reported rather
+                          than guessed at.
+                        </s-paragraph>
+                      </LearnMore>
+                    </>
+                  )}
+                </s-stack>
+
+                <s-divider />
+
+                <s-stack direction="block" gap="base">
+                  <s-heading>Order changes</s-heading>
+
+                  <s-stack direction="block" gap="small-400">
+                    <s-checkbox
+                      name="updateOnChange"
+                      value="on"
+                      label="Update the MetaKocka sales order"
+                      checked={form.updateOnChange}
+                      onChange={(event) =>
+                        set("updateOnChange", event.currentTarget.checked)
+                      }
+                    />
+                    <s-text color="subdued">
+                      {form.updateOnChange
+                        ? "A changed order is rebuilt in MetaKocka and read back to confirm it."
+                        : "A changed order is reported, and the document is left exactly as it was."}
+                    </s-text>
+                  </s-stack>
+
+                  {form.updateOnChange ? (
+                    <s-stack direction="block" gap="small-400">
+                      <s-checkbox
+                        name="updateAfterPaid"
+                        value="on"
+                        label="Update it even after the payment has been recorded"
+                        checked={form.updateAfterPaid}
+                        onChange={(event) =>
+                          set("updateAfterPaid", event.currentTarget.checked)
+                        }
+                      />
+                      <s-text color="subdued">
+                        Leave this off if you issue invoices from these sales
+                        orders.
+                      </s-text>
+                    </s-stack>
+                  ) : null}
+
                   <s-choice-list
-                    name="paymentAllocation"
-                    label="An order that ships from more than one warehouse"
-                    values={[form.paymentAllocation]}
+                    name="obsoleteDocumentPolicy"
+                    label="A sales order the Shopify order no longer uses"
+                    values={[form.obsoleteDocumentPolicy]}
                     onChange={(event) =>
                       set(
-                        "paymentAllocation",
-                        event.currentTarget.values[0] === "primary"
-                          ? "primary"
-                          : "proportional",
+                        "obsoleteDocumentPolicy",
+                        readObsoleteClient(event.currentTarget.values[0]),
                       )
                     }
                   >
-                    <s-choice value="proportional">
-                      Split each payment across the sales orders by value
+                    <s-choice value="empty">
+                      Remove its lines and report it
                       <s-text slot="details">
-                        The parts always add back up to what was paid.
+                        The document is kept; it may already be invoiced.
                       </s-text>
                     </s-choice>
-                    <s-choice value="primary">
-                      Put it all on the main sales order
+                    <s-choice value="report">
+                      Report it and change nothing
                       <s-text slot="details">
-                        The one carrying the shipping.
+                        The goods stay on it in MetaKocka until you deal with
+                        it.
+                      </s-text>
+                    </s-choice>
+                    <s-choice value="delete_unpaid">
+                      Delete it when nothing has been paid against it
+                      <s-text slot="details">
+                        One carrying a payment has its lines removed instead.
                       </s-text>
                     </s-choice>
                   </s-choice-list>
 
-                  <s-choice-list
-                    name="paymentEntryMode"
-                    label="An order paid more than once"
-                    values={[form.paymentEntryMode]}
-                    onChange={(event) =>
-                      set(
-                        "paymentEntryMode",
-                        event.currentTarget.values[0] === "aggregate"
-                          ? "aggregate"
-                          : "per_transaction",
-                      )
-                    }
-                  >
-                    <s-choice value="per_transaction">
-                      One payment per Shopify payment
-                      <s-text slot="details">
-                        A deposit and a balance appear on their own dates.
-                      </s-text>
-                    </s-choice>
-                    <s-choice value="aggregate">
-                      One payment per payment type
-                      <s-text slot="details">
-                        Amounts added together, dated from the last one.
-                      </s-text>
-                    </s-choice>
-                  </s-choice-list>
-
-                  <s-text color="subdued">
-                    Which MetaKocka payment type a Shopify gateway means is set
-                    on the{" "}
-                    <s-link href="/app/orders/settings/payments">
-                      Payment types
-                    </s-link>{" "}
-                    page.
-                  </s-text>
-
-                  <LearnMore label="How payments are recorded">
+                  <LearnMore label="What happens to a changed order">
                     <s-paragraph>
-                      Every successful payment Shopify records is sent as its
-                      own entry, so an order paid in two parts shows as two
-                      payments for the right amounts. With payments off, what
-                      has been paid is still shown on the order page and nothing
-                      is written to MetaKocka.
+                      A quantity changed, a line added or removed, a price
+                      corrected: with updates on, the sales order in MetaKocka
+                      is rebuilt to match and read back to confirm it. With them
+                      off, the order is flagged as needing attention and the
+                      document is left exactly as it was.
                     </s-paragraph>
                     <s-paragraph>
-                      A &euro;300 order split into a &euro;100 and a &euro;200
-                      sales order records &euro;100 and &euro;200 when payments
-                      are split by value. Putting it all on the main sales order
-                      is for stores that treat the others as picking documents
-                      and settle the order in one place.
+                      A paid document is the one most likely to have been
+                      invoiced, and rewriting an invoiced document changes an
+                      accounting record — which is why updating after payment is
+                      a separate answer. It covers changes to the order itself;
+                      a payment arriving later is always recorded.
                     </s-paragraph>
                     <s-paragraph>
-                      One payment per payment type adds the amounts together and
-                      dates them from the last one. Use it only if your
-                      MetaKocka company refuses a sales order with more than one
-                      payment on it.
-                    </s-paragraph>
-                    <s-paragraph>
-                      A gateway with no type and no fallback is reported rather
-                      than guessed at.
+                      When every item moves to another warehouse, the sales
+                      order left behind is dealt with by the setting above: its
+                      lines removed so it stops holding goods this order no
+                      longer takes from there, left exactly as it is, or — only
+                      ever when nothing has been paid against it — deleted. You
+                      are told either way, and nothing else in this app deletes
+                      a MetaKocka document.
                     </s-paragraph>
                   </LearnMore>
-                </>
-              ) : null}
-            </s-stack>
+                </s-stack>
 
-            <s-divider />
+                <s-divider />
 
-            <s-stack direction="block" gap="small-400">
-              <s-stack direction="inline">
-                <s-button
-                  type="button"
-                  variant="secondary"
-                  onClick={restoreRecommended}
-                  {...(atRecommended ? { disabled: true } : {})}
-                >
-                  Restore recommended settings
-                </s-button>
+                <s-stack direction="block" gap="base">
+                  <s-heading>Payments</s-heading>
+
+                  <s-stack direction="block" gap="small-400">
+                    <s-checkbox
+                      name="syncPayments"
+                      value="on"
+                      label="Record payments on the MetaKocka sales order"
+                      checked={form.syncPayments}
+                      onChange={(event) =>
+                        set("syncPayments", event.currentTarget.checked)
+                      }
+                    />
+                    <s-text color="subdued">
+                      {form.syncPayments
+                        ? "Every successful Shopify payment is sent as its own entry."
+                        : "What has been paid is shown on the order page, and nothing is written to MetaKocka."}
+                    </s-text>
+                  </s-stack>
+
+                  {form.syncPayments ? (
+                    <>
+                      <s-choice-list
+                        name="paymentAllocation"
+                        label="An order that ships from more than one warehouse"
+                        values={[form.paymentAllocation]}
+                        onChange={(event) =>
+                          set(
+                            "paymentAllocation",
+                            event.currentTarget.values[0] === "primary"
+                              ? "primary"
+                              : "proportional",
+                          )
+                        }
+                      >
+                        <s-choice value="proportional">
+                          Split each payment across the sales orders by value
+                          <s-text slot="details">
+                            The parts always add back up to what was paid.
+                          </s-text>
+                        </s-choice>
+                        <s-choice value="primary">
+                          Put it all on the main sales order
+                          <s-text slot="details">
+                            The one carrying the shipping.
+                          </s-text>
+                        </s-choice>
+                      </s-choice-list>
+
+                      <s-choice-list
+                        name="paymentEntryMode"
+                        label="An order paid more than once"
+                        values={[form.paymentEntryMode]}
+                        onChange={(event) =>
+                          set(
+                            "paymentEntryMode",
+                            event.currentTarget.values[0] === "aggregate"
+                              ? "aggregate"
+                              : "per_transaction",
+                          )
+                        }
+                      >
+                        <s-choice value="per_transaction">
+                          One payment per Shopify payment
+                          <s-text slot="details">
+                            A deposit and a balance appear on their own dates.
+                          </s-text>
+                        </s-choice>
+                        <s-choice value="aggregate">
+                          One payment per payment type
+                          <s-text slot="details">
+                            Amounts added together, dated from the last one.
+                          </s-text>
+                        </s-choice>
+                      </s-choice-list>
+
+                      <s-text color="subdued">
+                        Which MetaKocka payment type a Shopify gateway means is
+                        set on the{" "}
+                        <s-link href="/app/orders/settings/payments">
+                          Payment types
+                        </s-link>{" "}
+                        page.
+                      </s-text>
+
+                      <LearnMore label="How payments are recorded">
+                        <s-paragraph>
+                          Every successful payment Shopify records is sent as
+                          its own entry, so an order paid in two parts shows as
+                          two payments for the right amounts. With payments off,
+                          what has been paid is still shown on the order page
+                          and nothing is written to MetaKocka.
+                        </s-paragraph>
+                        <s-paragraph>
+                          A &euro;300 order split into a &euro;100 and a
+                          &euro;200 sales order records &euro;100 and &euro;200
+                          when payments are split by value. Putting it all on
+                          the main sales order is for stores that treat the
+                          others as picking documents and settle the order in
+                          one place.
+                        </s-paragraph>
+                        <s-paragraph>
+                          One payment per payment type adds the amounts together
+                          and dates them from the last one. Use it only if your
+                          MetaKocka company refuses a sales order with more than
+                          one payment on it.
+                        </s-paragraph>
+                        <s-paragraph>
+                          A gateway with no type and no fallback is reported
+                          rather than guessed at.
+                        </s-paragraph>
+                      </LearnMore>
+                    </>
+                  ) : null}
+                </s-stack>
+
+                <s-divider />
+
+                <s-stack direction="block" gap="small-400">
+                  <s-stack direction="inline">
+                    <s-button
+                      type="button"
+                      variant="secondary"
+                      onClick={restoreRecommended}
+                      {...(atRecommended ? { disabled: true } : {})}
+                    >
+                      Restore recommended settings
+                    </s-button>
+                  </s-stack>
+                  <s-text color="subdued">
+                    Puts the settings in this card back to what a new shop gets.
+                    It changes nothing until you save, and it never touches the
+                    shipping product or the discount setting, which are yours to
+                    choose.
+                  </s-text>
+                </s-stack>
               </s-stack>
-              <s-text color="subdued">
-                Puts the settings in this card back to what a new shop gets. It
-                changes nothing until you save, and it never touches the
-                shipping product or the discount setting, which are yours to
-                choose.
-              </s-text>
-            </s-stack>
-          </s-stack>
-        </AdvancedSection>
+            </AdvancedSection>
 
-        {/* ---------------------------------------------------------------
-         * The promises this app keeps whatever the settings above say. One
-         * line, and the list behind it: it is read once by a merchant deciding
-         * whether to trust the thing, and after that it is in the way.
-         * --------------------------------------------------------------- */}
-        <s-section heading="Safety and reconciliation">
-          <s-stack direction="block" gap="base">
-            <s-text color="subdued">
-              Nothing is duplicated, invented or deleted behind your back. An
-              order that cannot be represented exactly is reported rather than
-              sent wrong.
-            </s-text>
+            {/* ---------------------------------------------------------------
+             * The promises this app keeps whatever the settings above say. One
+             * line, and the list behind it: it is read once by a merchant deciding
+             * whether to trust the thing, and after that it is in the way.
+             * --------------------------------------------------------------- */}
+            <s-section heading="Safety and reconciliation">
+              <s-stack direction="block" gap="base">
+                <s-text color="subdued">
+                  Nothing is duplicated, invented or deleted behind your back.
+                  An order that cannot be represented exactly is reported rather
+                  than sent wrong.
+                </s-text>
 
-            <LearnMore label="What is never done automatically">
-              <s-unordered-list>
-                <s-list-item>
-                  A second sales order is never created for an order that
-                  already has one. When items move between warehouses the
-                  existing sales orders are changed, never duplicated.
-                </s-list-item>
-                <s-list-item>
-                  A MetaKocka document is never deleted, whatever happens in
-                  Shopify — including a cancelled or deleted order. The one
-                  exception is the setting in Order changes, which you have to
-                  turn on, and which only ever removes an unpaid sales order
-                  this order no longer uses.
-                </s-list-item>
-                <s-list-item>
-                  Refunds and credit notes are never sent. A refund is recorded
-                  in this app so what the customer has paid stays right, and
-                  reported for you to credit in MetaKocka — a payment already
-                  recorded is never shrunk to represent one.
-                </s-list-item>
-                <s-list-item>
-                  A payment type is never guessed, and a card authorisation is
-                  never treated as money received.
-                </s-list-item>
-                <s-list-item>
-                  A shipping or discount article is never invented in MetaKocka.
-                  If one is not configured, the order is reported rather than
-                  sent with money missing and no mention of it.
-                </s-list-item>
-              </s-unordered-list>
-            </LearnMore>
-          </s-stack>
-        </s-section>
+                <LearnMore label="What is never done automatically">
+                  <s-unordered-list>
+                    <s-list-item>
+                      A second sales order is never created for an order that
+                      already has one. When items move between warehouses the
+                      existing sales orders are changed, never duplicated.
+                    </s-list-item>
+                    <s-list-item>
+                      A MetaKocka document is never deleted, whatever happens in
+                      Shopify — including a cancelled or deleted order. The one
+                      exception is the setting in Order changes, which you have
+                      to turn on, and which only ever removes an unpaid sales
+                      order this order no longer uses.
+                    </s-list-item>
+                    <s-list-item>
+                      Refunds and credit notes are never sent. A refund is
+                      recorded in this app so what the customer has paid stays
+                      right, and reported for you to credit in MetaKocka — a
+                      payment already recorded is never shrunk to represent one.
+                    </s-list-item>
+                    <s-list-item>
+                      A payment type is never guessed, and a card authorisation
+                      is never treated as money received.
+                    </s-list-item>
+                    <s-list-item>
+                      A shipping or discount article is never invented in
+                      MetaKocka. If one is not configured, the order is reported
+                      rather than sent with money missing and no mention of it.
+                    </s-list-item>
+                  </s-unordered-list>
+                </LearnMore>
+              </s-stack>
+            </s-section>
+          </>
+        ) : null}
       </s-stack>
     </s-page>
   );
