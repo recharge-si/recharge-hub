@@ -8,7 +8,7 @@ Write-Host "⏳ Waiting for PostgreSQL to be ready..."
 $retries = 0
 while ($retries -lt 30) {
   try {
-    docker compose -f docker-compose.dev.yml exec -T postgres pg_isready -U orchestrator -d orchestrator 2>$null
+    docker compose -f docker-compose.dev.yml exec -T postgres pg_isready -U recharge_hub -d recharge_hub 2>$null
     if ($?) { break }
   } catch {}
   $retries++

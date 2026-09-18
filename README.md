@@ -1,6 +1,6 @@
-# Fulfilment orchestrator
+# Recharge Hub
 
-Fulfilment orchestrator is an embedded public Shopify app that connects a
+Recharge Hub is an embedded public Shopify app that connects a
 merchant's Shopify store to MetaKocka ERP. It allocates order lines across own
 and partner supply sources, creates the corresponding MetaKocka sales orders,
 and synchronizes inventory according to per-location ownership rules.

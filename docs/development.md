@@ -151,7 +151,7 @@ are harmless (every handler treats a missing row as nothing to do), but to be
 rid of them too:
 
 ```bash
-docker compose exec postgres psql -U orchestrator -d orchestrator \
+docker compose exec postgres psql -U recharge_hub -d recharge_hub \
   -c 'DROP SCHEMA IF EXISTS pgboss CASCADE'
 ```
 
@@ -274,12 +274,53 @@ touch another tenant's rows.
 
 ## Production Compose
 
+The production VM has too little memory to build the image next to PostgreSQL,
+so the image is built on a workstation, pushed to Docker Hub as
+`time4action/recharge-hub`, and only pulled on the server. `docker-compose.yml`
+has no `build:` for that reason; `APP_IMAGE` in `.env` overrides the tag.
+
+### Build and push (workstation)
+
+```bat
+docker login
+scripts\build-and-push.bat --latest
+```
+
+Tag flags are shared by `scripts\build.bat`, `scripts\push.bat` and
+`scripts\build-and-push.bat`, and combine:
+
+| Flag         | Tag                           |
+| ------------ | ----------------------------- |
+| *(none)*     | `latest`                      |
+| `--latest`   | `latest`                      |
+| `--dev`      | `dev`                         |
+| `--sha`      | short git commit hash         |
+| `--tag NAME` | `NAME` (repeatable)           |
+
+`build.bat --latest --sha` tags one build twice; `push.bat --latest --sha`
+pushes both.
+
+### Server
+
+Once: install Docker, point DNS at the VM, open ports 80 and 443, clone the
+repository (Compose needs `docker-compose.yml` and `ops/Caddyfile`), and copy
+`.env.example` to `.env`. Set `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`,
+`SHOPIFY_APP_URL`, `APP_DOMAIN` (the public hostname), a strong
+`POSTGRES_PASSWORD`, and `ENCRYPTION_KEY`. Keep a copy of `ENCRYPTION_KEY`
+somewhere safe: without it the stored MetaKocka secrets cannot be read.
+
 ```bash
+docker compose pull
 docker compose up -d
 ```
 
-Compose builds one image, runs one migration container, then starts `web`,
-`worker`, PostgreSQL, and Caddy. Set a strong `POSTGRES_PASSWORD`, set
-`APP_DOMAIN` to the public hostname, and provide real application secrets
-outside Git. Caddy is the only ingress; `/healthz` checks PostgreSQL and the
-queue without calling MetaKocka.
+Compose runs one migration container, then starts `web`, `worker`, PostgreSQL,
+and Caddy. Caddy is the only ingress and obtains the certificate itself;
+`/healthz` checks PostgreSQL and the queue without calling MetaKocka.
+
+Each release is the same two commands. To run a non-`latest` tag, set
+`APP_IMAGE=time4action/recharge-hub:dev` in `.env`.
+
+`shopify.app.toml` must carry the deployed origin in `application_url` and
+`auth.redirect_urls`; run `npm run deploy` after changing it so webhooks are
+registered against the new host.

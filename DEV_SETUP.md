@@ -20,7 +20,7 @@ Quick commands to spin up the full local development environment with hot reload
 docker compose -f docker-compose.dev.yml up -d postgres
 
 # 2. Wait for DB to be ready
-docker compose -f docker-compose.dev.yml exec postgres pg_isready -U orchestrator -d orchestrator
+docker compose -f docker-compose.dev.yml exec postgres pg_isready -U recharge_hub -d recharge_hub
 
 # 3. Install dependencies
 npm install
@@ -77,7 +77,7 @@ docker compose -f docker-compose.dev.yml down --volumes
 **"Connection refused"**
 Wait a few more seconds for PostgreSQL to start:
 ```bash
-docker compose -f docker-compose.dev.yml exec postgres pg_isready -U orchestrator -d orchestrator
+docker compose -f docker-compose.dev.yml exec postgres pg_isready -U recharge_hub -d recharge_hub
 ```
 
 **"Migrations failed"**

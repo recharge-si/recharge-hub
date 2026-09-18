@@ -1,25 +1,26 @@
 # docs/BUILD_SPEC.md section 4: Docker Compose on one Linux VM.
 # `docker compose up` brings up a working system in one command (section 12).
 
-name: fulfilment-orchestrator
+name: recharge-hub
 
 x-app: &app
-  build:
-    context: .
-  image: fulfilment-orchestrator:local
+  # Built and pushed from a workstation with scripts/build-and-push.bat; the
+  # server only pulls. The app VM does not have the memory to run a Vite build
+  # alongside PostgreSQL, so there is deliberately no `build:` here.
+  image: ${APP_IMAGE:-time4action/recharge-hub:latest}
   env_file: .env
   environment:
     NODE_ENV: production
-    DATABASE_URL: postgresql://${POSTGRES_USER:-orchestrator}:${POSTGRES_PASSWORD:-orchestrator}@postgres:5432/${POSTGRES_DB:-orchestrator}?schema=public
+    DATABASE_URL: postgresql://${POSTGRES_USER:-recharge_hub}:${POSTGRES_PASSWORD:-recharge_hub}@postgres:5432/${POSTGRES_DB:-recharge_hub}?schema=public
   restart: unless-stopped
 
 services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: ${POSTGRES_USER:-orchestrator}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-orchestrator}
-      POSTGRES_DB: ${POSTGRES_DB:-orchestrator}
+      POSTGRES_USER: ${POSTGRES_USER:-recharge_hub}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recharge_hub}
+      POSTGRES_DB: ${POSTGRES_DB:-recharge_hub}
     volumes:
       - pgdata:/var/lib/postgresql/data
     ports:
@@ -28,7 +29,7 @@ services:
       - "127.0.0.1:5432:5432"
     healthcheck:
       test:
-        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-orchestrator} -d ${POSTGRES_DB:-orchestrator}"]
+        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recharge_hub} -d ${POSTGRES_DB:-recharge_hub}"]
       interval: 5s
       timeout: 5s
       retries: 10

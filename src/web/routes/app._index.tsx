@@ -206,7 +206,7 @@ export default function Home() {
   );
 
   return (
-    <s-page heading="Fulfilment orchestrator">
+    <s-page heading="Recharge Hub">
       <s-stack direction="block" gap="large">
         {/*
          * Two things can be wrong at once and they are not the same thing:
