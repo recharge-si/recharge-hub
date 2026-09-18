@@ -1,6 +1,6 @@
 # Learn more about configuring your app at https://shopify.dev/docs/apps/tools/cli/configuration
 
-client_id = "77a669bae44e293ff5b59dc85783bc71"
+client_id = "c8278acae8662c0630fa3ece20955d05"
 name = "Recharge Hub"
 # Public origin of the deployed web process (Caddy, docs/development.md
 # § Production Compose). Must equal SHOPIFY_APP_URL and APP_DOMAIN on the
