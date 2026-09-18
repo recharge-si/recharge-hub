@@ -11,6 +11,7 @@ node_modules/
 
 # Local environment and logs
 .env
+/data/
 .env.*
 !.env.example
 *.log

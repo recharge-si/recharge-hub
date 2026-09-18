@@ -1,5 +1,11 @@
 # docs/BUILD_SPEC.md section 4: Docker Compose on one Linux VM.
 # `docker compose up` brings up a working system in one command (section 12).
+#
+# All persistent state lives under ./data next to this file (the database and
+# Caddy's certificates), so backing up or moving the deployment is a matter of
+# copying the checkout directory. The `Z` mount option relabels the directories
+# for SELinux, which AlmaLinux/RHEL enforce by default; without it Postgres
+# cannot write its own data directory. It is a no-op where SELinux is absent.
 
 name: recharge-hub
 
@@ -22,7 +28,7 @@ services:
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recharge_hub}
       POSTGRES_DB: ${POSTGRES_DB:-recharge_hub}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ./data/postgres:/var/lib/postgresql/data:Z
     ports:
       # Bound to loopback so `npm run dev` on the host can reach it. Not exposed
       # off the machine, in production or anywhere else.
@@ -76,14 +82,9 @@ services:
     environment:
       APP_DOMAIN: ${APP_DOMAIN:-localhost}
     volumes:
-      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy_data:/data
-      - caddy_config:/config
+      - ./ops/Caddyfile:/etc/caddy/Caddyfile:ro,Z
+      - ./data/caddy/data:/data:Z
+      - ./data/caddy/config:/config:Z
     depends_on:
       - web
     restart: unless-stopped
-
-volumes:
-  pgdata:
-  caddy_data:
-  caddy_config:

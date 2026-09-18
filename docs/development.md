@@ -16,9 +16,12 @@ company described in `docs/metakocka-verification.md`.
 ```bash
 npm install
 cp .env.example .env
-docker compose up -d postgres
+docker compose -f docker-compose.dev.yml up -d postgres
 npm run setup
 ```
+
+`docker-compose.yml` is the production stack; local development only needs the
+database from `docker-compose.dev.yml`.
 
 PowerShell equivalent for the copy:
 
@@ -174,17 +177,17 @@ docker compose exec postgres psql -U recharge_hub -d recharge_hub \
 The worker recreates it on next start. Sessions go with the schema, so the app
 re-authenticates the next time it is opened in the Shopify admin.
 
-**Everything, including the container's disk.** Removes the `pgdata` volume, so
-nothing at all survives — schema, pgboss, and any manual state:
+**Everything, including the container's disk.** Removes the `pgdata_dev`
+volume, so nothing at all survives — schema, pgboss, and any manual state:
 
 ```bash
-docker compose down -v
-docker compose up -d postgres
+docker compose -f docker-compose.dev.yml down -v
+docker compose -f docker-compose.dev.yml up -d postgres
 npx prisma migrate deploy
 ```
 
-`down -v` also removes the Caddy volumes, which means a new TLS certificate on
-next start. Harmless locally; do not run it against anything shared.
+Do not run this against the production stack: there the database is a bind
+mount under `data/postgres` and is not removed by `down -v` in any case.
 
 Most tests use mocked boundaries. The concurrency-sensitive guards are the
 exception and run against a real database under `tests/db/` — see Validation
@@ -276,7 +279,7 @@ a visible reason when neither is reachable**, so a checkout with no Compose
 stack still passes. Start the database first to include it:
 
 ```bash
-docker compose up -d postgres
+docker compose -f docker-compose.dev.yml up -d postgres
 npx prisma migrate deploy
 npx vitest run
 ```
@@ -318,14 +321,29 @@ pushes both.
 
 ### Server
 
-Once: install Docker, point DNS at the VM, open ports 80 and 443, clone the
-repository (Compose needs `docker-compose.yml` and `ops/Caddyfile`), and copy
-`.env.example` to `.env`. Set `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`,
-`SHOPIFY_APP_URL`, `APP_DOMAIN` (the public hostname), a strong
-`POSTGRES_PASSWORD`, and `ENCRYPTION_KEY`. Keep a copy of `ENCRYPTION_KEY`
-somewhere safe: without it the stored MetaKocka secrets cannot be read.
+Once: install Docker, point DNS at the VM, open ports 80 and 443, and clone the
+repository (Compose needs `docker-compose.yml` and `ops/Caddyfile`). The
+production checkout lives at `/data/stack/apps/recharge-hub`; everything the
+stack persists is written under `data/` inside it — `data/postgres` is the
+database, `data/caddy` holds the TLS certificates — so the checkout directory
+is the whole deployment.
 
 ```bash
+sudo mkdir -p /data/stack/apps
+sudo chown "$USER" /data/stack/apps
+git clone <repository> /data/stack/apps/recharge-hub
+cd /data/stack/apps/recharge-hub
+mkdir -p data/postgres data/caddy/data data/caddy/config
+cp .env.example .env
+```
+
+Set `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `APP_DOMAIN`
+(the public hostname), a strong `POSTGRES_PASSWORD`, and `ENCRYPTION_KEY` in
+`.env`. Keep a copy of `ENCRYPTION_KEY` somewhere safe: without it the stored
+MetaKocka secrets cannot be read.
+
+```bash
+docker compose config --quiet   # validates the file and .env
 docker compose pull
 docker compose up -d
 ```
@@ -333,6 +351,14 @@ docker compose up -d
 Compose runs one migration container, then starts `web`, `worker`, PostgreSQL,
 and Caddy. Caddy is the only ingress and obtains the certificate itself;
 `/healthz` checks PostgreSQL and the queue without calling MetaKocka.
+
+The bind mounts carry the `Z` SELinux label, which AlmaLinux and RHEL need for
+containers to write host directories. Back up the database with `pg_dump`, not
+by copying `data/postgres` while it runs:
+
+```bash
+docker compose exec postgres pg_dump -U recharge_hub -Fc recharge_hub > backup.dump
+```
 
 Each release is the same two commands. To run a non-`latest` tag, set
 `APP_IMAGE=time4action/recharge-hub:dev` in `.env`.
