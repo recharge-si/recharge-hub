@@ -9,15 +9,18 @@ import {
 
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { AppBridgeNavigation } from "~/web/components/app-bridge-navigation";
+import { APP_NAV } from "~/web/lib/navigation";
 import { describeStaleSessionError } from "~/web/lib/route-errors";
 
 /**
  * Everything under /app is embedded in the Shopify admin and authenticated by
  * token exchange (CLAUDE.md section 2.2).
  *
- * The nav deliberately has no item pointing at the app home. BFS rejects "a
- * separate navigation item in addition to the app name that redirects to the
- * app's homepage": the app name in the admin nav is that link.
+ * The nav deliberately has no visible item pointing at the app home. BFS
+ * rejects "a separate navigation item in addition to the app name that
+ * redirects to the app's homepage": the app name in the admin nav is that
+ * link. What the nav does carry is a hidden `rel="home"` entry naming `/app`
+ * as the route that name opens — see `web/lib/navigation`.
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   await authenticate.admin(request);
@@ -40,11 +43,15 @@ export default function AppLayout() {
        * (section 2.6).
        */}
       <s-app-nav>
-        <s-link href="/app/orders">Orders</s-link>
-        <s-link href="/app/exceptions">Needs attention</s-link>
-        <s-link href="/app/products">Products</s-link>
-        <s-link href="/app/locations">Locations</s-link>
-        <s-link href="/app/settings">Settings</s-link>
+        {APP_NAV.map((item) => (
+          <s-link
+            key={item.href}
+            href={item.href}
+            {...(item.rel ? { rel: item.rel } : {})}
+          >
+            {item.label}
+          </s-link>
+        ))}
       </s-app-nav>
       <Outlet />
     </>
