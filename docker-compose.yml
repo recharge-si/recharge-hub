@@ -55,7 +55,7 @@ services:
     <<: *app
     command: ["npm", "run", "start"]
     expose:
-      - "3000"
+      - "3192"
     depends_on:
       migrate:
         condition: service_completed_successfully
@@ -75,6 +75,9 @@ services:
         condition: service_completed_successfully
 
   caddy:
+    # Opt-in: `docker compose --profile caddy up -d` on a VM where nothing else
+    # owns ports 80/443. With a host nginx, leave it off.
+    profiles: ["caddy"]
     image: caddy:2-alpine
     ports:
       - "80:80"

@@ -321,26 +321,25 @@ pushes both.
 
 ### Server
 
-Once: install Docker, point DNS at the VM, open ports 80 and 443, and clone the
-repository (Compose needs `docker-compose.yml` and `ops/Caddyfile`). The
+Once: install Docker, point DNS at the VM, and clone the repository. The
 production checkout lives at `/data/stack/apps/recharge-hub`; everything the
 stack persists is written under `data/` inside it — `data/postgres` is the
-database, `data/caddy` holds the TLS certificates — so the checkout directory
-is the whole deployment.
+database — so the checkout directory is the whole deployment.
 
 ```bash
 sudo mkdir -p /data/stack/apps
 sudo chown "$USER" /data/stack/apps
 git clone <repository> /data/stack/apps/recharge-hub
 cd /data/stack/apps/recharge-hub
-mkdir -p data/postgres data/caddy/data data/caddy/config
+mkdir -p data/postgres
 cp .env.example .env
 ```
 
-Set `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, `APP_DOMAIN`
-(the public hostname), a strong `POSTGRES_PASSWORD`, and `ENCRYPTION_KEY` in
-`.env`. Keep a copy of `ENCRYPTION_KEY` somewhere safe: without it the stored
-MetaKocka secrets cannot be read.
+Set `SHOPIFY_API_KEY`, `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL`, a strong
+`POSTGRES_PASSWORD`, and `ENCRYPTION_KEY` in `.env`; `WEB_PORT` (default
+`3192`) is the loopback port the web container is published on. Keep a copy of
+`ENCRYPTION_KEY` somewhere safe: without it the stored MetaKocka secrets cannot
+be read.
 
 ```bash
 docker compose config --quiet   # validates the file and .env
@@ -348,9 +347,10 @@ docker compose pull
 docker compose up -d
 ```
 
-Compose runs one migration container, then starts `web`, `worker`, PostgreSQL,
-and Caddy. Caddy is the only ingress and obtains the certificate itself;
-`/healthz` checks PostgreSQL and the queue without calling MetaKocka.
+Compose runs one migration container, then starts `web`, `worker`, and
+PostgreSQL. `web` listens on `127.0.0.1:${WEB_PORT}` only; the host's nginx
+terminates TLS and proxies to it. `/healthz` checks PostgreSQL and the queue
+without calling MetaKocka.
 
 The bind mounts carry the `Z` SELinux label, which AlmaLinux and RHEL need for
 containers to write host directories. Back up the database with `pg_dump`, not
@@ -360,8 +360,32 @@ by copying `data/postgres` while it runs:
 docker compose exec postgres pg_dump -U recharge_hub -Fc recharge_hub > backup.dump
 ```
 
-Each release is the same two commands. To run a non-`latest` tag, set
-`APP_IMAGE=time4action/recharge-hub:dev` in `.env`.
+#### nginx
+
+`ops/nginx/recharge-hub.conf` is the site file: HTTP redirects to HTTPS, HTTPS
+proxies to the `WEB_PORT` upstream with `X-Forwarded-Proto` set. It adds no
+frame headers of its own because the app emits the Shopify
+`frame-ancestors` policy per request.
+
+```bash
+sudo dnf install -y nginx certbot python3-certbot-nginx   # EPEL
+sudo systemctl enable --now nginx
+sudo setsebool -P httpd_can_network_connect 1             # SELinux: let nginx reach 127.0.0.1:3192
+sudo firewall-cmd --permanent --add-service=http --add-service=https && sudo firewall-cmd --reload
+sudo certbot certonly --nginx -d recharge-hub.time-4-action.com
+sudo cp ops/nginx/recharge-hub.conf /etc/nginx/conf.d/
+sudo nginx -t && sudo systemctl reload nginx
+```
+
+Certbot's systemd timer renews the certificate; nginx reloads through the
+certbot nginx plugin hook.
+
+#### Caddy instead of nginx
+
+On a VM with nothing on ports 80/443, `docker compose --profile caddy up -d`
+adds Caddy as the ingress: it obtains the certificate for `APP_DOMAIN` itself
+and stores it under `data/caddy`. Create `data/caddy/data` and
+`data/caddy/config` first. Do not run both.
 
 `shopify.app.toml` must carry the deployed origin in `application_url` and
 `auth.redirect_urls`; run `npm run deploy` after changing it so webhooks are
