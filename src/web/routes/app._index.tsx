@@ -5,22 +5,31 @@ import {
   type LoaderFunctionArgs,
 } from "react-router";
 
+import { getCatalogueState } from "~/adapters/db/repositories/catalogue.server";
 import { getDashboard } from "~/adapters/db/repositories/dashboard.server";
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
 import { listExceptions } from "~/adapters/db/repositories/exception.server";
+import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
 import { getReadiness } from "~/adapters/db/repositories/readiness.server";
+import {
+  countVariantStatesFor,
+  listCampaigns,
+} from "~/adapters/db/repositories/sale-campaign.server";
 import { ensureShop, findShop } from "~/adapters/db/repositories/shop.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { componentOf } from "~/domain/readiness";
 import { DistributionBars } from "~/web/components/distribution-bars";
+import { HomeStatus, type StatusRow } from "~/web/components/home-status";
 import { OrderChart } from "~/web/components/order-chart";
 import { ReadinessList } from "~/web/components/readiness-list";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { SetupBanner } from "~/web/components/setup-banner";
 import { describeEvent } from "~/web/lib/activity";
 import { exceptionAction } from "~/web/lib/exceptions";
+import { ago, modulesOn, salesOverview } from "~/web/lib/home";
 import { principalFromSession } from "~/web/lib/principal.server";
 import { redirectWithin } from "~/web/lib/redirects";
+import { describeDiscount, formatInZone } from "~/web/lib/sales";
 
 /**
  * The operations dashboard.
@@ -29,19 +38,22 @@ import { redirectWithin } from "~/web/lib/redirects";
  * Built for Shopify: the home page has to be dynamic and diagnostic, and it has
  * to answer four questions within seconds of being opened.
  *
- *  1. **Is everything working?** The health block at the top, from the one
- *     shared readiness model (`domain/readiness`) rather than from this page's
- *     own idea of "configured".
- *  2. **What has happened today?** The metric row, and the two charts under it.
- *  3. **Does anything need me?** Needs attention, with a button per row that
- *     goes somewhere the merchant can actually fix it.
- *  4. **When did the systems last talk?** The two timestamps in the health
- *     block.
+ *  1. **Does anything need me?** Needs attention, first in the main column
+ *     when there is anything in it, with a button per row that goes somewhere
+ *     the merchant can actually fix it.
+ *  2. **What has happened today?** One row of figures, one per thing this
+ *     shop has switched on, and the orders chart under it for a shop that
+ *     sends orders.
+ *  3. **What is on sale?** The live campaigns and the next one due.
+ *  4. **Is everything working, and when did it last run?** The status card
+ *     in the sidebar, from the one shared readiness model
+ *     (`domain/readiness`) with each part's last run beside it.
  *
- * Healthy is calm. There are no green banners on this page: colour marks
- * exceptions (docs/ui-conventions.md), so a shop with nothing wrong sees
- * numbers and neutral badges, and the one thing that is wrong is the loudest
- * element on the screen.
+ * Only what is switched on is shown (`web/lib/home`): a shop that does not
+ * send orders sees no order figures, no order chart and no "orders last
+ * checked", because a true number about a thing that is off is still noise.
+ * Healthy is calm: no green banners, neutral text for what works, and the one
+ * thing that is wrong is the loudest element on the screen.
  *
  * Everything is read from our own database and server rendered. Section 2.5
  * forbids a page load awaiting MetaKocka, and this is the page most likely to
@@ -76,12 +88,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     }
   }
 
-  const [dashboard, events, readiness, exceptions] = await Promise.all([
-    getDashboard(principal, new Date()),
+  const now = new Date();
+  const [
+    dashboard,
+    events,
+    readiness,
+    exceptions,
+    campaigns,
+    catalogue,
+    productSync,
+  ] = await Promise.all([
+    getDashboard(principal, now),
     recentEvents(principal, 8),
     getReadiness(principal),
     listExceptions(principal, { status: "open", limit: 5 }),
+    listCampaigns(principal),
+    getCatalogueState(principal),
+    getProductSyncSetting(principal),
   ]);
+  const campaignCounts = await countVariantStatesFor(
+    campaigns.map((campaign) => campaign.id),
+  );
 
   return {
     dashboard,
@@ -111,20 +138,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         ok: described.ok,
       };
     }),
+    sales: salesOverview(
+      campaigns.map((campaign) => ({
+        id: campaign.id,
+        name: campaign.name,
+        status: campaign.status,
+        discount: describeDiscount(
+          { type: campaign.discountType, value: campaign.discountValue },
+          campaign.currency,
+        ),
+        startsAt: campaign.startsAt?.toISOString() ?? null,
+        endsAt: campaign.endsAt?.toISOString() ?? null,
+        counts: campaignCounts.get(campaign.id) ?? {},
+      })),
+    ),
+    timeZone: catalogue.ianaTimezone ?? "UTC",
+    productSync: {
+      enabled: productSync.enabled,
+      scheduled: productSync.scheduleEnabled,
+      lastRunAt: productSync.lastRunAt?.toISOString() ?? null,
+    },
   };
 };
-
-/** How long ago, in the words a person would use. */
-function ago(iso: string | null): string {
-  if (!iso) return "never";
-  const minutes = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes} min ago`;
-  const hours = Math.round(minutes / 60);
-  if (hours < 24) return `${hours} ${hours === 1 ? "hour" : "hours"} ago`;
-  const days = Math.round(hours / 24);
-  return `${days} ${days === 1 ? "day" : "days"} ago`;
-}
 
 /**
  * One number and what it means. Fixed block size so the row does not reflow as
@@ -133,31 +168,28 @@ function ago(iso: string | null): string {
 function Metric({
   label,
   value,
-  tone,
   note,
+  critical,
 }: {
   label: string;
   value: number | string;
-  tone?: "critical";
   note?: string;
+  critical?: boolean;
 }) {
   return (
     <s-box
-      padding="base"
+      padding="small-100"
       borderWidth="base"
       borderStyle="solid"
       borderColor="subdued"
       borderRadius="base"
-      minBlockSize="104px"
+      minBlockSize="88px"
     >
-      <s-stack direction="block" gap="small-300">
+      <s-stack direction="block" gap="small-500">
         <s-text color="subdued">{label}</s-text>
         <s-heading>{String(value)}</s-heading>
         {note ? (
-          <s-text
-            color="subdued"
-            tone={tone === "critical" ? "caution" : "auto"}
-          >
+          <s-text color="subdued" tone={critical ? "critical" : "auto"}>
             {note}
           </s-text>
         ) : null}
@@ -166,31 +198,16 @@ function Metric({
   );
 }
 
-/** One line of the health block: what it is, and one word for how it is. */
-function HealthRow({
-  title,
-  summary,
-  critical,
-}: {
-  title: string;
-  summary: string;
-  critical: boolean;
-}) {
-  return (
-    <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="center">
-      <s-text>{title}</s-text>
-      {critical ? (
-        <s-badge tone="critical">Needs attention</s-badge>
-      ) : (
-        <s-text color="subdued">{summary}</s-text>
-      )}
-    </s-grid>
-  );
-}
-
 export default function Home() {
-  const { dashboard, readiness, attention, events } =
-    useLoaderData<typeof loader>();
+  const {
+    dashboard,
+    readiness,
+    attention,
+    events,
+    sales,
+    timeZone,
+    productSync,
+  } = useLoaderData<typeof loader>();
 
   const { counts, series, warehouseShares, splitOrders, unsplit, windowDays } =
     dashboard;
@@ -198,17 +215,127 @@ export default function Home() {
     (sum, entry) => sum + entry.count,
     0,
   );
-
-  const health = readiness.components.filter((component) =>
-    ["metakocka", "orders", "stock", "payments"].includes(component.key),
-  );
+  const on = modulesOn(readiness.components);
+  const component = (key: (typeof readiness.components)[number]["key"]) =>
+    readiness.components.find((entry) => entry.key === key) ?? null;
   const problems = readiness.components.filter(
-    (component) => component.status === "needs_attention",
+    (entry) => entry.status === "needs_attention",
   );
+  const n = (value: number) => value.toLocaleString("en");
+
+  /* The status card: each part of the integration, with its last run. */
+  const rows: StatusRow[] = [];
+  const push = (
+    key: Parameters<typeof component>[0],
+    lastRun: StatusRow["lastRun"] = null,
+  ) => {
+    const entry = component(key);
+    if (!entry) return;
+    rows.push({
+      key,
+      title: entry.title,
+      status: entry.status,
+      summary: entry.summary,
+      lastRun: entry.status === "disabled" ? null : lastRun,
+      action: entry.action,
+    });
+  };
+  push("metakocka", {
+    text: `Last write ${ago(dashboard.lastMetakockaWriteAt)}`,
+  });
+  push("orders", { text: `Checked ${ago(dashboard.lastOrderSyncAt)}` });
+  if (on.has("orders")) push("payments");
+  push("stock", {
+    text:
+      dashboard.lastStockSyncOk === false
+        ? `Last run failed, ${ago(dashboard.lastStockSyncAt)}`
+        : `Synced ${ago(dashboard.lastStockSyncAt)}`,
+    failed: dashboard.lastStockSyncOk === false,
+  });
+  if (on.has("orders")) push("taxes");
+  const products = component("products");
+  if (products) {
+    rows.push({
+      key: "products",
+      title: "Product names",
+      status: productSync.enabled ? products.status : "disabled",
+      summary: productSync.enabled ? products.summary : "Not written",
+      lastRun: productSync.enabled
+        ? {
+            text: `${productSync.scheduled ? "Synced" : "Last synced by hand"} ${ago(productSync.lastRunAt)}`,
+          }
+        : null,
+      action: products.action,
+    });
+  }
+  rows.push({
+    key: "sales",
+    title: "Sales",
+    status:
+      sales.failed > 0 || sales.needsDecision > 0 ? "needs_attention" : "info",
+    summary:
+      sales.active.length > 0
+        ? `${n(sales.active.length)} ${sales.active.length === 1 ? "campaign" : "campaigns"} live, ${n(sales.onSale)} variants on sale`
+        : sales.next
+          ? `Next starts ${formatInZone(sales.next.startsAt, timeZone)}`
+          : "No campaign running",
+    lastRun:
+      sales.failed > 0
+        ? { text: `${n(sales.failed)} variants failed` }
+        : sales.needsDecision > 0
+          ? { text: `${n(sales.needsDecision)} variants need a decision` }
+          : null,
+    action: { label: "Open sales", href: "/app/sales" },
+  });
+
+  /* Today's figures: one per thing that is on. */
+  const metrics: Array<{
+    label: string;
+    value: number;
+    note?: string;
+    critical?: boolean;
+  }> = [];
+  if (on.has("orders")) {
+    metrics.push({ label: "Orders received", value: counts.receivedToday });
+    metrics.push({
+      label: "Sent to MetaKocka",
+      value: counts.writtenToday,
+      ...(counts.allocatedToday > counts.writtenToday
+        ? { note: `${counts.allocatedToday - counts.writtenToday} on the way` }
+        : {}),
+    });
+  }
+  if (on.has("payments")) {
+    metrics.push({
+      label: "Payments recorded",
+      value: counts.paymentsToday,
+      ...(dashboard.ordersAwaitingPayment > 0
+        ? {
+            note: `${dashboard.ordersAwaitingPayment} paid, not yet recorded`,
+            critical: true,
+          }
+        : {}),
+    });
+  }
+  if (on.has("stock")) {
+    metrics.push({
+      label: "Products restocked",
+      value: counts.stockUpdatesToday,
+    });
+  }
+  metrics.push({
+    label: "Variants on sale",
+    value: sales.onSale,
+    ...(sales.active.length > 0
+      ? {
+          note: `${n(sales.active.length)} ${sales.active.length === 1 ? "campaign" : "campaigns"}`,
+        }
+      : {}),
+  });
 
   return (
-    <s-page heading="Recharge Hub">
-      <s-stack direction="block" gap="large">
+    <s-page heading="Recharge Hub" inlineSize="base">
+      <s-stack direction="block" gap="base">
         {/*
          * Two things can be wrong at once and they are not the same thing:
          * setup was never finished, or it was and something has since stopped
@@ -231,98 +358,14 @@ export default function Home() {
           </s-banner>
         ) : null}
 
-        {/* --- Health ------------------------------------------------------ */}
-
-        <s-section heading="Integration">
-          <s-stack direction="block" gap="base">
-            <s-stack direction="block" gap="small-300">
-              {health.map((component) => (
-                <HealthRow
-                  key={component.key}
-                  title={component.title}
-                  summary={component.summary}
-                  critical={component.status === "needs_attention"}
-                />
-              ))}
-            </s-stack>
-
-            <s-divider />
-
-            <s-stack direction="block" gap="small-400">
-              <s-grid gridTemplateColumns="1fr auto" gap="base">
-                <s-text color="subdued">Last MetaKocka write</s-text>
-                <s-text color="subdued">
-                  {ago(dashboard.lastMetakockaWriteAt)}
-                </s-text>
-              </s-grid>
-              <s-grid gridTemplateColumns="1fr auto" gap="base">
-                <s-text color="subdued">Last stock sync</s-text>
-                <s-text
-                  color="subdued"
-                  tone={
-                    dashboard.lastStockSyncOk === false ? "caution" : "auto"
-                  }
-                >
-                  {ago(dashboard.lastStockSyncAt)}
-                </s-text>
-              </s-grid>
-              <s-grid gridTemplateColumns="1fr auto" gap="base">
-                <s-text color="subdued">Orders last checked</s-text>
-                <s-text color="subdued">
-                  {ago(dashboard.lastOrderSyncAt)}
-                </s-text>
-              </s-grid>
-            </s-stack>
-          </s-stack>
-        </s-section>
-
-        {/* --- Today ------------------------------------------------------- */}
-
-        <s-section heading="Today">
-          <s-stack direction="block" gap="base">
-            {/*
-             * Two columns on a phone rather than four squeezed ones. Section
-             * 2.6 requires 375px with no horizontal scroll, and a container
-             * query keeps that in the layout rather than in a media query
-             * about the whole viewport -- this card is not the whole viewport.
-             */}
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr 1fr"
-              gap="base"
-            >
-              <Metric label="Orders received" value={counts.receivedToday} />
-              <Metric
-                label="Sent to MetaKocka"
-                value={counts.writtenToday}
-                note={
-                  counts.allocatedToday > counts.writtenToday
-                    ? `${counts.allocatedToday - counts.writtenToday} still on the way`
-                    : undefined
-                }
-              />
-              <Metric label="Payments recorded" value={counts.paymentsToday} />
-              <Metric
-                label="Products restocked"
-                value={counts.stockUpdatesToday}
-              />
-            </s-grid>
-
-            {dashboard.ordersAwaitingPayment > 0 ? (
-              <s-text color="subdued" tone="caution">
-                {`${dashboard.ordersAwaitingPayment} ${dashboard.ordersAwaitingPayment === 1 ? "order is" : "orders are"} paid in Shopify and not yet recorded in MetaKocka.`}
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-section>
-
-        {/* --- Needs attention --------------------------------------------- */}
+        {/* --- Needs attention: first, because it is the one thing that needs a person. --- */}
 
         {attention.length > 0 ? (
           <s-section
             heading={`Needs attention${openExceptions > attention.length ? ` (${openExceptions})` : ""}`}
           >
-            <s-stack direction="block" gap="base">
-              {attention.map((entry) => {
+            <s-stack direction="block" gap="small-100">
+              {attention.map((entry, index) => {
                 const action = exceptionAction(entry.kind);
                 const href =
                   action?.href ??
@@ -330,76 +373,176 @@ export default function Home() {
                 const label = action?.label ?? "Review order";
 
                 return (
-                  <s-stack key={entry.id} direction="block" gap="small-400">
-                    <s-text type="strong">
-                      {entry.orderNumber
-                        ? `Order ${entry.orderNumber}`
-                        : "This store"}
-                    </s-text>
-                    <s-text color="subdued">{entry.message}</s-text>
-                    {href ? (
-                      <s-stack direction="inline" gap="small-300">
-                        <s-button variant="secondary" href={href}>
-                          {label}
-                        </s-button>
-                        {action && entry.orderId ? (
-                          <s-button
-                            variant="tertiary"
-                            href={`/app/orders/${entry.orderId}`}
-                          >
-                            Open order
-                          </s-button>
-                        ) : null}
+                  <s-stack key={entry.id} direction="block" gap="small-300">
+                    {index > 0 ? <s-divider /> : null}
+                    <s-grid
+                      gridTemplateColumns="@container (inline-size <= 560px) 1fr, 1fr auto"
+                      gap="small-300"
+                      alignItems="center"
+                      paddingBlock="small-400"
+                    >
+                      <s-stack direction="block" gap="small-500">
+                        <s-text type="strong">
+                          {entry.orderNumber
+                            ? `Order ${entry.orderNumber}`
+                            : "This store"}
+                        </s-text>
+                        <s-text color="subdued">{entry.message}</s-text>
                       </s-stack>
-                    ) : null}
+                      {href ? (
+                        <s-stack direction="inline" gap="small-300">
+                          <s-button variant="secondary" href={href}>
+                            {label}
+                          </s-button>
+                          {action && entry.orderId ? (
+                            <s-button
+                              variant="tertiary"
+                              href={`/app/orders/${entry.orderId}`}
+                            >
+                              Open order
+                            </s-button>
+                          ) : null}
+                        </s-stack>
+                      ) : null}
+                    </s-grid>
                   </s-stack>
                 );
               })}
-
-              {openExceptions > attention.length ? (
+              <s-divider />
+              <s-box paddingBlockStart="small-300">
                 <s-link href="/app/exceptions">
-                  {`See all ${openExceptions}`}
+                  {openExceptions > attention.length
+                    ? `See all ${openExceptions}`
+                    : "Go to Needs attention"}
                 </s-link>
-              ) : (
-                <s-link href="/app/exceptions">Go to Needs attention</s-link>
-              )}
+              </s-box>
             </s-stack>
           </s-section>
         ) : null}
 
-        {/* --- Charts ------------------------------------------------------ */}
+        {/* --- Today ------------------------------------------------------- */}
 
-        <s-section heading={`Orders over the last ${windowDays} days`}>
+        <s-section heading="Today">
+          {/*
+           * Two columns on a phone rather than four squeezed ones. Section
+           * 2.6 requires 375px with no horizontal scroll, and a container
+           * query keeps that in the layout rather than in a media query
+           * about the whole viewport -- this card is not the whole viewport.
+           */}
+          <s-grid
+            gridTemplateColumns={`@container (inline-size <= 560px) 1fr 1fr, ${metrics.map(() => "1fr").join(" ")}`}
+            gap="small-300"
+          >
+            {metrics.map((metric) => (
+              <Metric key={metric.label} {...metric} />
+            ))}
+          </s-grid>
+        </s-section>
+
+        {/* --- Sales ------------------------------------------------------- */}
+
+        <s-section heading="Sales">
           <s-stack direction="block" gap="base">
-            <OrderChart points={series} />
-            <s-link href="/app/orders">All orders</s-link>
+            {sales.active.length === 0 && !sales.next ? (
+              <s-text color="subdued">
+                {sales.total === 0
+                  ? "No sale campaigns yet. A campaign changes the prices of the products its rules match, and puts them back when it ends."
+                  : "No campaign is running or scheduled."}
+              </s-text>
+            ) : (
+              <s-stack direction="block" gap="small-300">
+                {sales.active.slice(0, 3).map((campaign, index) => (
+                  <s-stack key={campaign.id} direction="block" gap="small-300">
+                    {index > 0 ? <s-divider /> : null}
+                    <s-grid
+                      gridTemplateColumns="1fr auto"
+                      gap="small-300"
+                      alignItems="center"
+                    >
+                      <s-stack direction="block" gap="small-500">
+                        <s-link href={`/app/sales/${campaign.id}`}>
+                          {campaign.name}
+                        </s-link>
+                        <s-text color="subdued">
+                          {`${campaign.discount} · ${n(campaign.onSale)} variants on sale · ${campaign.endsAt ? `ends ${formatInZone(campaign.endsAt, timeZone)}` : "no end date"}`}
+                        </s-text>
+                      </s-stack>
+                      <s-badge tone="success">Live</s-badge>
+                    </s-grid>
+                  </s-stack>
+                ))}
+                {sales.next ? (
+                  <s-stack direction="block" gap="small-300">
+                    {sales.active.length > 0 ? <s-divider /> : null}
+                    <s-grid
+                      gridTemplateColumns="1fr auto"
+                      gap="small-300"
+                      alignItems="center"
+                    >
+                      <s-stack direction="block" gap="small-500">
+                        <s-link href={`/app/sales/${sales.next.id}`}>
+                          {sales.next.name}
+                        </s-link>
+                        <s-text color="subdued">
+                          {`${sales.next.discount} · starts ${formatInZone(sales.next.startsAt, timeZone)}`}
+                        </s-text>
+                      </s-stack>
+                      <s-badge tone="neutral">Scheduled</s-badge>
+                    </s-grid>
+                  </s-stack>
+                ) : null}
+              </s-stack>
+            )}
+            <s-stack direction="inline" gap="small-300" alignItems="center">
+              <s-button variant="secondary" href="/app/sales/new">
+                New sale
+              </s-button>
+              <s-link href="/app/sales">
+                {sales.total > 0
+                  ? `All campaigns (${n(sales.total)})`
+                  : "All campaigns"}
+              </s-link>
+            </s-stack>
           </s-stack>
         </s-section>
 
-        {/*
-         * A breakdown by warehouse, for a shop that has warehouses on its
-         * documents. One that writes a single sales order per Shopify order
-         * does not, and a chart of one bar labelled "Unknown warehouse" would
-         * be stating something untrue about their setup rather than saying
-         * nothing.
-         */}
-        {unsplit ? null : (
-          <s-section heading="Where orders were filed">
+        {/* --- Orders: only for a shop that sends them. -------------------- */}
+
+        {on.has("orders") ? (
+          <s-section heading={`Orders over the last ${windowDays} days`}>
             <s-stack direction="block" gap="base">
-              <DistributionBars
-                rows={warehouseShares}
-                unit="sales order"
-                empty={`No sales orders in the last ${windowDays} days.`}
-              />
-              {splitOrders > 0 ? (
-                <s-text color="subdued">
-                  {`${splitOrders} ${splitOrders === 1 ? "order was" : "orders were"} fulfilled from more than one warehouse, so ${splitOrders === 1 ? "it became" : "they became"} a sales order per warehouse.`}
-                </s-text>
+              <OrderChart points={series} />
+              {/*
+               * A breakdown by warehouse, for a shop that has warehouses on
+               * its documents. One that writes a single sales order per
+               * Shopify order does not, and a chart of one bar labelled
+               * "Unknown warehouse" would be stating something untrue about
+               * their setup rather than saying nothing.
+               */}
+              {!unsplit && warehouseShares.length > 0 ? (
+                <s-stack direction="block" gap="small-300">
+                  <s-divider />
+                  <s-text type="strong">Where orders were filed</s-text>
+                  <DistributionBars
+                    rows={warehouseShares}
+                    unit="sales order"
+                    empty={`No sales orders in the last ${windowDays} days.`}
+                  />
+                  {splitOrders > 0 ? (
+                    <s-text color="subdued">
+                      {`${splitOrders} ${splitOrders === 1 ? "order was" : "orders were"} fulfilled from more than one warehouse, so ${splitOrders === 1 ? "it became" : "they became"} a sales order per warehouse.`}
+                    </s-text>
+                  ) : null}
+                </s-stack>
               ) : null}
+              <s-link href="/app/orders">All orders</s-link>
             </s-stack>
           </s-section>
-        )}
+        ) : null}
+      </s-stack>
 
+      <s-stack slot="aside" direction="block" gap="base">
+        <HomeStatus rows={rows} />
         <s-section heading="Recent activity">
           <RecentActivity
             items={events}
