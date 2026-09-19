@@ -52,7 +52,15 @@ export async function ensureQueues(boss: PgBoss): Promise<void> {
   for (const name of ALL_QUEUES) {
     const options = QUEUE_DEFINITIONS[name];
     await boss.createQueue(name, options);
-    await boss.updateQueue(name, options);
+    /*
+     * A queue that names a policy (the sale campaign queues, created with
+     * `short` so a `singletonKey` actually dedupes) still needs its retry
+     * settings pushed, but `updateQueue` throws the moment `policy` is
+     * present in its options — even unchanged. So the policy is used at
+     * creation and dropped here.
+     */
+    const { policy: _policy, ...updatable } = options;
+    await boss.updateQueue(name, updatable);
   }
 }
 

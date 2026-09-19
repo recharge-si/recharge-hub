@@ -33,8 +33,8 @@ Caddy is the only production ingress and proxies to the web process.
 
 | Area            | Responsibility                                                                             | May depend on                   |
 | --------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
-| `src/domain/`   | Pure allocation, money, order-state, product-template, and supply-default rules            | Domain only                     |
-| `src/adapters/` | External boundaries: Shopify, MetaKocka, Prisma, queues, crypto, logs, Sentry, environment | Domain                          |
+| `src/domain/`   | Pure allocation, money, order-state, product-template, supply-default, tax and sale rules  | Domain only                     |
+| `src/adapters/` | External boundaries: Shopify, MetaKocka, Prisma, queues, crypto, logs, Sentry, environment; `adapters/sales/` is the sale-campaign service layer both web and jobs call | Domain |
 | `src/jobs/`     | Application orchestration and pg-boss handlers                                             | Domain and adapters             |
 | `src/web/`      | React Router loaders/actions, webhook endpoints, and embedded UI                           | Domain and adapters, never jobs |
 
@@ -44,7 +44,7 @@ randomness; callers inject time and inputs.
 
 ## Merchant-facing shape
 
-Five areas in `s-app-nav`, each a job rather than a table. Every settings page
+Six areas in `s-app-nav`, each a job rather than a table. Every settings page
 lives with the thing it configures, so nothing in the navigation is a database
 name:
 
@@ -52,7 +52,10 @@ name:
 Home              /app                  operations dashboard
 Orders            /app/orders           list, and /app/orders/settings
 Needs attention   /app/exceptions
-Products          /app/products         status, and /app/products/sync for settings
+Products          /app/products         status, /app/products/sync for settings,
+                                        and /app/products/:id — one product as a sale sees it
+Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
+                                        /app/sales/:id/variants every variant it touches
 Locations         /app/locations        how stock is going, and
                                         /app/locations/settings for the mappings,
                                         the defaults and the profit centres
@@ -481,6 +484,29 @@ ownership exists to prevent. The documented risk of leaving a warehouse out
 — that it is emptied — has never been observed and is announced by
 `stock_remove_list` if it happens (T-16, T-20 in `docs/project-status.md`).
 
+### Sale campaigns
+
+Visible storefront sales made by writing Shopify's own variant `price` and
+`compareAtPrice`, with a snapshot of both kept until they are put back. Never a
+Shopify discount. The whole design — schema, state machine, rule evaluation,
+conflicts, scheduler, idempotency, Markets limits — is `docs/sale-campaigns.md`;
+the short map is:
+
+```text
+/app/sales editor ── preview (DB only) ── activate
+  → adapters/sales/lifecycle: evaluate rules over catalog_* → stage rows → sale-campaign-run
+  → adapters/sales/writer: claim batch → read live → decide → productVariantsBulkUpdate → record
+sale-campaign-scheduler (every minute): starts_at / ends_at
+products/update, products/delete → sale-product-event: external change, dynamic membership
+catalogue-snapshot: bulkOperationRunQuery → JSONL → catalog_product / catalog_variant
+```
+
+Three safety boundaries hold it together: a partial unique index gives a
+variant one live owner across campaigns; every batch is claimed by conditional
+update and read live before it is written, so a retry never discounts twice;
+and a restore writes only over what the campaign itself wrote, sending anything
+else to a `review` row and a `sale_price_conflict` exception.
+
 ### Catalogue and product names
 
 - `sync-catalogue` reads Shopify variants and MetaKocka products into the SKU
@@ -496,9 +522,22 @@ ownership exists to prevent. The documented risk of leaving a warehouse out
 
 - every 5 minutes: inventory sync;
 - every 15 minutes: warehouse refresh, Shopify order reconciliation, exception
-  re-check, and due merchant-scheduled catalogue work;
+  re-check, due merchant-scheduled catalogue work, and the catalogue snapshot
+  for shops with a scheduled or dynamic sale campaign;
 - hourly: MetaKocka document read-back;
-- nightly: payment/profit-centre/pricelist refresh and PII retention.
+- nightly: payment/profit-centre/pricelist refresh, the catalogue snapshot for
+  every shop, and PII retention.
+
+The sale campaign scheduler is a fifth cron entry of its own, every minute on
+the `sale-campaign-scheduler` queue, because a sale that starts at midnight
+starts at midnight.
+
+**`singletonKey` only dedupes on a queue with a policy.** pg-boss's default
+`standard` policy has no unique index on the key, so a bare `singletonKey`
+(no window) is accepted and ignored. The four sale queues are created with
+`policy: "short"` so their keys hold; the older queues rely on
+`enqueueThrottled` (a window, which is enforced everywhere) or on the
+idempotency table (`docs/project-status.md` T-24).
 
 Jobs that exhaust retries generally dead-letter into a merchant-visible
 exception. Schedule/register jobs rely on the next cadence and Sentry instead.
@@ -524,7 +563,12 @@ history under `prisma/migrations/`. Major groups are:
   OSS, `config_version`), `VatRegistration`, `CountryVatRate` (merchant rows
   over the shipped reference), `TaxMapping` (rate → `tax_factor`),
   `TaxOverride`, and `OrderTaxSnapshot` (the decision, the configuration it
-  was made under, refund reversals, frozen once written).
+  was made under, refund reversals, frozen once written);
+- sales: `SaleCampaign`, `SaleCampaignVariant` (the price snapshot and where
+  each variant is; one live owner per variant by partial unique index),
+  `SaleRun`; the catalogue snapshot `CatalogProduct`, `CatalogVariant`,
+  `CatalogPriceList`, with `shop.catalogue_snapshot_at` and the bulk
+  operation in flight.
 
 Most tables are tenant-owned through `shopId`. The current repository-layer
 enforcement gap is tracked in `docs/project-status.md`.
@@ -540,6 +584,7 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Order reconciliation rule      | `src/domain/orders/` and `src/jobs/orders/`, then `reconcile-order`          |
 | Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
 | Tax rule, treatment or mapping | `src/domain/tax/`, then `src/jobs/orders/tax-decider.ts`; screens under `app.settings.taxes.*` |
+| Sale pricing, rule or conflict rule | `src/domain/sales/`; the write path is `src/adapters/sales/writer.server.ts`; screens under `app.sales.*` |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
 | What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |

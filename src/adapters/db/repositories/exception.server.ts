@@ -262,3 +262,25 @@ export async function closeExceptionsFor(
     data: { status: "resolved", resolvedBy: "app", resolvedAt: new Date() },
   });
 }
+
+/**
+ * Closes the open exception for one condition by its dedupe key — what a
+ * sale campaign does when a person has decided a price conflict.
+ */
+export async function resolveExceptionByKey(
+  principal: Principal,
+  kind: ExceptionKind,
+  dedupeKey: string,
+  by: string,
+  now: Date,
+): Promise<void> {
+  await prisma.exception.updateMany({
+    where: {
+      shop: { domain: shopDomainOf(principal) },
+      kind,
+      dedupeKey,
+      status: "open",
+    },
+    data: { status: "resolved", resolvedBy: by, resolvedAt: now },
+  });
+}

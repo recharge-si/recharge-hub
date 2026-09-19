@@ -82,9 +82,26 @@ api_version = "2026-07"
   topics = [ "orders/delete" ]
   uri = "/webhooks/orders/delete"
 
+  # Sale campaigns (docs/sale-campaigns.md). A product's price changing
+  # under an active campaign — an ERP sync, a person in the admin — is
+  # detected from here, and a product joining or leaving a dynamic campaign
+  # is noticed from here. The app's own price writes come back through this
+  # topic too and are recognised as its own.
+  [[webhooks.subscriptions]]
+  topics = [ "products/update" ]
+  uri = "/webhooks/products/update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "products/delete" ]
+  uri = "/webhooks/products/delete"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
-scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders"
+# `read_discounts` is for one warning only: a sale campaign's preview names
+# the automatic discounts Shopify would apply at checkout on top of the
+# catalogue price (docs/sale-campaigns.md § Required scopes). Until the
+# merchant approves it the preview says "not checked" and nothing else changes.
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_discounts"
 use_legacy_install_flow = false
 
 [auth]

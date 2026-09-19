@@ -53,3 +53,17 @@ export async function recentEvents(principal: Principal, limit = 20) {
     take: limit,
   });
 }
+
+/** The trail of one entity — a campaign, a variant — newest first. */
+export async function eventsForEntity(
+  principal: Principal,
+  entityType: string,
+  entityId: string,
+  limit = 50,
+) {
+  return prisma.eventLog.findMany({
+    where: { shop: { domain: shopDomainOf(principal) }, entityType, entityId },
+    orderBy: { at: "desc" },
+    take: limit,
+  });
+}

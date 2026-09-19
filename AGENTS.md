@@ -16,6 +16,8 @@ documentation, or Git—not only in a conversation.
   deployment instructions.
 - `docs/project-status.md` owns known gaps, open decisions, and technical debt.
 - `docs/ui-conventions.md` owns merchant-facing UI and terminology conventions.
+- `docs/sale-campaigns.md` owns the sale campaign module: schema, state
+  machine, price snapshot and restore, conflicts, scheduler and known limits.
 - Code and tests define implemented behavior. Git records historical behavior.
 - `docs/agent/HANDOFF.md`, when present, is the concise state of substantial
   unfinished work. It is not a permanent backlog.

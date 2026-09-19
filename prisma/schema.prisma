@@ -100,6 +100,17 @@ model Shop {
   /// mean starting again. Pure UI state: it decides nothing.
   setupStep String? @map("setup_step")
 
+  /// The catalogue snapshot (docs/sale-campaigns.md): when it was last read
+  /// whole, and the bulk operation reading it now, if one is.
+  catalogueSnapshotAt      DateTime? @map("catalogue_snapshot_at")
+  catalogueBulkOperationId String?   @map("catalogue_bulk_operation_id")
+  catalogueBulkStartedAt   DateTime? @map("catalogue_bulk_started_at")
+  /// Shopify's `shop.ianaTimezone` and currency, cached by the snapshot so a
+  /// schedule can be shown in the merchant's own time without a page load
+  /// asking Shopify.
+  ianaTimezone             String?   @map("iana_timezone")
+  currencyCode             String?   @map("currency_code")
+
   eventLogs              EventLog[]
   metakockaCredential    MetakockaCredential?
   supplySources          SupplySource[]
@@ -124,6 +135,12 @@ model Shop {
   taxMappings            TaxMapping[]
   taxOverrides           TaxOverride[]
   orderTaxSnapshots      OrderTaxSnapshot[]
+  saleCampaigns          SaleCampaign[]
+  saleCampaignVariants   SaleCampaignVariant[]
+  saleRuns               SaleRun[]
+  catalogProducts        CatalogProduct[]
+  catalogVariants        CatalogVariant[]
+  catalogPriceLists      CatalogPriceList[]
 
   @@map("shop")
 }
@@ -1369,6 +1386,13 @@ enum ExceptionKind {
   tax_data_insufficient
   /// Shopify charged a destination rate this configuration has no registration for.
   vat_registration_configuration_error
+  /// An owned variant's price was changed by something other than this app
+  /// while its campaign is active, and the policy says a person decides.
+  sale_price_conflict
+  /// A campaign could not write some of its variants after retries.
+  sale_apply_failed
+  /// A campaign could not restore some of its variants after retries.
+  sale_restore_failed
 
   @@map("exception_kind")
 }
@@ -1876,4 +1900,327 @@ model OrderTaxSnapshot {
   @@index([shopId, decidedAt])
   @@index([shopId, ok])
   @@map("order_tax_snapshot")
+}
+
+/**
+ * --------------------------------------------------------------------------
+ */
+/**
+ * Sale campaigns (docs/sale-campaigns.md)
+ */
+/**
+ * --------------------------------------------------------------------------
+ */
+
+enum SaleCampaignStatus {
+  draft
+  scheduled
+  active
+  paused
+  completed
+  cancelled
+
+  @@map("sale_campaign_status")
+}
+
+enum SaleDiscountType {
+  percentage
+  fixed_amount
+  fixed_price
+
+  @@map("sale_discount_type")
+}
+
+/// How a computed sale price is rounded. `increment` uses
+/// `rounding_increment_minor`; the named endings are the merchant's usual
+/// price points (docs/sale-campaigns.md § Discount calculation).
+enum SaleRounding {
+  none
+  nearest_whole
+  ending_99
+  ending_9
+  ending_99_99
+  increment
+
+  @@map("sale_rounding")
+}
+
+/// What to do with a variant whose compare-at is already above its price.
+enum SaleExistingSalePolicy {
+  skip
+  discount_selling_price
+  discount_compare_at
+  override
+
+  @@map("sale_existing_sale_policy")
+}
+
+enum SaleConflictStrategy {
+  prevent
+  priority
+  largest_discount
+  newest
+
+  @@map("sale_conflict_strategy")
+}
+
+/// What to do when something else changes an owned variant's price.
+enum SaleBasePriceChangePolicy {
+  preserve
+  recalculate
+  review
+
+  @@map("sale_base_price_change_policy")
+}
+
+/// Where one variant of one campaign is. The live states — the ones in which
+/// this campaign owns the variant's sale state — are enforced unique per
+/// (shop, variant) by a partial index the migration creates by hand.
+enum SaleVariantState {
+  pending
+  applying
+  applied
+  failed
+  skipped
+  review
+  restoring
+  restored
+  restore_failed
+  released
+
+  @@map("sale_variant_state")
+}
+
+enum SaleRunKind {
+  apply
+  restore
+  retry
+  release
+
+  @@map("sale_run_kind")
+}
+
+enum SaleRunStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
+
+  @@map("sale_run_status")
+}
+
+/// A sale campaign: a visible catalogue price change, made by writing variant
+/// `price` and `compareAtPrice`. Never a Shopify discount.
+model SaleCampaign {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  name   String
+  notes  String?
+  status SaleCampaignStatus @default(draft)
+
+  discountType  SaleDiscountType @map("discount_type")
+  /// Basis points for a percentage (2000 = 20 %), minor units otherwise.
+  discountValue Int              @map("discount_value")
+  /// The shop currency at creation; fixed amounts and set prices are in it.
+  currency      String
+
+  rounding               SaleRounding @default(none)
+  roundingIncrementMinor Int?         @map("rounding_increment_minor")
+
+  /// UTC. Null `starts_at` means "when activated"; null `ends_at` means no end.
+  startsAt DateTime? @map("starts_at")
+  endsAt   DateTime? @map("ends_at")
+  priority Int       @default(0)
+
+  existingSalePolicy    SaleExistingSalePolicy    @default(skip) @map("existing_sale_policy")
+  conflictStrategy      SaleConflictStrategy      @default(prevent) @map("conflict_strategy")
+  basePriceChangePolicy SaleBasePriceChangePolicy @default(review) @map("base_price_change_policy")
+  dynamicMembership     Boolean                   @default(false) @map("dynamic_membership")
+
+  /// Rule trees (`domain/sales/rules`), validated on save.
+  includeRules Json @map("include_rules")
+  excludeRules Json @map("exclude_rules")
+
+  createdBy String? @map("created_by")
+
+  activatedAt DateTime? @map("activated_at")
+  pausedAt    DateTime? @map("paused_at")
+  completedAt DateTime? @map("completed_at")
+  cancelledAt DateTime? @map("cancelled_at")
+  /// When membership was last evaluated against the catalogue snapshot.
+  evaluatedAt DateTime? @map("evaluated_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop     Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants SaleCampaignVariant[]
+  runs     SaleRun[]
+
+  @@index([shopId, status])
+  @@index([shopId, status, startsAt])
+  @@index([shopId, status, endsAt])
+  @@map("sale_campaign")
+}
+
+/// The snapshot: one row per variant a campaign has touched or intends to.
+/// Never deleted while the campaign exists — a completed campaign keeps its
+/// history, and a restore that failed keeps the values it needs.
+model SaleCampaignVariant {
+  id         String @id @default(cuid())
+  shopId     String @map("shop_id")
+  campaignId String @map("campaign_id")
+
+  productId String  @map("product_id")
+  variantId String  @map("variant_id")
+  sku       String?
+  title     String?
+
+  /// Exactly what Shopify held before the first write; what restore writes.
+  /// Null until the row leaves `pending`.
+  originalPriceMinor     Int?   @map("original_price_minor")
+  originalCompareAtMinor Int?   @map("original_compare_at_minor")
+  /// What the discount was computed from.
+  basePriceMinor         Int?   @map("base_price_minor")
+  /// What the campaign writes and expects to find.
+  salePriceMinor         Int?   @map("sale_price_minor")
+  saleCompareAtMinor     Int?   @map("sale_compare_at_minor")
+  currency               String
+
+  state        SaleVariantState @default(pending)
+  skipReason   String?          @map("skip_reason")
+  reviewReason String?          @map("review_reason")
+  lastError    String?          @map("last_error")
+  attempts     Int              @default(0)
+
+  lastObservedPriceMinor     Int?      @map("last_observed_price_minor")
+  lastObservedCompareAtMinor Int?      @map("last_observed_compare_at_minor")
+  lastObservedAt             DateTime? @map("last_observed_at")
+
+  snapshotCreatedAt DateTime? @map("snapshot_created_at")
+  lastAppliedAt     DateTime? @map("last_applied_at")
+  restoredAt        DateTime? @map("restored_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop     Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign SaleCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@unique([campaignId, variantId])
+  @@index([campaignId, state])
+  @@index([shopId, productId])
+  // One live owner per (shop, variant): a partial unique index
+  // (WHERE state IN ('applying','applied','review','restoring','restore_failed'))
+  // that Prisma's schema language cannot express, created by hand in
+  // 20260920010000_sale_campaigns/migration.sql.
+  @@index([shopId, variantId])
+  @@map("sale_campaign_variant")
+}
+
+/// One batch job over a campaign's variants. The progress bar reads this.
+model SaleRun {
+  id         String @id @default(cuid())
+  shopId     String @map("shop_id")
+  campaignId String @map("campaign_id")
+
+  kind   SaleRunKind
+  status SaleRunStatus @default(queued)
+
+  total  Int @default(0)
+  done   Int @default(0)
+  failed Int @default(0)
+
+  requestedBy String?   @map("requested_by")
+  lastError   String?   @map("last_error")
+  startedAt   DateTime? @map("started_at")
+  finishedAt  DateTime? @map("finished_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop     Shop         @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  campaign SaleCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+
+  @@index([campaignId, createdAt])
+  @@map("sale_run")
+}
+
+/// The catalogue snapshot a campaign's rules are evaluated against
+/// (docs/sale-campaigns.md § Data model). Replaced whole by each bulk read;
+/// kept current in between by `products/update`.
+model CatalogProduct {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  shopifyProductId String   @map("shopify_product_id")
+  title            String
+  handle           String?
+  vendor           String?
+  productType      String?  @map("product_type")
+  status           String?
+  tags             String[]
+  collectionIds    String[] @map("collection_ids")
+  categoryId       String?  @map("category_id")
+  categoryName     String?  @map("category_name")
+  /// `{ "namespace.key": { type, value } }`.
+  metafields       Json?
+  imageUrl         String?  @map("image_url")
+
+  shopifyUpdatedAt DateTime? @map("shopify_updated_at")
+  observedAt       DateTime  @default(now()) @map("observed_at")
+
+  shop     Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  variants CatalogVariant[]
+
+  @@unique([shopId, shopifyProductId])
+  @@map("catalog_product")
+}
+
+model CatalogVariant {
+  id        String @id @default(cuid())
+  shopId    String @map("shop_id")
+  productId String @map("product_id")
+
+  shopifyVariantId String  @map("shopify_variant_id")
+  sku              String?
+  barcode          String?
+  title            String?
+  priceMinor       Int     @map("price_minor")
+  compareAtMinor   Int?    @map("compare_at_minor")
+  currency         String
+  /// `{ "namespace.key": { type, value } }`.
+  metafields       Json?
+
+  observedAt DateTime @default(now()) @map("observed_at")
+
+  shop    Shop           @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  product CatalogProduct @relation(fields: [productId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, shopifyVariantId])
+  @@index([shopId, sku])
+  @@map("catalog_variant")
+}
+
+/// A Markets price list, as far as a sale needs to know about it: whether it
+/// holds fixed prices that will not follow the base price.
+model CatalogPriceList {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  shopifyPriceListId String  @map("shopify_price_list_id")
+  name               String
+  currency           String
+  fixedPricesCount   Int     @map("fixed_prices_count")
+  adjustmentType     String? @map("adjustment_type")
+  adjustmentValue    String? @map("adjustment_value")
+
+  observedAt DateTime @default(now()) @map("observed_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, shopifyPriceListId])
+  @@map("catalog_price_list")
 }

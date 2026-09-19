@@ -45,3 +45,17 @@ export function principalFromSession(session: Session): ShopSession {
 export function isOwnershipKnown(session: Session): boolean {
   return session.onlineAccessInfo?.associated_user !== undefined;
 }
+
+/**
+ * Who is acting, for the audit trail: the staff member's email when Shopify
+ * gave us an online session, null for a request with no person behind it.
+ * Recorded on what they did (`created_by`, event details); never used to
+ * decide anything.
+ */
+export function actorFromSession(session: Session): string | null {
+  const user = session.onlineAccessInfo?.associated_user;
+  if (!user) return null;
+  if (user.email) return user.email;
+  const name = `${user.first_name ?? ""} ${user.last_name ?? ""}`.trim();
+  return name === "" ? null : name;
+}

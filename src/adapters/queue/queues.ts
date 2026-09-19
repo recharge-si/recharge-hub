@@ -33,6 +33,11 @@ export const QUEUES = {
   pollMetakockaDocuments: "poll-metakocka-documents",
   redactOldOrders: "redact-old-orders",
   scheduledTick: "scheduled-tick",
+  // Sale campaigns (docs/sale-campaigns.md § Scheduler and jobs).
+  saleCampaignScheduler: "sale-campaign-scheduler",
+  saleCampaignRun: "sale-campaign-run",
+  saleProductEvent: "sale-product-event",
+  catalogueSnapshot: "catalogue-snapshot",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -54,6 +59,21 @@ export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
  */
 export function inventorySyncKey(shopDomain: string): string {
   return `inventory:${shopDomain}`;
+}
+
+/**
+ * At most one run job waiting per campaign. A run re-enqueues itself batch
+ * after batch, the scheduler asks for one every minute while a campaign is
+ * due, and a merchant may press a button in between: all of those must fold
+ * into the one job that is working the campaign's rows.
+ */
+export function saleRunKey(campaignId: string): string {
+  return `sale-run:${campaignId}`;
+}
+
+/** At most one catalogue read waiting per shop; Shopify allows one at a time anyway. */
+export function catalogueSnapshotKey(shopDomain: string): string {
+  return `catalogue:${shopDomain}`;
 }
 
 type QueueOptions = Omit<Queue, "name">;
@@ -292,6 +312,59 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 30,
     expireInSeconds: 300,
     retentionSeconds: 60 * 60 * 24,
+  },
+  /*
+   * Sale campaigns (docs/sale-campaigns.md § Scheduler and jobs).
+   *
+   * The scheduler is a cron fan-out like the tick: a failed minute is better
+   * dropped than retried into the next one. A run is safe to retry — every
+   * batch is claimed, read live, written and recorded, so a retry finds the
+   * rows where the last attempt left them — and a run that dies for good is
+   * a merchant-visible condition, because prices are half out. The product
+   * event carries a webhook and is guarded by webhook id like the order
+   * events. The catalogue read polls a bulk operation, so it may re-enqueue
+   * itself for a long time; its own expiry is generous.
+   *
+   * **These queues carry `policy: "short"`.** On pg-boss's default
+   * `standard` policy a `singletonKey` with no window is not enforced at
+   * all — the unique index that would reject the duplicate only exists for
+   * `short`, `singleton`, `stately` and `exclusive` queues. `short` keeps at
+   * most one *created* job per key, which is exactly what a run that hands
+   * over to itself needs: the running job is `active`, so its successor
+   * inserts, and anything else asking for the same campaign in the meantime
+   * folds into that one. These queues are new, so the policy can be set at
+   * creation; `ensureQueues` drops it again before `updateQueue`.
+   */
+  [QUEUES.saleCampaignScheduler]: {
+    policy: "short",
+    retryLimit: 1,
+    retryDelay: 30,
+    expireInSeconds: 300,
+    retentionSeconds: 60 * 60 * 24,
+  },
+  [QUEUES.saleCampaignRun]: {
+    policy: "short",
+    deadLetter: DEAD_LETTER,
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 600,
+  },
+  [QUEUES.saleProductEvent]: {
+    policy: "short",
+    deadLetter: DEAD_LETTER,
+    retryLimit: 5,
+    retryDelay: 30,
+    retryBackoff: true,
+    expireInSeconds: 300,
+  },
+  [QUEUES.catalogueSnapshot]: {
+    policy: "short",
+    deadLetter: DEAD_LETTER,
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
   },
   // A retention promise, so it retries like the other compliance work rather
   // than being dropped after a couple of attempts.

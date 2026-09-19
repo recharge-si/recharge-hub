@@ -231,17 +231,22 @@ export async function listVariantDetails(
 const METAFIELD_DEFINITIONS_QUERY = `#graphql
   query OrchestratorMetafieldDefinitions($first: Int!) {
     productDefs: metafieldDefinitions(first: $first, ownerType: PRODUCT) {
-      nodes { namespace key name }
+      nodes { namespace key name type { name } }
     }
     variantDefs: metafieldDefinitions(first: $first, ownerType: PRODUCTVARIANT) {
-      nodes { namespace key name }
+      nodes { namespace key name type { name } }
     }
   }
 `;
 
 const definitionNodes = z.object({
   nodes: z.array(
-    z.object({ namespace: z.string(), key: z.string(), name: z.string() }),
+    z.object({
+      namespace: z.string(),
+      key: z.string(),
+      name: z.string(),
+      type: z.object({ name: z.string() }).nullable().optional(),
+    }),
   ),
 });
 
@@ -262,15 +267,20 @@ export async function listMetafieldDefinitions(
   });
   const { data } = definitionsSchema.parse(await response.json());
 
+  const shape = (
+    node: z.infer<typeof definitionNodes>["nodes"][number],
+    ownerType: string,
+  ): MetafieldDefinition => ({
+    namespace: node.namespace,
+    key: node.key,
+    name: node.name,
+    ownerType,
+    ...(node.type?.name ? { type: node.type.name } : {}),
+  });
+
   return [
-    ...data.productDefs.nodes.map((node) => ({
-      ...node,
-      ownerType: "PRODUCT",
-    })),
-    ...data.variantDefs.nodes.map((node) => ({
-      ...node,
-      ownerType: "PRODUCTVARIANT",
-    })),
+    ...data.productDefs.nodes.map((node) => shape(node, "PRODUCT")),
+    ...data.variantDefs.nodes.map((node) => shape(node, "PRODUCTVARIANT")),
   ];
 }
 

@@ -54,6 +54,13 @@ import { principalFromSession } from "~/web/lib/principal.server";
  * the ones that can now succeed, so what is left here is what genuinely still
  * needs a person.
  */
+/** The campaign a sale exception names in its detail, if any. */
+function campaignIdOf(detail: unknown): string | null {
+  if (!detail || typeof detail !== "object") return null;
+  const id = (detail as { campaignId?: unknown }).campaignId;
+  return typeof id === "string" && id !== "" ? id : null;
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
@@ -65,9 +72,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     listExceptions(principal, { status: "resolved", limit: 10 }),
   ]);
 
-  const shape = (
-    rows: Awaited<ReturnType<typeof listOpenExceptionsByKind>>,
-  ) =>
+  const shape = (rows: Awaited<ReturnType<typeof listOpenExceptionsByKind>>) =>
     rows.map((row) => ({
       id: row.id,
       kind: row.kind,
@@ -75,6 +80,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       createdAt: row.createdAt.toISOString(),
       orderId: row.order?.id ?? null,
       orderNumber: row.order?.shopifyOrderNumber ?? null,
+      // A sale campaign's exception belongs to the campaign, not to an order.
+      campaignId: campaignIdOf(row.detail),
       // What has already been tried, so a retry that keeps failing stops
       // looking like a button that does not work.
       attempts: row.attempts,
@@ -101,7 +108,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   const groups = await Promise.all(
     kinds.map(async (kind) => {
-      const limit = parseExceptionsLimit(url.searchParams.get(limitParamFor(kind)));
+      const limit = parseExceptionsLimit(
+        url.searchParams.get(limitParamFor(kind)),
+      );
       const rows = await listOpenExceptionsByKind(principal, kind, { limit });
       const count = counts.get(kind) ?? 0;
       return {
@@ -352,194 +361,204 @@ export default function Exceptions() {
                       </s-stack>
                     ) : null}
 
-                  {/*
-                   * Bulk first, because it is usually the right one. Only shown
-                   * when there is more than one: for a single row the buttons
-                   * on the row itself say the same thing without the ambiguity
-                   * of "all".
-                   */}
-                  {count > 1 ? (
-                    <s-stack
-                      direction="inline"
-                      gap="small-300"
-                      alignItems="center"
-                    >
-                      {group.retryable ? (
+                    {/*
+                     * Bulk first, because it is usually the right one. Only shown
+                     * when there is more than one: for a single row the buttons
+                     * on the row itself say the same thing without the ambiguity
+                     * of "all".
+                     */}
+                    {count > 1 ? (
+                      <s-stack
+                        direction="inline"
+                        gap="small-300"
+                        alignItems="center"
+                      >
+                        {group.retryable ? (
+                          <Form method="post">
+                            <input
+                              type="hidden"
+                              name="intent"
+                              value="retry-kind"
+                            />
+                            <input
+                              type="hidden"
+                              name="kind"
+                              value={group.kind}
+                            />
+                            <s-button
+                              type="submit"
+                              variant="secondary"
+                              {...(busy ? { disabled: true } : {})}
+                            >
+                              {`Retry all ${count}`}
+                            </s-button>
+                          </Form>
+                        ) : null}
                         <Form method="post">
                           <input
                             type="hidden"
                             name="intent"
-                            value="retry-kind"
+                            value="resolve-kind"
                           />
-                          <input
-                            type="hidden"
-                            name="kind"
-                            value={group.kind}
-                          />
+                          <input type="hidden" name="kind" value={group.kind} />
                           <s-button
                             type="submit"
-                            variant="secondary"
+                            variant="tertiary"
                             {...(busy ? { disabled: true } : {})}
                           >
-                            {`Retry all ${count}`}
+                            {`Mark all ${count} resolved`}
                           </s-button>
                         </Form>
-                      ) : null}
-                      <Form method="post">
-                        <input
-                          type="hidden"
-                          name="intent"
-                          value="resolve-kind"
-                        />
-                        <input type="hidden" name="kind" value={group.kind} />
-                        <s-button
-                          type="submit"
-                          variant="tertiary"
-                          {...(busy ? { disabled: true } : {})}
-                        >
-                          {`Mark all ${count} resolved`}
-                        </s-button>
-                      </Form>
-                    </s-stack>
-                  ) : null}
+                      </s-stack>
+                    ) : null}
 
-                  {/*
-                   * `variant="auto"` keeps this inside §2.6 at 375px: Polaris
-                   * turns the columns into a labelled list rather than letting
-                   * the page scroll sideways.
-                   */}
-                  <s-table variant="auto">
-                    <s-table-header-row>
-                      <s-table-header listSlot="primary">Order</s-table-header>
-                      <s-table-header listSlot="secondary">
-                        What happened
-                      </s-table-header>
-                      <s-table-header listSlot="kicker">Since</s-table-header>
-                      <s-table-header listSlot="inline">
-                        Actions
-                      </s-table-header>
-                    </s-table-header-row>
+                    {/*
+                     * `variant="auto"` keeps this inside §2.6 at 375px: Polaris
+                     * turns the columns into a labelled list rather than letting
+                     * the page scroll sideways.
+                     */}
+                    <s-table variant="auto">
+                      <s-table-header-row>
+                        <s-table-header listSlot="primary">
+                          Order
+                        </s-table-header>
+                        <s-table-header listSlot="secondary">
+                          What happened
+                        </s-table-header>
+                        <s-table-header listSlot="kicker">Since</s-table-header>
+                        <s-table-header listSlot="inline">
+                          Actions
+                        </s-table-header>
+                      </s-table-header-row>
 
-                    <s-table-body>
-                      {group.rows.map((exception) => (
-                        <s-table-row key={exception.id}>
-                          <s-table-cell>
-                            {exception.orderNumber && exception.orderId ? (
-                              <s-link href={`/app/orders/${exception.orderId}`}>
-                                {exception.orderNumber}
-                              </s-link>
-                            ) : (
-                              <s-text color="subdued">No order</s-text>
-                            )}
-                          </s-table-cell>
+                      <s-table-body>
+                        {group.rows.map((exception) => (
+                          <s-table-row key={exception.id}>
+                            <s-table-cell>
+                              {exception.orderNumber && exception.orderId ? (
+                                <s-link
+                                  href={`/app/orders/${exception.orderId}`}
+                                >
+                                  {exception.orderNumber}
+                                </s-link>
+                              ) : exception.campaignId ? (
+                                <s-link
+                                  href={`/app/sales/${exception.campaignId}/variants`}
+                                >
+                                  Open campaign
+                                </s-link>
+                              ) : (
+                                <s-text color="subdued">No order</s-text>
+                              )}
+                            </s-table-cell>
 
-                          <s-table-cell>
-                            <s-stack direction="block" gap="small-500">
-                              <s-text>{exception.message}</s-text>
-                              {/*
-                               * What has already been tried. Without it, an
-                               * exception retried four times looks exactly like
-                               * one nobody has touched — which is why "retry
-                               * does nothing" is the first thing anyone says
-                               * about a queue like this.
-                               */}
-                              {exception.attempts > 0 ? (
-                                <s-text color="subdued">
-                                  {`Tried ${exception.attempts} ${exception.attempts === 1 ? "time" : "times"}${
-                                    exception.lastAttemptAt
-                                      ? `, last ${formatDateTime(exception.lastAttemptAt)}`
-                                      : ""
-                                  }.`}
-                                </s-text>
-                              ) : null}
-                            </s-stack>
-                          </s-table-cell>
+                            <s-table-cell>
+                              <s-stack direction="block" gap="small-500">
+                                <s-text>{exception.message}</s-text>
+                                {/*
+                                 * What has already been tried. Without it, an
+                                 * exception retried four times looks exactly like
+                                 * one nobody has touched — which is why "retry
+                                 * does nothing" is the first thing anyone says
+                                 * about a queue like this.
+                                 */}
+                                {exception.attempts > 0 ? (
+                                  <s-text color="subdued">
+                                    {`Tried ${exception.attempts} ${exception.attempts === 1 ? "time" : "times"}${
+                                      exception.lastAttemptAt
+                                        ? `, last ${formatDateTime(exception.lastAttemptAt)}`
+                                        : ""
+                                    }.`}
+                                  </s-text>
+                                ) : null}
+                              </s-stack>
+                            </s-table-cell>
 
-                          <s-table-cell>
-                            <s-text color="subdued">
-                              {formatDateTime(exception.createdAt)}
-                            </s-text>
-                          </s-table-cell>
+                            <s-table-cell>
+                              <s-text color="subdued">
+                                {formatDateTime(exception.createdAt)}
+                              </s-text>
+                            </s-table-cell>
 
-                          <s-table-cell>
-                            <s-stack direction="inline" gap="small-500">
-                              {exception.orderId && group.retryable ? (
+                            <s-table-cell>
+                              <s-stack direction="inline" gap="small-500">
+                                {exception.orderId && group.retryable ? (
+                                  <Form method="post">
+                                    <input
+                                      type="hidden"
+                                      name="intent"
+                                      value="retry"
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="orderId"
+                                      value={exception.orderId}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="id"
+                                      value={exception.id}
+                                    />
+                                    <input
+                                      type="hidden"
+                                      name="kind"
+                                      value={exception.kind}
+                                    />
+                                    <s-button
+                                      type="submit"
+                                      variant="tertiary"
+                                      {...(busy ? { disabled: true } : {})}
+                                    >
+                                      Retry
+                                    </s-button>
+                                  </Form>
+                                ) : null}
                                 <Form method="post">
                                   <input
                                     type="hidden"
                                     name="intent"
-                                    value="retry"
-                                  />
-                                  <input
-                                    type="hidden"
-                                    name="orderId"
-                                    value={exception.orderId}
+                                    value="resolve"
                                   />
                                   <input
                                     type="hidden"
                                     name="id"
                                     value={exception.id}
                                   />
+                                  <s-button
+                                    type="submit"
+                                    variant="tertiary"
+                                    {...(busy ? { disabled: true } : {})}
+                                  >
+                                    Resolve
+                                  </s-button>
+                                </Form>
+                                <Form method="post">
                                   <input
                                     type="hidden"
-                                    name="kind"
-                                    value={exception.kind}
+                                    name="intent"
+                                    value="ignore"
+                                  />
+                                  <input
+                                    type="hidden"
+                                    name="id"
+                                    value={exception.id}
                                   />
                                   <s-button
                                     type="submit"
                                     variant="tertiary"
                                     {...(busy ? { disabled: true } : {})}
                                   >
-                                    Retry
+                                    Ignore
                                   </s-button>
                                 </Form>
-                              ) : null}
-                              <Form method="post">
-                                <input
-                                  type="hidden"
-                                  name="intent"
-                                  value="resolve"
-                                />
-                                <input
-                                  type="hidden"
-                                  name="id"
-                                  value={exception.id}
-                                />
-                                <s-button
-                                  type="submit"
-                                  variant="tertiary"
-                                  {...(busy ? { disabled: true } : {})}
-                                >
-                                  Resolve
-                                </s-button>
-                              </Form>
-                              <Form method="post">
-                                <input
-                                  type="hidden"
-                                  name="intent"
-                                  value="ignore"
-                                />
-                                <input
-                                  type="hidden"
-                                  name="id"
-                                  value={exception.id}
-                                />
-                                <s-button
-                                  type="submit"
-                                  variant="tertiary"
-                                  {...(busy ? { disabled: true } : {})}
-                                >
-                                  Ignore
-                                </s-button>
-                              </Form>
-                            </s-stack>
-                          </s-table-cell>
-                        </s-table-row>
-                      ))}
-                    </s-table-body>
-                  </s-table>
-                </s-stack>
-              </s-section>
+                              </s-stack>
+                            </s-table-cell>
+                          </s-table-row>
+                        ))}
+                      </s-table-body>
+                    </s-table>
+                  </s-stack>
+                </s-section>
               );
             })}
           </>

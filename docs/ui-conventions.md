@@ -130,6 +130,11 @@ differs it is given, because the code is not going to be renamed to match.
 | **Mapping** (tax) | A VAT rate → the MetaKocka tax factor sent for it. "Not mapped" is the state that holds an order. | `TaxMapping`, `metakockaTaxFactor` |
 | **Override** (tax) | A deliberate exception by country or SKU, with a reason, visible on every order it touches. | `TaxOverride` |
 | **Held** | An order not sent because its VAT could not be filed safely. Never "blocked" in copy. | `sync_state = blocked`, `tax_*` exceptions |
+| **Campaign** | A sale campaign: a visible catalogue price change with a start, an end and rules. Never "discount" on its own, which is Shopify's checkout thing. | `SaleCampaign`, `/app/sales` |
+| **Compare-at** | Shopify's compare-at price, the "was" price a theme strikes through. Never "original" for this field; "original price" is what the campaign puts back. | `compareAtPrice`, `original_price_minor` |
+| **On sale** | A variant whose compare-at is above its price, whoever set it. | `isOnSale` |
+| **Put back** / **restore** | Writing the recorded original pair back. Never "reset". | `restoreRows`, `restored` |
+| **Needs a decision** | A variant whose price was changed outside its campaign and waits for a person. Never "conflict" in copy for this; "conflict" is two campaigns. | `state = review`, `sale_price_conflict` |
 
 Words that must not appear in merchant-facing copy: **article** (the build
 specification's word for a MetaKocka product), **token**, **template**, **code**

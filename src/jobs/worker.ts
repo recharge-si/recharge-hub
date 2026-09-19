@@ -8,6 +8,7 @@ import {
 import { createBoss, ensureQueues } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { makeAppUninstalledHandler } from "~/jobs/handlers/app-uninstalled";
+import { handleCatalogueSnapshot } from "~/jobs/handlers/catalogue-snapshot";
 import { handleCustomersDataRequest } from "~/jobs/handlers/customers-data-request";
 import { handleDeadJob } from "~/jobs/handlers/dead-job";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
@@ -24,6 +25,9 @@ import { handleReloadPricelists } from "~/jobs/handlers/reload-pricelists";
 import { handleReloadProfitCenters } from "~/jobs/handlers/reload-profit-centers";
 import { handleReloadWarehouses } from "~/jobs/handlers/reload-warehouses";
 import { handleRedactOldOrders } from "~/jobs/handlers/redact-old-orders";
+import { handleSaleCampaignRun } from "~/jobs/handlers/sale-campaign-run";
+import { handleSaleCampaignScheduler } from "~/jobs/handlers/sale-campaign-scheduler";
+import { handleSaleProductEvent } from "~/jobs/handlers/sale-product-event";
 import { handleScheduledTick } from "~/jobs/handlers/scheduled-tick";
 import { handleWriteMetakockaOrder } from "~/jobs/handlers/write-metakocka-order";
 import { handleShopRedact } from "~/jobs/handlers/shop-redact";
@@ -54,13 +58,9 @@ async function main(): Promise<void> {
   // §11: a job that has run out of retries is no longer being dealt with by
   // the queue, so it stops being invisible. Metadata is needed for the queue
   // the job died in (`sourceName`) and the failure it recorded (`output`).
-  await boss.work(
-    QUEUES.deadJobs,
-    { includeMetadata: true },
-    async (jobs) => {
-      for (const job of jobs) await handleDeadJob(job);
-    },
-  );
+  await boss.work(QUEUES.deadJobs, { includeMetadata: true }, async (jobs) => {
+    for (const job of jobs) await handleDeadJob(job);
+  });
 
   // Every handler runs at most once per Shopify webhook id, however many times
   // the event is delivered (CLAUDE.md section 6, idempotency_key).
@@ -168,6 +168,30 @@ async function main(): Promise<void> {
     for (const job of jobs) await handleRedactOldOrders(job);
   });
 
+  /*
+   * Sale campaigns (docs/sale-campaigns.md § Scheduler and jobs).
+   *
+   * The run claims its rows by conditional update, so two workers on one
+   * campaign are safe; the product event is a webhook and is guarded by
+   * webhook id; the catalogue read polls a bulk operation and re-enqueues
+   * itself. The scheduler is a cron of its own, every minute, because a
+   * sale that starts at midnight should start at midnight and not at the
+   * next quarter-hour.
+   */
+  await boss.work(QUEUES.saleCampaignRun, async (jobs) => {
+    for (const job of jobs) await handleSaleCampaignRun(job);
+  });
+  await boss.work(
+    QUEUES.saleProductEvent,
+    withIdempotency(QUEUES.saleProductEvent, handleSaleProductEvent),
+  );
+  await boss.work(QUEUES.catalogueSnapshot, async (jobs) => {
+    for (const job of jobs) await handleCatalogueSnapshot(job);
+  });
+  await boss.work(QUEUES.saleCampaignScheduler, async (jobs) => {
+    for (const job of jobs) await handleSaleCampaignScheduler(job);
+  });
+
   // One cron entry per cadence, fanned out per shop by the tick handler.
   // Everything it sends is throttled, so a slow run is never lapped.
   //
@@ -220,6 +244,14 @@ async function main(): Promise<void> {
     "20 3 * * *",
     { cadence: "nightly" },
     { key: "nightly" },
+  );
+
+  // Sale campaigns start and end on the minute they were given.
+  await boss.schedule(
+    QUEUES.saleCampaignScheduler,
+    "* * * * *",
+    {},
+    { key: "minute" },
   );
 
   log.info({ queues: Object.values(QUEUES) }, "Worker started");

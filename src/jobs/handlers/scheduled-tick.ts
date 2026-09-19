@@ -3,7 +3,11 @@ import { z } from "zod";
 
 import { prisma } from "~/adapters/db/client.server";
 import { enqueue, enqueueThrottled } from "~/adapters/queue/boss.server";
-import { QUEUES, inventorySyncKey } from "~/adapters/queue/queues";
+import {
+  QUEUES,
+  catalogueSnapshotKey,
+  inventorySyncKey,
+} from "~/adapters/queue/queues";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { captureException } from "~/adapters/observability/sentry.server";
 
@@ -92,6 +96,58 @@ export async function handleScheduledTick(job: Job<unknown>): Promise<void> {
     { shops: shops.length, failed, cadence },
     "Scheduled tick fanned out",
   );
+
+  await fanOutCatalogueSnapshots(cadence);
+}
+
+/**
+ * The catalogue snapshot behind sale campaigns (docs/sale-campaigns.md).
+ *
+ * Its own fan-out, because it does not need MetaKocka: a shop can run
+ * sales without the ERP connected, and the query above deliberately skips
+ * such shops. Hourly-ish for a shop with a campaign that will need a fresh
+ * catalogue — a dynamic one that is active, or one waiting to start — and
+ * nightly for every installed shop, so a preview is never a week old.
+ */
+async function fanOutCatalogueSnapshots(cadence: Cadence): Promise<void> {
+  if (cadence !== "quarter_hourly" && cadence !== "nightly") return;
+
+  const shops = await prisma.shop.findMany({
+    where: {
+      uninstalledAt: null,
+      installState: "installed",
+      ...(cadence === "quarter_hourly"
+        ? {
+            saleCampaigns: {
+              some: {
+                OR: [
+                  { status: "scheduled" },
+                  { status: "active", dynamicMembership: true },
+                ],
+              },
+            },
+          }
+        : {}),
+    },
+    select: { domain: true },
+  });
+
+  for (const shop of shops) {
+    try {
+      await enqueueThrottled(
+        QUEUES.catalogueSnapshot,
+        { shopDomain: shop.domain },
+        catalogueSnapshotKey(shop.domain),
+        cadence === "quarter_hourly" ? 55 * 60 : 20 * 60 * 60,
+      );
+    } catch (error) {
+      getLogger().error(
+        { err: error, shop: shop.domain, cadence },
+        "Could not queue the catalogue snapshot for one shop",
+      );
+      captureException(error, { shop: shop.domain, cadence });
+    }
+  }
 }
 
 type TickShop = {

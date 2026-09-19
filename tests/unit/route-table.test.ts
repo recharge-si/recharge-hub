@@ -87,8 +87,35 @@ describe("route table", () => {
     expect(await fileFor("/app/locations")).toBe(
       "routes/app.locations._index.tsx",
     );
+    expect(await fileFor("/app/sales")).toBe("routes/app.sales._index.tsx");
     expect(await fileFor("/app/settings")).toBe(
       "routes/app.settings._index.tsx",
+    );
+  });
+
+  it("gives a sale campaign its editor, its variants and its export", async () => {
+    // `app.sales.$campaignId._index.tsx` rather than `app.sales.$campaignId.tsx`,
+    // for the reason Locations gives: a leaf with children becomes a layout
+    // with no outlet, and the variants page would render as a blank editor.
+    expect(await fileFor("/app/sales/abc123")).toBe(
+      "routes/app.sales.$campaignId._index.tsx",
+    );
+    expect(await fileFor("/app/sales/abc123/variants")).toBe(
+      "routes/app.sales.$campaignId.variants.tsx",
+    );
+    // The bracket escapes the dot: this is one segment, not a child called "csv".
+    expect(await fileFor("/app/sales/abc123/variants.csv")).toBe(
+      "routes/app.sales.$campaignId.variants[.csv].tsx",
+    );
+  });
+
+  it("keeps the product view beside the products settings page", async () => {
+    // A product's numeric id is dynamic; "sync" is static and must still win.
+    expect(await fileFor("/app/products/sync")).toBe(
+      "routes/app.products.sync.tsx",
+    );
+    expect(await fileFor("/app/products/123456")).toBe(
+      "routes/app.products.$productId.tsx",
     );
   });
 

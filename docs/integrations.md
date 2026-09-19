@@ -33,7 +33,8 @@ Missing directions and product decisions are tracked in
 | `read_merchant_managed_fulfillment_orders` | Which location each line ships from, which is what drives the warehouse split. |
 | `read_products`, `read_inventory` | The SKU registry and stock levels. |
 | `write_inventory` | Writing MetaKocka stock into Shopify for `mk_to_shopify` locations. |
-| `write_products` | Merchant-enabled MetaKocka product-name and product-creation sync. Off by default. |
+| `write_products` | Merchant-enabled MetaKocka product-name and product-creation sync (off by default), and sale campaigns writing variant `price` / `compareAtPrice` (`docs/sale-campaigns.md`). |
+| `read_discounts` | One warning only: a sale campaign's preview names the automatic discounts Shopify would apply at checkout on top of the catalogue price. Until granted, the preview says "not checked". |
 
 **`write_orders` is deliberately not requested.** Synchronising Shopify into
 MetaKocka never writes to a Shopify order, so asking for it would be permission
@@ -70,9 +71,19 @@ authentication lives in `src/web/lib/webhook.server.ts`. Request work is
 persisted/enqueued and returned quickly; handlers live under `src/jobs/handlers/`.
 
 Subscribed topics include install/scope events, required compliance topics,
-order create/update/paid/cancel/delete/edit, and refunds. Shopify order webhooks
-are supplemented by a 15-minute Admin API reconciliation because delivery is
-best-effort.
+order create/update/paid/cancel/delete/edit, refunds, and `products/update` and
+`products/delete` for sale campaigns. Shopify order webhooks are supplemented by
+a 15-minute Admin API reconciliation because delivery is best-effort.
+
+**A product webhook is a trigger, never the price.** `sale-product-event` reads
+the variant live before calling anything an external change: payloads arrive
+late and out of order, and the app's own price writes come back through the
+same topic. What matches what the campaign wrote is its own echo and does
+nothing (`docs/sale-campaigns.md` § Loop prevention).
+
+The catalogue behind sale-campaign rules is read with `bulkOperationRunQuery`
+(five connections, two levels deep — the bulk-query limit), polled by the
+`catalogue-snapshot` job and replaced in one transaction.
 
 **An order webhook is a trigger, never a source of truth.** Every order topic
 ends in a `reconcile-order` job, which re-reads the order, its fulfilment

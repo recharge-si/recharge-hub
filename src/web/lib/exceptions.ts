@@ -183,6 +183,24 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "A job ran out of retries and will not run again on its own. The recorded failure is on the exception. Fix what it names, then retry.",
   },
+  sale_price_conflict: {
+    label: "Price changed outside the sale",
+    short: "whose price was changed outside its sale campaign",
+    guidance:
+      "Something other than this app — a price sync, a person in the admin — changed a variant that a sale campaign is holding. Nothing was overwritten. Open the campaign's variants and choose: keep the campaign price, recalculate it from the new price, or leave the new price and release the variant.",
+  },
+  sale_apply_failed: {
+    label: "Sale not fully applied",
+    short: "whose sale could not be applied to every variant",
+    guidance:
+      "Some variants were not put on sale. The campaign page lists each one with Shopify's reason; fix what it names, then retry the failed variants. The rest of the campaign is live.",
+  },
+  sale_restore_failed: {
+    label: "Original prices not fully restored",
+    short: "whose original prices could not all be put back",
+    guidance:
+      "Some variants still show the sale price after the campaign ended. The campaign page lists each one with Shopify's reason; retry the failed variants. Their original prices are kept until they are back.",
+  },
 };
 
 const FALLBACK: ExceptionCopy = {
@@ -230,7 +248,10 @@ const ACTIONS: Record<string, ExceptionAction> = {
     label: "Open order settings",
     href: "/app/orders/settings",
   },
-  tax_undeterminable: { label: "Open Taxes & VAT", href: "/app/settings/taxes" },
+  tax_undeterminable: {
+    label: "Open Taxes & VAT",
+    href: "/app/settings/taxes",
+  },
   tax_mapping_missing: {
     label: "Configure mapping",
     href: "/app/settings/taxes/mappings",
@@ -243,6 +264,9 @@ const ACTIONS: Record<string, ExceptionAction> = {
     label: "Open registrations",
     href: "/app/settings/taxes/registrations",
   },
+  sale_price_conflict: { label: "Open sales", href: "/app/sales" },
+  sale_apply_failed: { label: "Open sales", href: "/app/sales" },
+  sale_restore_failed: { label: "Open sales", href: "/app/sales" },
 };
 
 export function exceptionAction(kind: string): ExceptionAction | null {

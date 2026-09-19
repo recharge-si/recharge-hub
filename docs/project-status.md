@@ -54,6 +54,14 @@ Completed work belongs in Git history, not in this file.
   guided setup and the order settings page, computed from our own tables
 - An activation boundary (`shop.setup_completed_at`) both MetaKocka writers
   respect, so opening setup never starts writing
+- Sale campaigns (`docs/sale-campaigns.md`): rule-targeted, scheduled,
+  snapshot-and-restore price changes on Shopify variants, with existing-sale
+  and conflict policies, external-change detection through `products/update`,
+  dynamic membership, batched idempotent runs with progress and retry, a
+  catalogue snapshot read by bulk operation, a rule builder over collections,
+  vendors, tags, categories, product data, prices and typed metafields, a
+  preview that writes nothing, a product-side view, CSV export, and an audit
+  trail on `event_log`
 - 916 fixture-driven tests across pure domain, adapters, presentation helpers,
   the route table, the app's entry points, the order-to-MetaKocka vertical
   slice and the tax pipeline end to end, plus PostgreSQL tests for the
@@ -170,6 +178,36 @@ Closing it properly means requesting `read_assigned_fulfillment_orders` and
 `read_third_party_fulfillment_orders`, mapping those services to warehouses, and
 deciding whether their stock is MetaKocka's to hold. That is a scope change and
 a merchant-consent event (see T-07), so it is a decision rather than a task.
+
+### T-24 — Sale campaigns: known limits
+
+- **Markets with fixed prices are not changed.** A price list's fixed
+  `PriceListPrice` does not follow the base price; the preview names the
+  markets holding fixed prices and those variants keep their market price
+  during the sale. Writing per-market sale prices would need a per-price-list
+  snapshot and `priceListFixedPricesAdd`/`…Delete`, and is deliberately not
+  done rather than done wrong. Percentage-adjusted and currency-converted
+  markets follow the sale, compare-at included.
+- **Collections and metafields reach a campaign on the next catalogue
+  snapshot**, not from `products/update` (the payload carries neither): hourly
+  while a scheduled or dynamic campaign exists, nightly otherwise, or on
+  demand from the Sales page.
+- **Which products a Shopify automatic discount applies to is not
+  evaluated.** The preview names the active automatic discounts and warns;
+  it cannot say whether they overlap.
+- **`read_discounts` is a new scope.** The merchant is asked to approve it on
+  next open; until then the discount check reports "not checked".
+- **pg-boss `singletonKey` is inert on the existing `standard` queues.** Found
+  while building the sale queues (created with `policy: "short"` so their keys
+  hold): `inventorySyncKey` and the webhook `singletonKey: webhookId` sends on
+  the older queues do not dedupe at the queue. Webhooks are still exactly-once
+  through `idempotency_key`; inventory syncs can stack a queued copy behind a
+  running one, which the sync tolerates. Fixing the older queues means
+  recreating them, since a policy cannot be changed after creation.
+- **`orders-event` compares topics in `orders/edited` form** while the SDK
+  delivers `ORDERS_EDITED`; the `refunds/create`, `orders/edited` and
+  `orders/delete` branches there may never match. Noticed, not changed — it is
+  outside the sale work and needs its own verification against a delivery.
 
 ### T-08 — Shopify fulfilment orders are not moved or split
 

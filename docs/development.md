@@ -100,7 +100,7 @@ HMAC verification and can look like an application regression.
 | `SHOPIFY_API_KEY`                                   |      yes | Shopify public app key; injected by CLI in normal dev                |
 | `SHOPIFY_API_SECRET`                                |      yes | Shopify app secret; never commit it                                  |
 | `SHOPIFY_APP_URL`                                   |      yes | Absolute public/tunnel URL                                           |
-| `SCOPES`                                            |      yes | Comma-separated Shopify scopes, kept aligned with `shopify.app.toml` |
+| `SCOPES`                                            |      yes | Comma-separated Shopify scopes, kept aligned with `shopify.app.toml`. `read_discounts` was added for sale campaigns on 2026-09-19; the merchant approves it on next open |
 | `DATABASE_URL`                                      |      yes | Host-process PostgreSQL connection                                   |
 | `ENCRYPTION_KEY`                                    |      yes | 32 random bytes encoded as Base64                                    |
 | `SHOP_CUSTOM_DOMAIN`                                |       no | Custom shop domain accepted by Shopify auth                          |

@@ -30,6 +30,12 @@ export interface MetafieldDefinition {
   name: string;
   /** "PRODUCT" or "PRODUCTVARIANT" — decides which group it lists under. */
   ownerType: string;
+  /**
+   * Shopify's type name (`single_line_text_field`, `number_integer`, …).
+   * A name pattern does not care; a sale campaign rule does, because the
+   * operators it offers depend on it (`domain/sales/rules`).
+   */
+  type?: string;
 }
 
 export const PRODUCT_FIELDS: FieldDef[] = [

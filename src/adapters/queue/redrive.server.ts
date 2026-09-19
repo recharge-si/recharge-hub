@@ -101,6 +101,15 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
    */
   job_failed: "auto",
   /*
+   * Sale campaigns are not orders. Retrying failed variants and resolving a
+   * price conflict happen on the campaign's own pages, which the exception
+   * links to (web/lib/exceptions.ts); there is nothing order-shaped to
+   * re-drive from here.
+   */
+  sale_price_conflict: "none",
+  sale_apply_failed: "none",
+  sale_restore_failed: "none",
+  /*
    * An order whose MetaKocka documents do not add up to what Shopify says.
    *
    * The repair is the reconciliation itself — update what exists — and it is
@@ -324,7 +333,9 @@ export async function redriveOrder(
     await enqueue(
       QUEUES.syncOrderState,
       { shopDomain, shopifyOrderId: order.shopifyOrderId },
-      { singletonKey: `refresh:${shopDomain}:${order.shopifyOrderId}:${stamp}` },
+      {
+        singletonKey: `refresh:${shopDomain}:${order.shopifyOrderId}:${stamp}`,
+      },
     );
     queued.push("reading the order back from Shopify");
   }
@@ -332,7 +343,11 @@ export async function redriveOrder(
   if (chosen === "reconcile") {
     await enqueue(
       QUEUES.reconcileOrder,
-      { shopDomain, orderId, reason: actor === "person" ? "manual" : "recheck" },
+      {
+        shopDomain,
+        orderId,
+        reason: actor === "person" ? "manual" : "recheck",
+      },
       { singletonKey: `reconcile:${orderId}:retry:${stamp}` },
     );
     queued.push("reconciling the order against MetaKocka");
