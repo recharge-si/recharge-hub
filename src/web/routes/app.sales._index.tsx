@@ -97,13 +97,15 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       onSale,
       failed,
       review: states.review ?? 0,
-      // Finished and every price back: nothing left to keep it on the list for.
+      // Holds no price — an unused draft, or finished with every price back —
+      // so nothing keeps it on the list but the merchant's wish.
       deletable:
-        (campaign.status === "completed" || campaign.status === "cancelled") &&
-        onSale === 0 &&
-        failed === 0 &&
-        (states.review ?? 0) === 0 &&
-        (states.pending ?? 0) === 0,
+        (campaign.status === "draft" && Object.keys(states).length === 0) ||
+        ((campaign.status === "completed" || campaign.status === "cancelled") &&
+          onSale === 0 &&
+          failed === 0 &&
+          (states.review ?? 0) === 0 &&
+          (states.pending ?? 0) === 0),
       run: run
         ? {
             kind: run.kind,
