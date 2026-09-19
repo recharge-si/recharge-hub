@@ -26,6 +26,12 @@ export interface CampaignHeaderActionsProps {
   variantsHref: string;
   confirmModalId: string;
   helpModalId: string;
+  /**
+   * The dialogs the hard-to-undo actions open instead of running outright:
+   * ending, pausing, cancelling and deleting all go through one. The page
+   * renders the dialogs; the buttons here only open them.
+   */
+  confirmIds: { end: string; pause: string; cancel: string; delete: string };
   onIntent: (intent: string) => void;
 }
 
@@ -40,6 +46,7 @@ export function CampaignHeaderActions({
   variantsHref,
   confirmModalId,
   helpModalId,
+  confirmIds,
   onIntent,
 }: CampaignHeaderActionsProps) {
   const off = busy ? { disabled: true } : {};
@@ -82,8 +89,8 @@ export function CampaignHeaderActions({
           slot="primary-action"
           variant="primary"
           tone="critical"
-          type="button"
-          onClick={() => onIntent("end")}
+          command="--show"
+          commandFor={confirmIds.end}
           {...off}
         >
           End now
@@ -113,8 +120,8 @@ export function CampaignHeaderActions({
       {status === "active" ? (
         <s-button
           slot="secondary-actions"
-          type="button"
-          onClick={() => onIntent("pause")}
+          command="--show"
+          commandFor={confirmIds.pause}
           {...off}
         >
           Pause
@@ -123,8 +130,8 @@ export function CampaignHeaderActions({
       {status === "paused" ? (
         <s-button
           slot="secondary-actions"
-          type="button"
-          onClick={() => onIntent("end")}
+          command="--show"
+          commandFor={confirmIds.end}
           {...off}
         >
           End
@@ -143,10 +150,12 @@ export function CampaignHeaderActions({
       {status === "draft" || status === "scheduled" || status === "paused" ? (
         <s-button
           slot="secondary-actions"
-          type="button"
           tone="critical"
-          onClick={() =>
-            onIntent(status === "draft" && deletable ? "delete" : "cancel")
+          command="--show"
+          commandFor={
+            status === "draft" && deletable
+              ? confirmIds.delete
+              : confirmIds.cancel
           }
           {...off}
         >
@@ -157,9 +166,9 @@ export function CampaignHeaderActions({
       {(status === "completed" || status === "cancelled") && deletable ? (
         <s-button
           slot="secondary-actions"
-          type="button"
           tone="critical"
-          onClick={() => onIntent("delete")}
+          command="--show"
+          commandFor={confirmIds.delete}
           {...off}
         >
           Delete

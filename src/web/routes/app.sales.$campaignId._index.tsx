@@ -43,6 +43,7 @@ import { CampaignConflicts } from "~/web/components/campaign-conflicts";
 import { CampaignDetails } from "~/web/components/campaign-details";
 import { CampaignDiscount } from "~/web/components/campaign-discount";
 import { CampaignHeaderActions } from "~/web/components/campaign-header";
+import { ConfirmModal } from "~/web/components/confirm-modal";
 import { CampaignSchedule } from "~/web/components/campaign-schedule";
 import {
   CampaignStatus,
@@ -95,6 +96,12 @@ import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
  */
 const SAVE_BAR_ID = "sale-campaign-save-bar";
 const CONFIRM_MODAL_ID = "confirm-activate";
+const CONFIRM_IDS = {
+  end: "confirm-end",
+  pause: "confirm-pause",
+  cancel: "confirm-cancel",
+  delete: "confirm-delete",
+} as const;
 const HELP_MODAL_ID = "about-campaign";
 
 export const loader = async ({ request, params }: LoaderFunctionArgs) => {
@@ -596,8 +603,55 @@ export default function CampaignEditor() {
         variantsHref={variantsHref}
         confirmModalId={CONFIRM_MODAL_ID}
         helpModalId={HELP_MODAL_ID}
+        confirmIds={CONFIRM_IDS}
         onIntent={submit}
       />
+
+      {/* Hard-to-undo actions ask first. Each names what it does to prices. */}
+      <ConfirmModal
+        id={CONFIRM_IDS.end}
+        heading="End the campaign?"
+        confirmLabel="End campaign"
+        onConfirm={() => submit("end")}
+      >
+        <s-paragraph>
+          {`The sale stops now. ${onSale.toLocaleString("en")} variants go back to their original price and compare-at price, and the campaign is completed.`}
+        </s-paragraph>
+        <s-paragraph>A completed campaign cannot be resumed.</s-paragraph>
+      </ConfirmModal>
+      <ConfirmModal
+        id={CONFIRM_IDS.pause}
+        heading="Pause the campaign?"
+        confirmLabel="Pause"
+        tone="neutral"
+        onConfirm={() => submit("pause")}
+      >
+        <s-paragraph>
+          {`${onSale.toLocaleString("en")} variants go back to their original price. The campaign keeps its products and can be resumed, which takes a fresh snapshot and applies the sale again.`}
+        </s-paragraph>
+      </ConfirmModal>
+      <ConfirmModal
+        id={CONFIRM_IDS.cancel}
+        heading="Cancel the campaign?"
+        confirmLabel="Cancel campaign"
+        onConfirm={() => submit("cancel")}
+      >
+        <s-paragraph>
+          It will not run. Its settings and history are kept, but a cancelled
+          campaign cannot be activated again.
+        </s-paragraph>
+      </ConfirmModal>
+      <ConfirmModal
+        id={CONFIRM_IDS.delete}
+        heading="Delete the campaign?"
+        confirmLabel="Delete"
+        onConfirm={() => submit("delete")}
+      >
+        <s-paragraph>
+          The campaign, its rules and its price snapshot are removed. No price
+          in Shopify changes. This cannot be undone; the activity trail stays.
+        </s-paragraph>
+      </ConfirmModal>
 
       <s-modal
         id={CONFIRM_MODAL_ID}

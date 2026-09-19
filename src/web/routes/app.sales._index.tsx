@@ -21,6 +21,7 @@ import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES, catalogueSnapshotKey } from "~/adapters/queue/queues";
 import { recordCampaignEvent } from "~/adapters/sales/events.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
+import { ConfirmModal } from "~/web/components/confirm-modal";
 import { phaseFor } from "~/domain/sales/lifecycle";
 import type { CampaignStatus } from "~/domain/sales/types";
 import { formatDateTime } from "~/web/lib/datetime";
@@ -366,22 +367,36 @@ export default function Sales() {
                       <s-stack direction="inline" gap="small-300">
                         <s-button href={`/app/sales/${card.id}`}>View</s-button>
                         {card.deletable ? (
-                          <s-button
-                            type="button"
-                            tone="critical"
-                            accessibilityLabel={`Delete ${card.name}`}
-                            onClick={() =>
-                              fetcher.submit(
-                                { intent: "delete", id: card.id },
-                                { method: "post" },
-                              )
-                            }
-                            {...(fetcher.state !== "idle"
-                              ? { disabled: true }
-                              : {})}
-                          >
-                            Delete
-                          </s-button>
+                          <>
+                            <s-button
+                              tone="critical"
+                              accessibilityLabel={`Delete ${card.name}`}
+                              command="--show"
+                              commandFor={`confirm-delete-${card.id}`}
+                              {...(fetcher.state !== "idle"
+                                ? { disabled: true }
+                                : {})}
+                            >
+                              Delete
+                            </s-button>
+                            <ConfirmModal
+                              id={`confirm-delete-${card.id}`}
+                              heading={`Delete “${card.name}”?`}
+                              confirmLabel="Delete"
+                              onConfirm={() =>
+                                fetcher.submit(
+                                  { intent: "delete", id: card.id },
+                                  { method: "post" },
+                                )
+                              }
+                            >
+                              <s-paragraph>
+                                The campaign, its rules and its price snapshot
+                                are removed. No price in Shopify changes. This
+                                cannot be undone; the activity trail stays.
+                              </s-paragraph>
+                            </ConfirmModal>
+                          </>
                         ) : null}
                       </s-stack>
                     </s-grid>
