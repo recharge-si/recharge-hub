@@ -19,6 +19,8 @@ export function DownloadButton({
   slot,
   variant,
   icon,
+  inlineSize,
+  disabled,
 }: {
   href: string;
   /** The file name when the response does not say. */
@@ -27,6 +29,9 @@ export function DownloadButton({
   slot?: "secondary-actions";
   variant?: "primary" | "secondary" | "tertiary";
   icon?: "export";
+  inlineSize?: "fill";
+  /** The file would not say what the page says; the reason sits beside the button. */
+  disabled?: boolean;
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -64,7 +69,9 @@ export function DownloadButton({
         {...(slot ? { slot } : {})}
         {...(variant ? { variant } : {})}
         {...(icon ? { icon } : {})}
+        {...(inlineSize ? { inlineSize } : {})}
         {...(busy ? { loading: true } : {})}
+        {...(disabled ? { disabled: true } : {})}
       >
         {children}
       </s-button>

@@ -183,6 +183,8 @@ export interface CampaignSummaryProps {
   csvHref: string;
   /** Whether the variants page has anything to show yet. */
   hasVariants: boolean;
+  /** Unsaved edits: the export would list the saved campaign, not this one. */
+  dirty: boolean;
   snapshotAt: string | null;
   /** Shopify automatic discounts could not be checked, and why. */
   discountsUnchecked?: string | null;
@@ -227,6 +229,7 @@ export function CampaignSummary({
   variantsHref,
   csvHref,
   hasVariants,
+  dirty,
   snapshotAt,
   discountsUnchecked,
 }: CampaignSummaryProps) {
@@ -284,17 +287,34 @@ export function CampaignSummary({
 
         {hasVariants ? (
           <s-stack direction="block" gap="small-300">
-            <s-button href={variantsHref} inlineSize="fill">
-              View affected variants
-            </s-button>
-            <DownloadButton
-              href={csvHref}
-              fallbackName="variants.csv"
-              variant="tertiary"
-              icon="export"
+            {/* A matched pair: the same rows, on a page or in a file. */}
+            <s-grid
+              gridTemplateColumns="@container (inline-size <= 300px) 1fr, 1fr 1fr"
+              gap="small-300"
             >
-              Export CSV
-            </DownloadButton>
+              <s-button
+                href={variantsHref}
+                icon="variant-list"
+                inlineSize="fill"
+                {...(dirty ? { disabled: true } : {})}
+              >
+                View variants
+              </s-button>
+              <DownloadButton
+                href={csvHref}
+                fallbackName="variants.csv"
+                icon="export"
+                inlineSize="fill"
+                disabled={dirty}
+              >
+                Export CSV
+              </DownloadButton>
+            </s-grid>
+            {dirty ? (
+              <s-text color="subdued">
+                Save first: the list and the export show the saved campaign.
+              </s-text>
+            ) : null}
           </s-stack>
         ) : null}
 

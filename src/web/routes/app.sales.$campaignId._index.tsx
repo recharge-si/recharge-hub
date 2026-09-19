@@ -903,6 +903,7 @@ export default function CampaignEditor() {
               hasVariants={
                 campaign.status !== "draft" || (shown?.variants ?? 0) > 0
               }
+              dirty={dirty}
               snapshotAt={
                 shown ? (shown.snapshotAt ?? catalogue.snapshotAt) : null
               }
