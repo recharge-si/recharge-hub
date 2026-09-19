@@ -16,6 +16,7 @@ import { DistributionBars } from "~/web/components/distribution-bars";
 import { OrderChart } from "~/web/components/order-chart";
 import { ReadinessList } from "~/web/components/readiness-list";
 import { RecentActivity } from "~/web/components/recent-activity";
+import { SetupBanner } from "~/web/components/setup-banner";
 import { describeEvent } from "~/web/lib/activity";
 import { exceptionAction } from "~/web/lib/exceptions";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -215,15 +216,10 @@ export default function Home() {
          * banners close together.
          */}
         {!readiness.activated ? (
-          <s-banner tone="warning" heading="Synchronization has not started">
-            <s-paragraph>
-              Nothing is sent to MetaKocka until you finish setup. Whatever you
-              have already answered is saved.
-            </s-paragraph>
-            <s-link slot="primary-action" href="/app/setup">
-              Finish setup
-            </s-link>
-          </s-banner>
+          <SetupBanner
+            components={readiness.components}
+            overall={readiness.overall}
+          />
         ) : problems.length > 0 ? (
           <s-banner
             tone="warning"
@@ -380,7 +376,7 @@ export default function Home() {
           </s-stack>
         </s-section>
 
-{/*
+        {/*
          * A breakdown by warehouse, for a shop that has warehouses on its
          * documents. One that writes a single sales order per Shopify order
          * does not, and a chart of one bar labelled "Unknown warehouse" would

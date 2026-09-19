@@ -9,6 +9,7 @@ import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { READINESS_ROUTES } from "~/domain/readiness";
 import { ReadinessList } from "~/web/components/readiness-list";
+import { SetupBanner } from "~/web/components/setup-banner";
 import { principalFromSession } from "~/web/lib/principal.server";
 
 /**
@@ -93,18 +94,7 @@ export default function Settings() {
         <s-section heading="Setup">
           <s-stack direction="block" gap="base">
             {!activated ? (
-              <s-banner
-                tone="warning"
-                heading="Synchronization has not started"
-              >
-                <s-paragraph>
-                  Nothing is written to MetaKocka until setup is finished. Your
-                  answers are already saved, so it picks up where you left off.
-                </s-paragraph>
-                <s-link slot="primary-action" href="/app/setup">
-                  Finish setup
-                </s-link>
-              </s-banner>
+              <SetupBanner components={components} overall={overall} />
             ) : overall === "needs_attention" ? (
               <s-banner tone="warning" heading="Some settings need attention">
                 <s-paragraph>

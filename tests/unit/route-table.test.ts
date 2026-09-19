@@ -88,6 +88,7 @@ describe("route table", () => {
       "routes/app.locations._index.tsx",
     );
     expect(await fileFor("/app/sales")).toBe("routes/app.sales._index.tsx");
+    expect(await fileFor("/app/metakocka")).toBe("routes/app.metakocka.tsx");
     expect(await fileFor("/app/settings")).toBe(
       "routes/app.settings._index.tsx",
     );
