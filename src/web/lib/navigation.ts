@@ -22,7 +22,7 @@ export interface NavItem {
 export const APP_HOME = "/app";
 
 /**
- * Four visible entries. Orders, Products and Locations are all the MetaKocka
+ * Five visible entries. Orders, Products and Locations are all the MetaKocka
  * integration seen from three sides, and three top-level items for one job
  * made the menu longer than the job; they live under one **MetaKocka** entry
  * whose page (`/app/metakocka`) opens onto them. Their own addresses are
@@ -31,6 +31,7 @@ export const APP_HOME = "/app";
 export const APP_NAV: readonly NavItem[] = [
   { href: APP_HOME, label: "Home", rel: "home" },
   { href: "/app/sales", label: "Sales" },
+  { href: "/app/attributes", label: "Attributes" },
   { href: "/app/metakocka", label: "MetaKocka" },
   { href: "/app/exceptions", label: "Needs attention" },
   { href: "/app/settings", label: "Settings" },

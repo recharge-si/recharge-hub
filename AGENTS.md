@@ -18,6 +18,8 @@ documentation, or Git—not only in a conversation.
 - `docs/ui-conventions.md` owns merchant-facing UI and terminology conventions.
 - `docs/sale-campaigns.md` owns the sale campaign module: schema, state
   machine, price snapshot and restore, conflicts, scheduler and known limits.
+- `docs/attributes.md` owns the attribute schema: document, inheritance,
+  changes, persistence, screens, import and export, known limits.
 - Code and tests define implemented behavior. Git records historical behavior.
 - `docs/agent/HANDOFF.md`, when present, is the concise state of substantial
   unfinished work. It is not a permanent backlog.

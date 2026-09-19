@@ -62,6 +62,11 @@ Completed work belongs in Git history, not in this file.
   vendors, tags, categories, product data, prices and typed metafields, a
   preview that writes nothing, a product-side view, CSV export, and an audit
   trail on `event_log`
+- An attribute schema (`docs/attributes.md`): a tree of product types, an
+  attribute catalogue and sets with inheritance and exact-type exceptions,
+  planned as one document per shop under a revision guard, with JSON export
+  and import (including the standalone builder's own files); nothing is
+  written to Shopify from it yet
 - 916 fixture-driven tests across pure domain, adapters, presentation helpers,
   the route table, the app's entry points, the order-to-MetaKocka vertical
   slice and the tax pipeline end to end, plus PostgreSQL tests for the
@@ -208,6 +213,20 @@ a merchant-consent event (see T-07), so it is a decision rather than a task.
   delivers `ORDERS_EDITED`; the `refunds/create`, `orders/edited` and
   `orders/delete` branches there may never match. Noticed, not changed — it is
   outside the sale work and needs its own verification against a delivery.
+
+### T-25 — Attribute schema: a plan with no Shopify side yet
+
+- **Nothing is created in Shopify.** The schema names a Shopify field per
+  attribute and a category per type, but no metafield definition, category
+  or product assignment is written. That is the next piece of work and the
+  reason the module exists; until it lands the plan is the deliverable, and
+  the export is how it leaves the app.
+- **No undo.** Each destructive change is behind a confirmation and the export
+  is the backup. The standalone builder had an in-session undo stack; it was
+  not carried over because server-side persistence has no session to hold it
+  in.
+- **One option list per select attribute from the UI.** Lists shared between
+  attributes only arise through import and fork on first edit.
 
 ### T-08 — Shopify fulfilment orders are not moved or split
 

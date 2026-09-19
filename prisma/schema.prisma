@@ -141,6 +141,7 @@ model Shop {
   catalogProducts        CatalogProduct[]
   catalogVariants        CatalogVariant[]
   catalogPriceLists      CatalogPriceList[]
+  attributeSchema        AttributeSchema?
 
   @@map("shop")
 }
@@ -2223,4 +2224,29 @@ model CatalogPriceList {
 
   @@unique([shopId, shopifyPriceListId])
   @@map("catalog_price_list")
+}
+
+/// The attribute schema (docs/attributes.md): what information every product
+/// type needs, planned once and inherited down a tree of types.
+///
+/// One document per shop, held whole. It is planning data that a person edits
+/// in one sitting and exports as one file, and every change is a pure function
+/// over the whole document (`domain/attributes/mutations`), so one row is the
+/// honest shape. `revision` makes two people editing at once a refused save
+/// rather than a silent overwrite: a change carries the revision it was made
+/// against and the update is conditional on it.
+model AttributeSchema {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// A `domain/attributes` document; parsed, never trusted as stored.
+  document Json
+  revision Int  @default(1)
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("attribute_schema")
 }

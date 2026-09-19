@@ -33,7 +33,7 @@ Caddy is the only production ingress and proxies to the web process.
 
 | Area            | Responsibility                                                                             | May depend on                   |
 | --------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
-| `src/domain/`   | Pure allocation, money, order-state, product-template, supply-default, tax and sale rules  | Domain only                     |
+| `src/domain/`   | Pure allocation, money, order-state, product-template, supply-default, tax, sale and attribute-schema rules | Domain only                     |
 | `src/adapters/` | External boundaries: Shopify, MetaKocka, Prisma, queues, crypto, logs, Sentry, environment; `adapters/sales/` is the sale-campaign service layer both web and jobs call | Domain |
 | `src/jobs/`     | Application orchestration and pg-boss handlers                                             | Domain and adapters             |
 | `src/web/`      | React Router loaders/actions, webhook endpoints, and embedded UI                           | Domain and adapters, never jobs |
@@ -44,7 +44,7 @@ randomness; callers inject time and inputs.
 
 ## Merchant-facing shape
 
-Four visible entries in `s-app-nav`, each a job rather than a table. Every
+Five visible entries in `s-app-nav`, each a job rather than a table. Every
 settings page lives with the thing it configures, so nothing in the navigation
 is a database name:
 
@@ -52,6 +52,10 @@ is a database name:
 Home              /app                  operations dashboard
 Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
                                         /app/sales/:id/variants every variant it touches
+Attributes        /app/attributes       the attribute catalogue; /app/attributes/:id is one
+                                        attribute, /app/attributes/types/:typeId? the tree of
+                                        product types beside the selected one,
+                                        /app/attributes/settings import, export, sets and reset
 MetaKocka         /app/metakocka        the integration's front door: how each side is
                                         doing, opening onto
   Orders          /app/orders           list, and /app/orders/settings
@@ -509,6 +513,16 @@ update and read live before it is written, so a retry never discounts twice;
 and a restore writes only over what the campaign itself wrote, sending anything
 else to a `review` row and a `sale_price_conflict` exception.
 
+### Attribute schema
+
+What every product type should carry, planned as one document per shop and
+inherited down a tree of types â€” `docs/attributes.md`. Pure rules in
+`src/domain/attributes/` (parse and check, resolve inheritance, every change
+as a function over the document); one row in `attribute_schema` with a
+revision every write is conditional on; screens under `app.attributes.*`
+sharing `web/lib/attributes.server.ts` as the one path that changes it.
+Nothing here reads or writes Shopify yet.
+
 ### Catalogue and product names
 
 - `sync-catalogue` reads Shopify variants and MetaKocka products into the SKU
@@ -570,7 +584,9 @@ history under `prisma/migrations/`. Major groups are:
   each variant is; one live owner per variant by partial unique index),
   `SaleRun`; the catalogue snapshot `CatalogProduct`, `CatalogVariant`,
   `CatalogPriceList`, with `shop.catalogue_snapshot_at` and the bulk
-  operation in flight.
+  operation in flight;
+- attributes: `AttributeSchema`, the whole planned schema as one JSON
+  document per shop with a `revision` for conditional writes.
 
 Most tables are tenant-owned through `shopId`. The current repository-layer
 enforcement gap is tracked in `docs/project-status.md`.
@@ -587,6 +603,7 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
 | Tax rule, treatment or mapping | `src/domain/tax/`, then `src/jobs/orders/tax-decider.ts`; screens under `app.settings.taxes.*` |
 | Sale pricing, rule or conflict rule | `src/domain/sales/`; the write path is `src/adapters/sales/writer.server.ts`; screens under `app.sales.*` |
+| Attribute schema rule or screen | `src/domain/attributes/`, then `web/lib/attributes.server.ts`; screens under `app.attributes.*` |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
 | What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |
