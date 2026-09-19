@@ -146,14 +146,36 @@ export async function listCampaigns(principal: Principal): Promise<Campaign[]> {
   });
 }
 
-/** Only a draft with no snapshot rows may be deleted; everything else is history. */
-export async function deleteDraftCampaign(
+/**
+ * Deletes a campaign that holds no price: a draft with no rows, or a
+ * finished one (completed, cancelled) whose every row is settled — nothing
+ * live, nothing failed, nothing waiting for a decision. The snapshot rows go
+ * with it; the audit trail on `event_log` stays, because it was never the
+ * campaign's to take.
+ */
+export async function deleteCampaign(
   principal: Principal,
   id: string,
 ): Promise<boolean> {
   const shopId = await shopIdFor(principal);
   const { count } = await prisma.saleCampaign.deleteMany({
-    where: { id, shopId, status: "draft", variants: { none: {} } },
+    where: {
+      id,
+      shopId,
+      OR: [
+        { status: "draft", variants: { none: {} } },
+        {
+          status: { in: ["completed", "cancelled"] },
+          variants: {
+            none: {
+              state: {
+                in: [...LIVE_STATES, "pending", "failed"],
+              },
+            },
+          },
+        },
+      ],
+    },
   });
   return count > 0;
 }

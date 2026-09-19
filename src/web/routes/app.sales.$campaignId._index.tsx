@@ -16,7 +16,7 @@ import {
 import { eventsForEntity } from "~/adapters/db/repositories/event-log.server";
 import {
   countVariantStates,
-  deleteDraftCampaign,
+  deleteCampaign,
   getCampaign,
   latestRun,
   updateCampaign,
@@ -259,11 +259,16 @@ export const action = async ({
   }
 
   if (intent === "delete") {
-    const deleted = await deleteDraftCampaign(principal, campaign.id);
+    await recordCampaignEvent(principal, campaign.id, "sale_campaign.deleted", {
+      by: actor,
+      status: campaign.status,
+    });
+    const deleted = await deleteCampaign(principal, campaign.id);
     if (!deleted)
       return {
         ok: false,
-        message: "Only a draft that has never been applied can be deleted.",
+        message:
+          "Only a draft that has never been applied, or a finished campaign with every price back, can be deleted.",
       };
     throw redirectWithin(request, "/app/sales");
   }
@@ -541,6 +546,21 @@ export default function CampaignEditor() {
           {...(busy ? { disabled: true } : {})}
         >
           {campaign.status === "draft" ? "Delete" : "Cancel campaign"}
+        </s-button>
+      ) : null}
+      {/* A finished campaign with every price back is history nobody needs on the list. */}
+      {(campaign.status === "completed" || campaign.status === "cancelled") &&
+      failed === 0 &&
+      review === 0 &&
+      onSale === 0 ? (
+        <s-button
+          slot="secondary-actions"
+          type="button"
+          tone="critical"
+          onClick={() => submit("delete")}
+          {...(busy ? { disabled: true } : {})}
+        >
+          Delete
         </s-button>
       ) : null}
       <s-button

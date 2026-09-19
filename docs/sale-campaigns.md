@@ -98,7 +98,10 @@ One row per variant a campaign has touched or intends to touch:
 `(shop_id, variant_id) WHERE state IN ('applying','applied','review',
 'restoring','restore_failed')` means two campaigns cannot both hold a
 variant's sale state, whatever the jobs do. Rows are never deleted while a
-campaign exists; a completed campaign keeps its snapshot.
+campaign exists; a completed campaign keeps its snapshot. The campaign itself
+can be deleted only when it holds no price — an unused draft, or a finished
+one with every row settled (`deleteCampaign`) — and its `event_log` trail
+stays.
 
 ### `sale_run`
 

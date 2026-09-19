@@ -13,6 +13,7 @@ import { getCatalogueState } from "~/adapters/db/repositories/catalogue.server";
 import {
   countVariantStatesFor,
   createCampaign,
+  deleteCampaign,
   latestRunsFor,
   listCampaigns,
 } from "~/adapters/db/repositories/sale-campaign.server";
@@ -96,6 +97,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       onSale,
       failed,
       review: states.review ?? 0,
+      // Finished and every price back: nothing left to keep it on the list for.
+      deletable:
+        (campaign.status === "completed" || campaign.status === "cancelled") &&
+        onSale === 0 &&
+        failed === 0 &&
+        (states.review ?? 0) === 0 &&
+        (states.pending ?? 0) === 0,
       run: run
         ? {
             kind: run.kind,
@@ -140,6 +148,21 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       by: actorFromSession(session),
     });
     throw redirectWithin(request, `/app/sales/${campaign.id}`);
+  }
+
+  if (intent === "delete") {
+    const id = String(formData.get("id") ?? "");
+    await recordCampaignEvent(principal, id, "sale_campaign.deleted", {
+      by: actorFromSession(session),
+    });
+    const deleted = await deleteCampaign(principal, id);
+    return deleted
+      ? { ok: true, message: "Campaign deleted." }
+      : {
+          ok: false,
+          message:
+            "Only a finished campaign with every price back, or an unused draft, can be deleted.",
+        };
   }
 
   if (intent === "refresh-catalogue") {
@@ -340,6 +363,24 @@ export default function Sales() {
                       </s-stack>
                       <s-stack direction="inline" gap="small-300">
                         <s-button href={`/app/sales/${card.id}`}>View</s-button>
+                        {card.deletable ? (
+                          <s-button
+                            type="button"
+                            tone="critical"
+                            accessibilityLabel={`Delete ${card.name}`}
+                            onClick={() =>
+                              fetcher.submit(
+                                { intent: "delete", id: card.id },
+                                { method: "post" },
+                              )
+                            }
+                            {...(fetcher.state !== "idle"
+                              ? { disabled: true }
+                              : {})}
+                          >
+                            Delete
+                          </s-button>
+                        ) : null}
                       </s-stack>
                     </s-grid>
                   </s-box>

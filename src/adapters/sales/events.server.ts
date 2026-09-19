@@ -22,6 +22,7 @@ export type SaleCampaignEvent =
   | "sale_campaign.ending"
   | "sale_campaign.completed"
   | "sale_campaign.cancelled"
+  | "sale_campaign.deleted"
   | "sale_campaign.restore_requested"
   | "sale_campaign.retry_requested"
   | "sale_campaign.conflict_detected"
