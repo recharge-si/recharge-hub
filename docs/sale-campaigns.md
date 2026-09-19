@@ -316,6 +316,15 @@ When the live pair differs from the expected pair on an owned variant:
 Deriving the "new base": compare-at if it changed and is above the price,
 otherwise the price. Every detection is an `event_log` entry with both pairs.
 
+A review row is decided on the variants page — keep, recalculate, restore
+the original, or release — one row at a time. On a **completed or
+cancelled** campaign the editor also decides them all at once
+(`resolveAllReviewRows`): put every recorded original back in one mutation
+per product (`forceRestoreRows`), or leave every variant at the price it
+shows and release it. Each row's `sale_price_conflict` exception is resolved
+with it. Review rows hold the one-owner index, so this is what makes a
+finished campaign deletable.
+
 ## Dynamic membership
 
 `dynamic_membership` on: `sale-product-event` and every catalogue snapshot

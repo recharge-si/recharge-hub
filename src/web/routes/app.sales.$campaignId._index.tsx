@@ -24,6 +24,7 @@ import {
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES, catalogueSnapshotKey } from "~/adapters/queue/queues";
 import { recordCampaignEvent } from "~/adapters/sales/events.server";
+import { resolveAllReviewRows } from "~/adapters/sales/review.server";
 import {
   activateCampaign,
   cancelCampaign,
@@ -101,6 +102,8 @@ const CONFIRM_IDS = {
   pause: "confirm-pause",
   cancel: "confirm-cancel",
   delete: "confirm-delete",
+  reviewRestore: "confirm-review-restore",
+  reviewRelease: "confirm-review-release",
 } as const;
 const HELP_MODAL_ID = "about-campaign";
 
@@ -226,7 +229,7 @@ export const action = async ({
   request,
   params,
 }: ActionFunctionArgs): Promise<ActionResult> => {
-  const { session } = await authenticate.admin(request);
+  const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
   const id = String(params.campaignId ?? "");
   const actor = actorFromSession(session);
@@ -367,6 +370,22 @@ export const action = async ({
       return cancelCampaign(principal, campaign.id, options);
     case "retry":
       return retryFailedVariants(principal, campaign.id, options);
+    case "review-restore-all":
+      return resolveAllReviewRows(
+        admin,
+        principal,
+        campaign.id,
+        "restore",
+        options,
+      );
+    case "review-release-all":
+      return resolveAllReviewRows(
+        admin,
+        principal,
+        campaign.id,
+        "release",
+        options,
+      );
     default:
       return { ok: false, message: "Unknown action." };
   }
@@ -653,6 +672,29 @@ export default function CampaignEditor() {
         </s-paragraph>
       </ConfirmModal>
 
+      <ConfirmModal
+        id={CONFIRM_IDS.reviewRestore}
+        heading="Put every original price back?"
+        confirmLabel="Put them back"
+        tone="neutral"
+        onConfirm={() => submit("review-restore-all")}
+      >
+        <s-paragraph>
+          {`${review.toLocaleString("en")} variants get the price and compare-at price recorded before the sale, whatever they show now. The change somebody made outside the campaign is overwritten.`}
+        </s-paragraph>
+      </ConfirmModal>
+      <ConfirmModal
+        id={CONFIRM_IDS.reviewRelease}
+        heading="Leave every variant as it is?"
+        confirmLabel="Leave them"
+        tone="neutral"
+        onConfirm={() => submit("review-release-all")}
+      >
+        <s-paragraph>
+          {`${review.toLocaleString("en")} variants keep the price they show now and are released from the campaign. Nothing in Shopify changes.`}
+        </s-paragraph>
+      </ConfirmModal>
+
       <s-modal
         id={CONFIRM_MODAL_ID}
         heading={
@@ -862,6 +904,15 @@ export default function CampaignEditor() {
               ) : null
             }
             actionNote={actionNote}
+            {...(review > 0 && !activatable && campaign.status !== "active"
+              ? {
+                  reviewAll: {
+                    restoreId: CONFIRM_IDS.reviewRestore,
+                    releaseId: CONFIRM_IDS.reviewRelease,
+                    busy,
+                  },
+                }
+              : {})}
           />
 
           {catalogue.snapshotAt === null ? (

@@ -611,16 +611,37 @@ export async function forceRestoreRow(
   row: CampaignVariant,
   now: Date,
 ): Promise<BatchOutcome> {
-  const original = pairOf(row, "original");
-  if (!original) {
-    await recordVariantOutcome(row.id, { state: "released", now });
-    return { done: 1, failed: 0 };
-  }
-  return execute(admin, [
-    {
+  return forceRestoreRows(admin, principal, campaign, [row], now);
+}
+
+/**
+ * The same, for every review row of a campaign at once — one mutation per
+ * product rather than one per row, which is what makes "put them all back"
+ * on a finished campaign a click rather than an afternoon. Rows without a
+ * recorded original have nothing to put back and are released.
+ */
+export async function forceRestoreRows(
+  admin: AdminApiContext,
+  principal: Principal,
+  campaign: Campaign,
+  rows: readonly CampaignVariant[],
+  now: Date,
+): Promise<BatchOutcome> {
+  const plans: Planned[] = [];
+  for (const row of rows) {
+    const original = pairOf(row, "original");
+    plans.push({
       row,
-      write: { variantId: row.variantId, ...original },
+      write: original ? { variantId: row.variantId, ...original } : null,
       success: async () => {
+        if (!original) {
+          await recordVariantOutcome(row.id, {
+            state: "released",
+            reviewReason: null,
+            now,
+          });
+          return;
+        }
         await recordVariantOutcome(row.id, {
           state: "restored",
           reviewReason: null,
@@ -647,8 +668,9 @@ export async function forceRestoreRow(
           now,
         });
       },
-    },
-  ]);
+    });
+  }
+  return execute(admin, plans);
 }
 
 /* -------------------------------------------------------------------------- */

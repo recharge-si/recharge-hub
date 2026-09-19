@@ -47,6 +47,13 @@ export interface CampaignStatusProps {
   action?: ReactNode;
   /** Why the action is not available right now, when it is not. */
   actionNote?: ReactNode;
+  /**
+   * The dialogs that decide every review row at once: put the recorded
+   * originals back, or leave the variants at the price somebody else gave
+   * them. Offered when the sale is over, where those are the only two
+   * answers left; a live campaign still decides row by row.
+   */
+  reviewAll?: { restoreId: string; releaseId: string; busy: boolean };
 }
 
 export function CampaignStatus({
@@ -62,6 +69,7 @@ export function CampaignStatus({
   variantsHref,
   action,
   actionNote,
+  reviewAll,
 }: CampaignStatusProps) {
   const running = run?.status === "queued" || run?.status === "running";
   const failed = (counts.failed ?? 0) + (counts.restore_failed ?? 0);
@@ -142,9 +150,33 @@ export function CampaignStatus({
             <s-paragraph>
               {failed > 0
                 ? "Shopify rejected the write for these. The variants page shows its reason for each; fix it and retry."
-                : "Their price was changed outside the campaign. Decide for each on the variants page."}
+                : reviewAll
+                  ? "Their price was changed outside the campaign while it ran. Put the recorded originals back, leave them as they are now, or decide one by one."
+                  : "Their price was changed outside the campaign. Decide for each on the variants page."}
             </s-paragraph>
-            <s-link href={variantsHref}>Open variants</s-link>
+            {failed === 0 && reviewAll ? (
+              <s-stack direction="inline" gap="small-300">
+                <s-button
+                  command="--show"
+                  commandFor={reviewAll.restoreId}
+                  {...(reviewAll.busy ? { disabled: true } : {})}
+                >
+                  {`Put all ${n(review)} back`}
+                </s-button>
+                <s-button
+                  command="--show"
+                  commandFor={reviewAll.releaseId}
+                  {...(reviewAll.busy ? { disabled: true } : {})}
+                >
+                  Leave them as they are
+                </s-button>
+              </s-stack>
+            ) : null}
+            <s-link href={variantsHref}>
+              {failed === 0 && reviewAll
+                ? "Decide one by one"
+                : "Open variants"}
+            </s-link>
           </s-banner>
         ) : null}
 
