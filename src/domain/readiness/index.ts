@@ -116,6 +116,13 @@ export interface ReadinessFacts {
     fallback: string | null;
   };
   orders: {
+    /**
+     * The order-transfer switch (`domain/orders/transfer`). Off means no sales
+     * order is written, updated or paid, so neither orders nor payments can
+     * need anything: both report as switched off, and neither blocks
+     * activation.
+     */
+    transferOrders: boolean;
     shippingProductCode: string | null;
     discountRepresentation: "none" | "document_discount_value";
     /**
@@ -312,6 +319,22 @@ function paymentsOf(facts: ReadinessFacts): ReadinessComponent {
     action: { label: "Open payments", href: READINESS_ROUTES.payments },
   };
 
+  /*
+   * A payment is recorded against a sales order, so with order transfer off
+   * there is nothing for it to be recorded on. Said in those words rather
+   * than "Not recorded in MetaKocka", which is the payment switch's own
+   * answer and would send the merchant to the wrong setting.
+   */
+  if (!facts.orders.transferOrders) {
+    return {
+      ...base,
+      required: false,
+      status: "disabled",
+      summary: "Not recorded while order transfer is off",
+      reason: null,
+    };
+  }
+
   if (!facts.payments.enabled) {
     return {
       ...base,
@@ -384,6 +407,22 @@ function ordersOf(
     required: true,
     action: { label: "Open order settings", href: READINESS_ROUTES.orders },
   };
+
+  /*
+   * Off is a decision, not a problem. Nothing about any order reaches
+   * MetaKocka while the switch is off, so nothing here can be missing, and a
+   * shop that wants stock and the catalogue alone finishes setup without
+   * answering questions about documents it never writes.
+   */
+  if (!facts.orders.transferOrders) {
+    return {
+      ...base,
+      required: false,
+      status: "disabled",
+      summary: "Not sent to MetaKocka",
+      reason: null,
+    };
+  }
 
   /*
    * A warehouse mapping only gates orders for a shop that splits them.
@@ -477,7 +516,9 @@ function taxesOf(facts: ReadinessFacts): ReadinessComponent {
 
   const reasons: string[] = [];
   if (!domestic) {
-    reasons.push("No home VAT rate is set, so an order Shopify charges no tax on has nothing to stand in for the rate.");
+    reasons.push(
+      "No home VAT rate is set, so an order Shopify charges no tax on has nothing to stand in for the rate.",
+    );
   }
   if (unmappedRates.length > 0) {
     reasons.push(
@@ -512,7 +553,15 @@ export function computeReadiness(facts: ReadinessFacts): Readiness {
   const taxes = taxesOf(facts);
   const products = productsOf(facts);
 
-  const components = [metakocka, warehouses, stock, orders, payments, taxes, products];
+  const components = [
+    metakocka,
+    warehouses,
+    stock,
+    orders,
+    payments,
+    taxes,
+    products,
+  ];
 
   const blocking = components.filter(
     (component) => component.required && component.status === "needs_attention",

@@ -33,6 +33,7 @@ import {
   listProfitCenters,
   saveProfitCenter,
 } from "~/adapters/db/repositories/profit-center.server";
+import { listOrdersAwaitingTransfer } from "~/adapters/db/repositories/order.server";
 import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import {
   getSalesOrderSettings,
@@ -62,7 +63,7 @@ import { discoverPaymentTypes } from "~/adapters/metakocka/payment-types";
 import { validateProfitCenter } from "~/adapters/metakocka/profit-centers";
 import { findProductByCode } from "~/adapters/metakocka/stock";
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
-import { enqueueThrottled } from "~/adapters/queue/boss.server";
+import { enqueue, enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { listLocations } from "~/adapters/shopify/locations";
 import {
@@ -315,11 +316,28 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     );
     const typeValues = types.map((type) => type.value);
 
+    /*
+     * What turning transfer back on would send, counted only while it is off
+     * -- the same question the order settings page asks, asked here for a
+     * shop that ran with transfer off and comes back through setup to turn it
+     * on. A fresh shop has it on already and never sees the number.
+     */
+    const awaitingTransfer = settings.transferOrders
+      ? 0
+      : (
+          await listOrdersAwaitingTransfer(
+            principal,
+            settings.transferOrdersSince,
+          )
+        ).length;
+
     return {
       ...common,
       connect: null,
       stock: null,
       orders: {
+        transferOrders: settings.transferOrders,
+        awaitingTransfer,
         template: settings.customerOrderTemplate ?? "",
         split: settings.salesOrderSplit,
         defaultTemplate: DEFAULT_CUSTOMER_ORDER_TEMPLATE,
@@ -564,9 +582,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
         mark: String(formData.get(`warehouse:${locationId}`) ?? "").trim(),
         name: String(formData.get(`name:${locationId}`) ?? ""),
         // INHERIT unless the merchant answered for this location itself.
-        direction: String(
-          formData.get(`direction:${locationId}`) ?? INHERIT,
-        ),
+        direction: String(formData.get(`direction:${locationId}`) ?? INHERIT),
       }));
 
     /*
@@ -650,6 +666,46 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* ---------------------------------------------------------------------- */
 
   if (intent === "orders") {
+    const settings = await getSalesOrderSettings(principal);
+
+    /*
+     * The order-transfer switch, the same one the order settings page owns.
+     *
+     * Off is a hard stop: nothing about any order reaches MetaKocka, so the
+     * rest of this step describes something that is not happening and asks
+     * for nothing. Only the switch is written; every other answer already
+     * stored stays as it is, and readiness reports orders and payments as
+     * switched off rather than missing, so Finish is not held up by a
+     * shipping article or a payment fallback no document would carry.
+     */
+    const transferOrders = formData.get("transferOrders") === "on";
+    if (!transferOrders) {
+      await saveSalesOrderSettings(principal, {
+        ...settings,
+        transferOrders: false,
+      });
+      if (settings.transferOrders) {
+        await appendEvent(principal, {
+          entityType: "sales_order_setting",
+          event: "sales_order.settings_saved",
+          detail: { transferOrders: false, via: "setup" },
+        });
+      }
+      await saveSetupStep(principal, "review");
+      throw go("review");
+    }
+
+    /*
+     * Turning it on sets the cut-off to now unless the merchant asked for the
+     * backlog too, in which case the old cut-off stands and the backlog behind
+     * it is queued once everything else is saved. Exactly the settings page's
+     * rule, so the two screens cannot disagree about which orders are sent.
+     */
+    const transferBacklog = formData.get("transferBacklog") === "on";
+    const turningOn = !settings.transferOrders;
+    const transferOrdersSince =
+      turningOn && !transferBacklog ? new Date() : settings.transferOrdersSince;
+
     const template = String(formData.get("template") ?? "").trim();
     const unknown = unknownPlaceholders(template);
     if (unknown.length > 0) {
@@ -808,9 +864,10 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       defaultProfitCenter: profitCenter || null,
     });
 
-    const settings = await getSalesOrderSettings(principal);
     await saveSalesOrderSettings(principal, {
       ...settings,
+      transferOrders: true,
+      transferOrdersSince,
       customerOrderTemplate:
         template === "" || template === DEFAULT_CUSTOMER_ORDER_TEMPLATE
           ? null
@@ -818,7 +875,9 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       // Narrowed rather than cast: anything the form did not send means the
       // default, which is the shape this connector has always written.
       salesOrderSplit:
-        formData.get("salesOrderSplit") === "single" ? "single" : "per_warehouse",
+        formData.get("salesOrderSplit") === "single"
+          ? "single"
+          : "per_warehouse",
       shippingProductCode,
     });
 
@@ -829,6 +888,40 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       event: "payment_types.saved",
       detail: { count: entries.length, fallback, via: "setup" },
     });
+
+    /*
+     * The backlog, queued rather than sent: one reconcile per order, on the
+     * same singleton key the settings page uses, so going back and forward
+     * through this step does not queue them twice.
+     */
+    if (turningOn && transferBacklog) {
+      const backlog = await listOrdersAwaitingTransfer(
+        principal,
+        settings.transferOrdersSince,
+      );
+      for (const orderId of backlog) {
+        await enqueue(
+          QUEUES.reconcileOrder,
+          {
+            shopDomain: principal.shopDomain,
+            orderId,
+            reason: "transfer-backlog",
+          },
+          { singletonKey: `reconcile:${orderId}:backlog` },
+        );
+      }
+      if (backlog.length > 0) {
+        await appendEvent(principal, {
+          entityType: "sales_order_setting",
+          event: "sales_order.backlog_queued",
+          detail: {
+            orders: backlog.length,
+            since: settings.transferOrdersSince,
+            via: "setup",
+          },
+        });
+      }
+    }
 
     await saveSetupStep(principal, "review");
     throw go("review");
@@ -1304,9 +1397,9 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
 
                 <s-paragraph>
                   Set where each one counts stock now. Finishing setup starts
-                  the stock sync, and the first run writes real quantities, so
-                  a warehouse that works the other way round should say so
-                  here rather than be corrected afterwards.
+                  the stock sync, and the first run writes real quantities, so a
+                  warehouse that works the other way round should say so here
+                  rather than be corrected afterwards.
                 </s-paragraph>
 
                 <s-table variant="auto">
@@ -1410,6 +1503,9 @@ function StockStep({ stock, busy }: { stock: StockData; busy: boolean }) {
 }
 
 interface OrdersData {
+  transferOrders: boolean;
+  /** Orders with no document received since the cut-off, while transfer is off. */
+  awaitingTransfer: number;
   template: string;
   split: SalesOrderSettings["salesOrderSplit"];
   defaultTemplate: string;
@@ -1432,6 +1528,8 @@ function OrdersStep({
   result: StepResult | undefined;
   busy: boolean;
 }) {
+  const [transfer, setTransfer] = useState(orders.transferOrders);
+  const [backlog, setBacklog] = useState(false);
   const [template, setTemplate] = useState(orders.template);
   const [split, setSplit] = useState(orders.split);
   const [customising, setCustomising] = useState(orders.template !== "");
@@ -1497,306 +1595,397 @@ function OrdersStep({
     (gateway) => (orders.mapping[gateway] ?? "") !== "",
   ).length;
 
+  const turningOn = transfer && !orders.transferOrders;
+
   return (
     <Form method="post">
       <s-stack direction="block" gap="large">
-        <s-section heading="Orders">
+        <s-section heading="Order transfer">
           <s-stack direction="block" gap="base">
-            <s-paragraph>
-              Shopify orders are created as MetaKocka sales orders
-              automatically, and the quantities always add up to what the
-              customer bought.
-            </s-paragraph>
-
             {/*
-             * The one structural question about order sync, asked before the
-             * first order rather than discovered after it.
+             * The same switch the order settings page has, asked before the
+             * first order for a shop that wants stock and the catalogue alone
+             * or is not ready for the ERP to receive orders yet. Off hides the
+             * rest of this step: it would all describe something that is not
+             * happening, and the action stores nothing but the switch.
              *
-             * A merchant who does not keep warehouses in MetaKocka would
-             * otherwise meet the split as a surprise: two documents for one
-             * order, each filed against a warehouse they never meant to use.
-             * Asking here costs one answer and saves that.
-             *
-             * The value travels in a hidden input, as the reference pattern
-             * does, because this step is a real form and one control feeding
-             * one field is easier to reason about than trusting each web
-             * component's own form participation.
+             * A hidden input carries the value, as every other control in this
+             * step does.
              */}
-            <input type="hidden" name="salesOrderSplit" value={split} />
-            <s-choice-list
-              label="How many sales orders one Shopify order becomes"
-              values={[split]}
-              onChange={(event) =>
-                setSplit(
-                  event.currentTarget.values[0] === "single"
-                    ? "single"
-                    : "per_warehouse",
-                )
-              }
-            >
-              <s-choice value="per_warehouse">
-                One for each warehouse it ships from
-                <s-text slot="details">
-                  Each sales order is filed against its own MetaKocka warehouse.
-                  Keeps stock in MetaKocka right for shops that warehouse there.
-                </s-text>
-              </s-choice>
-              <s-choice value="single">
-                One for the whole order
-                <s-text slot="details">
-                  A single sales order carrying every line, with no warehouse on
-                  it, so MetaKocka applies the company default.
-                </s-text>
-              </s-choice>
-            </s-choice-list>
-
-            <s-text color="subdued">
-              {split === "single"
-                ? "You can change this later on the order settings page. Warehouses are still mapped in the previous step, because stock synchronization uses them — they just do not appear on the sales order."
-                : "You can change this later on the order settings page."}
-            </s-text>
-
+            <input
+              type="hidden"
+              name="transferOrders"
+              value={transfer ? "on" : ""}
+            />
             <s-stack direction="block" gap="small-400">
-              <s-text type="strong">Order reference</s-text>
-              <s-text>
-                {preview
-                  ? `Shopify order number. ${orders.sample?.name} would be filed as ${preview.reference}.`
-                  : "Shopify order number."}
-              </s-text>
+              <s-checkbox
+                label="Transfer orders to MetaKocka"
+                checked={transfer}
+                onChange={(event) => setTransfer(event.currentTarget.checked)}
+              />
               <s-text color="subdued">
-                {split === "single"
-                  ? "This is what MetaKocka shows as Customer\u2019s order, and how this app finds a sales order again if a write times out."
-                  : "This is what MetaKocka shows as Customer\u2019s order, and what links the sales orders of one Shopify order to each other."}
+                {transfer
+                  ? "Each order is written to MetaKocka as a sales order and kept up to date."
+                  : "Nothing about any order is sent to MetaKocka. Orders are still received and listed here, and stock and the catalogue keep synchronizing. You can turn this on later on the order settings page."}
               </s-text>
             </s-stack>
 
-            {customising ? (
+            {turningOn && orders.awaitingTransfer > 0 ? (
               /*
-               * The same control the product name pattern is edited in: fields
-               * as chips, offered as they are typed, each showing what it comes
-               * to for a real order of theirs. One way of editing a pattern,
-               * for both patterns a merchant edits.
-               *
-               * The value travels in a hidden input because this step is a real
-               * form and the editor is a contenteditable, which submits
-               * nothing on its own.
+               * Asked once, at the moment it matters, with the number in the
+               * question -- the order settings page's own question, for a shop
+               * coming back through setup to turn transfer on.
                */
-              <s-box maxInlineSize="520px">
-                <input type="hidden" name="template" value={template} />
-                <PatternEditor
-                  label="Reference pattern"
-                  value={template}
-                  onChange={setTemplate}
-                  registry={ORDER_REFERENCE_REGISTRY}
-                  rows={referenceRows}
-                  details="Type a word — order, number, email — and the field offers itself. Leave it empty to use the default."
-                  {...(templateError ? { error: templateError } : {})}
-                />
-
-                {/*
-                 * The same two ways in the settings page offers, and the same
-                 * ones the product name pattern has: typing a word offers the
-                 * fields on its own, and for anyone who has not started typing,
-                 * the full list and four ready references are one click away.
-                 */}
-                <s-stack direction="inline" gap="base" alignItems="center">
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    command="--show"
-                    commandFor={REFERENCE_FIELDS_MODAL_ID}
-                  >
-                    What you can put in a reference
-                  </s-button>
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    command="--show"
-                    commandFor={REFERENCE_PATTERNS_MODAL_ID}
-                  >
-                    Start from a ready pattern
-                  </s-button>
-                </s-stack>
-
-                <PatternFieldsModal
-                  id={REFERENCE_FIELDS_MODAL_ID}
-                  heading="What you can put in a reference"
-                  resolvedAgainst={
-                    orders.sample
-                      ? `order ${orders.sample.name}`
-                      : "one of your own orders"
-                  }
-                  groups={referenceRows("")}
-                />
-
-                <ReferencePatternsModal
-                  id={REFERENCE_PATTERNS_MODAL_ID}
-                  current={template}
-                  defaultPattern={orders.defaultTemplate}
-                  sample={sampleContext}
-                  onChoose={setTemplate}
-                />
-              </s-box>
-            ) : (
               <>
-                <input type="hidden" name="template" value={template} />
-                {/*
-                 * Secondary, not tertiary. A tertiary button has no border and
-                 * no fill, so alone on its own line under a paragraph it is
-                 * indistinguishable from a stray bold word — it needs
-                 * neighbouring controls to read as one. The tertiary buttons
-                 * this app keeps all sit in a table row or an action group.
-                 */}
-                <s-stack direction="inline">
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setCustomising(true)}
-                  >
-                    Customize
-                  </s-button>
+                <input
+                  type="hidden"
+                  name="transferBacklog"
+                  value={backlog ? "on" : ""}
+                />
+                <s-stack direction="block" gap="small-400">
+                  <s-checkbox
+                    label={
+                      orders.awaitingTransfer === 1
+                        ? "Also transfer the one order received while this was off"
+                        : `Also transfer the ${orders.awaitingTransfer} orders received while this was off`
+                    }
+                    checked={backlog}
+                    onChange={(event) =>
+                      setBacklog(event.currentTarget.checked)
+                    }
+                  />
+                  <s-text color="subdued">
+                    Leave this off if you entered them in MetaKocka yourself.
+                    They are then left alone for good; only orders from now on
+                    are sent.
+                  </s-text>
                 </s-stack>
               </>
+            ) : null}
+
+            {transfer ? null : (
+              <StepActions
+                step="orders"
+                intent="orders"
+                label="Continue"
+                busy={busy}
+              />
             )}
-
-            <s-box maxInlineSize="520px">
-              <s-text-field
-                name="profitCenter"
-                label="Default profit centre (optional)"
-                value={profitCenter}
-                onChange={(event) => setProfitCenter(event.currentTarget.value)}
-                details={
-                  orders.register.length > 0
-                    ? `Already known: ${orders.register.join(", ")}. Leave empty to let MetaKocka use the company setting.`
-                    : "Sent on every sales order. Leave empty to let MetaKocka use the company setting. It is checked against MetaKocka when you continue."
-                }
-                error={errorFor("profitCenter")}
-              />
-            </s-box>
           </s-stack>
         </s-section>
 
-        {/*
-         * Shipping, asked for before the first order rather than after it.
-         *
-         * A MetaKocka sales order carries products and a shipping charge is not
-         * one, so it needs an article of its own or the postage simply is not
-         * on the document. Required here, and checked against MetaKocka when
-         * you continue — the settings page checks the same code the same way.
-         */}
-        <s-section heading="Shipping">
-          <s-stack direction="block" gap="base">
-            <s-paragraph>
-              Postage is written against a MetaKocka product of its own.
-              Without one, every order that charges postage reaches MetaKocka
-              short of it and is reported rather than counted as reconciled.
-            </s-paragraph>
-
-            <s-box maxInlineSize="520px">
-              <s-text-field
-                name="shippingProductCode"
-                label="Shipping product code"
-                placeholder="e.g. SHIPPING"
-                value={shippingProductCode}
-                onChange={(event) =>
-                  setShippingProductCode(event.currentTarget.value)
-                }
-                details="The code exactly as MetaKocka holds it. This app never creates the article for you."
-                error={errorFor("shippingProductCode")}
-              />
-            </s-box>
-          </s-stack>
-        </s-section>
-
-        <s-section heading="Payments">
-          <s-stack direction="block" gap="base">
-            {orders.paymentTypes.length === 0 ? (
-              <s-banner tone="warning" heading="No payment types read yet">
+        {transfer ? (
+          <>
+            <s-section heading="Orders">
+              <s-stack direction="block" gap="base">
                 <s-paragraph>
-                  MetaKocka has not returned a readable list of payment types.
-                  They live in MetaKocka under Settings, Registers. You can
-                  finish setup once one is chosen below; the list is re-read
-                  overnight and whenever the payments page finds it out of date.
+                  Shopify orders are created as MetaKocka sales orders
+                  automatically, and the quantities always add up to what the
+                  customer bought.
                 </s-paragraph>
-              </s-banner>
-            ) : (
-              <s-paragraph>
-                {suggested > 0
-                  ? "Each Shopify payment method settles into one MetaKocka payment type. Obvious matches are filled in for you — check them before continuing."
-                  : "Each Shopify payment method settles into one MetaKocka payment type."}
-              </s-paragraph>
-            )}
 
-            <s-table variant="auto">
-              <s-table-header-row>
-                <s-table-header listSlot="primary">
-                  Shopify payment method
-                </s-table-header>
-                <s-table-header listSlot="labeled">
-                  MetaKocka payment type
-                </s-table-header>
-              </s-table-header-row>
-              <s-table-body>
-                {orders.gateways.map((gateway) => (
-                  <s-table-row key={gateway}>
-                    <s-table-cell>
-                      <s-stack direction="block" gap="small-500">
-                        <s-text type="strong">{gatewayLabel(gateway)}</s-text>
-                        <input type="hidden" name="gateway" value={gateway} />
-                      </s-stack>
-                    </s-table-cell>
-                    <s-table-cell>
-                      <s-box maxInlineSize="260px">
-                        <Dropdown
-                          name={`type:${gateway}`}
-                          label={`MetaKocka payment type for ${gatewayLabel(gateway)}`}
-                          hideLabel
-                          placeholder="Not mapped"
-                          value={mapping[gateway] ?? ""}
-                          options={typeOptions}
-                          onChange={(next) =>
-                            setMapping((current) => ({
-                              ...current,
-                              [gateway]: next,
-                            }))
-                          }
-                        />
-                      </s-box>
-                    </s-table-cell>
-                  </s-table-row>
-                ))}
-              </s-table-body>
-            </s-table>
+                {/*
+                 * The one structural question about order sync, asked before the
+                 * first order rather than discovered after it.
+                 *
+                 * A merchant who does not keep warehouses in MetaKocka would
+                 * otherwise meet the split as a surprise: two documents for one
+                 * order, each filed against a warehouse they never meant to use.
+                 * Asking here costs one answer and saves that.
+                 *
+                 * The value travels in a hidden input, as the reference pattern
+                 * does, because this step is a real form and one control feeding
+                 * one field is easier to reason about than trusting each web
+                 * component's own form participation.
+                 */}
+                <input type="hidden" name="salesOrderSplit" value={split} />
+                <s-choice-list
+                  label="How many sales orders one Shopify order becomes"
+                  values={[split]}
+                  onChange={(event) =>
+                    setSplit(
+                      event.currentTarget.values[0] === "single"
+                        ? "single"
+                        : "per_warehouse",
+                    )
+                  }
+                >
+                  <s-choice value="per_warehouse">
+                    One for each warehouse it ships from
+                    <s-text slot="details">
+                      Each sales order is filed against its own MetaKocka
+                      warehouse. Keeps stock in MetaKocka right for shops that
+                      warehouse there.
+                    </s-text>
+                  </s-choice>
+                  <s-choice value="single">
+                    One for the whole order
+                    <s-text slot="details">
+                      A single sales order carrying every line, with no
+                      warehouse on it, so MetaKocka applies the company default.
+                    </s-text>
+                  </s-choice>
+                </s-choice-list>
+
+                <s-text color="subdued">
+                  {split === "single"
+                    ? "You can change this later on the order settings page. Warehouses are still mapped in the previous step, because stock synchronization uses them — they just do not appear on the sales order."
+                    : "You can change this later on the order settings page."}
+                </s-text>
+
+                <s-stack direction="block" gap="small-400">
+                  <s-text type="strong">Order reference</s-text>
+                  <s-text>
+                    {preview
+                      ? `Shopify order number. ${orders.sample?.name} would be filed as ${preview.reference}.`
+                      : "Shopify order number."}
+                  </s-text>
+                  <s-text color="subdued">
+                    {split === "single"
+                      ? "This is what MetaKocka shows as Customer\u2019s order, and how this app finds a sales order again if a write times out."
+                      : "This is what MetaKocka shows as Customer\u2019s order, and what links the sales orders of one Shopify order to each other."}
+                  </s-text>
+                </s-stack>
+
+                {customising ? (
+                  /*
+                   * The same control the product name pattern is edited in: fields
+                   * as chips, offered as they are typed, each showing what it comes
+                   * to for a real order of theirs. One way of editing a pattern,
+                   * for both patterns a merchant edits.
+                   *
+                   * The value travels in a hidden input because this step is a real
+                   * form and the editor is a contenteditable, which submits
+                   * nothing on its own.
+                   */
+                  <s-box maxInlineSize="520px">
+                    <input type="hidden" name="template" value={template} />
+                    <PatternEditor
+                      label="Reference pattern"
+                      value={template}
+                      onChange={setTemplate}
+                      registry={ORDER_REFERENCE_REGISTRY}
+                      rows={referenceRows}
+                      details="Type a word — order, number, email — and the field offers itself. Leave it empty to use the default."
+                      {...(templateError ? { error: templateError } : {})}
+                    />
+
+                    {/*
+                     * The same two ways in the settings page offers, and the same
+                     * ones the product name pattern has: typing a word offers the
+                     * fields on its own, and for anyone who has not started typing,
+                     * the full list and four ready references are one click away.
+                     */}
+                    <s-stack direction="inline" gap="base" alignItems="center">
+                      <s-button
+                        type="button"
+                        variant="secondary"
+                        command="--show"
+                        commandFor={REFERENCE_FIELDS_MODAL_ID}
+                      >
+                        What you can put in a reference
+                      </s-button>
+                      <s-button
+                        type="button"
+                        variant="secondary"
+                        command="--show"
+                        commandFor={REFERENCE_PATTERNS_MODAL_ID}
+                      >
+                        Start from a ready pattern
+                      </s-button>
+                    </s-stack>
+
+                    <PatternFieldsModal
+                      id={REFERENCE_FIELDS_MODAL_ID}
+                      heading="What you can put in a reference"
+                      resolvedAgainst={
+                        orders.sample
+                          ? `order ${orders.sample.name}`
+                          : "one of your own orders"
+                      }
+                      groups={referenceRows("")}
+                    />
+
+                    <ReferencePatternsModal
+                      id={REFERENCE_PATTERNS_MODAL_ID}
+                      current={template}
+                      defaultPattern={orders.defaultTemplate}
+                      sample={sampleContext}
+                      onChoose={setTemplate}
+                    />
+                  </s-box>
+                ) : (
+                  <>
+                    <input type="hidden" name="template" value={template} />
+                    {/*
+                     * Secondary, not tertiary. A tertiary button has no border and
+                     * no fill, so alone on its own line under a paragraph it is
+                     * indistinguishable from a stray bold word — it needs
+                     * neighbouring controls to read as one. The tertiary buttons
+                     * this app keeps all sit in a table row or an action group.
+                     */}
+                    <s-stack direction="inline">
+                      <s-button
+                        type="button"
+                        variant="secondary"
+                        onClick={() => setCustomising(true)}
+                      >
+                        Customize
+                      </s-button>
+                    </s-stack>
+                  </>
+                )}
+
+                <s-box maxInlineSize="520px">
+                  <s-text-field
+                    name="profitCenter"
+                    label="Default profit centre (optional)"
+                    value={profitCenter}
+                    onChange={(event) =>
+                      setProfitCenter(event.currentTarget.value)
+                    }
+                    details={
+                      orders.register.length > 0
+                        ? `Already known: ${orders.register.join(", ")}. Leave empty to let MetaKocka use the company setting.`
+                        : "Sent on every sales order. Leave empty to let MetaKocka use the company setting. It is checked against MetaKocka when you continue."
+                    }
+                    error={errorFor("profitCenter")}
+                  />
+                </s-box>
+              </s-stack>
+            </s-section>
 
             {/*
-             * 520px, the width of every other field in this step, and not the
-             * 360px it had: the help line and the error render under the
-             * control at the control's own width, so a narrower box wrapped
-             * both into a ragged column while the card stayed empty beside it.
+             * Shipping, asked for before the first order rather than after it.
+             *
+             * A MetaKocka sales order carries products and a shipping charge is not
+             * one, so it needs an article of its own or the postage simply is not
+             * on the document. Required here, and checked against MetaKocka when
+             * you continue — the settings page checks the same code the same way.
              */}
-            <s-box maxInlineSize="520px">
-              <Dropdown
-                name="fallback"
-                label="Type for anything not mapped"
-                placeholder="Choose a type"
-                value={fallback}
-                options={fallbackOptions}
-                details="Used for any method above with no type of its own, so it cannot be empty."
-                onChange={setFallback}
-                {...(errorFor("fallback")
-                  ? { error: errorFor("fallback") }
-                  : {})}
-              />
-            </s-box>
+            <s-section heading="Shipping">
+              <s-stack direction="block" gap="base">
+                <s-paragraph>
+                  Postage is written against a MetaKocka product of its own.
+                  Without one, every order that charges postage reaches
+                  MetaKocka short of it and is reported rather than counted as
+                  reconciled.
+                </s-paragraph>
 
-            <StepActions
-              step="orders"
-              intent="orders"
-              label="Continue"
-              busy={busy}
-            />
-          </s-stack>
-        </s-section>
+                <s-box maxInlineSize="520px">
+                  <s-text-field
+                    name="shippingProductCode"
+                    label="Shipping product code"
+                    placeholder="e.g. SHIPPING"
+                    value={shippingProductCode}
+                    onChange={(event) =>
+                      setShippingProductCode(event.currentTarget.value)
+                    }
+                    details="The code exactly as MetaKocka holds it. This app never creates the article for you."
+                    error={errorFor("shippingProductCode")}
+                  />
+                </s-box>
+              </s-stack>
+            </s-section>
+
+            <s-section heading="Payments">
+              <s-stack direction="block" gap="base">
+                {orders.paymentTypes.length === 0 ? (
+                  <s-banner tone="warning" heading="No payment types read yet">
+                    <s-paragraph>
+                      MetaKocka has not returned a readable list of payment
+                      types. They live in MetaKocka under Settings, Registers.
+                      You can finish setup once one is chosen below; the list is
+                      re-read overnight and whenever the payments page finds it
+                      out of date.
+                    </s-paragraph>
+                  </s-banner>
+                ) : (
+                  <s-paragraph>
+                    {suggested > 0
+                      ? "Each Shopify payment method settles into one MetaKocka payment type. Obvious matches are filled in for you — check them before continuing."
+                      : "Each Shopify payment method settles into one MetaKocka payment type."}
+                  </s-paragraph>
+                )}
+
+                <s-table variant="auto">
+                  <s-table-header-row>
+                    <s-table-header listSlot="primary">
+                      Shopify payment method
+                    </s-table-header>
+                    <s-table-header listSlot="labeled">
+                      MetaKocka payment type
+                    </s-table-header>
+                  </s-table-header-row>
+                  <s-table-body>
+                    {orders.gateways.map((gateway) => (
+                      <s-table-row key={gateway}>
+                        <s-table-cell>
+                          <s-stack direction="block" gap="small-500">
+                            <s-text type="strong">
+                              {gatewayLabel(gateway)}
+                            </s-text>
+                            <input
+                              type="hidden"
+                              name="gateway"
+                              value={gateway}
+                            />
+                          </s-stack>
+                        </s-table-cell>
+                        <s-table-cell>
+                          <s-box maxInlineSize="260px">
+                            <Dropdown
+                              name={`type:${gateway}`}
+                              label={`MetaKocka payment type for ${gatewayLabel(gateway)}`}
+                              hideLabel
+                              placeholder="Not mapped"
+                              value={mapping[gateway] ?? ""}
+                              options={typeOptions}
+                              onChange={(next) =>
+                                setMapping((current) => ({
+                                  ...current,
+                                  [gateway]: next,
+                                }))
+                              }
+                            />
+                          </s-box>
+                        </s-table-cell>
+                      </s-table-row>
+                    ))}
+                  </s-table-body>
+                </s-table>
+
+                {/*
+                 * 520px, the width of every other field in this step, and not the
+                 * 360px it had: the help line and the error render under the
+                 * control at the control's own width, so a narrower box wrapped
+                 * both into a ragged column while the card stayed empty beside it.
+                 */}
+                <s-box maxInlineSize="520px">
+                  <Dropdown
+                    name="fallback"
+                    label="Type for anything not mapped"
+                    placeholder="Choose a type"
+                    value={fallback}
+                    options={fallbackOptions}
+                    details="Used for any method above with no type of its own, so it cannot be empty."
+                    onChange={setFallback}
+                    {...(errorFor("fallback")
+                      ? { error: errorFor("fallback") }
+                      : {})}
+                  />
+                </s-box>
+
+                <StepActions
+                  step="orders"
+                  intent="orders"
+                  label="Continue"
+                  busy={busy}
+                />
+              </s-stack>
+            </s-section>
+          </>
+        ) : null}
       </s-stack>
     </Form>
   );
@@ -1809,6 +1998,12 @@ function ReviewStep({
   review: { components: ReadinessComponent[]; blocking: ReadinessComponent[] };
   busy: boolean;
 }) {
+  // Readiness already knows the switch; the sentence below should not promise
+  // orders that the previous step said are not sent.
+  const transferOff =
+    review.components.find((component) => component.key === "orders")
+      ?.status === "disabled";
+
   return (
     <Form method="post">
       <s-stack direction="block" gap="large">
@@ -1821,10 +2016,9 @@ function ReviewStep({
         <s-section heading="What happens next">
           <s-stack direction="block" gap="base">
             <s-paragraph>
-              Finishing setup starts automatic synchronization. Orders placed
-              while you were setting up are picked up on the first pass, stock
-              is read for every connected location, and the two catalogues are
-              matched by SKU.
+              {transferOff
+                ? "Finishing setup starts automatic synchronization. Stock is read for every connected location and the two catalogues are matched by SKU. Orders are received and listed but not sent to MetaKocka until order transfer is turned on."
+                : "Finishing setup starts automatic synchronization. Orders placed while you were setting up are picked up on the first pass, stock is read for every connected location, and the two catalogues are matched by SKU."}
             </s-paragraph>
             <s-text color="subdued">
               Pressing this twice does not create anything twice.

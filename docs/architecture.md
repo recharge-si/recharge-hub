@@ -279,6 +279,13 @@ document is left alone for good. An order that already has a document is never
 held back by the cut-off, so a document written before the switch went off keeps
 converging afterwards.
 
+Guided setup's orders step asks the same switch first. Off hides the rest of the
+step and stores nothing but the switch; on applies the settings page's cut-off
+and backlog rule unchanged. Readiness reads the switch too: while it is off the
+orders and payments components report `disabled` and stop being required, so a
+shop that wants stock and the catalogue alone finishes setup without a shipping
+article or a payment fallback that no document would carry.
+
 ### How many documents an order becomes
 
 `sales_order_setting.sales_order_split` decides whether an order is split across
@@ -516,7 +523,7 @@ else to a `review` row and a `sale_price_conflict` exception.
 ### Attribute schema
 
 What every product type should carry, planned as one document per shop and
-inherited down a tree of types â€” `docs/attributes.md`. Pure rules in
+inherited down a tree of types — `docs/attributes.md`. Pure rules in
 `src/domain/attributes/` (parse and check, resolve inheritance, every change
 as a function over the document); one row in `attribute_schema` with a
 revision every write is conditional on; screens under `app.attributes.*`

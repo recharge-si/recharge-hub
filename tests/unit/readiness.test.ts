@@ -39,6 +39,7 @@ function facts(over: Partial<ReadinessFacts> = {}): ReadinessFacts {
       fallback: "Kartica",
     },
     orders: {
+      transferOrders: true,
       shippingProductCode: "SHIPPING",
       discountRepresentation: "document_discount_value",
       salesOrderSplit: "per_warehouse",
@@ -251,6 +252,7 @@ describe("computeReadiness", () => {
       facts({
         warehouses: { connectedCount: 0, incompleteNames: [] },
         orders: {
+          transferOrders: true,
           shippingProductCode: "SHIPPING",
           discountRepresentation: "document_discount_value",
           salesOrderSplit: "single",
@@ -346,6 +348,7 @@ describe("computeReadiness", () => {
     const readiness = computeReadiness(
       facts({
         orders: {
+          transferOrders: true,
           shippingProductCode: null,
           discountRepresentation: "none",
           salesOrderSplit: "per_warehouse",
@@ -356,6 +359,43 @@ describe("computeReadiness", () => {
     const orders = componentOf(readiness, "orders");
     expect(orders.status).toBe("ready");
     expect(orders.reason).toContain("Shipping and discounts");
+    expect(readiness.overall).toBe("ready");
+  });
+
+  it("calls orders and payments off, not broken, while order transfer is off", () => {
+    /*
+     * Nothing about any order reaches MetaKocka, so a shop that wants stock
+     * and the catalogue alone finishes setup without a shipping article or a
+     * payment fallback -- neither has anything to be written on.
+     */
+    const readiness = computeReadiness(
+      facts({
+        orders: {
+          transferOrders: false,
+          shippingProductCode: null,
+          discountRepresentation: "none",
+          salesOrderSplit: "per_warehouse",
+        },
+        payments: {
+          enabled: true,
+          seenGateways: ["manual"],
+          mappedGateways: [],
+          fallback: null,
+        },
+      }),
+    );
+
+    const orders = componentOf(readiness, "orders");
+    expect(orders.status).toBe("disabled");
+    expect(orders.required).toBe(false);
+    expect(orders.summary).toBe("Not sent to MetaKocka");
+
+    const payments = componentOf(readiness, "payments");
+    expect(payments.status).toBe("disabled");
+    expect(payments.required).toBe(false);
+    expect(payments.summary).toContain("order transfer is off");
+
+    expect(readiness.blocking).toEqual([]);
     expect(readiness.overall).toBe("ready");
   });
 

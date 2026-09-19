@@ -66,6 +66,7 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
     prisma.salesOrderSetting.findFirst({
       where: { shop: { domain } },
       select: {
+        transferOrders: true,
         syncPayments: true,
         shippingProductCode: true,
         discountRepresentation: true,
@@ -153,6 +154,8 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
       fallback: paymentSetting?.fallbackPaymentType?.trim() || null,
     },
     orders: {
+      // No row means the defaults, and order transfer is on by default.
+      transferOrders: salesOrderSetting?.transferOrders ?? true,
       shippingProductCode: salesOrderSetting?.shippingProductCode ?? null,
       discountRepresentation:
         salesOrderSetting?.discountRepresentation ?? "none",
