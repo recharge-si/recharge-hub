@@ -50,12 +50,12 @@ name:
 
 ```text
 Home              /app                  operations dashboard
+Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
+                                        /app/sales/:id/variants every variant it touches
 Orders            /app/orders           list, and /app/orders/settings
 Needs attention   /app/exceptions
 Products          /app/products         status, /app/products/sync for settings,
                                         and /app/products/:id — one product as a sale sees it
-Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
-                                        /app/sales/:id/variants every variant it touches
 Locations         /app/locations        how stock is going, and
                                         /app/locations/settings for the mappings,
                                         the defaults and the profit centres

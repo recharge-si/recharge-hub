@@ -23,10 +23,10 @@ export const APP_HOME = "/app";
 
 export const APP_NAV: readonly NavItem[] = [
   { href: APP_HOME, label: "Home", rel: "home" },
+  { href: "/app/sales", label: "Sales" },
   { href: "/app/orders", label: "Orders" },
   { href: "/app/exceptions", label: "Needs attention" },
   { href: "/app/products", label: "Products" },
-  { href: "/app/sales", label: "Sales" },
   { href: "/app/locations", label: "Locations" },
   { href: "/app/settings", label: "Settings" },
 ];
