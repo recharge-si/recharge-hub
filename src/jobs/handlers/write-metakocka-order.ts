@@ -26,8 +26,8 @@ import { replaceApplicationsForDocument } from "~/adapters/db/repositories/order
 import { isSyncActivated } from "~/adapters/db/repositories/shop.server";
 import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import { listCachedWarehouses } from "~/adapters/db/repositories/supply-source.server";
+import { getTaxSnapshot } from "~/adapters/db/repositories/tax.server";
 import { MetakockaClient } from "~/adapters/metakocka/client";
-import { taxFactorFromPercent } from "~/adapters/metakocka/products";
 import {
   buildSalesOrderBody,
   lookupSalesOrderByBuyerOrder,
@@ -67,6 +67,11 @@ const WRITE_FAILURE_KINDS = [
   "profit_center_rejected",
   "warehouse_invalid",
   "tax_undeterminable",
+  "tax_mapping_missing",
+  "tax_treatment_unknown",
+  "tax_data_insufficient",
+  "tax_reconciliation_failed",
+  "vat_registration_configuration_error",
   "unmapped_payment_gateway",
   "metakocka_write_failed",
   // A document that went through is proof every SKU on it is in the catalogue,
@@ -347,50 +352,45 @@ export async function writeMetakockaOrderFor(
   const parsed = parseOrderSafe(order.rawPayload);
 
   /**
-   * Tax, re-derived from the payload rather than read off the row.
+   * Tax, from the order's recorded decision and nowhere else (§42 of the
+   * brief: validate before creating a document).
    *
-   * `order_line.tax_factor` records what the parser made of the order the day
-   * it arrived. That is the right thing to store, but it means a parser fix can
-   * never reach an order that is already in the database — and this one landed
-   * exactly there: three lines saved as "unknown" by an older rule that today
-   * reads as a definite zero, with a retry that could only ever reproduce the
-   * same failure.
+   * The reconciler decides every order's VAT under `jobs/orders/tax-decider`
+   * and stores the result. This job never decides anything about tax: it reads
+   * the mapped `tax_factor` per line from that snapshot, and refuses without a
+   * clean one. A queued retry that lands here before the order has been
+   * decided, or after a decision that was blocked, is told to reconcile —
+   * which is the one path that decides again.
    *
-   * So while the payload is still here, it wins. Past the 90-day redaction it
-   * is gone (§2.4) and the stored value is all there is, which is why the
-   * fallback exists rather than this being a straight replacement.
+   * §3 verified that MetaKocka takes `tax_factor: "0"` without complaint and
+   * files a financially wrong line; a line with no mapped factor is therefore
+   * never sent with a stand-in.
    */
-  const freshTax = new Map(
-    (parsed?.lines ?? []).map((line) => [
-      line.shopifyLineItemId,
-      line.taxFactor,
-    ]),
+  const taxSnapshot = await getTaxSnapshot(principal, orderId);
+  if (!taxSnapshot || !taxSnapshot.decision.ok) {
+    await raiseException(principal, {
+      orderId,
+      kind: "tax_undeterminable",
+      message: taxSnapshot
+        ? `Order ${order.shopifyOrderNumber} has a VAT decision with unresolved issues, so no document was written. ${taxSnapshot.decision.issues
+            .filter((issue) => issue.severity === "blocking")
+            .map((issue) => issue.message)
+            .join(" ")}`
+        : `Order ${order.shopifyOrderNumber} has not had its VAT decided yet, so no document was written. Reconcile the order to decide it, then it is sent.`,
+      detail: taxSnapshot
+        ? { configVersion: taxSnapshot.decision.configVersion }
+        : { configVersion: null },
+    });
+    return;
+  }
+
+  const taxByLine = new Map(
+    taxSnapshot.decision.lines.map((line) => [line.lineId, line]),
   );
-  /**
-   * The shop's own VAT rate, used when Shopify did not supply one.
-   *
-   * MetaKocka will not take a line without a tax attribute — it answers
-   * "Attribute 'tax' for product with code X must be set" — and it will not
-   * infer one from the catalogue either. So a rate has to come from somewhere,
-   * and the merchant's configured rate is the only honest source: it is the one
-   * their catalogue and pricelist are built on.
-   *
-   * Sending zero instead, which this used to do, produced a line of 209.00 at
-   * 0% against a pricelist that says 171.31 at 22% — the right gross, a net
-   * matching nothing, and VAT understated to the tax office.
-   */
-  const defaultTaxFactor = taxFactorFromPercent(productSettings.taxPercent);
 
-  const taxFactorFor = (line: {
-    shopifyLineItemId: string;
-    taxFactor: string | null;
-  }) =>
-    freshTax.get(line.shopifyLineItemId) ?? line.taxFactor ?? defaultTaxFactor;
+  const taxFactorFor = (line: { shopifyLineItemId: string }): string | null =>
+    taxByLine.get(line.shopifyLineItemId)?.metakockaTaxFactor ?? null;
 
-  // §11: MetaKocka refuses a line whose product has no tax attribute unless the
-  // line carries one, and §8.6 forbids substituting a product default. When
-  // Shopify has not said enough to derive the rate, that is a human's decision,
-  // not ours to guess at.
   const withoutTax = perSourceLines.filter(
     (entry) => taxFactorFor(entry.line) === null,
   );
@@ -398,11 +398,18 @@ export async function writeMetakockaOrderFor(
     await raiseException(principal, {
       orderId,
       kind: "tax_undeterminable",
-      message: `Shopify did not give a tax rate for ${withoutTax.length === 1 ? "one line" : `${withoutTax.length} lines`} on this order, and MetaKocka will not accept a line without one. Set the default VAT rate on the product sync page so it matches your pricelist, or fix the tax settings for this market in Shopify, then retry.`,
-      detail: { skus: withoutTax.map((entry) => entry.line.sku) },
+      message: `Order ${order.shopifyOrderNumber} has ${withoutTax.length === 1 ? "a line" : `${withoutTax.length} lines`} (${withoutTax.map((entry) => entry.line.sku).join(", ")}) that the recorded VAT decision does not cover, so no document was written. Reconcile the order to decide it again.`,
+      detail: {
+        skus: withoutTax.map((entry) => entry.line.sku),
+        configVersion: taxSnapshot.decision.configVersion,
+      },
     });
     return;
   }
+
+  /** The shipping line's own factor, as Shopify taxed shipping. */
+  const shippingTaxFactor =
+    taxSnapshot.decision.shipping?.metakockaTaxFactor ?? null;
 
   /*
    * The app's internal claim key — **not** necessarily what MetaKocka is told.
@@ -680,14 +687,13 @@ export async function writeMetakockaOrderFor(
           code: salesOrderSettings.shippingProductCode,
           amountMinor: shippingMinor,
           /*
-           * Taxed at the order's prevailing rate rather than at a rate of our
-           * own. MetaKocka refuses a line with no tax attribute, and the
-           * shipping article's own rate is not something this app can read.
+           * Shipping's own rate, as Shopify taxed it (§27 of the brief) and
+           * as the tax decision recorded it — never a product's rate copied
+           * across. The decision refuses when it could not tell, so a null
+           * here means the order had no taxable shipping to decide, and the
+           * shipping share then carries no tax.
            */
-          taxFactor:
-            perSourceLines.length > 0
-              ? taxFactorFor(perSourceLines[0]!.line)
-              : defaultTaxFactor,
+          taxFactor: shippingTaxFactor,
         }
       : null;
 
@@ -1247,17 +1253,6 @@ export async function writeMetakockaOrderFor(
       await prisma.allocation.updateMany({
         where: { supplySourceId, orderLine: { orderId } },
         data: { status: "written_to_metakocka" },
-      });
-    }
-
-    // Bring the stored rows in line with what was sent, so the order page and
-    // the decision trail do not keep showing the superseded derivation.
-    for (const entry of perSourceLines) {
-      const derived = taxFactorFor(entry.line);
-      if (derived === entry.line.taxFactor) continue;
-      await prisma.orderLine.update({
-        where: { id: entry.line.id },
-        data: { taxFactor: derived },
       });
     }
 

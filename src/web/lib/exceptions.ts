@@ -136,10 +136,40 @@ const COPY: Record<string, ExceptionCopy> = {
       "Shopify would not move or split the fulfilment order. Check the location is still active, then retry.",
   },
   tax_undeterminable: {
-    label: "Tax rate could not be determined",
-    short: "with no usable tax rate",
+    label: "VAT not decided",
+    short: "whose VAT has not been decided",
     guidance:
-      "The order has no tax lines to derive a rate from. Set the rate in MetaKocka, or check the tax settings for that market.",
+      "The order has no usable VAT decision on record, so no document was written. Reconcile the order to decide it under the current Taxes & VAT settings.",
+  },
+  tax_mapping_missing: {
+    label: "VAT rate not mapped",
+    short: "using a VAT rate with no MetaKocka mapping",
+    guidance:
+      "The order uses a VAT rate that has no MetaKocka mapping, so it was not sent. Map the rate on the Taxes & VAT page, then reconcile the order again.",
+  },
+  tax_treatment_unknown: {
+    label: "VAT treatment unclear",
+    short: "whose VAT treatment could not be told",
+    guidance:
+      "This app could not say what kind of VAT event the order is — an unexplained 0%, a destination it is not allowed to stand the home rate in for, or no destination at all. The message names the choice to make on the Taxes & VAT page, or the address to add in Shopify. Nothing is guessed.",
+  },
+  tax_data_insufficient: {
+    label: "Shopify tax breakdown missing",
+    short: "taxed by Shopify without a per-line rate",
+    guidance:
+      "Shopify charged tax on the order but did not say at what rate for every line, so the document cannot state the VAT. Check the order's taxes in Shopify, then reconcile it again.",
+  },
+  tax_reconciliation_failed: {
+    label: "Tax does not add up",
+    short: "whose line taxes do not add up to the order tax",
+    guidance:
+      "What Shopify reports per line does not add up to what it reports for the order, beyond a cent of rounding. Check the order's taxes in Shopify, then reconcile it again.",
+  },
+  vat_registration_configuration_error: {
+    label: "VAT registration not configured",
+    short: "charged destination VAT with no registration to file it under",
+    guidance:
+      "Shopify charged a destination country's VAT, but neither EU OSS nor a registration in that country is configured here, so this app cannot say how that VAT is reported. Enable OSS or add the registration on the Taxes & VAT page, then reconcile the order again.",
   },
   commercial_representation_missing: {
     label: "Shipping or discount has nowhere to go",
@@ -200,9 +230,18 @@ const ACTIONS: Record<string, ExceptionAction> = {
     label: "Open order settings",
     href: "/app/orders/settings",
   },
-  tax_undeterminable: {
-    label: "Open order settings",
-    href: "/app/orders/settings",
+  tax_undeterminable: { label: "Open Taxes & VAT", href: "/app/settings/taxes" },
+  tax_mapping_missing: {
+    label: "Configure mapping",
+    href: "/app/settings/taxes/mappings",
+  },
+  tax_treatment_unknown: {
+    label: "Open Taxes & VAT",
+    href: "/app/settings/taxes/registrations",
+  },
+  vat_registration_configuration_error: {
+    label: "Open registrations",
+    href: "/app/settings/taxes/registrations",
   },
 };
 

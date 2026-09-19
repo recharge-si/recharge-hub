@@ -135,6 +135,7 @@ export async function saveIncomingOrder(
         paymentGateway: parsed.gateway,
         presentmentCurrency: parsed.currency,
         totalMinor: parsed.totalMinor,
+        totalTaxMinor: parsed.totalTaxMinor,
         shippingMinor: parsed.shippingMinor,
         discountMinor: parsed.discountMinor,
         // §2.4 minimisation happens here, at the one boundary every stored
@@ -927,6 +928,7 @@ export async function applyOrderSync(
           ? {
               presentmentCurrency: parsed.currency,
               totalMinor: parsed.totalMinor,
+              totalTaxMinor: parsed.totalTaxMinor,
               shippingMinor: parsed.shippingMinor,
               discountMinor: parsed.discountMinor,
             }

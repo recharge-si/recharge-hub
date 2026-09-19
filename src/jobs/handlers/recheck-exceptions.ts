@@ -4,7 +4,7 @@ import { z } from "zod";
 
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
-import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
+import { getTaxConfig } from "~/adapters/db/repositories/tax.server";
 import {
   findPaymentType,
   getFallbackPaymentType,
@@ -17,6 +17,7 @@ import {
   redriveOrder,
   type RedriveTarget,
 } from "~/adapters/queue/redrive.server";
+import { decideOrderTax } from "~/domain/tax/decide";
 import { serviceToken, type Principal } from "~/domain/types";
 
 /**
@@ -355,18 +356,33 @@ async function verdictFor(
     }
 
     /*
-     * No usable tax rate. Fixed by setting the shop's own VAT rate, which is
-     * what the write path falls back to when Shopify supplies none (§3).
+     * Tax. Every one of these was raised because the order's VAT decision had
+     * a blocking issue under the configuration of the day — a rate with no
+     * mapping, a zero nobody could explain, a registration missing. The
+     * merchant fixes that on the Taxes & VAT page, and nothing announces it.
+     *
+     * The check is the decision itself, re-run under the current configuration
+     * against the stored payload. It is pure and costs no call to anything;
+     * if it comes out clean, reconciling is what writes the document.
      */
-    case "tax_undeterminable": {
+    case "tax_undeterminable":
+    case "tax_mapping_missing":
+    case "tax_treatment_unknown":
+    case "tax_data_insufficient":
+    case "tax_reconciliation_failed":
+    case "vat_registration_configuration_error": {
       if (fullyWritten(facts)) return FIXED("Every document is written.");
 
-      const settings = await getProductSyncSetting(principal);
-      return settings.taxPercent
+      const parsed = parseOrderSafe(order.rawPayload);
+      if (!parsed) return OPEN;
+
+      const config = await getTaxConfig(principal);
+      const decision = decideOrderTax(parsed.tax, config);
+      return decision.ok
         ? {
             kind: "unblocked",
-            note: "A default VAT rate is configured.",
-            retry: "write",
+            note: "The order's VAT can be decided under the current tax configuration.",
+            retry: "reconcile",
           }
         : OPEN;
     }

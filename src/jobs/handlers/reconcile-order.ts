@@ -30,8 +30,10 @@ import {
   fetchFulfillmentAssignments,
   type FulfillmentAssignment,
 } from "~/adapters/shopify/fulfillment-orders";
+import { parseOrderSafe } from "~/adapters/shopify/order-payload";
 import { fetchOrderById } from "~/adapters/shopify/orders";
 import { fetchOrderTransactions } from "~/adapters/shopify/transactions";
+import { freezeTaxSnapshot } from "~/adapters/db/repositories/tax.server";
 import { unauthenticated } from "~/adapters/shopify/shopify.server";
 import {
   classifyQuantities,
@@ -55,6 +57,11 @@ import {
   planPayments,
   reconcileLedger,
 } from "~/jobs/orders/payment-reconciler";
+import {
+  applyTaxExceptions,
+  decideOrderTaxFor,
+  type TaxDecisionOutcome,
+} from "~/jobs/orders/tax-decider";
 import { contentOf, verifyOrder } from "~/jobs/orders/verification";
 
 /**
@@ -74,6 +81,7 @@ import { contentOf, verifyOrder } from "~/jobs/orders/verification";
  * ```text
  * acquire the per-order lock
  *   read the order from Shopify, fresh
+ *   decide the order's VAT and record why
  *   read where Shopify says each line ships from
  *   read the payment transactions
  *   build the desired state
@@ -259,7 +267,29 @@ async function reconcileUnderLock(
   });
   if (!order) return { kind: "skipped", reason: "the order no longer exists" };
 
-  const canonicalLines: CanonicalLine[] = order.lines.map((line) => ({
+  /* ---------------------------------------------------------------------- */
+  /* The tax decision                                                       */
+  /* ---------------------------------------------------------------------- */
+
+  /*
+   * Decided here, every pass, from the payload as it stands, and recorded
+   * before anything about documents is considered (`jobs/orders/tax-decider`).
+   * The lines below then carry the mapped `tax_factor` the decision produced,
+   * which is what the document builder reads — never a product default and
+   * never a guess. Whether a blocking decision holds the order is settled
+   * after the transfer switch, where every other "not sent" reason lives.
+   */
+  const parsedForTax = parseOrderSafe(payload);
+  const tax: TaxDecisionOutcome | null = parsedForTax
+    ? await decideOrderTaxFor(principal, { orderId, parsed: parsedForTax, now })
+    : null;
+
+  const decidedLines = await prisma.orderLine.findMany({
+    where: { orderId },
+    orderBy: { createdAt: "asc" },
+  });
+
+  const canonicalLines: CanonicalLine[] = decidedLines.map((line) => ({
     shopifyLineItemId: line.shopifyLineItemId,
     sku: line.sku,
     title: line.title,
@@ -314,6 +344,19 @@ async function reconcileUnderLock(
         refundedMinor: ledger.summary.refundedMinor,
         netPaidMinor: ledger.summary.netPaidMinor,
         creditRequiredMinor: ledger.summary.refundedMinor,
+        /*
+         * What the credit note reverses, per rate and per treatment, taken
+         * from the tax decision the order was filed under — never from
+         * today's configuration (§33 of the brief).
+         */
+        taxToReverse: (tax?.refunds ?? []).map((refund) => ({
+          refundId: refund.refundId,
+          configVersion: refund.configVersion,
+          currency: refund.currency,
+          totals: refund.totals,
+          totalTaxMinor: refund.totalTaxMinor,
+          unmatchedLineIds: refund.unmatchedLineIds,
+        })),
       },
     });
   }
@@ -370,6 +413,56 @@ async function reconcileUnderLock(
       "Order not transferred to MetaKocka",
     );
     return { kind: "skipped", reason };
+  }
+
+  /* ---------------------------------------------------------------------- */
+  /* Fail closed on tax                                                     */
+  /* ---------------------------------------------------------------------- */
+
+  /*
+   * Accounting correctness outranks sending every order (§41 of the brief).
+   * A decision with a blocking issue — an unmapped rate, an unexplained zero,
+   * a line Shopify taxed without saying at what, totals that do not add up —
+   * means no document is created or updated for this order. The issues are
+   * filed as exceptions in the engine's own words, the verdict says why, and
+   * the next pass after the merchant fixes the configuration writes it.
+   *
+   * A payload this app cannot read any more (redacted past §2.4) has no tax
+   * to decide and cannot be sent either; the write job says so itself.
+   */
+  if (tax) {
+    await applyTaxExceptions(principal, {
+      orderId,
+      orderNumber: order.shopifyOrderNumber,
+      decision: tax.decision,
+    });
+
+    if (!tax.decision.ok) {
+      await recordSyncVerdict(orderId, {
+        state: "blocked",
+        detail: {
+          reason: "the order's VAT could not be filed safely",
+          tax: {
+            configVersion: tax.decision.configVersion,
+            issues: tax.decision.issues
+              .filter((issue) => issue.severity === "blocking")
+              .map((issue) => ({ kind: issue.kind, message: issue.message })),
+          },
+        },
+        at: now,
+      });
+      log.info(
+        {
+          shop: shopDomain,
+          orderId,
+          issues: tax.decision.issues
+            .filter((issue) => issue.severity === "blocking")
+            .map((issue) => issue.kind),
+        },
+        "Order held: tax could not be decided",
+      );
+      return { kind: "reconciled", orderId, actions: [], inconsistent: false };
+    }
   }
 
   /* ---------------------------------------------------------------------- */
@@ -797,6 +890,15 @@ async function reconcileUnderLock(
 
   const finalRows = await listDocumentsForReconciliation(principal, orderId);
 
+  /*
+   * A document exists under this decision: from now on it is history. Later
+   * passes re-decide an edit under the configuration frozen here, and a
+   * refund reverses exactly what was filed (§45 of the brief).
+   */
+  if (finalRows.some((row) => row.status === "written" && row.mkId !== null)) {
+    await freezeTaxSnapshot(principal, orderId, now);
+  }
+
   const verification = verifyOrder({
     lines: canonicalLines,
     documents: finalRows
@@ -928,6 +1030,15 @@ async function reconcileUnderLock(
       reason: options.reason,
       salesOrderSplit: settings.salesOrderSplit,
       allocationMode: settings.allocationMode,
+      tax: tax
+        ? {
+            configVersion: tax.decision.configVersion,
+            treatment: tax.decision.treatment,
+            source: tax.decision.source,
+            rateKeys: tax.decision.rateKeys,
+            taxMinor: tax.decision.totals.taxMinor,
+          }
+        : null,
       actions: actions.map((action) =>
         action.kind === "retire"
           ? { kind: action.kind, countCode: action.countCode }
