@@ -60,6 +60,19 @@ Long explanation belongs behind one of these or in the page's Help modal, never 
 the card. A control states its answer in one line; the reasoning, the edge case and what
 MetaKocka does with it are one click away.
 
+## Editors with a summary
+An editor whose answer is a number the merchant cannot work out by reading the form —
+how many variants a rule set matches, what a discount comes to — is two columns:
+the form in the order it is built, numbered, and a sticky sidebar (`s-page` with
+`inlineSize="base"` and the `aside` slot) that states where the thing is, what it
+comes to, what could go wrong, and carries the one action that moves it on with the
+reason when that action is closed. The sidebar follows the unsaved form; counts that
+need the server refresh under a spinner in a fixed slot, never by emptying the number.
+A choice between three or four kinds of thing, each of which changes the fields that
+follow, is a row of selectable cards (bordered `s-clickable`, the chosen one marked by
+its border and a tick); a choice that only sets a value is a `s-choice-list`, with any
+field that exists only under one choice folded into that choice's `secondary-content`.
+
 ## Setting rows
 A setting another page owns, or one whose current value is a sentence, is a row: its name,
 what it says now, and the control that changes it, aligned down the card. Three rows read

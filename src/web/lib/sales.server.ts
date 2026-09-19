@@ -1,3 +1,4 @@
+import type { Prisma } from "@prisma/client";
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 import { z } from "zod";
 
@@ -36,6 +37,8 @@ export interface PreviewExample {
   productId: string;
   title: string;
   sku: string | null;
+  /** What the discount is computed from, for the editor's live example. */
+  baseMinor: number;
   beforeMinor: number;
   afterMinor: number;
   currency: string;
@@ -106,6 +109,7 @@ export async function buildPreview(
           ? `${facts.productTitle} — ${facts.variantTitle}`
           : facts.productTitle,
         sku: facts.sku,
+        baseMinor: decision.baseMinor,
         beforeMinor: decision.saleCompareAtMinor,
         afterMinor: decision.salePriceMinor,
         currency: campaign.currency,
@@ -142,6 +146,25 @@ export async function buildPreview(
         fixedPrices: list.fixedPricesCount,
       })),
     discounts,
+  };
+}
+
+/**
+ * The stored campaign with the form's unsaved answers laid over it, for a
+ * preview of what the merchant is about to save. Nothing is written: the
+ * result is only ever handed to `buildPreview`. The rule trees take the same
+ * cast the repository uses on the way into the database.
+ */
+export function campaignWithInput(
+  campaign: Campaign,
+  input: CampaignInput,
+): Campaign {
+  const { includeRules, excludeRules, ...rest } = input;
+  return {
+    ...campaign,
+    ...rest,
+    includeRules: includeRules as unknown as Prisma.JsonValue,
+    excludeRules: excludeRules as unknown as Prisma.JsonValue,
   };
 }
 

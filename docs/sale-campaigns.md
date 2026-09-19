@@ -373,12 +373,32 @@ shows its own trail.
   Draft / Finished, each card: name, discount, product count, when it starts
   or ends, phase.
 - `/app/sales/new` creates a draft and opens it.
-- `/app/sales/:id` — the editor: General · Targeting · Exclusions · Discount
-  · Schedule · Conflict handling · Advanced (existing sales, base-price
-  changes, dynamic membership, rounding) · Preview. The header carries the
-  lifecycle actions for the current status. Activation goes through a
-  confirmation naming the variant count. While a run is in progress the page
-  polls and shows `Applying sale… 1,248 / 4,932 variants`.
+- `/app/sales/:id` — the editor, two columns (`s-page` with its `aside`
+  slot; one column below tablet width). Main: 1. Campaign details · 2. Products (include rules, exclude rules, one result line) · 3. Discount
+  (type cards, value, rounding, an example from the merchant's own
+  catalogue) · 4. Schedule · 5. Conflict handling (priority only under
+  "Higher priority wins") · 6. Advanced settings (existing sales, base-price
+  changes, dynamic membership; closed, stating its answers) · Activity,
+  folded. Sidebar, sticky: status with the activate / schedule / resume
+  action and the reason it is closed; the campaign summary (discount,
+  products, variants, excluded, will change, skipped by reason, starts,
+  ends, conflicts, links to the variants page and CSV); warnings as one
+  card. The header carries the lifecycle actions for the current status; a
+  saved draft with a start date is offered Schedule first. Activation goes
+  through a confirmation naming the variant count. While a run is in
+  progress the page polls and shows `Applying sale… 1,248 / 4,932 variants`.
+  Each section is a component under `src/web/components/campaign-*.tsx`;
+  what the sidebar says about the unsaved form is derived in
+  `src/web/lib/campaign-editor.ts`.
+- The preview is computed twice, read-only both times: on load for the saved
+  campaign (with the Shopify automatic-discount read), and, debounced, for
+  the unsaved form through the `preview` action intent whenever a field the
+  preview reads changes (`campaignWithInput` lays the parsed form over the
+  stored row; no Shopify call). The sidebar and the products result line
+  follow the unsaved form; the answer stays tied to the form it was asked
+  for, with a spinner in a fixed slot while a newer one is pending, so the
+  numbers never jump. Activation itself still uses what is saved, and the
+  save bar is the only way to save (docs/BUILD_SPEC.md § 2.6).
 - `/app/sales/:id/variants` — every variant row, filterable by state, with
   CSV export at `/app/sales/:id/variants.csv`.
 - `/app/products/:productId` — the product view: per variant, price,

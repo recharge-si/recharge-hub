@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -37,50 +37,61 @@ import { listMetafieldDefinitions } from "~/adapters/shopify/products";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { editability, phaseFor } from "~/domain/sales/lifecycle";
 import { parseRuleGroup, type RuleGroup } from "~/domain/sales/rules";
-import { AdvancedSection } from "~/web/components/advanced-section";
-import { Dropdown } from "~/web/components/dropdown";
-import { RuleBuilder } from "~/web/components/rule-builder";
-import { formatDateTime } from "~/web/lib/datetime";
-import { formatMoney } from "~/web/lib/money";
+import { CampaignActivity } from "~/web/components/campaign-activity";
+import { CampaignAdvanced } from "~/web/components/campaign-advanced";
+import { CampaignConflicts } from "~/web/components/campaign-conflicts";
+import { CampaignDetails } from "~/web/components/campaign-details";
+import { CampaignDiscount } from "~/web/components/campaign-discount";
+import { CampaignHeaderActions } from "~/web/components/campaign-header";
+import { CampaignSchedule } from "~/web/components/campaign-schedule";
+import {
+  CampaignStatus,
+  CampaignSummary,
+} from "~/web/components/campaign-summary";
+import { CampaignTargeting } from "~/web/components/campaign-targeting";
+import { CampaignWarnings } from "~/web/components/campaign-warnings";
+import {
+  conflictSummary,
+  describeFormDiscount,
+  scheduleSummary,
+} from "~/web/lib/campaign-editor";
 import {
   actorFromSession,
   principalFromSession,
 } from "~/web/lib/principal.server";
 import { redirectWithin } from "~/web/lib/redirects";
 import {
-  BASE_CHANGE_LABEL,
-  CONFLICT_LABEL,
-  DISCOUNT_TYPE_LABEL,
-  EXISTING_SALE_LABEL,
-  PHASE_LABEL,
-  ROUNDING_LABEL,
-  SKIP_REASON_LABEL,
-  STATUS_LABEL,
   describeDiscount,
   formatAmountInput,
   formatBasisPoints,
-  formatInZone,
   utcToZoned,
 } from "~/web/lib/sales";
 import {
   buildPreview,
   campaignFormSchema,
+  campaignWithInput,
   parseCampaignForm,
   type CampaignForm,
+  type Preview,
 } from "~/web/lib/sales.server";
 import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
 
 /**
  * The campaign editor (docs/sale-campaigns.md § UI).
  *
- * General · Targeting · Exclusions · Discount · Schedule · Conflict handling
- * · Advanced · Preview, then the campaign's own trail. The header carries
- * the lifecycle actions the current status allows. Everything the merchant
- * edits is saved as a draft of settings; nothing in Shopify changes until
- * Activate, and Activate goes through a confirmation naming the count.
+ * Two columns. The main one is the campaign in the order it is built —
+ * details, products, discount, schedule, conflict handling, advanced — with
+ * its trail folded at the foot; the sidebar is where the campaign stands
+ * and what it comes to, and stays in view while the main column scrolls.
+ * The header carries the lifecycle actions the current status allows.
+ * Everything the merchant edits is saved as a draft of settings; nothing in
+ * Shopify changes until Activate, and Activate goes through a confirmation
+ * naming the count.
  *
- * The preview is computed on load from the catalogue snapshot and writes
- * nothing (docs/ui-conventions.md § Destructive writes).
+ * The preview is computed from the catalogue snapshot and writes nothing
+ * (docs/ui-conventions.md § Destructive writes): once on load for the saved
+ * campaign, and again, debounced, for the unsaved form whenever a field the
+ * preview reads has changed — so the sidebar's numbers follow the edit.
  */
 const SAVE_BAR_ID = "sale-campaign-save-bar";
 const CONFIRM_MODAL_ID = "confirm-activate";
@@ -196,7 +207,13 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   };
 };
 
-type ActionResult = { ok: boolean; message: string; field?: string };
+type ActionResult = {
+  ok: boolean;
+  message: string;
+  field?: string;
+  /** Only from the `preview` intent. */
+  preview?: Preview;
+};
 
 export const action = async ({
   request,
@@ -256,6 +273,37 @@ export const action = async ({
       fields: Object.keys(patch),
     });
     return { ok: true, message: "Saved." };
+  }
+
+  /*
+   * The preview for the unsaved form. Read-only, exactly like the one on
+   * load, and skipped for the Shopify discount read the sidebar already
+   * has from that one.
+   */
+  if (intent === "preview") {
+    const raw: Record<string, string> = {};
+    for (const [key, value] of formData.entries()) {
+      if (typeof value === "string") raw[key] = value;
+    }
+    const parsedForm = campaignFormSchema.safeParse(raw);
+    if (!parsedForm.success)
+      return { ok: false, message: "The form could not be read." };
+    const catalogue = await getCatalogueState(principal);
+    if (!catalogue.snapshotAt)
+      return { ok: false, message: "The catalogue has not been read yet." };
+    const outcome = parseCampaignForm(parsedForm.data, {
+      timeZone: catalogue.ianaTimezone ?? "UTC",
+      currency: campaign.currency,
+      now,
+    });
+    if (!outcome.ok)
+      return { ok: false, field: outcome.field, message: outcome.message };
+    const preview = await buildPreview(
+      principal,
+      campaignWithInput(campaign, outcome.input),
+      null,
+    );
+    return { ok: true, message: "", preview };
   }
 
   if (intent === "delete") {
@@ -328,44 +376,94 @@ function usePolling(active: boolean) {
   }, [active, revalidator]);
 }
 
-const EVENT_COPY: Record<string, string> = {
-  "sale_campaign.created": "Created",
-  "sale_campaign.edited": "Edited",
-  "sale_campaign.scheduled": "Scheduled",
-  "sale_campaign.unscheduled": "Back to draft",
-  "sale_campaign.activated": "Activated",
-  "sale_campaign.paused": "Paused",
-  "sale_campaign.resumed": "Resumed",
-  "sale_campaign.ending": "Ending: putting prices back",
-  "sale_campaign.completed": "Completed",
-  "sale_campaign.cancelled": "Cancelled",
-  "sale_campaign.restore_requested": "Restore of original prices requested",
-  "sale_campaign.retry_requested": "Retry of failed variants requested",
-  "sale_campaign.conflict_detected": "Conflict with another campaign",
-  "sale_campaign.apply_finished": "Finished applying",
-  "sale_campaign.restore_finished": "Finished putting prices back",
-  "sale_campaign.membership_changed": "Products joined or left",
-};
+/** The fields whose change alters what the preview would count. */
+const PREVIEW_FIELDS = [
+  "includeRules",
+  "excludeRules",
+  "discountType",
+  "discountValue",
+  "rounding",
+  "roundingIncrement",
+  "existingSalePolicy",
+  "conflictStrategy",
+  "priority",
+  "startMode",
+  "startDate",
+  "startTime",
+  "endMode",
+  "endDate",
+  "endTime",
+] as const satisfies ReadonlyArray<keyof CampaignForm>;
 
-function describeCampaignEvent(event: string, detail: unknown): string {
-  const d = (detail ?? {}) as Record<string, unknown>;
-  const base = EVENT_COPY[event] ?? event;
-  const counts = d.counts as Record<string, number> | undefined;
-  const parts: string[] = [];
-  if (typeof d.by === "string" && d.by) parts.push(`by ${d.by}`);
-  if (typeof d.variants === "number") parts.push(`${d.variants} variants`);
-  if (counts) {
-    const said = Object.entries(counts)
-      .filter(([, n]) => n > 0)
-      .map(([state, n]) => `${n} ${state.replace("_", " ")}`);
-    if (said.length > 0) parts.push(said.join(", "));
-  }
-  if (typeof d.added === "number" || typeof d.released === "number") {
-    parts.push(`${d.added ?? 0} added, ${d.released ?? 0} released`);
-  }
-  if (Array.isArray(d.holders) && d.holders.length > 0)
-    parts.push(`with ${d.holders.join(", ")}`);
-  return parts.length > 0 ? `${base} — ${parts.join(" · ")}` : base;
+function previewKeyOf(form: CampaignForm): string {
+  return JSON.stringify(PREVIEW_FIELDS.map((field) => form[field]));
+}
+
+/**
+ * The preview for the form as it is being edited: asked for, debounced,
+ * whenever a field the preview reads has changed from what is saved, and
+ * dropped again the moment the form matches the saved campaign. Nothing is
+ * written by it (docs/ui-conventions.md § Destructive writes).
+ *
+ * The answer is tied to the form it was asked for. While a newer form waits
+ * for its answer the previous one stays on screen under a spinner, so the
+ * numbers never jump back to the saved campaign's between keystrokes.
+ */
+function useLivePreview(
+  form: CampaignForm,
+  savedForm: CampaignForm,
+  enabled: boolean,
+): {
+  preview: Preview | null;
+  refreshing: boolean;
+  note: string | null;
+} {
+  const fetcher = useFetcher<typeof action>();
+  const latest = useRef(form);
+  latest.current = form;
+  const key = previewKeyOf(form);
+  const savedKey = previewKeyOf(savedForm);
+  const wanted = enabled && key !== savedKey;
+  const askedFor = useRef<string | null>(null);
+  const [answer, setAnswer] = useState<{
+    key: string;
+    preview: Preview | null;
+    note: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!wanted) return;
+    const timer = setTimeout(() => {
+      askedFor.current = key;
+      fetcher.submit(
+        { intent: "preview", ...latest.current },
+        { method: "post" },
+      );
+    }, 500);
+    return () => clearTimeout(timer);
+    // Keyed on the form's content, not the fetcher: its identity changes with
+    // every state change, and re-arming the timer on those would never fire.
+  }, [wanted, key]);
+
+  const data = fetcher.data;
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !data || askedFor.current === null) return;
+    setAnswer({
+      key: askedFor.current,
+      preview: data.ok && data.preview ? data.preview : null,
+      note: data.ok
+        ? null
+        : `Counts are for the saved campaign. ${data.message}`,
+    });
+  }, [fetcher.state, data]);
+
+  if (!wanted) return { preview: null, refreshing: false, note: null };
+  const current = answer?.key === key ? answer : null;
+  return {
+    preview: current?.preview ?? answer?.preview ?? null,
+    refreshing: current === null,
+    note: current?.note ?? null,
+  };
 }
 
 export default function CampaignEditor() {
@@ -407,6 +505,7 @@ export default function CampaignEditor() {
   const full = campaign.editability === "full";
   const limited = campaign.editability === "limited";
   const frozen = !full;
+  const readOnly = campaign.editability === "none";
 
   useEffect(() => {
     if (!result?.ok) return;
@@ -431,152 +530,74 @@ export default function CampaignEditor() {
     !dirty &&
     campaign.startsAt !== null;
 
+  const deletable =
+    campaign.status === "draft"
+      ? onSale === 0 && (counts.restored ?? 0) === 0
+      : failed === 0 && review === 0 && onSale === 0;
+
+  /* The numbers the sidebar shows follow the unsaved form. */
+  const live = useLivePreview(
+    form,
+    data.form,
+    full && catalogue.snapshotAt !== null,
+  );
+  const shown = live.preview ?? preview;
+  const summaryCounts = shown
+    ? {
+        products: shown.products,
+        variants: shown.variants,
+        includedVariants: shown.includedVariants,
+        excludedVariants: shown.excludedVariants,
+        willChange: shown.applies + shown.conflicts.taken,
+        skipped: shown.skipped,
+      }
+    : null;
+  const exampleVariant = shown?.examples[0]
+    ? { title: shown.examples[0].title, baseMinor: shown.examples[0].baseMinor }
+    : null;
+  const schedule = scheduleSummary(form, timeZone, {
+    status: campaign.status,
+    startedAt: campaign.startsAt,
+  });
+
+  const variantsHref = `/app/sales/${campaign.id}/variants`;
+  const csvHref = `/app/sales/${campaign.id}/variants.csv`;
+  const activatable =
+    campaign.status === "draft" ||
+    campaign.status === "scheduled" ||
+    campaign.status === "paused";
+
+  /* Why the way forward is closed, in one line beside the button. */
+  const actionNote = !activatable ? null : catalogue.snapshotAt === null ? (
+    "Read the catalogue to see what this campaign would change."
+  ) : dirty ? (
+    "Save your changes first. Activation uses what is saved."
+  ) : toModify === 0 ? (
+    <>
+      Nothing would change yet: no variant the discount lowers.{" "}
+      <s-link href="#campaign-products">Choose products</s-link>.
+    </>
+  ) : null;
+
   return (
-    <s-page heading={campaign.name} inlineSize="large">
+    <s-page heading={campaign.name} inlineSize="base">
       <s-link slot="breadcrumb-actions" href="/app/sales">
         Sales
       </s-link>
 
-      {/* Lifecycle actions for this status. */}
-      {campaign.status === "draft" || campaign.status === "scheduled" ? (
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          command="--show"
-          commandFor={CONFIRM_MODAL_ID}
-          {...(busy || dirty || !preview || toModify === 0
-            ? { disabled: true }
-            : {})}
-        >
-          Activate now
-        </s-button>
-      ) : null}
-      {campaign.status === "paused" ? (
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          command="--show"
-          commandFor={CONFIRM_MODAL_ID}
-          {...(busy || dirty || !preview || toModify === 0
-            ? { disabled: true }
-            : {})}
-        >
-          Resume
-        </s-button>
-      ) : null}
-      {campaign.status === "active" ? (
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          tone="critical"
-          type="button"
-          onClick={() => submit("end")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          End now
-        </s-button>
-      ) : null}
-
-      {scheduleReady ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          onClick={() => submit("schedule")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          Schedule
-        </s-button>
-      ) : null}
-      {campaign.status === "scheduled" ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          onClick={() => submit("unschedule")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          Back to draft
-        </s-button>
-      ) : null}
-      {campaign.status === "active" ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          onClick={() => submit("pause")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          Pause
-        </s-button>
-      ) : null}
-      {campaign.status === "paused" ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          onClick={() => submit("end")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          End
-        </s-button>
-      ) : null}
-      {failed > 0 ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          onClick={() => submit("retry")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          {`Retry ${failed} failed`}
-        </s-button>
-      ) : null}
-      {campaign.status === "draft" ||
-      campaign.status === "scheduled" ||
-      campaign.status === "paused" ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          tone="critical"
-          onClick={() =>
-            submit(
-              campaign.status === "draft" &&
-                onSale === 0 &&
-                (counts.restored ?? 0) === 0
-                ? "delete"
-                : "cancel",
-            )
-          }
-          {...(busy ? { disabled: true } : {})}
-        >
-          {campaign.status === "draft" ? "Delete" : "Cancel campaign"}
-        </s-button>
-      ) : null}
-      {/* A finished campaign with every price back is history nobody needs on the list. */}
-      {(campaign.status === "completed" || campaign.status === "cancelled") &&
-      failed === 0 &&
-      review === 0 &&
-      onSale === 0 ? (
-        <s-button
-          slot="secondary-actions"
-          type="button"
-          tone="critical"
-          onClick={() => submit("delete")}
-          {...(busy ? { disabled: true } : {})}
-        >
-          Delete
-        </s-button>
-      ) : null}
-      <s-button
-        slot="secondary-actions"
-        href={`/app/sales/${campaign.id}/variants`}
-      >
-        Variants
-      </s-button>
-      <s-button
-        slot="secondary-actions"
-        icon="question-circle"
-        command="--show"
-        commandFor={HELP_MODAL_ID}
-      >
-        Help
-      </s-button>
+      <CampaignHeaderActions
+        status={campaign.status}
+        busy={busy}
+        dirty={dirty}
+        canActivate={preview !== null && toModify > 0}
+        scheduleReady={scheduleReady}
+        failed={failed}
+        deletable={deletable}
+        variantsHref={variantsHref}
+        confirmModalId={CONFIRM_MODAL_ID}
+        helpModalId={HELP_MODAL_ID}
+        onIntent={submit}
+      />
 
       <s-modal
         id={CONFIRM_MODAL_ID}
@@ -588,7 +609,7 @@ export default function CampaignEditor() {
       >
         <s-stack direction="block" gap="base">
           <s-paragraph>
-            {`You're about to modify ${toModify.toLocaleString("en")} Shopify variants${preview ? ` across ${preview.products.toLocaleString("en")} products` : ""}: ${campaign.discount}.`}
+            {`This changes the price of ${toModify.toLocaleString("en")} Shopify variants${preview ? ` across ${preview.products.toLocaleString("en")} products` : ""}: ${campaign.discount}.`}
           </s-paragraph>
           <s-paragraph>
             Each variant&apos;s current price and compare-at price are recorded
@@ -621,8 +642,8 @@ export default function CampaignEditor() {
       <s-modal id={HELP_MODAL_ID} heading="About this campaign">
         <s-stack direction="block" gap="base">
           <s-paragraph>
-            Targeting chooses the products; exclusions take some back out. The
-            preview shows what activation would do and writes nothing.
+            Products chooses what goes on sale; exclusions take some back out.
+            The summary shows what activation would do and writes nothing.
           </s-paragraph>
           <s-paragraph>
             Once active, what is on sale is frozen: pause to change the rules or
@@ -644,680 +665,212 @@ export default function CampaignEditor() {
         </s-button>
       </s-modal>
 
-      <s-stack direction="block" gap="large">
+      {/* Main column: the campaign, top to bottom in the order it is built. */}
+      <s-stack direction="block" gap="base">
         {result && !result.ok && !result.field ? (
           <s-banner tone="critical" heading="That did not work">
             <s-paragraph>{result.message}</s-paragraph>
           </s-banner>
         ) : null}
-
-        {/* Where the campaign is. */}
-        <s-section>
-          <s-stack direction="block" gap="small-300">
-            <s-stack direction="inline" gap="small-300" alignItems="center">
-              <s-badge
-                tone={campaign.status === "active" ? "success" : "neutral"}
-              >
-                {STATUS_LABEL[campaign.status]}
-              </s-badge>
-              {campaign.phase !== "idle" ? (
-                <s-text color="subdued">{PHASE_LABEL[campaign.phase]}</s-text>
-              ) : null}
-            </s-stack>
-            {running && run ? (
-              <s-text>
-                {`${run.kind === "restore" || run.kind === "release" ? "Putting prices back" : "Applying sale"}… ${run.done.toLocaleString("en")} / ${run.total.toLocaleString("en")} variants (${run.total > 0 ? Math.round((run.done / run.total) * 100) : 0}%)`}
-              </s-text>
-            ) : null}
-            {campaign.status === "active" ||
-            campaign.status === "paused" ||
-            campaign.status === "completed" ? (
-              <s-text color="subdued">
-                {[
-                  onSale > 0 ? `${onSale.toLocaleString("en")} on sale` : null,
-                  (counts.skipped ?? 0) > 0
-                    ? `${counts.skipped} skipped`
-                    : null,
-                  (counts.restored ?? 0) > 0
-                    ? `${counts.restored} restored`
-                    : null,
-                  (counts.released ?? 0) > 0
-                    ? `${counts.released} released`
-                    : null,
-                  failed > 0 ? `${failed} failed` : null,
-                  review > 0 ? `${review} need a decision` : null,
-                ]
-                  .filter(Boolean)
-                  .join(" · ") || "No variants yet."}
-              </s-text>
-            ) : null}
-            {campaign.status === "active" ? (
-              <s-text color="subdued">
-                {campaign.endsAt
-                  ? `Ends ${formatInZone(campaign.endsAt, timeZone)}.`
-                  : "No end date. End it from here when the sale is over."}
-              </s-text>
-            ) : null}
-            {campaign.status === "scheduled" && campaign.startsAt ? (
-              <s-text color="subdued">{`Starts ${formatInZone(campaign.startsAt, timeZone)}.`}</s-text>
-            ) : null}
-            {failed > 0 || review > 0 ? (
-              <s-banner
-                tone="critical"
-                heading={
-                  failed > 0
-                    ? `${failed} variants failed`
-                    : `${review} variants need a decision`
-                }
-              >
-                <s-paragraph>
-                  {failed > 0
-                    ? "Shopify rejected the write for these. The variants page shows its reason for each; fix it and retry."
-                    : "Their price was changed outside the campaign. Decide for each on the variants page."}
-                </s-paragraph>
-                <s-link href={`/app/sales/${campaign.id}/variants`}>
-                  Open variants
-                </s-link>
-              </s-banner>
-            ) : null}
-          </s-stack>
-        </s-section>
-
-        {/* General */}
-        <s-section heading="General">
-          <s-stack direction="block" gap="base">
-            <s-text-field
-              label="Name"
-              value={form.name}
-              onChange={(event) => set("name", event.currentTarget.value)}
-              {...(errorFor("name") ? { error: errorFor("name") } : {})}
-              {...(campaign.editability === "none" ? { disabled: true } : {})}
-            />
-            <s-text-area
-              label="Internal notes"
-              details="For your team. Customers never see this."
-              value={form.notes}
-              onChange={(event) => set("notes", event.currentTarget.value)}
-              {...(campaign.editability === "none" ? { disabled: true } : {})}
-            />
-            <s-text color="subdued">
-              {`Created ${formatDateTime(campaign.createdAt)}${campaign.createdBy ? ` by ${campaign.createdBy}` : ""}.`}
-            </s-text>
-          </s-stack>
-        </s-section>
-
-        {frozen && campaign.status === "active" ? (
-          <s-banner tone="info">
-            <s-paragraph>
-              This campaign is live, so its products, discount and policies are
-              frozen. Pause it to change them; pausing puts prices back first.
-            </s-paragraph>
+        {result && !result.ok && result.field ? (
+          <s-banner tone="critical" heading="Not saved">
+            <s-paragraph>{result.message}</s-paragraph>
           </s-banner>
         ) : null}
 
-        {/* Targeting */}
-        <s-section heading="Targeting">
-          <s-stack direction="block" gap="base">
-            <s-paragraph>Include products where…</s-paragraph>
-            <RuleBuilder
-              purpose="include"
-              value={include}
-              onChange={setInclude}
-              facets={facets}
-              metafields={metafields}
-              currency={campaign.currency}
-              {...(frozen ? { disabled: true } : {})}
-            />
-            {errorFor("includeRules") ? (
-              <s-text tone="critical">{errorFor("includeRules")}</s-text>
-            ) : null}
-            {preview ? (
-              <s-text color="subdued">
-                {dirty
-                  ? "Save to update the count."
-                  : `Matches ${preview.includedVariants.toLocaleString("en")} variants before exclusions.`}
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-section>
+        <CampaignDetails
+          name={form.name}
+          notes={form.notes}
+          onNameChange={(name) => set("name", name)}
+          onNotesChange={(notes) => set("notes", notes)}
+          nameError={errorFor("name")}
+          disabled={readOnly}
+        />
 
-        {/* Exclusions */}
-        <s-section heading="Exclusions">
-          <s-stack direction="block" gap="base">
-            <s-paragraph>…but not products where…</s-paragraph>
-            <RuleBuilder
-              purpose="exclude"
-              value={exclude}
-              onChange={setExclude}
-              facets={facets}
-              metafields={metafields}
-              currency={campaign.currency}
-              {...(frozen ? { disabled: true } : {})}
-            />
-            {errorFor("excludeRules") ? (
-              <s-text tone="critical">{errorFor("excludeRules")}</s-text>
-            ) : null}
-            {preview && !dirty ? (
-              <s-stack direction="block" gap="small-500">
-                <s-text color="subdued">{`Applies to: ${preview.includedVariants.toLocaleString("en")} variants`}</s-text>
-                <s-text color="subdued">{`Excluded: ${preview.excludedVariants.toLocaleString("en")} variants`}</s-text>
-                <s-text type="strong">{`Final: ${preview.variants.toLocaleString("en")} variants in ${preview.products.toLocaleString("en")} products`}</s-text>
-              </s-stack>
-            ) : null}
-          </s-stack>
-        </s-section>
+        <CampaignTargeting
+          id="campaign-products"
+          include={include}
+          exclude={exclude}
+          onIncludeChange={setInclude}
+          onExcludeChange={setExclude}
+          facets={facets}
+          metafields={metafields}
+          currency={campaign.currency}
+          disabled={frozen}
+          includeError={errorFor("includeRules")}
+          excludeError={errorFor("excludeRules")}
+          counts={summaryCounts}
+          refreshing={live.refreshing}
+          countsNote={live.note}
+        />
 
-        {/* Discount */}
-        <s-section heading="Discount">
-          <s-stack direction="block" gap="base">
-            <s-choice-list
-              label="Type"
-              name="discountType"
-              values={[form.discountType]}
-              onChange={(event) => {
-                const next = event.currentTarget.values[0];
-                if (
-                  next === "percentage" ||
-                  next === "fixed_amount" ||
-                  next === "fixed_price"
-                ) {
-                  set("discountType", next);
-                }
-              }}
-              {...(frozen ? { disabled: true } : {})}
-            >
-              {(
-                Object.keys(DISCOUNT_TYPE_LABEL) as Array<
-                  keyof typeof DISCOUNT_TYPE_LABEL
-                >
-              ).map((type) => (
-                <s-choice key={type} value={type}>
-                  {DISCOUNT_TYPE_LABEL[type]}
-                </s-choice>
-              ))}
-            </s-choice-list>
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 560px) 1fr, 1fr 1fr"
-              gap="base"
-            >
-              <s-text-field
-                label={
-                  form.discountType === "percentage"
-                    ? "Percent off"
-                    : form.discountType === "fixed_amount"
-                      ? `Amount off (${campaign.currency})`
-                      : `Sale price (${campaign.currency})`
-                }
-                value={form.discountValue}
-                onChange={(event) =>
-                  set("discountValue", event.currentTarget.value)
-                }
-                {...(errorFor("discountValue")
-                  ? { error: errorFor("discountValue") }
-                  : {})}
-                {...(frozen ? { disabled: true } : {})}
-              />
-              <Dropdown
-                name="rounding"
-                label="Rounding"
-                value={form.rounding}
-                options={(
-                  Object.keys(ROUNDING_LABEL) as Array<
-                    keyof typeof ROUNDING_LABEL
-                  >
-                ).map((mode) => ({
-                  value: mode,
-                  label: ROUNDING_LABEL[mode],
-                }))}
-                onChange={(mode) =>
-                  set("rounding", mode as CampaignForm["rounding"])
-                }
-                {...(frozen ? { disabled: true } : {})}
-              />
-            </s-grid>
-            {form.rounding === "increment" ? (
-              <s-text-field
-                label={`Increment (${campaign.currency})`}
-                details="For example 5.00 rounds 1,823.27 to 1,825.00."
-                value={form.roundingIncrement}
-                onChange={(event) =>
-                  set("roundingIncrement", event.currentTarget.value)
-                }
-                {...(errorFor("roundingIncrement")
-                  ? { error: errorFor("roundingIncrement") }
-                  : {})}
-                {...(frozen ? { disabled: true } : {})}
-              />
-            ) : null}
-            <s-text color="subdued">
-              1,823.27 becomes 1,823 (nearest whole number), 1,822.99 (end in
-              .99), 1,819 (end in 9) or 1,799.99 (end in 99.99). Endings round
-              down, so the sale is never smaller than advertised.
-            </s-text>
-          </s-stack>
-        </s-section>
+        <CampaignDiscount
+          form={form}
+          currency={campaign.currency}
+          onChange={set}
+          errorFor={errorFor}
+          disabled={frozen}
+          exampleVariant={exampleVariant}
+        />
 
-        {/* Schedule */}
-        <s-section heading="Schedule">
-          <s-stack direction="block" gap="base">
-            <s-text color="subdued">{`Times are in ${timeZone}.`}</s-text>
-            {campaign.status !== "active" ? (
-              <s-choice-list
-                label="Start"
-                name="startMode"
-                values={[form.startMode]}
-                onChange={(event) => {
-                  const next = event.currentTarget.values[0];
-                  if (next === "now" || next === "at") set("startMode", next);
-                }}
-                {...(frozen ? { disabled: true } : {})}
-              >
-                <s-choice value="now">When activated</s-choice>
-                <s-choice value="at">At a date and time</s-choice>
-              </s-choice-list>
-            ) : (
-              <s-text>{`Started ${campaign.startsAt ? formatInZone(campaign.startsAt, timeZone) : ""}.`}</s-text>
-            )}
-            {form.startMode === "at" && campaign.status !== "active" ? (
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 560px) 1fr, 2fr 1fr"
-                gap="base"
-              >
-                <s-date-field
-                  label="Start date"
-                  value={form.startDate}
-                  onChange={(event) =>
-                    set("startDate", event.currentTarget.value)
-                  }
-                  {...(errorFor("startDate")
-                    ? { error: errorFor("startDate") }
-                    : {})}
-                  {...(frozen ? { disabled: true } : {})}
-                />
-                <s-text-field
-                  label="Start time"
-                  placeholder="00:00"
-                  value={form.startTime}
-                  onChange={(event) =>
-                    set("startTime", event.currentTarget.value)
-                  }
-                  {...(frozen ? { disabled: true } : {})}
-                />
-              </s-grid>
-            ) : null}
-            <s-choice-list
-              label="End"
-              name="endMode"
-              values={[form.endMode]}
-              onChange={(event) => {
-                const next = event.currentTarget.values[0];
-                if (next === "none" || next === "at") set("endMode", next);
-              }}
-              {...(campaign.editability === "none" ? { disabled: true } : {})}
-            >
-              <s-choice value="none">No end date</s-choice>
-              <s-choice value="at">At a date and time</s-choice>
-            </s-choice-list>
-            {form.endMode === "at" ? (
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 560px) 1fr, 2fr 1fr"
-                gap="base"
-              >
-                <s-date-field
-                  label="End date"
-                  value={form.endDate}
-                  onChange={(event) =>
-                    set("endDate", event.currentTarget.value)
-                  }
-                  {...(errorFor("endDate")
-                    ? { error: errorFor("endDate") }
-                    : {})}
-                  {...(campaign.editability === "none"
-                    ? { disabled: true }
-                    : {})}
-                />
-                <s-text-field
-                  label="End time"
-                  placeholder="23:59"
-                  value={form.endTime}
-                  onChange={(event) =>
-                    set("endTime", event.currentTarget.value)
-                  }
-                  {...(campaign.editability === "none"
-                    ? { disabled: true }
-                    : {})}
-                />
-              </s-grid>
-            ) : null}
-            {campaign.status === "draft" && form.startMode === "at" ? (
-              <s-text color="subdued">
-                Save, then press Schedule to have it start on its own.
-              </s-text>
-            ) : null}
-          </s-stack>
-        </s-section>
+        <CampaignSchedule
+          form={form}
+          onChange={set}
+          errorFor={errorFor}
+          timeZone={timeZone}
+          status={campaign.status}
+          startedAt={campaign.startsAt}
+          startDisabled={frozen}
+          disabled={readOnly}
+        />
 
-        {/* Conflict handling */}
-        <s-section heading="Conflict handling">
-          <s-stack direction="block" gap="base">
-            <s-text color="subdued">
-              When a variant is in another campaign at the same time. Prices are
-              never stacked: one campaign holds a variant, or none does.
-            </s-text>
-            <s-choice-list
-              label="If another campaign holds a variant"
-              name="conflictStrategy"
-              values={[form.conflictStrategy]}
-              onChange={(event) => {
-                const next = event.currentTarget.values[0] ?? "";
-                if (next in CONFLICT_LABEL)
-                  set(
-                    "conflictStrategy",
-                    next as CampaignForm["conflictStrategy"],
-                  );
-              }}
-              {...(frozen ? { disabled: true } : {})}
-            >
-              {(
-                Object.keys(CONFLICT_LABEL) as Array<
-                  keyof typeof CONFLICT_LABEL
-                >
-              ).map((strategy) => (
-                <s-choice key={strategy} value={strategy}>
-                  {CONFLICT_LABEL[strategy].label}
-                  <s-text slot="details">
-                    {CONFLICT_LABEL[strategy].detail}
-                  </s-text>
-                </s-choice>
-              ))}
-            </s-choice-list>
-            <s-box inlineSize="200px">
-              <s-text-field
-                label="Priority"
-                details="Higher wins under “Higher priority wins”."
-                value={form.priority}
-                onChange={(event) => set("priority", event.currentTarget.value)}
-                {...(errorFor("priority")
-                  ? { error: errorFor("priority") }
-                  : {})}
-                {...(frozen ? { disabled: true } : {})}
-              />
-            </s-box>
-          </s-stack>
-        </s-section>
+        <CampaignConflicts
+          strategy={form.conflictStrategy}
+          priority={form.priority}
+          onStrategyChange={(strategy) => set("conflictStrategy", strategy)}
+          onPriorityChange={(priority) => set("priority", priority)}
+          priorityError={errorFor("priority")}
+          disabled={frozen}
+        />
 
-        {/* Advanced */}
-        <AdvancedSection
-          summary={`${EXISTING_SALE_LABEL[form.existingSalePolicy].label} · ${BASE_CHANGE_LABEL[form.basePriceChangePolicy].label} · ${form.dynamicMembership === "on" ? "products join and leave on their own" : "products fixed at activation"}`}
-        >
-          <s-stack direction="block" gap="large">
-            <s-choice-list
-              label="Products already on sale"
-              name="existingSalePolicy"
-              values={[form.existingSalePolicy]}
-              onChange={(event) => {
-                const next = event.currentTarget.values[0] ?? "";
-                if (next in EXISTING_SALE_LABEL)
-                  set(
-                    "existingSalePolicy",
-                    next as CampaignForm["existingSalePolicy"],
-                  );
-              }}
-              {...(frozen ? { disabled: true } : {})}
-            >
-              {(
-                Object.keys(EXISTING_SALE_LABEL) as Array<
-                  keyof typeof EXISTING_SALE_LABEL
-                >
-              ).map((policy) => (
-                <s-choice key={policy} value={policy}>
-                  {EXISTING_SALE_LABEL[policy].label}
-                  <s-text slot="details">
-                    {EXISTING_SALE_LABEL[policy].detail}
-                  </s-text>
-                </s-choice>
-              ))}
-            </s-choice-list>
-            <s-text color="subdued">
-              A variant is “already on sale” when its compare-at price is above
-              its price. The original pair is recorded whatever you choose, so
-              it is put back exactly.
-            </s-text>
+        <CampaignAdvanced
+          existingSalePolicy={form.existingSalePolicy}
+          basePriceChangePolicy={form.basePriceChangePolicy}
+          dynamicMembership={form.dynamicMembership}
+          onChange={set}
+          disabled={frozen}
+        />
 
-            <s-choice-list
-              label="If a price changes outside the campaign while it is live"
-              name="basePriceChangePolicy"
-              values={[form.basePriceChangePolicy]}
-              onChange={(event) => {
-                const next = event.currentTarget.values[0] ?? "";
-                if (next in BASE_CHANGE_LABEL)
-                  set(
-                    "basePriceChangePolicy",
-                    next as CampaignForm["basePriceChangePolicy"],
-                  );
-              }}
-              {...(frozen ? { disabled: true } : {})}
-            >
-              {(
-                Object.keys(BASE_CHANGE_LABEL) as Array<
-                  keyof typeof BASE_CHANGE_LABEL
-                >
-              ).map((policy) => (
-                <s-choice key={policy} value={policy}>
-                  {BASE_CHANGE_LABEL[policy].label}
-                  <s-text slot="details">
-                    {BASE_CHANGE_LABEL[policy].detail}
-                  </s-text>
-                </s-choice>
-              ))}
-            </s-choice-list>
-            <s-text color="subdued">
-              An ERP price sync or a person in the admin can change a price this
-              campaign is holding. The campaign notices from Shopify&apos;s own
-              webhook and never mistakes its own write for somebody else&apos;s.
-            </s-text>
-
-            <s-checkbox
-              label="Keep membership up to date"
-              details="Products that start matching the rules join the sale; products that stop matching have their price put back. Off: only the products matched at activation are affected."
-              checked={form.dynamicMembership === "on"}
-              onChange={(event) =>
-                set(
-                  "dynamicMembership",
-                  event.currentTarget.checked ? "on" : "off",
-                )
-              }
-              {...(frozen ? { disabled: true } : {})}
-            />
-          </s-stack>
-        </AdvancedSection>
-
-        {/* Preview */}
-        <s-section heading="Preview">
-          <s-stack direction="block" gap="base">
-            {catalogue.snapshotAt === null ? (
-              <s-banner
-                tone="warning"
-                heading="The catalogue has not been read yet"
-              >
-                <s-stack direction="block" gap="small-300">
-                  <s-paragraph>
-                    {catalogue.reading
-                      ? "Reading it from Shopify now. The preview appears when it finishes."
-                      : "Read the catalogue once to see what this campaign would do."}
-                  </s-paragraph>
-                  {!catalogue.reading ? (
-                    <s-stack direction="inline">
-                      <s-button
-                        type="button"
-                        onClick={() => submit("refresh-catalogue")}
-                      >
-                        Read the catalogue
-                      </s-button>
-                    </s-stack>
-                  ) : null}
-                </s-stack>
-              </s-banner>
-            ) : null}
-
-            {preview ? (
-              <>
-                {dirty ? (
-                  <s-banner tone="info">
-                    <s-paragraph>
-                      Save to preview the changes you are making.
-                    </s-paragraph>
-                  </s-banner>
-                ) : null}
-                <s-stack direction="block" gap="small-500">
-                  <s-heading>{campaign.discount}</s-heading>
-                  <s-text>{`Products: ${preview.products.toLocaleString("en")}`}</s-text>
-                  <s-text>{`Variants: ${preview.variants.toLocaleString("en")}`}</s-text>
-                  <s-text type="strong">{`Will be changed: ${preview.applies.toLocaleString("en")}`}</s-text>
-                </s-stack>
-
-                {preview.examples.length > 0 ? (
-                  <s-table variant="auto">
-                    <s-table-header-row>
-                      <s-table-header listSlot="primary">
-                        Product
-                      </s-table-header>
-                      <s-table-header listSlot="kicker">SKU</s-table-header>
-                      <s-table-header listSlot="secondary">
-                        Price
-                      </s-table-header>
-                    </s-table-header-row>
-                    <s-table-body>
-                      {preview.examples.map((example) => (
-                        <s-table-row key={example.variantId}>
-                          <s-table-cell>
-                            <s-link
-                              href={`/app/products/${example.productId.replace(/^gid:\/\/shopify\/Product\//, "")}`}
-                            >
-                              {example.title}
-                            </s-link>
-                          </s-table-cell>
-                          <s-table-cell>
-                            <s-text color="subdued">
-                              {example.sku ?? "—"}
-                            </s-text>
-                          </s-table-cell>
-                          <s-table-cell>
-                            {`${formatMoney(example.beforeMinor, example.currency)} → ${formatMoney(example.afterMinor, example.currency)}`}
-                          </s-table-cell>
-                        </s-table-row>
-                      ))}
-                    </s-table-body>
-                  </s-table>
-                ) : null}
-
-                <s-stack direction="block" gap="small-500">
-                  <s-text color="subdued">{`Excluded: ${preview.excludedVariants.toLocaleString("en")}`}</s-text>
-                  {Object.entries(preview.skipped).map(([reason, n]) => (
-                    <s-text key={reason} color="subdued">
-                      {`${SKIP_REASON_LABEL[reason] ?? reason}: ${n.toLocaleString("en")}`}
-                    </s-text>
-                  ))}
-                  {preview.conflicts.refused +
-                    preview.conflicts.taken +
-                    preview.conflicts.lost >
-                  0 ? (
-                    <s-text tone="critical">
-                      {`Conflicts: ${(preview.conflicts.refused + preview.conflicts.taken + preview.conflicts.lost).toLocaleString("en")} variants are held by ${preview.conflicts.holders.join(", ")}` +
-                        (preview.conflicts.refused > 0
-                          ? " — activation is refused under “Do not overlap”."
-                          : ` — ${preview.conflicts.taken} would be taken over, ${preview.conflicts.lost} left with the other campaign.`)}
-                    </s-text>
-                  ) : null}
-                  {preview.scheduledOverlaps.map((overlap) => (
-                    <s-text key={overlap.campaignId} tone="caution">
-                      {`Overlaps “${overlap.name}” (${STATUS_LABEL[overlap.status].toLowerCase()}) on ${overlap.variants.toLocaleString("en")} variants during the same period.`}
-                    </s-text>
-                  ))}
-                </s-stack>
-
-                {preview.fixedPriceMarkets.length > 0 ? (
-                  <s-banner tone="info" heading="Markets with fixed prices">
-                    <s-paragraph>
-                      {`${preview.fixedPriceMarkets.map((m) => `${m.name} (${m.currency}, ${m.fixedPrices} fixed prices)`).join("; ")}. Fixed market prices do not follow the base price, so those variants keep their market price during the sale. Markets priced by percentage or by currency conversion follow it.`}
-                    </s-paragraph>
-                  </s-banner>
-                ) : null}
-
-                {preview.discounts ? (
-                  preview.discounts.kind === "unavailable" ? (
-                    <s-text color="subdued">{`Shopify automatic discounts: not checked. ${preview.discounts.reason}`}</s-text>
-                  ) : preview.discounts.discounts.length > 0 ? (
-                    <s-banner
-                      tone="warning"
-                      heading="Shopify automatic discounts are active"
-                    >
-                      <s-paragraph>
-                        {`${preview.discounts.discounts.map((d) => `${d.title} (${d.kind})`).join(", ")}. If any of them applies to these products, checkout will discount the sale price again. This campaign does not create a Shopify discount.`}
-                      </s-paragraph>
-                    </s-banner>
-                  ) : (
-                    <s-text color="subdued">
-                      No Shopify automatic discounts are active.
-                    </s-text>
-                  )
-                ) : null}
-
-                <s-stack direction="inline" gap="small-300">
-                  <s-button href={`/app/sales/${campaign.id}/variants`}>
-                    See every variant
-                  </s-button>
-                  <s-button
-                    href={`/app/sales/${campaign.id}/variants.csv`}
-                    target="_blank"
-                  >
-                    Export CSV
-                  </s-button>
-                </s-stack>
-                <s-text color="subdued">
-                  {`From the catalogue read ${formatDateTime(preview.snapshotAt ?? catalogue.snapshotAt ?? "")}. Nothing is changed by previewing.`}
-                </s-text>
-              </>
-            ) : campaign.status === "active" ||
-              campaign.status === "completed" ||
-              campaign.status === "cancelled" ? (
-              <s-stack direction="inline" gap="small-300">
-                <s-button href={`/app/sales/${campaign.id}/variants`}>
-                  See every variant
-                </s-button>
-                <s-button
-                  href={`/app/sales/${campaign.id}/variants.csv`}
-                  target="_blank"
-                >
-                  Export CSV
-                </s-button>
-              </s-stack>
-            ) : null}
-          </s-stack>
-        </s-section>
-
-        {/* Activity */}
-        <s-section heading="Activity">
-          {events.length === 0 ? (
-            <s-text color="subdued">Nothing yet.</s-text>
-          ) : (
-            <s-stack direction="block" gap="small-300">
-              {events.map((event) => (
-                <s-grid
-                  key={event.id}
-                  gridTemplateColumns="auto 1fr"
-                  gap="base"
-                >
-                  <s-text color="subdued">{formatDateTime(event.at)}</s-text>
-                  <s-text>
-                    {describeCampaignEvent(event.event, event.detail)}
-                  </s-text>
-                </s-grid>
-              ))}
-            </s-stack>
-          )}
-        </s-section>
+        <CampaignActivity events={events} />
       </s-stack>
+
+      {/*
+       * Sidebar: status, the summary, warnings. Sticky, so the answer stays
+       * beside the question while the form scrolls; capped at the viewport
+       * and scrolling inside it, so nothing in it is ever out of reach on a
+       * short screen. Layout only — every colour and space is Polaris's.
+       */}
+      <div
+        slot="aside"
+        style={{
+          position: "sticky",
+          top: "1rem",
+          maxHeight: "calc(100vh - 2rem)",
+          overflowY: "auto",
+        }}
+      >
+        <s-stack direction="block" gap="base">
+          <CampaignStatus
+            status={campaign.status}
+            phase={campaign.phase}
+            run={run}
+            counts={counts}
+            startsAt={campaign.startsAt}
+            endsAt={campaign.endsAt}
+            timeZone={timeZone}
+            createdAt={campaign.createdAt}
+            createdBy={campaign.createdBy}
+            variantsHref={variantsHref}
+            action={
+              activatable ? (
+                <s-stack direction="block" gap="small-300">
+                  {campaign.status === "draft" && scheduleReady ? (
+                    <s-button
+                      variant="primary"
+                      type="button"
+                      inlineSize="fill"
+                      onClick={() => submit("schedule")}
+                      {...(busy ? { disabled: true } : {})}
+                    >
+                      Schedule campaign
+                    </s-button>
+                  ) : null}
+                  <s-button
+                    variant={
+                      campaign.status === "draft" && scheduleReady
+                        ? "secondary"
+                        : "primary"
+                    }
+                    inlineSize="fill"
+                    command="--show"
+                    commandFor={CONFIRM_MODAL_ID}
+                    {...(busy || dirty || !preview || toModify === 0
+                      ? { disabled: true }
+                      : {})}
+                  >
+                    {campaign.status === "paused"
+                      ? "Resume"
+                      : campaign.status === "scheduled" || scheduleReady
+                        ? "Activate now"
+                        : "Activate campaign"}
+                  </s-button>
+                </s-stack>
+              ) : null
+            }
+            actionNote={actionNote}
+          />
+
+          {catalogue.snapshotAt === null ? (
+            <s-banner
+              tone="warning"
+              heading="The catalogue has not been read yet"
+            >
+              <s-stack direction="block" gap="small-300">
+                <s-paragraph>
+                  {catalogue.reading
+                    ? "Reading it from Shopify now. The summary appears when it finishes."
+                    : "Read the catalogue once to see what this campaign would do."}
+                </s-paragraph>
+                {!catalogue.reading ? (
+                  <s-stack direction="inline">
+                    <s-button
+                      type="button"
+                      onClick={() => submit("refresh-catalogue")}
+                      {...(busy ? { disabled: true } : {})}
+                    >
+                      Read the catalogue
+                    </s-button>
+                  </s-stack>
+                ) : null}
+              </s-stack>
+            </s-banner>
+          ) : null}
+
+          {preview || campaign.status !== "draft" ? (
+            <CampaignSummary
+              discount={describeFormDiscount(form, campaign.currency)}
+              counts={summaryCounts}
+              refreshing={live.refreshing}
+              note={live.note}
+              schedule={schedule}
+              conflicts={conflictSummary(form.conflictStrategy, form.priority)}
+              variantsHref={variantsHref}
+              csvHref={csvHref}
+              hasVariants={
+                campaign.status !== "draft" || (shown?.variants ?? 0) > 0
+              }
+              snapshotAt={
+                shown ? (shown.snapshotAt ?? catalogue.snapshotAt) : null
+              }
+              discountsUnchecked={
+                preview?.discounts?.kind === "unavailable"
+                  ? preview.discounts.reason
+                  : null
+              }
+            />
+          ) : null}
+
+          {shown ? (
+            <CampaignWarnings
+              conflicts={shown.conflicts}
+              scheduledOverlaps={shown.scheduledOverlaps}
+              fixedPriceMarkets={shown.fixedPriceMarkets}
+              discounts={preview?.discounts ?? null}
+              campaignHref={(id) => `/app/sales/${id}`}
+            />
+          ) : null}
+        </s-stack>
+      </div>
 
       {/* The save bar. `data-save-bar` cannot see React-driven fields; the page drives it. */}
       <ui-save-bar id={SAVE_BAR_ID}>

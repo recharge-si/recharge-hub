@@ -31,6 +31,11 @@ import {
  * metafield is chosen from the shop's definitions and offers only the
  * operators its type can answer. The tree it edits is exactly what the
  * domain evaluates, so what the preview counts is what activation does.
+ *
+ * Every condition is a bordered row and every group a subdued panel around
+ * its rows, with the "and" / "or" that joins them written out between them:
+ * the tree reads the way it evaluates, without the merchant having to know
+ * what a tree is.
  */
 
 export interface RuleFacets {
@@ -48,7 +53,7 @@ export interface RuleBuilderProps {
   metafields: MetafieldDefinition[];
   currency: string;
   disabled?: boolean;
-  /** "Include" or "Exclude": names the empty state. */
+  /** "Include" or "Exclude": names the empty state and the buttons. */
   purpose: "include" | "exclude";
 }
 
@@ -94,6 +99,11 @@ function isListOperator(operator: Operator): boolean {
   return operator === "in" || operator === "not_in";
 }
 
+/** A structural copy: the duplicate is its own row from the first keystroke. */
+function cloneNode(node: RuleNode): RuleNode {
+  return JSON.parse(JSON.stringify(node)) as RuleNode;
+}
+
 export function RuleBuilder(props: RuleBuilderProps) {
   const { value, onChange, purpose, disabled } = props;
 
@@ -101,38 +111,55 @@ export function RuleBuilder(props: RuleBuilderProps) {
     (rules: RuleNode[]) => onChange({ ...value, rules }),
     [onChange, value],
   );
+  const addCondition = () =>
+    setRules([...value.rules, defaultRule("collection")]);
+  const addGroup = () =>
+    setRules([
+      ...value.rules,
+      {
+        kind: "group",
+        op: value.op === "and" ? "or" : "and",
+        rules: [defaultRule("collection")],
+      },
+    ]);
 
   return (
-    <s-stack direction="block" gap="base">
-      <GroupEditor {...props} group={value} depth={0} />
+    <s-stack direction="block" gap="small-300">
       {value.rules.length === 0 ? (
-        <s-text color="subdued">
-          {purpose === "include"
-            ? "No rules yet. Add one to choose which products go on sale."
-            : "No exclusions. Every product the rules above match will be on sale."}
-        </s-text>
-      ) : null}
+        purpose === "include" ? (
+          <s-box
+            padding="base"
+            borderWidth="base"
+            borderStyle="dashed"
+            borderColor="base"
+            borderRadius="base"
+            background="subdued"
+          >
+            <s-stack direction="block" gap="small-500" alignItems="center">
+              <s-text type="strong">No products chosen yet</s-text>
+              <s-text color="subdued">
+                Add a condition to choose which products go on sale.
+              </s-text>
+            </s-stack>
+          </s-box>
+        ) : null
+      ) : (
+        <GroupEditor {...props} group={value} depth={0} />
+      )}
       <s-stack direction="inline" gap="small-300">
         <s-button
           type="button"
           icon="plus"
-          onClick={() => setRules([...value.rules, defaultRule("collection")])}
+          onClick={addCondition}
           {...(disabled ? { disabled: true } : {})}
         >
-          Add rule
+          {purpose === "include" ? "Add condition" : "Add exclusion"}
         </s-button>
         <s-button
           type="button"
-          onClick={() =>
-            setRules([
-              ...value.rules,
-              {
-                kind: "group",
-                op: value.op === "and" ? "or" : "and",
-                rules: [defaultRule("collection")],
-              },
-            ])
-          }
+          variant="tertiary"
+          icon="plus"
+          onClick={addGroup}
           {...(disabled ? { disabled: true } : {})}
         >
           Add group
@@ -142,9 +169,23 @@ export function RuleBuilder(props: RuleBuilderProps) {
   );
 }
 
+/** "and ────" between two rows, so the join reads before the next row does. */
+function Connector({ op }: { op: RuleGroup["op"] }) {
+  return (
+    <s-grid gridTemplateColumns="auto 1fr" gap="small-300" alignItems="center">
+      <s-text type="strong" color="subdued">
+        {op === "and" ? "and" : "or"}
+      </s-text>
+      <s-divider />
+    </s-grid>
+  );
+}
+
 function GroupEditor({
   group,
   onChange,
+  onRemove,
+  onDuplicate,
   depth,
   facets,
   metafields,
@@ -153,8 +194,11 @@ function GroupEditor({
 }: RuleBuilderProps & {
   group: RuleGroup;
   onChange: (next: RuleGroup) => void;
+  onRemove?: () => void;
+  onDuplicate?: () => void;
   depth: number;
 }) {
+  const off = disabled ? { disabled: true } : {};
   const update = (index: number, node: RuleNode) =>
     onChange({
       ...group,
@@ -162,63 +206,99 @@ function GroupEditor({
     });
   const remove = (index: number) =>
     onChange({ ...group, rules: group.rules.filter((_, i) => i !== index) });
+  const duplicate = (index: number) => {
+    const copy = cloneNode(group.rules[index] as RuleNode);
+    const rules = [...group.rules];
+    rules.splice(index + 1, 0, copy);
+    onChange({ ...group, rules });
+  };
 
   return (
     <s-stack direction="block" gap="small-300">
       {group.rules.length > 1 || depth > 0 ? (
-        <s-stack direction="inline" gap="small-300" alignItems="center">
-          <s-text color="subdued">
-            {depth === 0 ? "Products where" : "Where"}
-          </s-text>
-          <s-box inlineSize="160px">
-            <Dropdown
-              name={`op-${depth}`}
-              label="Match"
-              hideLabel
-              value={group.op}
-              options={[
-                { value: "and", label: "all of these" },
-                { value: "or", label: "any of these" },
-              ]}
-              onChange={(op) =>
-                onChange({ ...group, op: op === "or" ? "or" : "and" })
-              }
-              {...(disabled ? { disabled: true } : {})}
-            />
-          </s-box>
-        </s-stack>
+        <s-grid
+          gridTemplateColumns={depth > 0 ? "1fr auto" : "1fr"}
+          gap="small-300"
+          alignItems="center"
+        >
+          <s-stack direction="inline" gap="small-300" alignItems="center">
+            <s-text color="subdued">
+              {depth === 0 ? "Products that match" : "A group that matches"}
+            </s-text>
+            <s-box inlineSize="150px">
+              <Dropdown
+                name={`op-${depth}`}
+                label="Match"
+                hideLabel
+                value={group.op}
+                options={[
+                  { value: "and", label: "all of these" },
+                  { value: "or", label: "any of these" },
+                ]}
+                onChange={(op) =>
+                  onChange({ ...group, op: op === "or" ? "or" : "and" })
+                }
+                {...off}
+              />
+            </s-box>
+          </s-stack>
+          {depth > 0 ? (
+            <s-stack direction="inline" gap="none">
+              {onDuplicate ? (
+                <s-button
+                  type="button"
+                  variant="tertiary"
+                  icon="duplicate"
+                  accessibilityLabel="Duplicate group"
+                  onClick={onDuplicate}
+                  {...off}
+                />
+              ) : null}
+              {onRemove ? (
+                <s-button
+                  type="button"
+                  variant="tertiary"
+                  icon="delete"
+                  accessibilityLabel="Remove group"
+                  onClick={onRemove}
+                  {...off}
+                />
+              ) : null}
+            </s-stack>
+          ) : null}
+        </s-grid>
       ) : null}
 
       {group.rules.map((node, index) => (
-        <s-box
-          key={index}
-          padding={node.kind === "group" ? "base" : "none"}
-          {...(node.kind === "group"
-            ? { border: "base", borderRadius: "base" }
-            : {})}
-        >
-          <s-stack direction="block" gap="small-300">
-            {index > 0 ? (
-              <s-text color="subdued">
-                {group.op === "and" ? "and" : "or"}
-              </s-text>
-            ) : null}
-            {node.kind === "group" ? (
+        <s-stack key={index} direction="block" gap="small-300">
+          {index > 0 ? <Connector op={group.op} /> : null}
+          {node.kind === "group" ? (
+            <s-box
+              padding="small-300"
+              borderWidth="base"
+              borderStyle="solid"
+              borderColor="base"
+              borderRadius="base"
+              background="subdued"
+            >
               <s-stack direction="block" gap="small-300">
                 <GroupEditor
                   group={node}
                   onChange={(next) => update(index, next)}
+                  onRemove={() => remove(index)}
+                  onDuplicate={() => duplicate(index)}
                   depth={depth + 1}
                   facets={facets}
                   metafields={metafields}
                   currency={currency}
                   purpose="include"
                   value={node}
-                  {...(disabled ? { disabled: true } : {})}
+                  {...off}
                 />
                 <s-stack direction="inline" gap="small-300">
                   <s-button
                     type="button"
+                    variant="tertiary"
                     icon="plus"
                     onClick={() =>
                       update(index, {
@@ -226,33 +306,35 @@ function GroupEditor({
                         rules: [...node.rules, defaultRule("vendor")],
                       })
                     }
-                    {...(disabled ? { disabled: true } : {})}
+                    {...off}
                   >
-                    Add rule
-                  </s-button>
-                  <s-button
-                    type="button"
-                    tone="critical"
-                    onClick={() => remove(index)}
-                    {...(disabled ? { disabled: true } : {})}
-                  >
-                    Remove group
+                    Add condition
                   </s-button>
                 </s-stack>
               </s-stack>
-            ) : (
+            </s-box>
+          ) : (
+            <s-box
+              padding="small-300"
+              borderWidth="base"
+              borderStyle="solid"
+              borderColor="base"
+              borderRadius="base"
+              background="base"
+            >
               <RuleRow
                 rule={node}
                 onChange={(next) => update(index, next)}
                 onRemove={() => remove(index)}
+                onDuplicate={() => duplicate(index)}
                 facets={facets}
                 metafields={metafields}
                 currency={currency}
-                {...(disabled ? { disabled: true } : {})}
+                {...off}
               />
-            )}
-          </s-stack>
-        </s-box>
+            </s-box>
+          )}
+        </s-stack>
       ))}
     </s-stack>
   );
@@ -262,6 +344,7 @@ function RuleRow({
   rule,
   onChange,
   onRemove,
+  onDuplicate,
   facets,
   metafields,
   currency,
@@ -270,6 +353,7 @@ function RuleRow({
   rule: Rule;
   onChange: (next: Rule) => void;
   onRemove: () => void;
+  onDuplicate: () => void;
   facets: RuleFacets;
   metafields: MetafieldDefinition[];
   currency: string;
@@ -326,9 +410,9 @@ function RuleRow({
 
   return (
     <s-grid
-      gridTemplateColumns="@container (inline-size <= 700px) 1fr, minmax(150px, 1fr) minmax(150px, 1fr) minmax(200px, 2fr) auto"
+      gridTemplateColumns="@container (inline-size <= 700px) 1fr, minmax(140px, 1fr) minmax(140px, 1fr) minmax(180px, 2fr) auto"
       gap="small-300"
-      alignItems="end"
+      alignItems="start"
     >
       <Dropdown
         name="field"
@@ -377,7 +461,9 @@ function RuleRow({
           {...off}
         />
       ) : (
-        <s-text color="subdued">Every product in the catalogue</s-text>
+        <s-box paddingBlock="small-300">
+          <s-text color="subdued">Every product in the catalogue</s-text>
+        </s-box>
       )}
 
       {needsValue(rule.operator, kind) ? (
@@ -389,17 +475,28 @@ function RuleRow({
           currency={currency}
           {...off}
         />
-      ) : kind !== "none" ? (
+      ) : (
         <s-box />
-      ) : null}
+      )}
 
-      <s-button
-        type="button"
-        icon="x"
-        accessibilityLabel="Remove rule"
-        onClick={onRemove}
-        {...off}
-      />
+      <s-stack direction="inline" gap="none">
+        <s-button
+          type="button"
+          variant="tertiary"
+          icon="duplicate"
+          accessibilityLabel="Duplicate condition"
+          onClick={onDuplicate}
+          {...off}
+        />
+        <s-button
+          type="button"
+          variant="tertiary"
+          icon="delete"
+          accessibilityLabel="Remove condition"
+          onClick={onRemove}
+          {...off}
+        />
+      </s-stack>
     </s-grid>
   );
 }

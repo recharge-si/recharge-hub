@@ -17,21 +17,28 @@ import { useState, type ReactNode } from "react";
  * the same rule `Advanced` follows, and the reason neither is a bare
  * disclosure with a chevron and nothing else.
  *
- * The heading is fixed rather than a prop, because "Advanced settings" at the
- * bottom of a settings page is a place the merchant learns once and expects to
- * find in the same words on the next page.
+ * The heading defaults to "Advanced settings", because that at the bottom of
+ * a settings page is a place the merchant learns once and expects to find in
+ * the same words on the next page. A page whose cards are numbered may number
+ * this one too; the words stay.
  */
 export interface AdvancedSectionProps {
   /** What the settings inside currently say, in one short sentence. */
   summary: string;
+  /** "Advanced settings", or the same words behind a section number. */
+  heading?: string;
   children: ReactNode;
 }
 
-export function AdvancedSection({ summary, children }: AdvancedSectionProps) {
+export function AdvancedSection({
+  summary,
+  heading = "Advanced settings",
+  children,
+}: AdvancedSectionProps) {
   const [open, setOpen] = useState(false);
 
   return (
-    <s-section heading="Advanced settings">
+    <s-section heading={heading}>
       <s-stack direction="block" gap="base">
         <s-stack direction="inline" gap="small-300" alignItems="center">
           {/*
