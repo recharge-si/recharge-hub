@@ -1,6 +1,6 @@
 # Project status
 
-Reviewed against the repository on 26 August 2026. This is the canonical list
+Reviewed against the repository on 19 September 2026. This is the canonical list
 of current implementation gaps, open decisions, and meaningful technical debt.
 Completed work belongs in Git history, not in this file.
 
@@ -33,6 +33,20 @@ Completed work belongs in Git history, not in this file.
   visibility, dashboard, orders, and exceptions UI
 - Five-area information architecture with settings under the thing they
   configure, and redirects from the three routes that moved
+- The app's name in the admin nav opens Home: `/app` is the named home route
+  and the root decides embedded-or-outside from the admin's own markers, so an
+  installed merchant never sees the shop-domain login form
+  (`docs/architecture.md` § Merchant-facing shape)
+- A tax subsystem (`docs/architecture.md` § Tax decisions,
+  `docs/BUILD_SPEC.md` §8.12): Shopify's transaction tax normalised at the
+  boundary, one pure engine that classifies each line's treatment (domestic,
+  OSS, distance sale, reverse charge, local registration, export, exempt,
+  zero-rated, non-taxable), validates and maps it to a MetaKocka `tax_factor`,
+  a per-order snapshot with the configuration version and content it was
+  decided under, refund reversal against that snapshot, fail-closed
+  exceptions in the existing queue, Taxes & VAT settings (registrations and
+  policy, EU rates, mappings, overrides) with diagnostics, a tax card on the
+  order page and a Taxes readiness component
 - Guided setup at `/app/setup`: connect and verify MetaKocka, choose where stock
   is counted, map locations to warehouses, order reference, profit centre and
   payment types, then an explicit Finish that activates synchronization
@@ -40,11 +54,12 @@ Completed work belongs in Git history, not in this file.
   guided setup and the order settings page, computed from our own tables
 - An activation boundary (`shop.setup_completed_at`) both MetaKocka writers
   respect, so opening setup never starts writing
-- 753 fixture-driven tests across pure domain, adapters, presentation helpers,
-  the route table, and the order-to-MetaKocka vertical slice, plus PostgreSQL
-  tests for the reconciliation lock, the `count_code` claim, the payment
-  ledger's unique index, activation idempotency and the one-writer-per-location
-  rule
+- 916 fixture-driven tests across pure domain, adapters, presentation helpers,
+  the route table, the app's entry points, the order-to-MetaKocka vertical
+  slice and the tax pipeline end to end, plus PostgreSQL tests for the
+  reconciliation lock, the `count_code` claim, the payment ledger's unique
+  index, activation idempotency, the one-writer-per-location rule, the tax
+  tables and the tax migration's backfill
 
 ## Product and integration gaps
 
@@ -201,9 +216,46 @@ rule editor. It is now a fallback rather than the primary path — Shopify's own
 assignment is — so its priority has dropped accordingly.
 
 Refunds are recorded transaction by transaction and netted, so what a customer
-has actually paid is right. Automatic credit notes, returns, and complaints
+has actually paid is right, and each refund's tax is reversed against the
+order's stored decision — per rate and per treatment — so the credit note a
+person issues has its figures. Automatic credit notes, returns, and complaints
 remain phase 2, and deliberately so: representing a refund on a sales order
-would mean shrinking a recorded receipt.
+would mean shrinking a recorded receipt, and MetaKocka's credit-note behaviour
+is unverified.
+
+### T-22 — Tax: known limits of the data this app can read
+
+Genuine limits of the Shopify data available to this app, not gaps in the
+engine:
+
+- **B2B company tax registrations are not read.** `Order.purchasingEntity`
+  (company location tax id, exemptions) needs `read_customers` and
+  `read_companies`. A VAT number reaches the engine only through a note
+  attribute a storefront or app wrote (`VAT number`, `Tax ID`, `DDV`…), and
+  its presence alone never zeroes VAT. Adding those scopes is a merchant
+  consent event (T-07).
+- **Duties and import tax are not modelled.** `IMPORT` exists as a treatment
+  but nothing produces it; `currentTotalDutiesSet` is not read. A DDP order
+  reconciles on its tax lines alone.
+- **A reference reduced rate cannot be removed**, only replaced: the country
+  table holds one merchant row per (country, kind). Reduced rates are
+  validation data, so the cost is at most a note on an order.
+- **Sale Campaigns** are named by the product brief and do not exist in this
+  repository. The engine reads Shopify's actual selling price and transaction
+  tax, so any price change upstream is handled without coupling.
+- **Rates are validation data, verified September 2026.** The reference
+  table in `domain/tax/eu` is what the app expects, not what it files with;
+  a merchant edits it on the EU VAT rates page when a country changes.
+
+### T-23 — Existing shops: non-EU orders with no Shopify tax now wait
+
+Before the tax subsystem the configured rate stood in for a missing Shopify
+rate on every order, including one shipped outside the EU — which filed home
+VAT on an export. The migration keeps the EU-wide fallback (that is what the
+shop was doing) and sets the non-EU policy to `review`, so the first such
+order is held with `tax_treatment_unknown` until the merchant chooses "file
+as export at 0%" on the Taxes & VAT page. Deliberate: a held order is
+recoverable, home VAT on an export is a correction in the books.
 
 ## Decisions taken
 

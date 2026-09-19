@@ -250,6 +250,11 @@ add up to what was collected - never the full amount on each.
 
 ## Validation
 
+`tests/db/tax-repository.test.ts` needs the Compose database like the rest of
+`tests/db/`: it replays the tax migration's backfill for one throwaway tenant
+and asserts the old global `tax_percent` becomes the home rate and its
+mappings without loss.
+
 For every code change:
 
 ```bash

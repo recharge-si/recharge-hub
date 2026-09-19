@@ -124,6 +124,12 @@ differs it is given, because the code is not going to be renamed to match.
 | **Setup** | The guided flow, and the state of being configured. Never "onboarding" in copy. | `/app/setup`, `setup_completed_at` |
 | **Payment method** | The Shopify side of a payment mapping, as a merchant reads it. "Gateway" is the handle beneath it and stays where the handle is shown. | `Order.paymentGateway`, `PaymentTypeMap.shopifyGateway` |
 | **Pricelist** | A MetaKocka pricelist, referenced by the `count_code` it already has there. Net or gross is a property of the pricelist, not of Shopify. | `pricelistCode` |
+| **Rate** | A VAT rate as a percentage, "22%", "9.5%". Never a factor ("0.22") in copy except where the MetaKocka factor is itself the field. | `RateKey`, `rateKeyFromPercent` |
+| **Treatment** | What kind of VAT event a line is: domestic VAT, EU OSS, reverse charge, export, exempt, zero-rated, not taxable. Never "tax type". | `TaxTreatment`, `TREATMENT_LABEL` |
+| **Home rate** | The merchant's home-country standard VAT rate, which may stand in when Shopify charges nothing. Never "default rate" in copy. | `TaxSetting.domesticRateKey` |
+| **Mapping** (tax) | A VAT rate → the MetaKocka tax factor sent for it. "Not mapped" is the state that holds an order. | `TaxMapping`, `metakockaTaxFactor` |
+| **Override** (tax) | A deliberate exception by country or SKU, with a reason, visible on every order it touches. | `TaxOverride` |
+| **Held** | An order not sent because its VAT could not be filed safely. Never "blocked" in copy. | `sync_state = blocked`, `tax_*` exceptions |
 
 Words that must not appear in merchant-facing copy: **article** (the build
 specification's word for a MetaKocka product), **token**, **template**, **code**

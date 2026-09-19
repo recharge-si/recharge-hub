@@ -56,8 +56,24 @@ Products          /app/products         status, and /app/products/sync for setti
 Locations         /app/locations        how stock is going, and
                                         /app/locations/settings for the mappings,
                                         the defaults and the profit centres
-Settings          /app/settings         hub; /app/settings/metakocka is the connection
+Settings          /app/settings         hub; /app/settings/metakocka is the connection,
+                                        /app/settings/taxes is Taxes & VAT (an overview,
+                                        then registrations, rates, mappings, overrides)
 ```
+
+**The app's root means Home.** App Bridge links the app's name in the admin
+nav to the app's home route, `/` by default, and dispatches a client-side
+navigation for it — a data fetch with no `shop` or `host`, only the session
+token App Bridge puts in the `Authorization` header. The root route once read
+"no `shop`" as "not embedded" and sent an installed, signed-in merchant to the
+shop-domain login form. Two things close that: `s-app-nav` names `/app` as
+the home route with a hidden `rel="home"` entry (`web/lib/navigation`), and
+`web/lib/app-entry` decides embedded-or-outside from the admin's own markers
+(the Authorization header, `host`, `embedded`, `id_token`) as well as `shop`.
+`/auth/login` applies the same test and never renders the form for a request
+that carries them. Only a request with none of them is a person arriving from
+outside the admin. `tests/unit/app-entry.test.ts` enumerates every root
+request the admin can produce and asserts each lands in `/app`.
 
 Guided setup is `/app/setup`, five steps, reachable again from Home and
 Settings. Three routes moved and redirect: `/app/settings/sales-orders` to
@@ -339,6 +355,80 @@ shipping or a discount raises `commercial_representation_missing` and is held
 out of `in_sync`: the goods are still written, and the order is never reported
 as commercially reconciled while the ERP is short.
 
+### Tax decisions
+
+Shopify's transaction tax is what an order is filed with; this app decides
+what kind of VAT event each line is, checks it, maps it, and records why.
+One centralised engine, pure, in `src/domain/tax/`:
+
+```text
+Shopify order (webhook or Admin API read)
+  → adapters/shopify/order-payload: NormalizedOrderTax
+      per-line tax lines with amounts, shipping's own tax lines, order tax
+      lines, tax-exempt flag, a VAT number from note attributes, destination
+      (Northern Ireland as XI), refunds with Shopify's refunded goods and tax
+  → domain/tax/decide: TaxDecision
+      per line: rate, treatment, source, taxable amount, tax, mapped
+      MetaKocka tax_factor, issues; per order: totals, reconciliation, ok
+  → order_tax_snapshot (+ rate/treatment/source/amounts on order_line)
+  → adapters/metakocka/documents: tax_factor per line, price or
+      price_with_tax by the shop's tax-inclusive setting
+```
+
+**Source precedence.** An enabled override that sets a rate (a SKU override
+outranks a country one); Shopify's own tax lines; the configured home rate
+where `tax_setting.fallback_scope` allows it (home orders, or home and EU
+consumer orders — origin VAT below the OSS threshold); otherwise a blocking
+issue. Shopify's rate is never replaced by a table's, however much they agree;
+the country tables (`domain/tax/eu` reference, `country_vat_rate` per shop)
+only say whether a rate was expected, and an unexpected one is a note on the
+order.
+
+**Treatments** are classified from destination, buyer and registrations:
+`DOMESTIC_VAT`, `EU_OSS`, `EU_DISTANCE_SALE`, `EU_REVERSE_CHARGE`,
+`EU_LOCAL_REGISTRATION`, `NON_EU_LOCAL_REGISTRATION`, `ZERO_RATED`,
+`TAX_EXEMPT`, `NON_EU_EXPORT`, `NO_TAX`, `MANUAL_OVERRIDE`, `UNKNOWN`. Zero is
+never one thing: an explicit 0% line to a non-EU address is an export, a
+Shopify-exempt buyer is exempt, an EU business buyer with a VAT number that
+Shopify charged nothing is a reverse charge, and a 0% nobody can explain is
+`UNKNOWN`. A VAT number alone never zeroes VAT Shopify charged. OSS is on
+because the merchant said so, never inferred.
+
+**Fail closed.** `jobs/orders/tax-decider` runs in the reconciliation loop
+after the lines are current and before any document is planned. A decision
+with a blocking issue — a rate with no `tax_mapping`, an unexplained zero, a
+missing destination, a line Shopify taxed without a breakdown, a destination
+rate with no registration, line taxes that do not add up to Shopify's order
+tax beyond a cent per taxed line — files an exception per kind
+(`tax_mapping_missing`, `tax_treatment_unknown`, `tax_data_insufficient`,
+`tax_reconciliation_failed`, `vat_registration_configuration_error`), records
+a `blocked` verdict, and writes nothing. `write-metakocka-order` reads the
+stored decision and refuses without a clean one; it never stands a factor in.
+Retry for every tax kind means reconcile, and `recheck-exceptions` re-runs the
+pure decision under the current configuration to know when an order can go.
+
+**History.** `tax_setting.config_version` moves on every change to any tax
+table; each snapshot records the version and the whole configuration it was
+decided under. Once a document is written the snapshot is frozen: an edit is
+re-decided under the frozen configuration (learning new mappings additively,
+never replacing one), and a refund is reversed against the stored decision by
+`domain/tax/refunds`, per rate and per treatment, so a refund months later
+reverses what was filed rather than what today's settings would compute. The
+breakdown rides on the `refund_received` exception and the order page; the
+credit note itself stays a merchant action (MetaKocka's credit-note behaviour
+is unverified).
+
+**Money.** Rates are integer parts per million (`domain/tax/rates`); tax on a
+gross or net amount is BigInt arithmetic over minor units, half-up away from
+zero, so a refund is the exact negation of the sale. Shopify's own amounts are
+used wherever it supplies them.
+
+**Diagnostics and readiness.** `domain/tax/diagnostics` reads the
+configuration, the rates recent orders used and the open tax exceptions into
+checks with a place to act; the Taxes & VAT page shows them, and readiness
+folds them into a `taxes` component so Home and Settings say the same thing.
+Nothing on these paths waits on MetaKocka.
+
 ### Payments
 
 Payments are a ledger of individual Shopify transactions, not a flag.
@@ -429,7 +519,12 @@ history under `prisma/migrations/`. Major groups are:
 - payments: `OrderPayment` (one row per Shopify transaction) and
   `OrderPaymentApplication` (that transaction's share of one document);
 - merchant mappings/settings: payment types, payment fallback, and sales-order
-  update policy.
+  update policy;
+- taxes: `TaxSetting` (home country and rate, fallback scope, non-EU policy,
+  OSS, `config_version`), `VatRegistration`, `CountryVatRate` (merchant rows
+  over the shipped reference), `TaxMapping` (rate → `tax_factor`),
+  `TaxOverride`, and `OrderTaxSnapshot` (the decision, the configuration it
+  was made under, refund reversals, frozen once written).
 
 Most tables are tenant-owned through `shopId`. The current repository-layer
 enforcement gap is tracked in `docs/project-status.md`.
@@ -444,6 +539,7 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Database query                 | `src/adapters/db/repositories/`; keep tenant scope at the boundary           |
 | Order reconciliation rule      | `src/domain/orders/` and `src/jobs/orders/`, then `reconcile-order`          |
 | Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
+| Tax rule, treatment or mapping | `src/domain/tax/`, then `src/jobs/orders/tax-decider.ts`; screens under `app.settings.taxes.*` |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
 | What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |
@@ -459,6 +555,9 @@ enforcement gap is tracked in `docs/project-status.md`.
 - Webhooks verify HMAC before parsing and enqueue heavy work.
 - No page loader waits for MetaKocka; UI reads cached PostgreSQL state.
 - Money stays in integer minor units until an integration boundary.
+- No MetaKocka line is sent with a guessed `tax_factor`: the factor comes
+  from the order's recorded tax decision, and an order without a clean one is
+  held with an exception.
 - MetaKocka credentials and Shopify offline tokens are encrypted. PII retention
   is active; the remaining JSON encryption gap is documented in project status.
 - `EventLog` is an append-only product audit trail, not temporary debug output.

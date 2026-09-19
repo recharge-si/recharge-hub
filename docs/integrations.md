@@ -86,7 +86,13 @@ Three Admin API reads make up an order's desired state, and each has its own
 adapter so the parsers cannot drift:
 
 - `src/adapters/shopify/orders.ts` — the order itself, mapped into the webhook
-  shape so one parser serves both paths.
+  shape so one parser serves both paths. On API 2026-07 it reads, beyond the
+  order and its lines: `taxExempt`, order-level `taxLines`, `currentTotalTaxSet`,
+  `customAttributes` (where a storefront puts a VAT number), `shippingLines`
+  with their own `taxLines`, and `refunds` with `refundLineItems` and
+  `refundShippingLines`. `Order.purchasingEntity` (B2B company tax
+  registration) is deliberately not read: it needs `read_customers` and
+  `read_companies`, which this app does not hold.
 - `src/adapters/shopify/fulfillment-orders.ts` — which location is fulfilling
   what. Cancelled and incomplete fulfilment orders are excluded, several
   fulfilment orders for one location are folded into one entry, and a location
@@ -146,6 +152,11 @@ third base URL and a dedicated adapter.
   delete_unpaid`) and never for a document carrying a payment.
 - Product lines are catalogue references. Sending `unit` can create a product
   accidentally, so order lines deliberately omit it.
+- Every line carries `tax_factor`, taken from the order's recorded tax
+  decision (`docs/architecture.md` § Tax decisions) through the merchant's
+  `tax_mapping` for the decided rate. MetaKocka accepts a wrong factor,
+  including `"0"`, without complaint, so an order whose decision is not clean
+  is never written.
 - Stock `sync_stock` removes omitted products and can report success for a
   no-op, so the adapter sends and verifies a complete list for the warehouse
   it writes. It writes **only** the warehouse Shopify is authoritative for.

@@ -316,8 +316,11 @@ merchant's ERP. Treat it as a production database password (§10).
   gross, a net matching nothing, and VAT understated to the tax office. Sending
   `"0.22"` produces `price 171.31 / price_with_tax 209 / tax EX4`, which is the
   correct line. So when Shopify supplies no rate — any shop with no tax
-  registration for that market, which includes every development store — use the
-  shop's configured VAT rate. Only `taxable: false` means zero.
+  registration for that market, which includes every development store — the
+  tax engine (§8.12) stands the shop's configured home rate in where the
+  merchant's fallback setting allows it, and holds the order otherwise. Only
+  `taxable: false`, an explicit 0% tax line, or a classified zero (export,
+  exemption, reverse charge) means zero.
 - **[verified] Tax on a line is not optional.** A line whose product carries no
   `tax` attribute in MetaKocka is rejected with `opr_code 6, "Attribute 'tax' for
   product with code 'X' or name 'Y' must be set."` So `tax_factor` is always sent,
@@ -325,7 +328,9 @@ merchant's ERP. Treat it as a production database password (§10).
   `total_tax: 0.00` or `taxable: false` — that is the ERP being told what the
   customer actually paid — but when tax *was* charged and Shopify has not broken
   it down per line, the rate is undeterminable and the order becomes an exception
-  (§11) rather than a guess.
+  (§11) rather than a guess. The factor sent is always the merchant's
+  `tax_mapping` for the decided rate (§8.12); a rate with no mapping holds the
+  order.
 - **Send `price` for a tax-exclusive shop, `price_with_tax` for a tax-inclusive
   one.** The docs say webshop orders should always send gross, which holds only
   while `taxes_included` is true. Shopify's `price` is net when it is false, and
@@ -893,11 +898,57 @@ One Shopify payment becomes N MetaKocka documents. Decided once, here, asserted 
   Never silently convert to shop currency.
 - **Tax:** derive `tax_factor` per line from Shopify tax lines, not a product default —
   the same SKU has different rates across markets. Handle tax-inclusive and tax-exclusive
-  stores.
+  stores. The whole of it is §8.12.
 
 Current status: shipping, document-level discounts, and line-level discounts are
 not yet encoded faithfully in the MetaKocka request body because their API
 semantics have not been verified. See `docs/project-status.md` T-05/T-06.
+
+### 8.12 Tax decisions
+
+Shopify is the source of transaction tax; this app is not a tax engine and
+never claims an order's taxes are legally correct. Its job is:
+
+```text
+Shopify transaction tax → normalise → classify the treatment → validate
+  → snapshot → map to MetaKocka → sales order
+```
+
+- **Precedence.** An intentional override that sets a rate; Shopify's own
+  per-line tax lines; the configured home rate where the fallback setting
+  allows it; otherwise the order is held. A rate Shopify gave is never
+  replaced by a country table's, even when they agree: the tables are
+  validation data and an unexpected rate is a note on the order, not a
+  substitution.
+- **Treatments**, at minimum: `DOMESTIC_VAT`, `EU_OSS`, `EU_DISTANCE_SALE`,
+  `EU_REVERSE_CHARGE`, `EU_LOCAL_REGISTRATION`, `NON_EU_LOCAL_REGISTRATION`,
+  `ZERO_RATED`, `TAX_EXEMPT`, `NON_EU_EXPORT`, `IMPORT`, `NO_TAX`,
+  `MANUAL_OVERRIDE`, `UNKNOWN`. 0% is never generic. A VAT number alone never
+  zeroes VAT; OSS applies only when the merchant enabled it.
+- **Line level.** Every line and the shipping charge carry their own rate,
+  taxable amount, tax and mapped factor. Shipping uses Shopify's own shipping
+  tax lines; it never borrows a product's rate. Taxable amounts are after
+  discounts, on the basis Shopify prices in (`taxes_included`), and the
+  document sends `price` or `price_with_tax` accordingly — never both, never
+  doubled.
+- **Validation before a document.** Treatment known, rates known, every rate
+  mapped, amounts valid, line taxes reconcile with Shopify's order tax within
+  a cent per taxed line, currency coherent, every zero explained, a
+  registration where a destination rate needs one. Anything else is an
+  exception in the existing queue (`tax_*`,
+  `vat_registration_configuration_error`), `sync_state = blocked`, and no
+  write. `tax_factor` is never guessed and never `"0"` by default.
+- **History.** Every order keeps its decision and the configuration version
+  and content it was decided under; a written order's snapshot is frozen. A
+  refund is reversed against that snapshot, never against today's settings.
+- **Configuration**, on the Taxes & VAT settings page: home country and
+  rate, EU OSS, registrations elsewhere, the fallback policy, per-country
+  expected rates over a shipped EU reference table, `rate → tax_factor`
+  mappings, and overrides by country or SKU with a reason each. All
+  versioned; all validated server side.
+- **Privacy.** The snapshot holds rates, amounts, countries, treatments and
+  reasons, and a business VAT identifier that the §2.4 retention job removes
+  with the payload.
 
 ### 8.7 Payments
 
