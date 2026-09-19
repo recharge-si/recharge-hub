@@ -312,6 +312,34 @@ export function describeEvent(
         ok: true,
       };
 
+    case "tax.settings.saved":
+      return {
+        title: "Taxes & VAT",
+        text: "The tax registrations and policy were saved.",
+        ok: true,
+      };
+
+    case "tax.mappings.saved":
+      return {
+        title: "Taxes & VAT",
+        text: "The MetaKocka tax mappings were saved.",
+        ok: true,
+      };
+
+    case "tax.country_rates.saved":
+      return {
+        title: "Taxes & VAT",
+        text: "The country VAT rates were saved.",
+        ok: true,
+      };
+
+    case "tax.overrides.saved":
+      return {
+        title: "Taxes & VAT",
+        text: "The tax overrides were saved.",
+        ok: true,
+      };
+
     case "app.installed":
       return { title: "This app", text: "Installed on this store.", ok: true };
 

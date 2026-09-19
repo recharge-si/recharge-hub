@@ -357,16 +357,18 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   }
 
   /*
-   * §3, verified: MetaKocka refuses a document line with no tax attribute and
-   * will not infer one. Zero is not a safe stand-in — it files the right gross
-   * against a net that matches no pricelist and understates the VAT.
+   * The rate written into a created article's pricelist entry. §3, verified:
+   * a pricelist entry carries its own rate, and zero is not a safe stand-in.
+   * Order lines no longer read this — their VAT comes from the Taxes & VAT
+   * decision — but an article created without a rate is one MetaKocka will
+   * refuse on every order that names it.
    */
   if (taxPercent === "") {
     return {
       ok: false,
       field: "taxPercent",
       message:
-        "Enter the VAT rate this shop charges, for example 22. MetaKocka refuses an order line with no tax rate, and sending zero would understate the VAT rather than leave it unanswered.",
+        "Enter the VAT rate for products this app creates in MetaKocka, for example 22. An article created without one is refused on every order that names it.",
     };
   }
 
@@ -1580,8 +1582,8 @@ export default function ProductSyncSettings() {
 
             <s-text-field
               name="taxPercent"
-              label="Default VAT rate (%)"
-              details="Used on order lines when Shopify gives no rate."
+              label="VAT rate for created products (%)"
+              details="Written into the pricelist of a product this app creates. Order lines take their VAT from Taxes & VAT under Settings."
               value={state.taxPercent}
               onChange={(e) => set({ taxPercent: e.currentTarget.value })}
               {...(errorFor("taxPercent")

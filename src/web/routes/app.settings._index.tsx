@@ -60,6 +60,12 @@ const LINKS: SettingsLink[] = [
     href: READINESS_ROUTES.payments,
   },
   {
+    title: "Taxes & VAT",
+    description:
+      "Home VAT, EU OSS, registrations, the rates expected per country, and which MetaKocka tax factor each rate becomes.",
+    href: READINESS_ROUTES.taxes,
+  },
+  {
     title: "Locations",
     description:
       "Which MetaKocka warehouse each Shopify location means, and which way stock is copied.",

@@ -44,6 +44,12 @@ function facts(over: Partial<ReadinessFacts> = {}): ReadinessFacts {
       salesOrderSplit: "per_warehouse",
     },
     products: { matched: 40, unmatched: 0 },
+    taxes: {
+      status: "ready",
+      domestic: "Slovenia 22%",
+      unmappedRates: [],
+      blockedOrders: 0,
+    },
     setupCompletedAt: new Date("2026-08-26T09:00:00Z"),
     ...over,
   };
@@ -57,6 +63,33 @@ describe("computeReadiness", () => {
     expect(readiness.blocking).toEqual([]);
     expect(readiness.activated).toBe(true);
     expect(componentOf(readiness, "orders").summary).toBe("Automatic");
+    expect(componentOf(readiness, "taxes")).toMatchObject({
+      status: "ready",
+      summary: "Configured, Slovenia 22%",
+      required: false,
+    });
+  });
+
+  it("names unmapped rates and held orders on the taxes component without blocking activation", () => {
+    const readiness = computeReadiness(
+      facts({
+        taxes: {
+          status: "needs_attention",
+          domestic: "Slovenia 22%",
+          unmappedRates: ["9.5"],
+          blockedOrders: 2,
+        },
+      }),
+    );
+
+    const taxes = componentOf(readiness, "taxes");
+    expect(taxes.status).toBe("needs_attention");
+    expect(taxes.summary).toBe("2 issues");
+    expect(taxes.reason).toContain("9.5% has no MetaKocka mapping");
+    expect(taxes.reason).toContain("2 orders are held");
+    expect(taxes.action?.href).toBe("/app/settings/taxes");
+    // Held orders are held one at a time; activation is not.
+    expect(readiness.blocking).toEqual([]);
   });
 
   it("reports a fresh install as needing the connection first", () => {

@@ -28,7 +28,13 @@ export type ReadinessStatus =
   | "optional";
 
 export type ReadinessKey =
-  "metakocka" | "warehouses" | "stock" | "orders" | "payments" | "products";
+  | "metakocka"
+  | "warehouses"
+  | "stock"
+  | "orders"
+  | "payments"
+  | "taxes"
+  | "products";
 
 export interface ReadinessAction {
   label: string;
@@ -75,6 +81,7 @@ export const READINESS_ROUTES = {
   locations: "/app/locations",
   orders: "/app/orders/settings",
   payments: "/app/orders/settings/payments",
+  taxes: "/app/settings/taxes",
   products: "/app/products",
   setup: "/app/setup",
 } as const;
@@ -126,6 +133,20 @@ export interface ReadinessFacts {
   products: {
     matched: number;
     unmatched: number;
+  };
+  /**
+   * The tax diagnostics, already computed (`domain/tax/diagnostics`). Carried
+   * as its verdict rather than re-derived here, so Home and the Taxes & VAT
+   * page cannot disagree about whether taxes are configured.
+   */
+  taxes: {
+    status: "ready" | "needs_attention";
+    /** The home rate as configured, "Slovenia 22%", or null. */
+    domestic: string | null;
+    /** Rates orders use, or the configuration expects, with no mapping. */
+    unmappedRates: string[];
+    /** Orders currently held by an open tax exception. */
+    blockedOrders: number;
   };
   /** Null until the merchant presses Finish setup. */
   setupCompletedAt: Date | null;
@@ -430,15 +451,68 @@ function productsOf(facts: ReadinessFacts): ReadinessComponent {
   };
 }
 
+/**
+ * Taxes. Never blocks activation: an order whose VAT cannot be filed safely is
+ * held on its own, one at a time, which is the safer place to be strict. What
+ * this reports is whether anything is held right now and whether a rate in
+ * use has no MetaKocka mapping — the two things a person can act on.
+ */
+function taxesOf(facts: ReadinessFacts): ReadinessComponent {
+  const base = {
+    key: "taxes" as const,
+    title: "Taxes",
+    required: false,
+    action: { label: "Open Taxes & VAT", href: READINESS_ROUTES.taxes },
+  };
+  const { status, domestic, unmappedRates, blockedOrders } = facts.taxes;
+
+  if (status === "ready") {
+    return {
+      ...base,
+      status: "ready",
+      summary: domestic ? `Configured, ${domestic}` : "Configured",
+      reason: null,
+    };
+  }
+
+  const reasons: string[] = [];
+  if (!domestic) {
+    reasons.push("No home VAT rate is set, so an order Shopify charges no tax on has nothing to stand in for the rate.");
+  }
+  if (unmappedRates.length > 0) {
+    reasons.push(
+      `${list(unmappedRates.map((rate) => `${rate}%`))} ${plural(unmappedRates.length, "has", "have")} no MetaKocka mapping, so orders using ${plural(unmappedRates.length, "it", "them")} are held.`,
+    );
+  }
+  if (blockedOrders > 0) {
+    reasons.push(
+      `${blockedOrders} ${plural(blockedOrders, "order is", "orders are")} held until their VAT can be filed safely.`,
+    );
+  }
+
+  return {
+    ...base,
+    status: "needs_attention",
+    summary:
+      blockedOrders > 0
+        ? `${blockedOrders} ${plural(blockedOrders, "issue", "issues")}`
+        : unmappedRates.length > 0
+          ? `${unmappedRates.length} ${plural(unmappedRates.length, "rate", "rates")} not mapped`
+          : "Not configured",
+    reason: reasons.join(" ") || "The tax diagnostics name what to change.",
+  };
+}
+
 export function computeReadiness(facts: ReadinessFacts): Readiness {
   const metakocka = metakockaOf(facts);
   const warehouses = warehousesOf(facts);
   const stock = stockOf(facts);
   const orders = ordersOf(facts, metakocka, warehouses);
   const payments = paymentsOf(facts);
+  const taxes = taxesOf(facts);
   const products = productsOf(facts);
 
-  const components = [metakocka, warehouses, stock, orders, payments, products];
+  const components = [metakocka, warehouses, stock, orders, payments, taxes, products];
 
   const blocking = components.filter(
     (component) => component.required && component.status === "needs_attention",

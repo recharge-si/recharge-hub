@@ -1,5 +1,9 @@
 import { prisma } from "~/adapters/db/client.server";
+import { getTaxDiagnosticsFacts } from "~/adapters/db/repositories/tax.server";
 import { computeReadiness, type Readiness } from "~/domain/readiness";
+import { computeTaxDiagnostics } from "~/domain/tax/diagnostics";
+import { countryName } from "~/domain/tax/eu";
+import { formatRateKey } from "~/domain/tax/rates";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -29,6 +33,7 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
     skuGroups,
     gatewayGroups,
     shop,
+    taxFacts,
   ] = await Promise.all([
     prisma.metakockaCredential.findFirst({
       where: { shop: { domain } },
@@ -85,7 +90,10 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
       where: { domain },
       select: { setupCompletedAt: true },
     }),
+    getTaxDiagnosticsFacts(principal, new Date()),
   ]);
+
+  const taxes = computeTaxDiagnostics(taxFacts);
 
   const connected = sources.filter(
     (source) =>
@@ -153,6 +161,14 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
     products: {
       matched: skuCount("matched"),
       unmatched: skuCount("unmatched"),
+    },
+    taxes: {
+      status: taxes.status,
+      domestic: taxFacts.config.domesticRateKey
+        ? `${countryName(taxFacts.config.domesticCountry)} ${formatRateKey(taxFacts.config.domesticRateKey)}`
+        : null,
+      unmappedRates: taxes.unmappedRates,
+      blockedOrders: taxes.blockedOrders,
     },
     setupCompletedAt: shop?.setupCompletedAt ?? null,
   });

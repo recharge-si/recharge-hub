@@ -105,6 +105,27 @@ describe("route table", () => {
     );
   });
 
+  it("puts Taxes & VAT under Settings, an overview with a page per concern", async () => {
+    // `app.settings.taxes._index.tsx` rather than `app.settings.taxes.tsx`,
+    // for the reason Locations gives: a leaf with children becomes a layout
+    // with no outlet, and every sub-page would render as a blank overview.
+    expect(await fileFor("/app/settings/taxes")).toBe(
+      "routes/app.settings.taxes._index.tsx",
+    );
+    expect(await fileFor("/app/settings/taxes/registrations")).toBe(
+      "routes/app.settings.taxes.registrations.tsx",
+    );
+    expect(await fileFor("/app/settings/taxes/rates")).toBe(
+      "routes/app.settings.taxes.rates.tsx",
+    );
+    expect(await fileFor("/app/settings/taxes/mappings")).toBe(
+      "routes/app.settings.taxes.mappings.tsx",
+    );
+    expect(await fileFor("/app/settings/taxes/overrides")).toBe(
+      "routes/app.settings.taxes.overrides.tsx",
+    );
+  });
+
   it("keeps guided setup reachable at a stable address", async () => {
     expect(await fileFor("/app/setup")).toBe("routes/app.setup.tsx");
   });

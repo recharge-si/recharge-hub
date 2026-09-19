@@ -22,6 +22,7 @@ import {
 } from "~/adapters/db/repositories/order.server";
 import { listLedger } from "~/adapters/db/repositories/order-payment.server";
 import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
+import { getTaxSnapshot } from "~/adapters/db/repositories/tax.server";
 import { metakockaDocumentUrl } from "~/adapters/metakocka/documents";
 import { redriveOrder } from "~/adapters/queue/redrive.server";
 import {
@@ -35,6 +36,7 @@ import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown } from "~/web/components/dropdown";
+import { OrderTaxCard, type OrderTaxView } from "~/web/components/order-tax-card";
 import { formatDateTime } from "~/web/lib/datetime";
 import { describeExceptionKind } from "~/web/lib/exceptions";
 import { formatMoney } from "~/web/lib/money";
@@ -68,7 +70,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Both only exist so the two things that used to be impossible on this page
   // are possible: choosing a source by hand, and giving MetaKocka a customer
   // for an order Shopify has no address on.
-  const [settings, sources, stock, products, ledger] = await Promise.all([
+  const [settings, sources, stock, products, ledger, taxSnapshot] = await Promise.all([
     getSalesOrderSettings(principal),
     listAllocatableSources(principal),
     stockForOrder(principal, order.id),
@@ -93,9 +95,57 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
      * that is paid look identical in a badge.
      */
     listLedger(principal, order.id),
+    /*
+     * The VAT decision, as recorded. Nothing on this page re-derives a rate:
+     * the snapshot is the answer to "why did this order receive this VAT",
+     * and it stays the answer after the settings change.
+     */
+    getTaxSnapshot(principal, order.id),
   ]);
 
   const override = parsePartnerOverride(order.partnerOverride);
+
+  const titleBySku = new Map(order.lines.map((line) => [line.shopifyLineItemId, line.title]));
+  const tax: OrderTaxView | null = taxSnapshot
+    ? {
+        decidedAt: taxSnapshot.decidedAt.toISOString(),
+        configVersion: taxSnapshot.decision.configVersion,
+        frozenAt: taxSnapshot.frozenAt?.toISOString() ?? null,
+        currency: taxSnapshot.decision.currency,
+        taxesIncluded: taxSnapshot.decision.taxesIncluded,
+        destinationCountry: taxSnapshot.decision.destinationCountry,
+        customerKind: taxSnapshot.decision.customerKind,
+        vatNumber: taxSnapshot.decision.vatNumber,
+        treatment: taxSnapshot.decision.treatment,
+        source: taxSnapshot.decision.source,
+        rateKeys: taxSnapshot.decision.rateKeys,
+        totals: {
+          taxableMinor: taxSnapshot.decision.totals.taxableMinor,
+          taxMinor: taxSnapshot.decision.totals.taxMinor,
+          shopifyTaxMinor: taxSnapshot.decision.totals.shopifyTaxMinor,
+          reconciled: taxSnapshot.decision.totals.reconciled,
+        },
+        ok: taxSnapshot.decision.ok,
+        issues: taxSnapshot.decision.issues.map((issue) => ({
+          kind: issue.kind,
+          severity: issue.severity,
+          message: issue.message,
+        })),
+        lines: taxSnapshot.decision.lines.map((line) => ({
+          ...line,
+          title: titleBySku.get(line.lineId) ?? line.sku,
+        })),
+        shipping: taxSnapshot.decision.shipping
+          ? { ...taxSnapshot.decision.shipping, title: "Shipping" }
+          : null,
+        refunds: taxSnapshot.refunds.map((refund) => ({
+          refundId: refund.refundId,
+          createdAt: refund.createdAt,
+          totals: refund.totals,
+          totalTaxMinor: refund.totalTaxMinor,
+        })),
+      }
+    : null;
 
   /*
    * Every transaction, not only the settled ones.
@@ -140,6 +190,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     })),
     partnerOverride: override,
     payments,
+    tax,
     /** Whether Shopify gave us anything to file the order against at all. */
     hasShopifyAddress: Boolean(
       shopifyParty?.partner ?? shopifyParty?.receiver,
@@ -545,6 +596,7 @@ export default function OrderDetail() {
     partnerOverride,
     hasShopifyAddress,
     payments,
+    tax,
   } = useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
@@ -1330,6 +1382,8 @@ export default function OrderDetail() {
             ) : null}
           </s-stack>
         </s-section>
+
+        <OrderTaxCard tax={tax} />
 
         <s-section heading="MetaKocka documents">
           {order.documents.length === 0 ? (
