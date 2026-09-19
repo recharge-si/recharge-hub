@@ -435,8 +435,8 @@ export default function Locations() {
 
   return (
     <s-page heading="Locations">
-      <s-link slot="breadcrumb-actions" href="/app">
-        Home
+      <s-link slot="breadcrumb-actions" href="/app/metakocka">
+        MetaKocka
       </s-link>
 
       {/*

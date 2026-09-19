@@ -212,8 +212,8 @@ export default function Orders() {
   if (orders.length === 0 && !filtered) {
     return (
       <s-page heading="Orders" inlineSize="large">
-        <s-link slot="breadcrumb-actions" href="/app">
-          Home
+        <s-link slot="breadcrumb-actions" href="/app/metakocka">
+          MetaKocka
         </s-link>
         <s-button slot="secondary-actions" href="/app/orders/settings">
           Settings
@@ -231,8 +231,8 @@ export default function Orders() {
 
   return (
     <s-page heading="Orders" inlineSize="large">
-      <s-link slot="breadcrumb-actions" href="/app">
-        Home
+      <s-link slot="breadcrumb-actions" href="/app/metakocka">
+        MetaKocka
       </s-link>
 
       {/*
