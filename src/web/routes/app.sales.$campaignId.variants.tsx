@@ -30,6 +30,7 @@ import {
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { readVariantPrices } from "~/adapters/shopify/variant-prices";
 import type { VariantState } from "~/domain/sales/types";
+import { DownloadButton } from "~/web/components/download-button";
 import { formatDateTime } from "~/web/lib/datetime";
 import { formatMoney } from "~/web/lib/money";
 import {
@@ -339,13 +340,13 @@ export default function CampaignVariants() {
       <s-link slot="breadcrumb-actions" href={`/app/sales/${campaign.id}`}>
         {campaign.name}
       </s-link>
-      <s-button
+      <DownloadButton
         slot="secondary-actions"
         href={`/app/sales/${campaign.id}/variants.csv${state ? `?state=${state}` : ""}`}
-        target="_blank"
+        fallbackName="variants.csv"
       >
         Export CSV
-      </s-button>
+      </DownloadButton>
 
       <s-stack direction="block" gap="large">
         {result && !result.ok ? (

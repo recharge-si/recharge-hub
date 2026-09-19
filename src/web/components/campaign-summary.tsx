@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 
+import { DownloadButton } from "~/web/components/download-button";
 import type { CampaignPhase } from "~/domain/sales/lifecycle";
 import type { CampaignStatus, VariantState } from "~/domain/sales/types";
 import { formatDateTime } from "~/web/lib/datetime";
@@ -286,11 +287,14 @@ export function CampaignSummary({
             <s-button href={variantsHref} inlineSize="fill">
               View affected variants
             </s-button>
-            <s-stack direction="inline" gap="small-300" alignItems="center">
-              <s-link href={csvHref} target="_blank">
-                Export CSV
-              </s-link>
-            </s-stack>
+            <DownloadButton
+              href={csvHref}
+              fallbackName="variants.csv"
+              variant="tertiary"
+              icon="export"
+            >
+              Export CSV
+            </DownloadButton>
           </s-stack>
         ) : null}
 

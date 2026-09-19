@@ -400,7 +400,10 @@ shows its own trail.
   numbers never jump. Activation itself still uses what is saved, and the
   save bar is the only way to save (docs/BUILD_SPEC.md § 2.6).
 - `/app/sales/:id/variants` — every variant row, filterable by state, with
-  CSV export at `/app/sales/:id/variants.csv`.
+  CSV export at `/app/sales/:id/variants.csv`. The export is fetched on the
+  page (`DownloadButton`) and saved as a blob: a link opened in a new tab
+  reaches the app without a session token and lands in the install flow
+  instead of the file.
 - `/app/products/:productId` — the product view: per variant, price,
   compare-at, sale, campaign (linked), discount, original price.
 - Needs attention gains `sale_price_conflict`, `sale_apply_failed`,
