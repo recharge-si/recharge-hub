@@ -44,21 +44,23 @@ randomness; callers inject time and inputs.
 
 ## Merchant-facing shape
 
-Six areas in `s-app-nav`, each a job rather than a table. Every settings page
-lives with the thing it configures, so nothing in the navigation is a database
-name:
+Four visible entries in `s-app-nav`, each a job rather than a table. Every
+settings page lives with the thing it configures, so nothing in the navigation
+is a database name:
 
 ```text
 Home              /app                  operations dashboard
 Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
                                         /app/sales/:id/variants every variant it touches
-Orders            /app/orders           list, and /app/orders/settings
-Needs attention   /app/exceptions
-Products          /app/products         status, /app/products/sync for settings,
+MetaKocka         /app/metakocka        the integration's front door: how each side is
+                                        doing, opening onto
+  Orders          /app/orders           list, and /app/orders/settings
+  Products        /app/products         status, /app/products/sync for settings,
                                         and /app/products/:id — one product as a sale sees it
-Locations         /app/locations        how stock is going, and
+  Locations       /app/locations        how stock is going, and
                                         /app/locations/settings for the mappings,
                                         the defaults and the profit centres
+Needs attention   /app/exceptions
 Settings          /app/settings         hub; /app/settings/metakocka is the connection,
                                         /app/settings/taxes is Taxes & VAT (an overview,
                                         then registrations, rates, mappings, overrides)
