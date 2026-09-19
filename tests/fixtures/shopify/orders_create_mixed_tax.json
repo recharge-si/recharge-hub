@@ -1,0 +1,177 @@
+{
+  "id": 5551234567999,
+  "admin_graphql_api_id": "gid://shopify/Order/5551234567999",
+  "order_number": 1077,
+  "name": "#1077",
+  "currency": "EUR",
+  "presentment_currency": "EUR",
+  "financial_status": "paid",
+  "fulfillment_status": null,
+  "taxes_included": true,
+  "tax_exempt": false,
+  "created_at": "2026-09-10T09:30:00+02:00",
+  "updated_at": "2026-09-12T09:30:00+02:00",
+  "cancelled_at": null,
+  "note": null,
+  "note_attributes": [
+    { "name": "VAT number", "value": "DE123456789" },
+    { "name": "gift", "value": "no" }
+  ],
+  "total_price": "254.40",
+  "current_total_price": "254.40",
+  "total_price_set": {
+    "shop_money": { "amount": "254.40", "currency_code": "EUR" },
+    "presentment_money": { "amount": "254.40", "currency_code": "EUR" }
+  },
+  "current_total_price_set": {
+    "shop_money": { "amount": "254.40", "currency_code": "EUR" },
+    "presentment_money": { "amount": "254.40", "currency_code": "EUR" }
+  },
+  "total_discounts": "10.00",
+  "total_discounts_set": {
+    "shop_money": { "amount": "10.00", "currency_code": "EUR" },
+    "presentment_money": { "amount": "10.00", "currency_code": "EUR" }
+  },
+  "total_tax": "41.66",
+  "total_tax_set": {
+    "shop_money": { "amount": "41.66", "currency_code": "EUR" },
+    "presentment_money": { "amount": "41.66", "currency_code": "EUR" }
+  },
+  "current_total_tax": "41.66",
+  "current_total_tax_set": {
+    "shop_money": { "amount": "41.66", "currency_code": "EUR" },
+    "presentment_money": { "amount": "41.66", "currency_code": "EUR" }
+  },
+  "tax_lines": [
+    { "title": "DDV", "rate": 0.22, "price": "39.76", "price_set": { "shop_money": { "amount": "39.76", "currency_code": "EUR" }, "presentment_money": { "amount": "39.76", "currency_code": "EUR" } } },
+    { "title": "DDV", "rate": 0.095, "price": "1.90", "price_set": { "shop_money": { "amount": "1.90", "currency_code": "EUR" }, "presentment_money": { "amount": "1.90", "currency_code": "EUR" } } }
+  ],
+  "total_shipping_price_set": {
+    "shop_money": { "amount": "6.10", "currency_code": "EUR" },
+    "presentment_money": { "amount": "6.10", "currency_code": "EUR" }
+  },
+  "shipping_lines": [
+    {
+      "title": "Standard",
+      "price": "6.10",
+      "price_set": { "shop_money": { "amount": "6.10", "currency_code": "EUR" }, "presentment_money": { "amount": "6.10", "currency_code": "EUR" } },
+      "discounted_price": "6.10",
+      "discounted_price_set": { "shop_money": { "amount": "6.10", "currency_code": "EUR" }, "presentment_money": { "amount": "6.10", "currency_code": "EUR" } },
+      "tax_lines": [
+        { "title": "DDV", "rate": 0.22, "price": "1.10", "price_set": { "shop_money": { "amount": "1.10", "currency_code": "EUR" }, "presentment_money": { "amount": "1.10", "currency_code": "EUR" } } }
+      ]
+    }
+  ],
+  "payment_gateway_names": ["bank_deposit"],
+  "gateway": "bank_deposit",
+  "line_items": [
+    {
+      "id": 14101,
+      "sku": "MAST-490",
+      "title": "Carbon mast 490",
+      "name": "Carbon mast 490",
+      "quantity": 2,
+      "taxable": true,
+      "price": "112.20",
+      "price_set": { "shop_money": { "amount": "112.20", "currency_code": "EUR" }, "presentment_money": { "amount": "112.20", "currency_code": "EUR" } },
+      "total_discount": "10.00",
+      "total_discount_set": { "shop_money": { "amount": "10.00", "currency_code": "EUR" }, "presentment_money": { "amount": "10.00", "currency_code": "EUR" } },
+      "tax_lines": [
+        { "title": "DDV", "rate": 0.22, "price": "38.66", "price_set": { "shop_money": { "amount": "38.66", "currency_code": "EUR" }, "presentment_money": { "amount": "38.66", "currency_code": "EUR" } } }
+      ]
+    },
+    {
+      "id": 14102,
+      "sku": "BOOK-1",
+      "title": "Rigging handbook",
+      "name": "Rigging handbook",
+      "quantity": 1,
+      "taxable": true,
+      "price": "21.90",
+      "price_set": { "shop_money": { "amount": "21.90", "currency_code": "EUR" }, "presentment_money": { "amount": "21.90", "currency_code": "EUR" } },
+      "total_discount": "0.00",
+      "total_discount_set": { "shop_money": { "amount": "0.00", "currency_code": "EUR" }, "presentment_money": { "amount": "0.00", "currency_code": "EUR" } },
+      "tax_lines": [
+        { "title": "DDV", "rate": 0.095, "price": "1.90", "price_set": { "shop_money": { "amount": "1.90", "currency_code": "EUR" }, "presentment_money": { "amount": "1.90", "currency_code": "EUR" } } }
+      ]
+    },
+    {
+      "id": 14103,
+      "sku": "GIFT-CARD",
+      "title": "Gift card",
+      "name": "Gift card",
+      "quantity": 1,
+      "taxable": false,
+      "price": "12.00",
+      "price_set": { "shop_money": { "amount": "12.00", "currency_code": "EUR" }, "presentment_money": { "amount": "12.00", "currency_code": "EUR" } },
+      "total_discount": "0.00",
+      "total_discount_set": { "shop_money": { "amount": "0.00", "currency_code": "EUR" }, "presentment_money": { "amount": "0.00", "currency_code": "EUR" } },
+      "tax_lines": []
+    }
+  ],
+  "refunds": [
+    {
+      "id": 88001,
+      "created_at": "2026-09-12T09:30:00+02:00",
+      "refund_line_items": [
+        {
+          "id": 91001,
+          "line_item_id": 14101,
+          "quantity": 1,
+          "subtotal": "107.20",
+          "subtotal_set": { "shop_money": { "amount": "107.20", "currency_code": "EUR" }, "presentment_money": { "amount": "107.20", "currency_code": "EUR" } },
+          "total_tax": "19.33",
+          "total_tax_set": { "shop_money": { "amount": "19.33", "currency_code": "EUR" }, "presentment_money": { "amount": "19.33", "currency_code": "EUR" } }
+        }
+      ],
+      "order_adjustments": [
+        {
+          "id": 92001,
+          "kind": "shipping_refund",
+          "amount": "-6.10",
+          "amount_set": { "shop_money": { "amount": "-6.10", "currency_code": "EUR" }, "presentment_money": { "amount": "-6.10", "currency_code": "EUR" } },
+          "tax_amount": "-1.10",
+          "tax_amount_set": { "shop_money": { "amount": "-1.10", "currency_code": "EUR" }, "presentment_money": { "amount": "-1.10", "currency_code": "EUR" } }
+        }
+      ]
+    }
+  ],
+  "customer": {
+    "id": 7001,
+    "first_name": "Anna",
+    "last_name": "Schmidt",
+    "email": "anna@example.test",
+    "phone": null,
+    "tax_exempt": false
+  },
+  "email": "anna@example.test",
+  "phone": null,
+  "billing_address": {
+    "first_name": "Anna",
+    "last_name": "Schmidt",
+    "name": "Anna Schmidt",
+    "company": "Schmidt GmbH",
+    "address1": "Hauptstrasse 1",
+    "address2": null,
+    "zip": "10115",
+    "city": "Berlin",
+    "province": null,
+    "country": "Germany",
+    "country_code": "DE",
+    "phone": null
+  },
+  "shipping_address": {
+    "first_name": "Anna",
+    "last_name": "Schmidt",
+    "name": "Anna Schmidt",
+    "company": "Schmidt GmbH",
+    "address1": "Hauptstrasse 1",
+    "address2": null,
+    "zip": "10115",
+    "city": "Berlin",
+    "province": null,
+    "country": "Germany",
+    "country_code": "DE",
+    "phone": null
+  }
+}

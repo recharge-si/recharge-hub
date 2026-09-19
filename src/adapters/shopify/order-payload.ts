@@ -8,6 +8,13 @@ import {
   type FulfillmentState,
   type OrderSnapshot,
 } from "~/domain/orders/types";
+import { rateKeyFromFactor } from "~/domain/tax/rates";
+import type { RefundInput } from "~/domain/tax/refunds";
+import type {
+  NormalizedOrderTax,
+  ShippingTaxInput,
+  TaxLineInput,
+} from "~/domain/tax/types";
 
 /**
  * The Shopify `orders/create` payload, narrowed to what this app actually uses.
@@ -75,15 +82,72 @@ const addressSchema = z
     zip: z.string().nullish(),
     city: z.string().nullish(),
     province: z.string().nullish(),
+    province_code: z.string().nullish(),
     country: z.string().nullish(),
     country_code: z.string().nullish(),
     phone: z.string().nullish(),
   })
   .nullish();
 
+/**
+ * One tax line, on a line item, on shipping, or on the order.
+ *
+ * `rate` is a decimal (0.22); `price` is the tax charged at that rate, in the
+ * shop currency as a flat field and in both currencies in the set. The set is
+ * preferred for the same reason as every other amount (§8.6).
+ */
 const taxLineSchema = z.object({
+  title: z.string().nullish(),
   rate: z.union([z.string(), z.number()]).nullish(),
   price: money.nullish(),
+  price_set: moneySet,
+});
+
+/**
+ * A shipping line. Shopify taxes shipping on its own terms — its own tax
+ * lines, its own rate — and never as "whatever the goods were taxed at", so
+ * they are read rather than borrowed (§27 of the brief).
+ */
+const shippingLineSchema = z.object({
+  title: z.string().nullish(),
+  price: money.nullish(),
+  price_set: moneySet,
+  discounted_price: money.nullish(),
+  discounted_price_set: moneySet,
+  tax_lines: z.array(taxLineSchema).default([]),
+});
+
+/**
+ * A refund, narrowed to what a credit note needs: which lines, how many, and
+ * what Shopify refunded in goods and in tax. `order_adjustments` is where a
+ * refunded shipping charge lives, as negative amounts.
+ */
+const refundSchema = z.object({
+  id: z.union([z.string(), z.number()]).transform(String),
+  created_at: z.string().nullish(),
+  refund_line_items: z
+    .array(
+      z.object({
+        line_item_id: z.union([z.string(), z.number()]).transform(String),
+        quantity: z.number(),
+        subtotal: money.nullish(),
+        subtotal_set: moneySet,
+        total_tax: money.nullish(),
+        total_tax_set: moneySet,
+      }),
+    )
+    .default([]),
+  order_adjustments: z
+    .array(
+      z.object({
+        kind: z.string().nullish(),
+        amount: money.nullish(),
+        amount_set: moneySet,
+        tax_amount: money.nullish(),
+        tax_amount_set: moneySet,
+      }),
+    )
+    .default([]),
 });
 
 const lineItemSchema = z.object({
@@ -114,9 +178,25 @@ export const orderPayloadSchema = z.object({
   total_discounts: money.nullish(),
   total_discounts_set: moneySet,
   taxes_included: z.boolean().nullish(),
+  tax_exempt: z.boolean().nullish(),
   total_tax: money.nullish(),
   total_tax_set: moneySet,
+  current_total_tax: money.nullish(),
+  current_total_tax_set: moneySet,
+  tax_lines: z.array(taxLineSchema).default([]),
   total_shipping_price_set: moneySet,
+  /// Absent on some older payloads; null then means "not described", which
+  /// the tax engine treats differently from "described as untaxed".
+  shipping_lines: z.array(shippingLineSchema).nullish(),
+  note_attributes: z
+    .array(
+      z.object({
+        name: z.string().nullish(),
+        value: z.union([z.string(), z.number()]).transform(String).nullish(),
+      }),
+    )
+    .default([]),
+  refunds: z.array(refundSchema).default([]),
   payment_gateway_names: z.array(z.string()).default([]),
   gateway: z.string().nullish(),
   note: z.string().nullish(),
@@ -134,6 +214,7 @@ export const orderPayloadSchema = z.object({
       last_name: z.string().nullish(),
       email: z.string().nullish(),
       phone: z.string().nullish(),
+      tax_exempt: z.boolean().nullish(),
     })
     .nullish(),
   email: z.string().nullish(),
@@ -277,6 +358,10 @@ export interface ParsedOrderLine {
   /**
    * Decimal factor derived from this line's own tax lines, never a product
    * default. Null means Shopify did not say enough to know it (§11).
+   *
+   * What Shopify said, and only that. What the line is *sent* with is the tax
+   * engine's decision (`domain/tax`), which maps this through the merchant's
+   * MetaKocka mappings or stands a configured rate in for a missing one.
    */
   taxFactor: string | null;
 }
@@ -373,6 +458,179 @@ export interface ParsedOrder {
   lines: ParsedOrderLine[];
   partner: ParsedAddress | null;
   receiver: ParsedAddress | null;
+  /** Everything the tax engine reads, with no Shopify field names left in it. */
+  tax: NormalizedOrderTax;
+  /** Refunds Shopify has processed, for reversing the order's tax decision. */
+  refunds: RefundInput[];
+}
+
+/**
+ * The ISO code of an address, with Northern Ireland as `XI`.
+ *
+ * Shopify reports Northern Ireland as country `GB` with the province set, and
+ * for VAT on goods it is inside the EU VAT area — the one place where the
+ * country code alone gives the wrong jurisdiction.
+ */
+function countryCodeOf(
+  address: OrderPayload["billing_address"],
+): string | null {
+  if (!address) return null;
+  const code = (address.country_code ?? "").trim().toUpperCase();
+  if (code === "") return null;
+  const province = `${address.province ?? ""} ${address.province_code ?? ""}`;
+  if (code === "GB" && /northern ireland|\bNIR\b/i.test(province)) return "XI";
+  return code;
+}
+
+/**
+ * Shopify's tax lines, normalised. A tax line whose rate cannot be read is
+ * dropped rather than guessed at; the engine's reconciliation then sees the
+ * order tax it does not account for and holds the order.
+ */
+function toTaxLines(lines: z.infer<typeof taxLineSchema>[]): TaxLineInput[] {
+  const out: TaxLineInput[] = [];
+  for (const line of lines) {
+    if (line.rate === null || line.rate === undefined) continue;
+    const rateKey = rateKeyFromFactor(line.rate);
+    if (rateKey === null) continue;
+    out.push({
+      rateKey,
+      amountMinor: toMinorUnits(presentmentAmount(line.price_set, line.price)),
+      title: line.title?.trim() || null,
+    });
+  }
+  return out;
+}
+
+/**
+ * The names a VAT identifier travels under when a storefront collects one.
+ *
+ * Shopify has no first-class VAT number on an order outside B2B company
+ * accounts, so apps and themes put it in a note attribute. Matching the usual
+ * names finds it; nothing about tax treatment follows from its presence alone.
+ */
+const VAT_ATTRIBUTE = /^(vat[\s_-]*(id|number|no|nr)?|tax[\s_-]*(id|number)|davcna|davčna|ddv|id[\s_-]*za[\s_-]*ddv)$/i;
+
+function vatNumberOf(order: OrderPayload): string | null {
+  for (const attribute of order.note_attributes) {
+    const name = (attribute.name ?? "").trim();
+    const value = (attribute.value ?? "").trim();
+    if (name && value && VAT_ATTRIBUTE.test(name)) return value;
+  }
+  return null;
+}
+
+function toShipping(order: OrderPayload): ShippingTaxInput | null {
+  const shippingMinor = toMinorUnits(
+    presentmentAmount(order.total_shipping_price_set, "0"),
+  );
+  if (shippingMinor <= 0 && !order.shipping_lines?.length) return null;
+
+  // The lines were not described at all: the amount is known, the tax is not.
+  if (!order.shipping_lines) {
+    return { amountMinor: shippingMinor, taxLines: null };
+  }
+
+  const amountMinor = order.shipping_lines.reduce(
+    (sum, line) =>
+      sum +
+      toMinorUnits(
+        presentmentAmount(
+          line.discounted_price_set ?? line.price_set,
+          line.discounted_price ?? line.price ?? "0",
+        ),
+      ),
+    0,
+  );
+
+  return {
+    amountMinor: amountMinor > 0 ? amountMinor : shippingMinor,
+    taxLines: toTaxLines(order.shipping_lines.flatMap((line) => line.tax_lines)),
+  };
+}
+
+function toNormalizedTax(
+  order: OrderPayload,
+  currency: string,
+  taxesIncluded: boolean,
+  totalTaxMinor: number,
+): NormalizedOrderTax {
+  const company =
+    Boolean(order.billing_address?.company?.trim()) ||
+    Boolean(order.shipping_address?.company?.trim());
+  const vatNumber = vatNumberOf(order);
+
+  return {
+    currency,
+    taxesIncluded,
+    totalTaxMinor,
+    orderTaxLines: toTaxLines(order.tax_lines),
+    destinationCountry: countryCodeOf(order.shipping_address),
+    billingCountry: countryCodeOf(order.billing_address),
+    customer: {
+      isBusiness: company || vatNumber !== null,
+      vatNumber,
+      taxExempt: order.tax_exempt === true || order.customer?.tax_exempt === true,
+    },
+    lines: order.line_items.map((line) => ({
+      lineId: line.id,
+      sku: line.sku?.trim() ?? "",
+      quantity: line.quantity,
+      unitPriceMinor: toMinorUnits(presentmentAmount(line.price_set, line.price)),
+      discountMinor: toMinorUnits(
+        presentmentAmount(line.total_discount_set, line.total_discount),
+      ),
+      taxable: line.taxable ?? true,
+      taxLines: toTaxLines(line.tax_lines),
+    })),
+    shipping: toShipping(order),
+  };
+}
+
+function toRefunds(order: OrderPayload): RefundInput[] {
+  return order.refunds.map((refund) => {
+    const lines = refund.refund_line_items.map((line) => ({
+      lineId: line.line_item_id,
+      quantity: line.quantity,
+      subtotalMinor:
+        line.subtotal_set || line.subtotal
+          ? toMinorUnits(presentmentAmount(line.subtotal_set, line.subtotal))
+          : null,
+      taxMinor:
+        line.total_tax_set || line.total_tax
+          ? toMinorUnits(presentmentAmount(line.total_tax_set, line.total_tax))
+          : null,
+    }));
+
+    // Shipping refunds arrive as negative adjustments; the breakdown wants
+    // the positive amount refunded.
+    let shippingMinor = 0;
+    let shippingTaxMinor: number | null = null;
+    for (const adjustment of refund.order_adjustments) {
+      if ((adjustment.kind ?? "") !== "shipping_refund") continue;
+      shippingMinor += Math.abs(
+        toMinorUnits(presentmentAmount(adjustment.amount_set, adjustment.amount)),
+      );
+      if (adjustment.tax_amount_set || adjustment.tax_amount) {
+        shippingTaxMinor =
+          (shippingTaxMinor ?? 0) +
+          Math.abs(
+            toMinorUnits(
+              presentmentAmount(adjustment.tax_amount_set, adjustment.tax_amount),
+            ),
+          );
+      }
+    }
+
+    return {
+      refundId: refund.id,
+      createdAt: refund.created_at ?? null,
+      totalRefundedMinor:
+        lines.reduce((sum, line) => sum + (line.subtotalMinor ?? 0), 0) + shippingMinor,
+      lines,
+      shipping: shippingMinor > 0 ? { amountMinor: shippingMinor, taxMinor: shippingTaxMinor } : null,
+    };
+  });
 }
 
 export function parseOrder(payload: unknown): ParsedOrder {
@@ -396,9 +654,14 @@ export function parseOrder(payload: unknown): ParsedOrder {
   // Mixing the two — a shop-currency total under a presentment code — is the
   // failure this reads around: it prices the whole MetaKocka document wrongly
   // and nothing downstream can tell, because the number is perfectly valid.
+  // `current_total_tax` follows edits and refunds the way `current_total_price`
+  // does, so it is what the lines as they stand now must add up to.
   const orderTaxMinor = toMinorUnits(
-    presentmentAmount(order.total_tax_set, order.total_tax),
+    order.current_total_tax_set || order.current_total_tax
+      ? presentmentAmount(order.current_total_tax_set, order.current_total_tax)
+      : presentmentAmount(order.total_tax_set, order.total_tax),
   );
+  const taxesIncluded = order.taxes_included ?? true;
 
   const shipping = presentmentAmount(order.total_shipping_price_set, "0");
 
@@ -427,7 +690,7 @@ export function parseOrder(payload: unknown): ParsedOrder {
     gateway: order.payment_gateway_names[0] ?? order.gateway ?? null,
     // Shopify defaults to tax-inclusive pricing, and treating an unstated flag
     // as exclusive would inflate every price by the VAT rate.
-    taxesIncluded: order.taxes_included ?? true,
+    taxesIncluded,
     totalTaxMinor: orderTaxMinor,
     fulfillmentState: toFulfillmentState(order.fulfillment_status),
     note: order.note ?? null,
@@ -454,6 +717,8 @@ export function parseOrder(payload: unknown): ParsedOrder {
     })),
     partner: toParty(order.billing_address, contact, fallbackName),
     receiver: toParty(order.shipping_address, contact, fallbackName),
+    tax: toNormalizedTax(order, currency, taxesIncluded, orderTaxMinor),
+    refunds: toRefunds(order),
   };
 }
 

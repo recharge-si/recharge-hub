@@ -37,6 +37,13 @@ import { z } from "zod";
  */
 const LINE_ITEM_PAGE = 100;
 
+const TAX_LINE_FIELDS = `#graphql
+  title
+  rate
+  ratePercentage
+  priceSet { presentmentMoney { amount } shopMoney { amount } }
+`;
+
 const LINE_ITEM_FIELDS = `#graphql
   id
   sku
@@ -46,8 +53,17 @@ const LINE_ITEM_FIELDS = `#graphql
   taxable
   originalUnitPriceSet { presentmentMoney { amount } shopMoney { amount } }
   totalDiscountSet { presentmentMoney { amount } shopMoney { amount } }
-  taxLines { rate ratePercentage priceSet { presentmentMoney { amount } } }
+  taxLines { ${TAX_LINE_FIELDS} }
 `;
+
+/**
+ * How many shipping lines and refunds one order read carries. An order has one
+ * or two shipping lines and a handful of refunds; the caps keep the query's
+ * calculated cost bounded inside a page of fifty orders.
+ */
+const SHIPPING_LINE_PAGE = 10;
+const REFUND_PAGE = 20;
+const REFUND_LINE_PAGE = 50;
 
 const ORDER_FIELDS = `#graphql
   id
@@ -64,17 +80,47 @@ const ORDER_FIELDS = `#graphql
   displayFinancialStatus
   displayFulfillmentStatus
   taxesIncluded
+  taxExempt
   paymentGatewayNames
   currentTotalPriceSet { presentmentMoney { amount } shopMoney { amount } }
   totalPriceSet { presentmentMoney { amount } shopMoney { amount } }
   totalDiscountsSet { presentmentMoney { amount } shopMoney { amount } }
   totalTaxSet { presentmentMoney { amount } shopMoney { amount } }
+  currentTotalTaxSet { presentmentMoney { amount } shopMoney { amount } }
   totalShippingPriceSet { presentmentMoney { amount } shopMoney { amount } }
+  taxLines { ${TAX_LINE_FIELDS} }
+  customAttributes { key value }
+  shippingLines(first: ${SHIPPING_LINE_PAGE}) {
+    nodes {
+      title
+      originalPriceSet { presentmentMoney { amount } shopMoney { amount } }
+      discountedPriceSet { presentmentMoney { amount } shopMoney { amount } }
+      taxLines { ${TAX_LINE_FIELDS} }
+    }
+  }
+  refunds(first: ${REFUND_PAGE}) {
+    id
+    createdAt
+    refundLineItems(first: ${REFUND_LINE_PAGE}) {
+      nodes {
+        quantity
+        subtotalSet { presentmentMoney { amount } shopMoney { amount } }
+        totalTaxSet { presentmentMoney { amount } shopMoney { amount } }
+        lineItem { id }
+      }
+    }
+    refundShippingLines(first: ${SHIPPING_LINE_PAGE}) {
+      nodes {
+        subtotalAmountSet { presentmentMoney { amount } shopMoney { amount } }
+        taxAmountSet { presentmentMoney { amount } shopMoney { amount } }
+      }
+    }
+  }
   billingAddress {
-    firstName lastName name company address1 address2 zip city province country countryCodeV2 phone
+    firstName lastName name company address1 address2 zip city province provinceCode country countryCodeV2 phone
   }
   shippingAddress {
-    firstName lastName name company address1 address2 zip city province country countryCodeV2 phone
+    firstName lastName name company address1 address2 zip city province provinceCode country countryCodeV2 phone
   }
   lineItems(first: ${LINE_ITEM_PAGE}) {
     pageInfo { hasNextPage endCursor }
@@ -131,11 +177,21 @@ const address = z
     zip: z.string().nullish(),
     city: z.string().nullish(),
     province: z.string().nullish(),
+    provinceCode: z.string().nullish(),
     country: z.string().nullish(),
     countryCodeV2: z.string().nullish(),
     phone: z.string().nullish(),
   })
   .nullish();
+
+const taxLine = z.object({
+  title: z.string().nullish(),
+  rate: z.number().nullish(),
+  ratePercentage: z.number().nullish(),
+  priceSet: money.nullish(),
+});
+
+type TaxLineNode = z.infer<typeof taxLine>;
 
 const orderNode = z.object({
   id: z.string(),
@@ -152,12 +208,63 @@ const orderNode = z.object({
   displayFinancialStatus: z.string().nullish(),
   displayFulfillmentStatus: z.string().nullish(),
   taxesIncluded: z.boolean(),
+  taxExempt: z.boolean().nullish(),
   paymentGatewayNames: z.array(z.string()).default([]),
   currentTotalPriceSet: money,
   totalPriceSet: money,
   totalDiscountsSet: money,
   totalTaxSet: money,
+  // Optional so a fixture recorded before these existed still parses.
+  currentTotalTaxSet: money.nullish(),
   totalShippingPriceSet: money,
+  // Nullish rather than defaulted, so a node built or recorded before these
+  // fields were read still passes through the mapper unchanged.
+  taxLines: z.array(taxLine).nullish(),
+  customAttributes: z
+    .array(z.object({ key: z.string(), value: z.string().nullish() }))
+    .nullish(),
+  shippingLines: z
+    .object({
+      nodes: z.array(
+        z.object({
+          title: z.string().nullish(),
+          originalPriceSet: money.nullish(),
+          discountedPriceSet: money.nullish(),
+          taxLines: z.array(taxLine).nullish(),
+        }),
+      ),
+    })
+    .nullish(),
+  refunds: z
+    .array(
+      z.object({
+        id: z.string(),
+        createdAt: z.string().nullish(),
+        refundLineItems: z
+          .object({
+            nodes: z.array(
+              z.object({
+                quantity: z.number(),
+                subtotalSet: money.nullish(),
+                totalTaxSet: money.nullish(),
+                lineItem: z.object({ id: z.string() }).nullish(),
+              }),
+            ),
+          })
+          .nullish(),
+        refundShippingLines: z
+          .object({
+            nodes: z.array(
+              z.object({
+                subtotalAmountSet: money.nullish(),
+                taxAmountSet: money.nullish(),
+              }),
+            ),
+          })
+          .nullish(),
+      }),
+    )
+    .nullish(),
   billingAddress: address,
   shippingAddress: address,
   lineItems: z.object({
@@ -179,21 +286,7 @@ const orderNode = z.object({
         taxable: z.boolean().nullish(),
         originalUnitPriceSet: money,
         totalDiscountSet: money,
-        taxLines: z
-          .array(
-            z.object({
-              rate: z.number().nullish(),
-              ratePercentage: z.number().nullish(),
-              priceSet: z
-                .object({
-                  presentmentMoney: z
-                    .object({ amount: z.string() })
-                    .nullish(),
-                })
-                .nullish(),
-            }),
-          )
-          .default([]),
+        taxLines: z.array(taxLine).nullish(),
       }),
     ),
   }),
@@ -233,6 +326,78 @@ export function numericId(gid: string): string {
 /** Presentment first: §8.6 files the currency the customer was charged in. */
 function amountOf(set: z.infer<typeof money> | null | undefined): string {
   return set?.presentmentMoney?.amount ?? set?.shopMoney?.amount ?? "0";
+}
+
+/** A money bag in the webhook's `*_set` shape. */
+function setOf(set: z.infer<typeof money> | null | undefined) {
+  return {
+    presentment_money: { amount: set?.presentmentMoney?.amount ?? "0" },
+    shop_money: { amount: set?.shopMoney?.amount ?? "0" },
+  };
+}
+
+/**
+ * Tax lines in the webhook's vocabulary.
+ *
+ * `rate` is a decimal, not a percentage. `TaxLine` offers both and they differ
+ * by a factor of a hundred; a percentage read as a decimal would put 22 where
+ * 0.22 belongs and produce a document taxed at 2200%.
+ */
+function taxLinesOf(lines: TaxLineNode[] | null | undefined) {
+  return (lines ?? []).map((tax) => ({
+    title: tax.title ?? null,
+    rate:
+      tax.rate ??
+      (tax.ratePercentage === null || tax.ratePercentage === undefined
+        ? null
+        : tax.ratePercentage / 100),
+    price: amountOf(tax.priceSet),
+    price_set: setOf(tax.priceSet),
+  }));
+}
+
+/**
+ * A refund in the webhook's vocabulary. A refunded shipping charge is a
+ * negative `shipping_refund` adjustment there, so the GraphQL shipping lines
+ * are summed into one.
+ */
+function refundsOf(refunds: OrderNode["refunds"]) {
+  return (refunds ?? []).map((refund) => {
+    const shipping = refund.refundShippingLines?.nodes ?? [];
+    const shippingMinor = shipping.reduce(
+      (sum, line) => sum + Number(amountOf(line.subtotalAmountSet)),
+      0,
+    );
+    const shippingTax = shipping.reduce(
+      (sum, line) => sum + Number(amountOf(line.taxAmountSet)),
+      0,
+    );
+
+    return {
+      id: numericId(refund.id),
+      created_at: refund.createdAt ?? null,
+      refund_line_items: (refund.refundLineItems?.nodes ?? [])
+        .filter((line) => line.lineItem)
+        .map((line) => ({
+          line_item_id: numericId(line.lineItem!.id),
+          quantity: line.quantity,
+          subtotal: amountOf(line.subtotalSet),
+          subtotal_set: setOf(line.subtotalSet),
+          total_tax: amountOf(line.totalTaxSet),
+          total_tax_set: setOf(line.totalTaxSet),
+        })),
+      order_adjustments:
+        shipping.length > 0
+          ? [
+              {
+                kind: "shipping_refund",
+                amount: (-shippingMinor).toFixed(2),
+                tax_amount: (-shippingTax).toFixed(2),
+              },
+            ]
+          : [],
+    };
+  });
 }
 
 /**
@@ -279,15 +444,30 @@ export function toWebhookShape(node: OrderNode): Record<string, unknown> {
     current_total_price: amountOf(node.currentTotalPriceSet),
     total_discounts: amountOf(node.totalDiscountsSet),
     total_tax: amountOf(node.totalTaxSet),
+    ...(node.currentTotalTaxSet
+      ? { current_total_tax: amountOf(node.currentTotalTaxSet) }
+      : {}),
     taxes_included: node.taxesIncluded,
-    total_shipping_price_set: {
-      presentment_money: {
-        amount: node.totalShippingPriceSet.presentmentMoney?.amount ?? "0",
-      },
-      shop_money: {
-        amount: node.totalShippingPriceSet.shopMoney?.amount ?? "0",
-      },
-    },
+    tax_exempt: node.taxExempt ?? null,
+    tax_lines: taxLinesOf(node.taxLines),
+    total_shipping_price_set: setOf(node.totalShippingPriceSet),
+    ...(node.shippingLines
+      ? {
+          shipping_lines: node.shippingLines.nodes.map((line) => ({
+            title: line.title ?? null,
+            price: amountOf(line.originalPriceSet),
+            price_set: setOf(line.originalPriceSet),
+            discounted_price: amountOf(line.discountedPriceSet ?? line.originalPriceSet),
+            discounted_price_set: setOf(line.discountedPriceSet ?? line.originalPriceSet),
+            tax_lines: taxLinesOf(line.taxLines),
+          })),
+        }
+      : {}),
+    note_attributes: (node.customAttributes ?? []).map((attribute) => ({
+      name: attribute.key,
+      value: attribute.value ?? null,
+    })),
+    refunds: refundsOf(node.refunds),
     payment_gateway_names: node.paymentGatewayNames,
     note: node.note ?? null,
     created_at: node.createdAt,
@@ -305,6 +485,7 @@ export function toWebhookShape(node: OrderNode): Record<string, unknown> {
           zip: node.billingAddress.zip ?? null,
           city: node.billingAddress.city ?? null,
           province: node.billingAddress.province ?? null,
+          province_code: node.billingAddress.provinceCode ?? null,
           country: node.billingAddress.country ?? null,
           country_code: node.billingAddress.countryCodeV2 ?? null,
           phone: node.billingAddress.phone ?? null,
@@ -321,6 +502,7 @@ export function toWebhookShape(node: OrderNode): Record<string, unknown> {
           zip: node.shippingAddress.zip ?? null,
           city: node.shippingAddress.city ?? null,
           province: node.shippingAddress.province ?? null,
+          province_code: node.shippingAddress.provinceCode ?? null,
           country: node.shippingAddress.country ?? null,
           country_code: node.shippingAddress.countryCodeV2 ?? null,
           phone: node.shippingAddress.phone ?? null,
@@ -335,14 +517,7 @@ export function toWebhookShape(node: OrderNode): Record<string, unknown> {
       price: amountOf(line.originalUnitPriceSet),
       total_discount: amountOf(line.totalDiscountSet),
       taxable: line.taxable ?? null,
-      tax_lines: line.taxLines.map((tax) => ({
-        rate:
-          tax.rate ??
-          (tax.ratePercentage === null || tax.ratePercentage === undefined
-            ? null
-            : tax.ratePercentage / 100),
-        price: tax.priceSet?.presentmentMoney?.amount ?? null,
-      })),
+      tax_lines: taxLinesOf(line.taxLines),
     })),
   };
 }
