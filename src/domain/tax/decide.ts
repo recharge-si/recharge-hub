@@ -195,7 +195,10 @@ function classifyPositiveRate(
 
     case "eu": {
       const expectedHere = isExpectedRate(config, destination, rateKey);
-      const homeRate = sameRate(rateKey, config.domesticRateKey);
+      // The home standard rate, or a home reduced rate: origin VAT either way.
+      const homeRate =
+        sameRate(rateKey, config.domesticRateKey) ||
+        isExpectedRate(config, config.domesticCountry, rateKey);
       const local = registrationFor(config, "local", destination);
       const oss = ossActive(config);
 

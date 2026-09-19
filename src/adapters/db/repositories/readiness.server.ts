@@ -90,7 +90,7 @@ export async function getReadiness(principal: Principal): Promise<Readiness> {
       where: { domain },
       select: { setupCompletedAt: true },
     }),
-    getTaxDiagnosticsFacts(principal, new Date()),
+    getTaxDiagnosticsFacts(principal, new Date(), { includeWarnings: false }),
   ]);
 
   const taxes = computeTaxDiagnostics(taxFacts);

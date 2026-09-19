@@ -5,6 +5,7 @@ import { Prisma } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
+import { redactTaxSnapshot } from "~/adapters/db/repositories/tax.server";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { serviceToken } from "~/domain/types";
 
@@ -191,6 +192,10 @@ export async function handleRedactOldOrders(job: Job<unknown>): Promise<void> {
         documents += 1;
       }
     });
+
+    // The tax decision keeps its rates, amounts and reasons; only the VAT
+    // identifier — a business's, and for a sole trader a person's — goes.
+    await redactTaxSnapshot(order.id);
 
     orders += 1;
   }

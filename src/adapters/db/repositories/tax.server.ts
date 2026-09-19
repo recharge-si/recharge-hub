@@ -507,9 +507,20 @@ export async function saveTaxDecision(
   await prisma.$transaction(async (tx) => {
     const order = await tx.order.findFirst({
       where: { id: orderId, shopId },
-      select: { id: true },
+      select: { id: true, taxSnapshot: { select: { decision: true } } },
     });
     if (!order) return;
+
+    /*
+     * The same decision again is not news. The reconciler decides on every
+     * pass, and most passes find the order exactly as it was; re-writing the
+     * row would move `decided_at` and make "decided on" mean "last looked at".
+     * The lines are still brought in line below: an order sync rewrites them
+     * from the payload, and the payload knows nothing about mappings.
+     */
+    const unchanged =
+      order.taxSnapshot !== null &&
+      JSON.stringify(order.taxSnapshot.decision) === JSON.stringify(decision);
 
     const data = {
       configVersion: decision.configVersion,
@@ -532,11 +543,13 @@ export async function saveTaxDecision(
       decidedAt: now,
     };
 
-    await tx.orderTaxSnapshot.upsert({
-      where: { orderId },
-      create: { shopId, orderId, ...data },
-      update: data,
-    });
+    if (!unchanged) {
+      await tx.orderTaxSnapshot.upsert({
+        where: { orderId },
+        create: { shopId, orderId, ...data },
+        update: data,
+      });
+    }
 
     for (const line of decision.lines) {
       await tx.orderLine.updateMany({
@@ -584,6 +597,45 @@ export async function recordRefundBreakdowns(
   });
 }
 
+/**
+ * Removes the VAT identifier from an order's snapshot (docs/BUILD_SPEC.md
+ * §2.4), keeping every rate, amount, treatment and reason.
+ *
+ * A VAT number identifies a business, and for a sole trader that is a person.
+ * It is the one field on the snapshot that can be, so it goes when the
+ * order's payload does; the decision it explained stays explained without it.
+ */
+export async function redactTaxSnapshot(orderId: string): Promise<void> {
+  const row = await prisma.orderTaxSnapshot.findUnique({
+    where: { orderId },
+    select: { id: true, decision: true },
+  });
+  if (!row) return;
+
+  const decision = taxDecisionSchema.safeParse(row.decision);
+  const scrubbed: TaxDecision | null = decision.success
+    ? {
+        ...decision.data,
+        vatNumber: decision.data.vatNumber === null ? null : "[redacted]",
+        lines: decision.data.lines.map((line) => ({
+          ...line,
+          zeroReason:
+            line.zeroReason && decision.data.vatNumber
+              ? line.zeroReason.replace(decision.data.vatNumber, "[redacted]")
+              : line.zeroReason,
+        })),
+      }
+    : null;
+
+  await prisma.orderTaxSnapshot.update({
+    where: { id: row.id },
+    data: {
+      vatNumber: null,
+      ...(scrubbed ? { decision: scrubbed as unknown as Prisma.InputJsonValue } : {}),
+    },
+  });
+}
+
 /* -------------------------------------------------------------------------- */
 /* Diagnostics facts                                                           */
 /* -------------------------------------------------------------------------- */
@@ -596,15 +648,30 @@ const DIAGNOSTICS_LIMIT = 500;
 export async function getTaxDiagnosticsFacts(
   principal: Principal,
   now: Date,
+  options: {
+    /**
+     * Whether to read each recent decision for its warnings. The Taxes & VAT
+     * page wants them; readiness, which runs on every Home and Settings load,
+     * does not need a few hundred JSON documents to say whether a rate is
+     * unmapped.
+     */
+    includeWarnings?: boolean;
+  } = {},
 ): Promise<TaxDiagnosticsFacts> {
   const domain = shopDomainOf(principal);
   const since = new Date(now.getTime() - DIAGNOSTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const includeWarnings = options.includeWarnings ?? true;
 
   const [config, snapshots, exceptions] = await Promise.all([
     getTaxConfig(principal),
     prisma.orderTaxSnapshot.findMany({
       where: { shop: { domain }, decidedAt: { gte: since } },
-      select: { rateKeys: true, destinationCountry: true, decidedAt: true, decision: true },
+      select: {
+        rateKeys: true,
+        destinationCountry: true,
+        decidedAt: true,
+        decision: includeWarnings,
+      },
       orderBy: { decidedAt: "desc" },
       take: DIAGNOSTICS_LIMIT,
     }),
@@ -644,6 +711,7 @@ export async function getTaxDiagnosticsFacts(
       observed.set(rateKey, entry);
     }
 
+    if (!includeWarnings) continue;
     const decision = taxDecisionSchema.safeParse(snapshot.decision);
     if (decision.success) {
       for (const issue of decision.data.issues) {

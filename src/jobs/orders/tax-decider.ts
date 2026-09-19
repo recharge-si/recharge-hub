@@ -14,6 +14,7 @@ import {
 import { getLogger } from "~/adapters/observability/logger.server";
 import type { ParsedOrder } from "~/adapters/shopify/order-payload";
 import { decideOrderTax } from "~/domain/tax/decide";
+import { sameRate } from "~/domain/tax/rates";
 import { reverseTaxForRefund, type RefundTaxBreakdown } from "~/domain/tax/refunds";
 import type { TaxConfig, TaxDecision, TaxIssueKind } from "~/domain/tax/types";
 import type { Principal } from "~/domain/types";
@@ -70,13 +71,32 @@ export interface TaxDecisionOutcome {
   refunds: RefundTaxBreakdown[];
 }
 
-/** Which configuration an order is decided under. */
+/**
+ * Which configuration an order is decided under.
+ *
+ * A frozen snapshot keeps its rules — home rate, fallback, registrations,
+ * country tables, overrides — so nothing about a filed line is reinterpreted.
+ * Mappings are the one exception, and only additively: an edit that brings a
+ * rate the frozen configuration had no mapping for would otherwise hold the
+ * order with an exception telling the merchant to map it, which they could
+ * do and never satisfy. A mapping the frozen configuration already had is
+ * never replaced, so every factor already sent stays what it was.
+ */
 function configFor(
   snapshot: StoredTaxSnapshot | null,
   current: TaxConfig,
 ): { config: TaxConfig; historical: boolean } {
   if (snapshot?.frozenAt && snapshot.decision.ok) {
-    return { config: snapshot.config, historical: true };
+    const frozen = snapshot.config;
+    const learned = current.mappings.filter(
+      (mapping) =>
+        mapping.enabled &&
+        !frozen.mappings.some((known) => sameRate(known.rateKey, mapping.rateKey)),
+    );
+    return {
+      config: { ...frozen, mappings: [...frozen.mappings, ...learned] },
+      historical: true,
+    };
   }
   return { config: current, historical: false };
 }
