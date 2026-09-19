@@ -540,6 +540,41 @@ describe("mixed rates, discounts and shipping", () => {
     expect(blocking(decision)).toEqual(["data_insufficient"]);
   });
 
+  it("shipping follows the taxable goods, not a non-taxable gift card beside them", () => {
+    const decision = decideOrderTax(
+      order({
+        lines: [
+          line({ lineId: "1", unitPriceMinor: 20900 }),
+          line({ lineId: "gift", unitPriceMinor: 5000, taxable: false }),
+        ],
+        shipping: { amountMinor: 610, taxLines: [] },
+      }),
+      config(),
+    );
+    expect(decision.ok).toBe(true);
+    expect(decision.shipping).toMatchObject({ rateKey: "22", taxMinor: 110, treatment: "DOMESTIC_VAT" });
+  });
+
+  it("shipping with nothing to inherit from is a blocking gap, never an invented rate", () => {
+    const decision = decideOrderTax(
+      order({
+        lines: [
+          line({ lineId: "1", sku: "A", unitPriceMinor: 20900 }),
+          line({ lineId: "2", sku: "B", unitPriceMinor: 10000 }),
+        ],
+        shipping: { amountMinor: 610, taxLines: [] },
+      }),
+      config({
+        overrides: [
+          { id: "o", scope: "sku", match: "B", treatment: null, rateKey: "9.5", reason: "books", enabled: true },
+        ],
+      }),
+    );
+    expect(decision.ok).toBe(false);
+    expect(blocking(decision)).toEqual(["data_insufficient"]);
+    expect(decision.shipping?.metakockaTaxFactor).toBeNull();
+  });
+
   it("shipping follows the goods when nothing on the order was taxed", () => {
     const decision = decideOrderTax(
       order({

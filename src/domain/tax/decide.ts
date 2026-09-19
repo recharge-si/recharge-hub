@@ -628,11 +628,17 @@ function decideShipping(
   }
 
   if (order.totalTaxMinor === 0) {
-    // Nothing on the order was taxed. Shipping goes the way the goods went.
+    /*
+     * Nothing on the order was taxed. Shipping goes the way the goods went:
+     * the taxable goods first, because a non-taxable gift card beside a
+     * taxable mast says nothing about the postage.
+     */
     const decided = lines.filter((line) => line.treatment !== "UNKNOWN");
-    const rates = [...new Set(decided.map((line) => line.rateKey ?? "0"))];
-    const treatments = [...new Set(decided.map((line) => line.treatment))];
-    const template = decided[0];
+    const taxableGoods = decided.filter((line) => line.treatment !== "NO_TAX");
+    const pool = taxableGoods.length > 0 ? taxableGoods : decided;
+    const rates = [...new Set(pool.map((line) => line.rateKey ?? "0"))];
+    const treatments = [...new Set(pool.map((line) => line.treatment))];
+    const template = pool[0];
 
     if (template && rates.length === 1 && treatments.length === 1) {
       const rateKey = rates[0]!;
@@ -649,8 +655,21 @@ function decideShipping(
       );
     }
 
-    // The goods could not be decided either, or disagree; their issues cover
-    // the order and shipping waits with them.
+    if (decided.length > 0) {
+      // The goods disagree about their rate and Shopify said nothing about
+      // shipping's: there is no rate to inherit, and none is invented.
+      issue(
+        ctx,
+        "data_insufficient",
+        "blocking",
+        `Shopify charged no tax on this order and gave no rate for shipping, and the goods are taxed at different rates (${rates.map(formatRateKey).join(", ")}), so the shipping VAT cannot be told. Add an override for the shipping, or check the market's tax settings in Shopify, then reconcile the order again.`,
+        ["shipping"],
+        { rates },
+      );
+    }
+
+    // Otherwise the goods could not be decided either; their issues cover the
+    // order and shipping waits with them.
     return {
       lineId: "shipping",
       sku: "",
@@ -667,9 +686,14 @@ function decideShipping(
     };
   }
 
-  // Tax was charged on the order. What is left after the lines is shipping's.
-  const linesTax = lines.reduce(
-    (sum, line) => sum + (line.source === "SHOPIFY" ? line.taxMinor : 0),
+  /*
+   * Tax was charged on the order. What is left after the lines is shipping's.
+   * Shopify's own line amounts are what its total is made of, whatever this
+   * decision then did to a line (an override recomputes a line's tax, not
+   * Shopify's total).
+   */
+  const linesTax = order.lines.reduce(
+    (sum, line) => sum + line.taxLines.reduce((inner, tax) => inner + tax.amountMinor, 0),
     0,
   );
   const residual = order.totalTaxMinor - linesTax;
