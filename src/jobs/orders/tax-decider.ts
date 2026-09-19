@@ -15,7 +15,10 @@ import { getLogger } from "~/adapters/observability/logger.server";
 import type { ParsedOrder } from "~/adapters/shopify/order-payload";
 import { decideOrderTax } from "~/domain/tax/decide";
 import { sameRate } from "~/domain/tax/rates";
-import { reverseTaxForRefund, type RefundTaxBreakdown } from "~/domain/tax/refunds";
+import {
+  reverseTaxForRefund,
+  type RefundTaxBreakdown,
+} from "~/domain/tax/refunds";
 import type { TaxConfig, TaxDecision, TaxIssueKind } from "~/domain/tax/types";
 import type { Principal } from "~/domain/types";
 
@@ -41,7 +44,10 @@ import type { Principal } from "~/domain/types";
  */
 
 /** The exception kind each blocking issue is filed under. */
-export const EXCEPTION_KIND_FOR_ISSUE: Record<TaxIssueKind, ExceptionKind | null> = {
+export const EXCEPTION_KIND_FOR_ISSUE: Record<
+  TaxIssueKind,
+  ExceptionKind | null
+> = {
   mapping_missing: "tax_mapping_missing",
   treatment_unknown: "tax_treatment_unknown",
   destination_missing: "tax_treatment_unknown",
@@ -91,7 +97,9 @@ function configFor(
     const learned = current.mappings.filter(
       (mapping) =>
         mapping.enabled &&
-        !frozen.mappings.some((known) => sameRate(known.rateKey, mapping.rateKey)),
+        !frozen.mappings.some((known) =>
+          sameRate(known.rateKey, mapping.rateKey),
+        ),
     );
     return {
       config: { ...frozen, mappings: [...frozen.mappings, ...learned] },
@@ -200,8 +208,16 @@ export async function applyTaxExceptions(
         treatment: decision.treatment,
         rateKeys: decision.rateKeys,
         issues: decision.issues
-          .filter((issue) => issue.severity === "blocking" && EXCEPTION_KIND_FOR_ISSUE[issue.kind] === kind)
-          .map((issue) => ({ kind: issue.kind, lineIds: issue.lineIds, ...issue.detail })),
+          .filter(
+            (issue) =>
+              issue.severity === "blocking" &&
+              EXCEPTION_KIND_FOR_ISSUE[issue.kind] === kind,
+          )
+          .map((issue) => ({
+            kind: issue.kind,
+            lineIds: issue.lineIds,
+            ...issue.detail,
+          })),
       },
     });
   }

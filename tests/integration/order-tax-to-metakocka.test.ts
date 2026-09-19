@@ -31,7 +31,10 @@ import type { TaxConfig, TaxDecision } from "~/domain/tax/types";
 
 const PAYLOAD: unknown = JSON.parse(
   readFileSync(
-    resolve(process.cwd(), "tests/fixtures/shopify/orders_create_mixed_tax.json"),
+    resolve(
+      process.cwd(),
+      "tests/fixtures/shopify/orders_create_mixed_tax.json",
+    ),
     "utf8",
   ),
 );
@@ -46,7 +49,12 @@ function config(overrides: Partial<TaxConfig> = {}): TaxConfig {
     nonEuNoTaxPolicy: "review",
     ossEnabled: true,
     registrations: [
-      { kind: "domestic", country: "SI", vatNumber: "SI12345678", enabled: true },
+      {
+        kind: "domestic",
+        country: "SI",
+        vatNumber: "SI12345678",
+        enabled: true,
+      },
       { kind: "oss", country: "SI", vatNumber: null, enabled: true },
     ],
     countryRates: effectiveCountryRates([]),
@@ -71,7 +79,8 @@ function bodiesFor(
   allocation: Record<string, { own: number; partner: number }>,
 ) {
   const factorFor = (lineId: string) =>
-    decision.lines.find((line) => line.lineId === lineId)?.metakockaTaxFactor ?? null;
+    decision.lines.find((line) => line.lineId === lineId)?.metakockaTaxFactor ??
+    null;
 
   const perSource = (["own", "partner"] as const).map((source) => ({
     sourceId: source,
@@ -79,7 +88,9 @@ function bodiesFor(
     kind: source,
     lineTotalMinor: order.lines.reduce(
       (sum, line) =>
-        sum + (allocation[line.shopifyLineItemId]?.[source] ?? 0) * line.unitPriceWithTaxMinor,
+        sum +
+        (allocation[line.shopifyLineItemId]?.[source] ?? 0) *
+          line.unitPriceWithTaxMinor,
       0,
     ),
   }));
@@ -137,12 +148,23 @@ describe("a mixed-rate German business order becomes two MetaKocka documents", (
     expect(decision.vatNumber).toBe("DE123456789");
     // Shopify charged VAT, so the VAT number changes nothing (§24).
     expect(decision.treatment).toBe("MIXED");
-    expect(decision.lines.map((line) => [line.sku, line.rateKey, line.treatment, line.metakockaTaxFactor])).toEqual([
+    expect(
+      decision.lines.map((line) => [
+        line.sku,
+        line.rateKey,
+        line.treatment,
+        line.metakockaTaxFactor,
+      ]),
+    ).toEqual([
       ["MAST-490", "22", "EU_DISTANCE_SALE", "0.22"],
       ["BOOK-1", "9.5", "EU_DISTANCE_SALE", "0.095"],
       ["GIFT-CARD", "0", "NO_TAX", "0"],
     ]);
-    expect(decision.shipping).toMatchObject({ rateKey: "22", taxMinor: 110, metakockaTaxFactor: "0.22" });
+    expect(decision.shipping).toMatchObject({
+      rateKey: "22",
+      taxMinor: 110,
+      metakockaTaxFactor: "0.22",
+    });
     expect(decision.totals).toEqual({
       taxableMinor: 21440 - 3866 + (2190 - 190) + 1200 + (610 - 110),
       taxMinor: 4166,
@@ -157,7 +179,10 @@ describe("a mixed-rate German business order becomes two MetaKocka documents", (
     // rate stands; the order page shows one note per line; nothing is blocked.
     expect(decision.issues.length).toBeGreaterThan(0);
     for (const issue of decision.issues) {
-      expect([issue.kind, issue.severity]).toEqual(["rate_mismatch", "warning"]);
+      expect([issue.kind, issue.severity]).toEqual([
+        "rate_mismatch",
+        "warning",
+      ]);
     }
   });
 
@@ -170,22 +195,57 @@ describe("a mixed-rate German business order becomes two MetaKocka documents", (
   it("keeps every line at its own rate on whichever document carries it", () => {
     const [own, partner] = documents;
     expect(own!.body.product_list).toEqual([
-      { code: "MAST-490", amount: "1", price_with_tax: "112.20", tax_factor: "0.22" },
-      { code: "BOOK-1", amount: "1", price_with_tax: "21.90", tax_factor: "0.095" },
+      {
+        code: "MAST-490",
+        amount: "1",
+        price_with_tax: "112.20",
+        tax_factor: "0.22",
+      },
+      {
+        code: "BOOK-1",
+        amount: "1",
+        price_with_tax: "21.90",
+        tax_factor: "0.095",
+      },
       // 6.10 spread by merchandise value: 134.10 of 258.30 here, the rest there.
-      { code: "POSTNINA", amount: "1", price_with_tax: "3.17", tax_factor: "0.22" },
+      {
+        code: "POSTNINA",
+        amount: "1",
+        price_with_tax: "3.17",
+        tax_factor: "0.22",
+      },
     ]);
     expect(partner!.body.product_list).toEqual([
-      { code: "MAST-490", amount: "1", price_with_tax: "112.20", tax_factor: "0.22" },
-      { code: "GIFT-CARD", amount: "1", price_with_tax: "12.00", tax_factor: "0" },
-      { code: "POSTNINA", amount: "1", price_with_tax: "2.93", tax_factor: "0.22" },
+      {
+        code: "MAST-490",
+        amount: "1",
+        price_with_tax: "112.20",
+        tax_factor: "0.22",
+      },
+      {
+        code: "GIFT-CARD",
+        amount: "1",
+        price_with_tax: "12.00",
+        tax_factor: "0",
+      },
+      {
+        code: "POSTNINA",
+        amount: "1",
+        price_with_tax: "2.93",
+        tax_factor: "0.22",
+      },
     ]);
   });
 
   it("charges the shipping once across the documents, at shipping's own rate", () => {
-    const shipping = documents.reduce((sum, entry) => sum + entry.share.shippingMinor, 0);
+    const shipping = documents.reduce(
+      (sum, entry) => sum + entry.share.shippingMinor,
+      0,
+    );
     expect(shipping).toBe(610);
-    expect(documents.reduce((sum, entry) => sum + entry.share.totalMinor, 0)).toBe(order.totalMinor);
+    expect(
+      documents.reduce((sum, entry) => sum + entry.share.totalMinor, 0),
+    ).toBe(order.totalMinor);
   });
 
   it("sends gross prices because the shop is tax-inclusive, and never doubles the VAT", () => {
@@ -200,7 +260,9 @@ describe("a mixed-rate German business order becomes two MetaKocka documents", (
   it("reverses the refund at the rate and treatment the order was filed under", () => {
     const breakdown = reverseTaxForRefund(
       decision,
-      new Map(order.lines.map((line) => [line.shopifyLineItemId, line.quantity])),
+      new Map(
+        order.lines.map((line) => [line.shopifyLineItemId, line.quantity]),
+      ),
       order.refunds[0]!,
     );
     expect(breakdown.configVersion).toBe(12);
@@ -212,19 +274,29 @@ describe("a mixed-rate German business order becomes two MetaKocka documents", (
       taxMinor: 1933,
       basis: "shopify",
     });
-    expect(breakdown.shipping).toMatchObject({ rateKey: "22", taxMinor: 110, taxableMinor: 500 });
+    expect(breakdown.shipping).toMatchObject({
+      rateKey: "22",
+      taxMinor: 110,
+      taxableMinor: 500,
+    });
     expect(breakdown.totalTaxMinor).toBe(1933 + 110);
   });
 });
 
 describe("the same order on a tax-exclusive shop", () => {
-  const exclusive = JSON.parse(JSON.stringify(PAYLOAD)) as Record<string, unknown>;
+  const exclusive = JSON.parse(JSON.stringify(PAYLOAD)) as Record<
+    string,
+    unknown
+  >;
   exclusive.taxes_included = false;
   const order = parseOrder(exclusive);
   const decision = decideOrderTax(order.tax, config());
 
   it("takes the taxable amount as the net price and sends `price`, not `price_with_tax`", () => {
-    expect(decision.lines[0]).toMatchObject({ taxableMinor: 21440, taxMinor: 3866 });
+    expect(decision.lines[0]).toMatchObject({
+      taxableMinor: 21440,
+      taxMinor: 3866,
+    });
     const [own] = bodiesFor(order, decision, {
       "14101": { own: 2, partner: 0 },
       "14102": { own: 1, partner: 0 },
@@ -245,12 +317,16 @@ describe("fail closed", () => {
   it("an unmapped 9.5% holds the whole order and no line carries a factor for it", () => {
     const decision = decideOrderTax(
       order.tax,
-      config({ mappings: config().mappings.filter((row) => row.rateKey !== "9.5") }),
+      config({
+        mappings: config().mappings.filter((row) => row.rateKey !== "9.5"),
+      }),
     );
     expect(decision.ok).toBe(false);
-    expect(decision.issues.filter((issue) => issue.severity === "blocking").map((issue) => issue.kind)).toEqual([
-      "mapping_missing",
-    ]);
+    expect(
+      decision.issues
+        .filter((issue) => issue.severity === "blocking")
+        .map((issue) => issue.kind),
+    ).toEqual(["mapping_missing"]);
     expect(decision.lines[1]?.metakockaTaxFactor).toBeNull();
     // The 22% lines are still mapped; it is the order as a whole that waits.
     expect(decision.lines[0]?.metakockaTaxFactor).toBe("0.22");

@@ -70,13 +70,19 @@ describeDatabase("tax configuration and decisions", () => {
     expect(config.domesticRateKey).toBe("22");
     expect(config.mappings).toHaveLength(2);
     // The reference table is present without anyone seeding it.
-    expect(config.countryRates.some((row) => row.country === "AT" && row.rateKey === "20")).toBe(true);
+    expect(
+      config.countryRates.some(
+        (row) => row.country === "AT" && row.rateKey === "20",
+      ),
+    ).toBe(true);
   });
 
   it("records a decision, materialises it onto the lines, and freezes it once written", async () => {
     tenant = await createTenant("tax-decision");
     const orderId = await createOrder(tenant);
-    const line = await prisma.orderLine.findFirstOrThrow({ where: { orderId } });
+    const line = await prisma.orderLine.findFirstOrThrow({
+      where: { orderId },
+    });
 
     await replaceTaxMappings(tenant.principal, [
       { rateKey: "22", metakockaTaxFactor: "0.22", enabled: true },
@@ -115,7 +121,9 @@ describeDatabase("tax configuration and decisions", () => {
     expect(stored?.config.version).toBe(config.version);
     expect(stored?.frozenAt).toBeNull();
 
-    const materialised = await prisma.orderLine.findFirstOrThrow({ where: { id: line.id } });
+    const materialised = await prisma.orderLine.findFirstOrThrow({
+      where: { id: line.id },
+    });
     expect(materialised).toMatchObject({
       taxFactor: "0.22",
       taxRateKey: "22",
@@ -126,7 +134,9 @@ describeDatabase("tax configuration and decisions", () => {
     });
 
     await freezeTaxSnapshot(tenant.principal, orderId, now);
-    expect((await getTaxSnapshot(tenant.principal, orderId))?.frozenAt).toEqual(now);
+    expect((await getTaxSnapshot(tenant.principal, orderId))?.frozenAt).toEqual(
+      now,
+    );
 
     // Another tenant cannot read it.
     const other = await createTenant("tax-other");
@@ -155,7 +165,12 @@ describeDatabase("tax configuration and decisions", () => {
       },
       config,
     );
-    await saveTaxDecision(tenant.principal, { orderId, decision, config, now: new Date() });
+    await saveTaxDecision(tenant.principal, {
+      orderId,
+      decision,
+      config,
+      now: new Date(),
+    });
 
     const breakdown: RefundTaxBreakdown = {
       refundId: "R1",
@@ -170,10 +185,16 @@ describeDatabase("tax configuration and decisions", () => {
       unmatchedLineIds: [],
     };
     await recordRefundBreakdowns(tenant.principal, orderId, [breakdown]);
-    await recordRefundBreakdowns(tenant.principal, orderId, [breakdown, { ...breakdown, refundId: "R2" }]);
+    await recordRefundBreakdowns(tenant.principal, orderId, [
+      breakdown,
+      { ...breakdown, refundId: "R2" },
+    ]);
 
     const stored = await getTaxSnapshot(tenant.principal, orderId);
-    expect(stored?.refunds.map((entry) => entry.refundId)).toEqual(["R1", "R2"]);
+    expect(stored?.refunds.map((entry) => entry.refundId)).toEqual([
+      "R1",
+      "R2",
+    ]);
   });
 
   it("migrates the old global tax setting without loss and seeds the rates already sent", async () => {
@@ -183,7 +204,10 @@ describeDatabase("tax configuration and decisions", () => {
       data: { shopId: tenant.shopId, taxPercent: "9,50" },
     });
     const orderId = await createOrder(tenant);
-    await prisma.orderLine.updateMany({ where: { orderId }, data: { taxFactor: "0.22" } });
+    await prisma.orderLine.updateMany({
+      where: { orderId },
+      data: { taxFactor: "0.22" },
+    });
     await prisma.metakockaTaxRate.create({
       data: { shopId: tenant.shopId, percent: "5" },
     });
@@ -195,7 +219,10 @@ describeDatabase("tax configuration and decisions", () => {
      * does for this one exactly what it did for them.
      */
     const sql = readFileSync(
-      resolve(process.cwd(), "prisma/migrations/20260919010000_taxes_and_vat/migration.sql"),
+      resolve(
+        process.cwd(),
+        "prisma/migrations/20260919010000_taxes_and_vat/migration.sql",
+      ),
       "utf8",
     );
     const marker = "-- Migrate the existing global tax setting";
@@ -206,16 +233,41 @@ describeDatabase("tax configuration and decisions", () => {
      * this test has no business entering.
      */
     const scoped = (text: string, from: string, to: string): string => {
-      if (!text.includes(from)) throw new Error(`migration no longer contains: ${from}`);
+      if (!text.includes(from))
+        throw new Error(`migration no longer contains: ${from}`);
       return text.replace(from, to);
     };
     let backfill = sql.slice(sql.indexOf(marker));
-    backfill = scoped(backfill, `WHERE p."tax_percent" IS NOT NULL`, `WHERE p."shop_id" = '${tenant.shopId}' AND p."tax_percent" IS NOT NULL`);
-    backfill = scoped(backfill, `FROM "shop" s\n`, `FROM "shop" s WHERE s."id" = '${tenant.shopId}'\n`);
-    backfill = scoped(backfill, `WHERE t."domestic_rate_key" IS NOT NULL`, `WHERE t."shop_id" = '${tenant.shopId}' AND t."domestic_rate_key" IS NOT NULL`);
-    backfill = scoped(backfill, `WHERE l."tax_factor" IS NOT NULL`, `WHERE o."shop_id" = '${tenant.shopId}' AND l."tax_factor" IS NOT NULL`);
-    backfill = scoped(backfill, `WHERE trim(r."percent")`, `WHERE r."shop_id" = '${tenant.shopId}' AND trim(r."percent")`);
-    backfill = scoped(backfill, `WHERE o2."raw_payload" IS NOT NULL`, `WHERE o2."shop_id" = '${tenant.shopId}' AND o2."raw_payload" IS NOT NULL`);
+    backfill = scoped(
+      backfill,
+      `WHERE p."tax_percent" IS NOT NULL`,
+      `WHERE p."shop_id" = '${tenant.shopId}' AND p."tax_percent" IS NOT NULL`,
+    );
+    backfill = scoped(
+      backfill,
+      `FROM "shop" s\n`,
+      `FROM "shop" s WHERE s."id" = '${tenant.shopId}'\n`,
+    );
+    backfill = scoped(
+      backfill,
+      `WHERE t."domestic_rate_key" IS NOT NULL`,
+      `WHERE t."shop_id" = '${tenant.shopId}' AND t."domestic_rate_key" IS NOT NULL`,
+    );
+    backfill = scoped(
+      backfill,
+      `WHERE l."tax_factor" IS NOT NULL`,
+      `WHERE o."shop_id" = '${tenant.shopId}' AND l."tax_factor" IS NOT NULL`,
+    );
+    backfill = scoped(
+      backfill,
+      `WHERE trim(r."percent")`,
+      `WHERE r."shop_id" = '${tenant.shopId}' AND trim(r."percent")`,
+    );
+    backfill = scoped(
+      backfill,
+      `WHERE o2."raw_payload" IS NOT NULL`,
+      `WHERE o2."shop_id" = '${tenant.shopId}' AND o2."raw_payload" IS NOT NULL`,
+    );
 
     for (const statement of backfill
       .split(/;\s*\n/)
@@ -238,7 +290,9 @@ describeDatabase("tax configuration and decisions", () => {
 
     const config = await getTaxConfig(tenant.principal);
     expect(
-      config.mappings.map((row) => [row.rateKey, row.metakockaTaxFactor]).sort(),
+      config.mappings
+        .map((row) => [row.rateKey, row.metakockaTaxFactor])
+        .sort(),
     ).toEqual([
       ["0", "0"],
       ["22", "0.22"],

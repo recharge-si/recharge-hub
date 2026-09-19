@@ -86,7 +86,8 @@ function share(amount: number, part: number, whole: number): number {
   const negative = numerator < 0n;
   const n = negative ? -numerator : numerator;
   const quotient = n / denominator;
-  const rounded = (n % denominator) * 2n >= denominator ? quotient + 1n : quotient;
+  const rounded =
+    (n % denominator) * 2n >= denominator ? quotient + 1n : quotient;
   return Number(negative ? -rounded : rounded);
 }
 
@@ -94,9 +95,14 @@ function entryFor(
   decision: TaxDecision,
   line: LineTaxDecision,
   quantityOnOrder: number,
-  refund: { quantity: number; subtotalMinor: number | null; taxMinor: number | null },
+  refund: {
+    quantity: number;
+    subtotalMinor: number | null;
+    taxMinor: number | null;
+  },
 ): RefundTaxEntry {
-  const shopifyStated = refund.subtotalMinor !== null && refund.taxMinor !== null;
+  const shopifyStated =
+    refund.subtotalMinor !== null && refund.taxMinor !== null;
 
   let taxableMinor: number;
   let taxMinor: number;
@@ -140,7 +146,12 @@ export function reverseTaxForRefund(
       continue;
     }
     entries.push(
-      entryFor(decision, line, quantities.get(refunded.lineId) ?? refunded.quantity, refunded),
+      entryFor(
+        decision,
+        line,
+        quantities.get(refunded.lineId) ?? refunded.quantity,
+        refunded,
+      ),
     );
   }
 
@@ -198,7 +209,9 @@ export function reverseTaxForRefund(
     entries,
     shipping,
     totals: [...totals.values()].sort(
-      (a, b) => (rateKeyToPpm(a.rateKey ?? "0") ?? 0) - (rateKeyToPpm(b.rateKey ?? "0") ?? 0),
+      (a, b) =>
+        (rateKeyToPpm(a.rateKey ?? "0") ?? 0) -
+        (rateKeyToPpm(b.rateKey ?? "0") ?? 0),
     ),
     totalTaxableMinor: all.reduce((sum, entry) => sum + entry.taxableMinor, 0),
     totalTaxMinor: all.reduce((sum, entry) => sum + entry.taxMinor, 0),

@@ -38,7 +38,9 @@ const OSS_2026: TaxConfig = {
   fallbackScope: "domestic",
   nonEuNoTaxPolicy: "review",
   ossEnabled: true,
-  registrations: [{ kind: "oss", country: "SI", vatNumber: "SI12345678", enabled: true }],
+  registrations: [
+    { kind: "oss", country: "SI", vatNumber: "SI12345678", enabled: true },
+  ],
   countryRates: effectiveCountryRates([]),
   mappings: [
     { rateKey: "0", metakockaTaxFactor: "0", enabled: true },
@@ -63,7 +65,9 @@ describe("a refund reverses the original treatment", () => {
       refundId: "R1",
       createdAt: "2027-03-01T10:00:00Z",
       totalRefundedMinor: 12000,
-      lines: [{ lineId: "L1", quantity: 1, subtotalMinor: 12000, taxMinor: 2000 }],
+      lines: [
+        { lineId: "L1", quantity: 1, subtotalMinor: 12000, taxMinor: 2000 },
+      ],
       shipping: null,
     });
 
@@ -76,7 +80,12 @@ describe("a refund reverses the original treatment", () => {
       basis: "shopify",
     });
     expect(breakdown.totals).toEqual([
-      { rateKey: "20", treatment: "EU_OSS", taxableMinor: 10000, taxMinor: 2000 },
+      {
+        rateKey: "20",
+        treatment: "EU_OSS",
+        taxableMinor: 10000,
+        taxMinor: 2000,
+      },
     ]);
   });
 
@@ -85,12 +94,22 @@ describe("a refund reverses the original treatment", () => {
       refundId: "R2",
       createdAt: null,
       totalRefundedMinor: 12000,
-      lines: [{ lineId: "L1", quantity: 1, subtotalMinor: null, taxMinor: null }],
+      lines: [
+        { lineId: "L1", quantity: 1, subtotalMinor: null, taxMinor: null },
+      ],
       shipping: { amountMinor: 660, taxMinor: null },
     });
 
-    expect(breakdown.entries[0]).toMatchObject({ taxableMinor: 10000, taxMinor: 2000, basis: "snapshot" });
-    expect(breakdown.shipping).toMatchObject({ taxableMinor: 550, taxMinor: 110, treatment: "EU_OSS" });
+    expect(breakdown.entries[0]).toMatchObject({
+      taxableMinor: 10000,
+      taxMinor: 2000,
+      basis: "snapshot",
+    });
+    expect(breakdown.shipping).toMatchObject({
+      taxableMinor: 550,
+      taxMinor: 110,
+      treatment: "EU_OSS",
+    });
     expect(breakdown.totalTaxMinor).toBe(2110);
   });
 
@@ -101,10 +120,16 @@ describe("a refund reverses the original treatment", () => {
       refundId: "R3",
       createdAt: null,
       totalRefundedMinor: 24000,
-      lines: [{ lineId: "L1", quantity: 2, subtotalMinor: null, taxMinor: null }],
+      lines: [
+        { lineId: "L1", quantity: 2, subtotalMinor: null, taxMinor: null },
+      ],
       shipping: null,
     });
-    expect(breakdown.totals[0]).toMatchObject({ rateKey: "20", treatment: "EU_OSS", taxMinor: 4000 });
+    expect(breakdown.totals[0]).toMatchObject({
+      rateKey: "20",
+      treatment: "EU_OSS",
+      taxMinor: 4000,
+    });
   });
 
   it("reports a refund line the snapshot has no decision for rather than guessing", () => {
@@ -124,7 +149,9 @@ describe("diagnostics", () => {
   it("reads READY when everything in use is mapped", () => {
     const diagnostics = computeTaxDiagnostics({
       config: OSS_2026,
-      observed: [{ rateKey: "20", orders: 3, countries: ["AT"], lastSeenAt: null }],
+      observed: [
+        { rateKey: "20", orders: 3, countries: ["AT"], lastSeenAt: null },
+      ],
       openExceptions: [],
       recentWarnings: [],
       decidedOrders: 3,
@@ -132,7 +159,9 @@ describe("diagnostics", () => {
 
     expect(diagnostics.status).toBe("ready");
     expect(diagnostics.unmappedRates).toEqual([]);
-    expect(diagnostics.checks.map((check) => [check.key, check.status])).toEqual([
+    expect(
+      diagnostics.checks.map((check) => [check.key, check.status]),
+    ).toEqual([
       ["domestic", "ok"],
       ["oss", "ok"],
       ["registrations", "ok"],
@@ -141,13 +170,17 @@ describe("diagnostics", () => {
       ["exceptions", "ok"],
     ]);
     expect(diagnostics.checks[0]?.summary).toBe("Slovenia 22%");
-    expect(diagnostics.checks[1]?.summary).toBe("Enabled, identified in Slovenia");
+    expect(diagnostics.checks[1]?.summary).toBe(
+      "Enabled, identified in Slovenia",
+    );
   });
 
   it("names an observed rate with no mapping and points at the mapping page", () => {
     const diagnostics = computeTaxDiagnostics({
       config: OSS_2026,
-      observed: [{ rateKey: "9.5", orders: 2, countries: ["SI"], lastSeenAt: null }],
+      observed: [
+        { rateKey: "9.5", orders: 2, countries: ["SI"], lastSeenAt: null },
+      ],
       openExceptions: [{ kind: "tax_mapping_missing", count: 2 }],
       recentWarnings: [],
       decidedOrders: 5,
@@ -155,10 +188,15 @@ describe("diagnostics", () => {
 
     expect(diagnostics.status).toBe("needs_attention");
     expect(diagnostics.unmappedRates).toEqual(["9.5"]);
-    const mappings = diagnostics.checks.find((check) => check.key === "mappings");
+    const mappings = diagnostics.checks.find(
+      (check) => check.key === "mappings",
+    );
     expect(mappings?.status).toBe("attention");
     expect(mappings?.reason).toContain("Orders use 9.5%");
-    expect(mappings?.action).toEqual({ label: "Configure mapping", href: "/app/settings/taxes/mappings" });
+    expect(mappings?.action).toEqual({
+      label: "Configure mapping",
+      href: "/app/settings/taxes/mappings",
+    });
     expect(diagnostics.blockedOrders).toBe(2);
   });
 
@@ -183,7 +221,11 @@ describe("diagnostics", () => {
       decidedOrders: 1,
     });
     expect(diagnostics.status).toBe("ready");
-    expect(diagnostics.checks.find((check) => check.key === "fallback")?.status).toBe("warning");
-    expect(diagnostics.checks.find((check) => check.key === "warnings")?.status).toBe("warning");
+    expect(
+      diagnostics.checks.find((check) => check.key === "fallback")?.status,
+    ).toBe("warning");
+    expect(
+      diagnostics.checks.find((check) => check.key === "warnings")?.status,
+    ).toBe("warning");
   });
 });

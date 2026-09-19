@@ -95,7 +95,9 @@ type SaveResult =
   | { ok: true; message: string }
   | { ok: false; field?: string; message: string };
 
-export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResult> => {
+export const action = async ({
+  request,
+}: ActionFunctionArgs): Promise<SaveResult> => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
@@ -104,20 +106,28 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
   try {
     json = JSON.parse(raw);
   } catch {
-    return { ok: false, message: "The form could not be read. Reload the page and try again." };
+    return {
+      ok: false,
+      message: "The form could not be read. Reload the page and try again.",
+    };
   }
   const parsed = formSchema.safeParse(json);
   if (!parsed.success) {
-    return { ok: false, message: "The form could not be read. Reload the page and try again." };
+    return {
+      ok: false,
+      message: "The form could not be read. Reload the page and try again.",
+    };
   }
   const form = parsed.data;
 
-  const domesticRateKey = form.domesticRate === "" ? null : rateKeyFromPercent(form.domesticRate);
+  const domesticRateKey =
+    form.domesticRate === "" ? null : rateKeyFromPercent(form.domesticRate);
   if (form.domesticRate !== "" && domesticRateKey === null) {
     return {
       ok: false,
       field: "domesticRate",
-      message: "The home VAT rate must be a percentage between 0 and 100, for example 22.",
+      message:
+        "The home VAT rate must be a percentage between 0 and 100, for example 22.",
     };
   }
 
@@ -125,7 +135,8 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
     return {
       ok: false,
       field: "ossCountry",
-      message: "OSS is identified in an EU member state. Choose the country the OSS return is filed in.",
+      message:
+        "OSS is identified in an EU member state. Choose the country the OSS return is filed in.",
     };
   }
 
@@ -205,8 +216,12 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
 function normalise(form: Form): string {
   return JSON.stringify({
     ...form,
-    domesticRate: rateKeyFromPercent(form.domesticRate) ?? form.domesticRate.trim(),
-    local: form.local.map((row) => ({ ...row, country: row.country.toUpperCase() })),
+    domesticRate:
+      rateKeyFromPercent(form.domesticRate) ?? form.domesticRate.trim(),
+    local: form.local.map((row) => ({
+      ...row,
+      country: row.country.toUpperCase(),
+    })),
   });
 }
 
@@ -235,7 +250,8 @@ export default function TaxRegistrations() {
   const errorFor = (field: string) =>
     result && !result.ok && result.field === field ? result.message : undefined;
 
-  const save = () => saver.submit({ form: JSON.stringify(form) }, { method: "post" });
+  const save = () =>
+    saver.submit({ form: JSON.stringify(form) }, { method: "post" });
 
   const countries = countryOptions();
   const euCountries = countries.filter((option) => isEuVatArea(option.value));
@@ -247,7 +263,11 @@ export default function TaxRegistrations() {
       </s-link>
 
       <ui-save-bar id={SAVE_BAR_ID}>
-        <button variant="primary" onClick={save} {...(saving ? { loading: "" } : {})}>
+        <button
+          variant="primary"
+          onClick={save}
+          {...(saving ? { loading: "" } : {})}
+        >
           Save
         </button>
         <button onClick={reset}>Discard</button>
@@ -283,8 +303,12 @@ export default function TaxRegistrations() {
                 label="Standard VAT rate (%)"
                 details="For example 22."
                 value={form.domesticRate}
-                onChange={(event) => set("domesticRate", event.currentTarget.value)}
-                {...(errorFor("domesticRate") ? { error: errorFor("domesticRate") } : {})}
+                onChange={(event) =>
+                  set("domesticRate", event.currentTarget.value)
+                }
+                {...(errorFor("domesticRate")
+                  ? { error: errorFor("domesticRate") }
+                  : {})}
               />
             </s-grid>
             <s-text-field
@@ -292,7 +316,9 @@ export default function TaxRegistrations() {
               label="VAT number"
               details="Optional. Recorded for the audit trail; it does not change how any order is filed."
               value={form.domesticVatNumber}
-              onChange={(event) => set("domesticVatNumber", event.currentTarget.value)}
+              onChange={(event) =>
+                set("domesticVatNumber", event.currentTarget.value)
+              }
             />
           </s-stack>
         </s-section>
@@ -305,7 +331,9 @@ export default function TaxRegistrations() {
               label="Report EU consumer sales through the One Stop Shop"
               details="Tick this only if you are registered for OSS. Shopify then charges the destination country's VAT, and this app files those orders as OSS."
               checked={form.ossEnabled}
-              onChange={(event) => set("ossEnabled", event.currentTarget.checked)}
+              onChange={(event) =>
+                set("ossEnabled", event.currentTarget.checked)
+              }
             />
             {form.ossEnabled ? (
               <s-grid
@@ -318,14 +346,18 @@ export default function TaxRegistrations() {
                   value={form.ossCountry}
                   options={euCountries}
                   onChange={(next) => set("ossCountry", next)}
-                  {...(errorFor("ossCountry") ? { error: errorFor("ossCountry") } : {})}
+                  {...(errorFor("ossCountry")
+                    ? { error: errorFor("ossCountry") }
+                    : {})}
                 />
                 <s-text-field
                   name="ossVatNumber"
                   label="OSS identification number"
                   details="Optional."
                   value={form.ossVatNumber}
-                  onChange={(event) => set("ossVatNumber", event.currentTarget.value)}
+                  onChange={(event) =>
+                    set("ossVatNumber", event.currentTarget.value)
+                  }
                 />
               </s-grid>
             ) : null}
@@ -357,7 +389,9 @@ export default function TaxRegistrations() {
                   onChange={(next) =>
                     set(
                       "local",
-                      form.local.map((entry, i) => (i === index ? { ...entry, country: next } : entry)),
+                      form.local.map((entry, i) =>
+                        i === index ? { ...entry, country: next } : entry,
+                      ),
                     )
                   }
                 />
@@ -369,7 +403,9 @@ export default function TaxRegistrations() {
                     set(
                       "local",
                       form.local.map((entry, i) =>
-                        i === index ? { ...entry, vatNumber: event.currentTarget.value } : entry,
+                        i === index
+                          ? { ...entry, vatNumber: event.currentTarget.value }
+                          : entry,
                       ),
                     )
                   }
@@ -377,7 +413,12 @@ export default function TaxRegistrations() {
                 <s-button
                   variant="tertiary"
                   tone="critical"
-                  onClick={() => set("local", form.local.filter((_, i) => i !== index))}
+                  onClick={() =>
+                    set(
+                      "local",
+                      form.local.filter((_, i) => i !== index),
+                    )
+                  }
                 >
                   Remove
                 </s-button>
@@ -387,7 +428,10 @@ export default function TaxRegistrations() {
               <s-button
                 variant="secondary"
                 onClick={() =>
-                  set("local", [...form.local, { country: "DE", vatNumber: "", enabled: true }])
+                  set("local", [
+                    ...form.local,
+                    { country: "DE", vatNumber: "", enabled: true },
+                  ])
                 }
               >
                 Add registration
@@ -399,9 +443,9 @@ export default function TaxRegistrations() {
         <s-section heading="When Shopify charges no tax">
           <s-stack direction="block" gap="base">
             <s-text color="subdued">
-              Shopify charges nothing when the store has no tax registration
-              for a market. This decides what this app may do about it.
-              Anything not allowed here holds the order and says why.
+              Shopify charges nothing when the store has no tax registration for
+              a market. This decides what this app may do about it. Anything not
+              allowed here holds the order and says why.
             </s-text>
             <Dropdown
               name="fallbackScope"
@@ -420,7 +464,10 @@ export default function TaxRegistrations() {
                 { value: "none", label: "Never" },
               ]}
               onChange={(next) =>
-                set("fallbackScope", next === "eu" ? "eu" : next === "none" ? "none" : "domestic")
+                set(
+                  "fallbackScope",
+                  next === "eu" ? "eu" : next === "none" ? "none" : "domestic",
+                )
               }
             />
             <Dropdown
@@ -436,14 +483,16 @@ export default function TaxRegistrations() {
                 { value: "review", label: "Hold for review" },
                 { value: "export", label: "File as export at 0%" },
               ]}
-              onChange={(next) => set("nonEuNoTaxPolicy", next === "export" ? "export" : "review")}
+              onChange={(next) =>
+                set("nonEuNoTaxPolicy", next === "export" ? "export" : "review")
+              }
             />
             <LearnMore label="Business buyers with a VAT number">
               <s-paragraph>
                 A VAT number alone changes nothing. When Shopify charges no VAT
                 to an EU business buyer whose order carries a VAT number, the
-                line is filed as a reverse charge at 0%; when Shopify did
-                charge VAT, that VAT is filed as it was charged.
+                line is filed as a reverse charge at 0%; when Shopify did charge
+                VAT, that VAT is filed as it was charged.
               </s-paragraph>
             </LearnMore>
           </s-stack>

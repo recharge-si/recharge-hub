@@ -17,7 +17,10 @@ import { toWebhookShape } from "~/adapters/shopify/orders";
 
 const PAYLOAD: unknown = JSON.parse(
   readFileSync(
-    resolve(process.cwd(), "tests/fixtures/shopify/orders_create_mixed_tax.json"),
+    resolve(
+      process.cwd(),
+      "tests/fixtures/shopify/orders_create_mixed_tax.json",
+    ),
     "utf8",
   ),
 );
@@ -91,20 +94,34 @@ describe("a webhook payload with mixed rates, taxed shipping and a VAT number", 
         refundId: "88001",
         createdAt: "2026-09-12T09:30:00+02:00",
         totalRefundedMinor: 10720 + 610,
-        lines: [{ lineId: "14101", quantity: 1, subtotalMinor: 10720, taxMinor: 1933 }],
+        lines: [
+          {
+            lineId: "14101",
+            quantity: 1,
+            subtotalMinor: 10720,
+            taxMinor: 1933,
+          },
+        ],
         shipping: { amountMinor: 610, taxMinor: 110 },
       },
     ]);
   });
 
   it("still derives the raw per-line factor the way it always did", () => {
-    expect(order.lines.map((line) => line.taxFactor)).toEqual(["0.22", "0.095", "0"]);
+    expect(order.lines.map((line) => line.taxFactor)).toEqual([
+      "0.22",
+      "0.095",
+      "0",
+    ]);
   });
 });
 
 describe("a payload without shipping lines", () => {
   it("reports shipping as not described, not as untaxed", () => {
-    const payload = JSON.parse(JSON.stringify(PAYLOAD)) as Record<string, unknown>;
+    const payload = JSON.parse(JSON.stringify(PAYLOAD)) as Record<
+      string,
+      unknown
+    >;
     delete payload.shipping_lines;
     const order = parseOrder(payload);
     expect(order.tax.shipping).toEqual({ amountMinor: 610, taxLines: null });
@@ -157,8 +174,18 @@ describe("the Admin API read produces the same normalised tax", () => {
     currentTotalTaxSet: { presentmentMoney: { amount: "41.66" } },
     totalShippingPriceSet: { presentmentMoney: { amount: "6.10" } },
     taxLines: [
-      { title: "DDV", rate: 0.22, ratePercentage: 22, priceSet: { presentmentMoney: { amount: "39.76" } } },
-      { title: "DDV", rate: 0.095, ratePercentage: 9.5, priceSet: { presentmentMoney: { amount: "1.90" } } },
+      {
+        title: "DDV",
+        rate: 0.22,
+        ratePercentage: 22,
+        priceSet: { presentmentMoney: { amount: "39.76" } },
+      },
+      {
+        title: "DDV",
+        rate: 0.095,
+        ratePercentage: 9.5,
+        priceSet: { presentmentMoney: { amount: "1.90" } },
+      },
     ],
     customAttributes: [{ key: "VAT number", value: "DE123456789" }],
     shippingLines: {
@@ -167,7 +194,14 @@ describe("the Admin API read produces the same normalised tax", () => {
           title: "Standard",
           originalPriceSet: { presentmentMoney: { amount: "6.10" } },
           discountedPriceSet: { presentmentMoney: { amount: "6.10" } },
-          taxLines: [{ title: "DDV", rate: 0.22, ratePercentage: 22, priceSet: { presentmentMoney: { amount: "1.10" } } }],
+          taxLines: [
+            {
+              title: "DDV",
+              rate: 0.22,
+              ratePercentage: 22,
+              priceSet: { presentmentMoney: { amount: "1.10" } },
+            },
+          ],
         },
       ],
     },
@@ -222,7 +256,14 @@ describe("the Admin API read produces the same normalised tax", () => {
           taxable: true,
           originalUnitPriceSet: { presentmentMoney: { amount: "112.20" } },
           totalDiscountSet: { presentmentMoney: { amount: "10.00" } },
-          taxLines: [{ title: "DDV", rate: 0.22, ratePercentage: 22, priceSet: { presentmentMoney: { amount: "38.66" } } }],
+          taxLines: [
+            {
+              title: "DDV",
+              rate: 0.22,
+              ratePercentage: 22,
+              priceSet: { presentmentMoney: { amount: "38.66" } },
+            },
+          ],
         },
         {
           id: "gid://shopify/LineItem/14103",
@@ -243,8 +284,15 @@ describe("the Admin API read produces the same normalised tax", () => {
 
   it("carries the order's tax facts, the VAT number and the exemption flag", () => {
     expect(order.tax.totalTaxMinor).toBe(4166);
-    expect(order.tax.orderTaxLines.map((line) => line.rateKey)).toEqual(["22", "9.5"]);
-    expect(order.tax.customer).toEqual({ isBusiness: true, vatNumber: "DE123456789", taxExempt: false });
+    expect(order.tax.orderTaxLines.map((line) => line.rateKey)).toEqual([
+      "22",
+      "9.5",
+    ]);
+    expect(order.tax.customer).toEqual({
+      isBusiness: true,
+      vatNumber: "DE123456789",
+      taxExempt: false,
+    });
     // No shipping address: the billing country is the destination.
     expect(order.tax.destinationCountry).toBeNull();
     expect(order.tax.billingCountry).toBe("DE");
@@ -257,13 +305,17 @@ describe("the Admin API read produces the same normalised tax", () => {
     });
     expect(order.refunds[0]).toMatchObject({
       refundId: "88001",
-      lines: [{ lineId: "14101", quantity: 1, subtotalMinor: 10720, taxMinor: 1933 }],
+      lines: [
+        { lineId: "14101", quantity: 1, subtotalMinor: 10720, taxMinor: 1933 },
+      ],
       shipping: { amountMinor: 610, taxMinor: 110 },
     });
   });
 
   it("reads the per-line tax lines with the decimal rate", () => {
-    expect(order.tax.lines[0]?.taxLines).toEqual([{ rateKey: "22", amountMinor: 3866, title: "DDV" }]);
+    expect(order.tax.lines[0]?.taxLines).toEqual([
+      { rateKey: "22", amountMinor: 3866, title: "DDV" },
+    ]);
     expect(order.tax.lines[1]?.taxable).toBe(false);
   });
 });

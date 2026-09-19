@@ -60,7 +60,9 @@ const DEFAULT_SETTINGS: TaxSettings = {
   configVersion: 1,
 };
 
-export async function getTaxSettings(principal: Principal): Promise<TaxSettings> {
+export async function getTaxSettings(
+  principal: Principal,
+): Promise<TaxSettings> {
   const row = await prisma.taxSetting.findFirst({
     where: { shop: { domain: shopDomainOf(principal) } },
   });
@@ -95,7 +97,9 @@ export async function saveTaxSettings(
   input: Omit<TaxSettings, "configVersion">,
 ): Promise<TaxSettings> {
   const shopId = await shopIdFor(principal);
-  const version = await prisma.$transaction((tx) => bumpVersion(tx, shopId, input));
+  const version = await prisma.$transaction((tx) =>
+    bumpVersion(tx, shopId, input),
+  );
   return { ...input, configVersion: version };
 }
 
@@ -168,7 +172,12 @@ export async function listMerchantCountryRates(
 
 export async function upsertCountryRate(
   principal: Principal,
-  input: { country: string; kind: CountryRateConfig["kind"]; rateKey: string; label: string | null },
+  input: {
+    country: string;
+    kind: CountryRateConfig["kind"];
+    rateKey: string;
+    label: string | null;
+  },
 ): Promise<void> {
   const shopId = await shopIdFor(principal);
   await prisma.$transaction(async (tx) => {
@@ -211,7 +220,9 @@ export async function deleteCountryRate(
 /* Mappings                                                                    */
 /* -------------------------------------------------------------------------- */
 
-export async function listTaxMappings(principal: Principal): Promise<TaxMappingConfig[]> {
+export async function listTaxMappings(
+  principal: Principal,
+): Promise<TaxMappingConfig[]> {
   const rows = await prisma.taxMapping.findMany({
     where: { shop: { domain: shopDomainOf(principal) } },
   });
@@ -249,7 +260,9 @@ export async function replaceTaxMappings(
 
 const treatmentSchema = z.enum(TAX_TREATMENTS);
 
-export async function listTaxOverrides(principal: Principal): Promise<TaxOverrideConfig[]> {
+export async function listTaxOverrides(
+  principal: Principal,
+): Promise<TaxOverrideConfig[]> {
   const rows = await prisma.taxOverride.findMany({
     where: { shop: { domain: shopDomainOf(principal) } },
     orderBy: [{ scope: "asc" }, { match: "asc" }],
@@ -311,12 +324,14 @@ export async function getTaxConfig(principal: Principal): Promise<TaxConfig> {
     fallbackScope: settings.fallbackScope,
     nonEuNoTaxPolicy: settings.nonEuNoTaxPolicy,
     ossEnabled: settings.ossEnabled,
-    registrations: registrations.map(({ kind, country, vatNumber, enabled }) => ({
-      kind,
-      country,
-      vatNumber,
-      enabled,
-    })),
+    registrations: registrations.map(
+      ({ kind, country, vatNumber, enabled }) => ({
+        kind,
+        country,
+        vatNumber,
+        enabled,
+      }),
+    ),
     countryRates: effectiveCountryRates(merchantRates),
     mappings,
     overrides,
@@ -397,7 +412,14 @@ export const taxConfigSchema: z.ZodType<TaxConfig> = z.object({
   countryRates: z.array(
     z.object({
       country: z.string(),
-      kind: z.enum(["standard", "reduced", "super_reduced", "parking", "zero", "other"]),
+      kind: z.enum([
+        "standard",
+        "reduced",
+        "super_reduced",
+        "parking",
+        "zero",
+        "other",
+      ]),
       rateKey: z.string(),
       label: z.string().nullable(),
       origin: z.enum(["reference", "merchant"]),
@@ -499,7 +521,12 @@ export async function getTaxSnapshot(
  */
 export async function saveTaxDecision(
   principal: Principal,
-  input: { orderId: string; decision: TaxDecision; config: TaxConfig; now: Date },
+  input: {
+    orderId: string;
+    decision: TaxDecision;
+    config: TaxConfig;
+    now: Date;
+  },
 ): Promise<void> {
   const shopId = await shopIdFor(principal);
   const { orderId, decision, config, now } = input;
@@ -568,9 +595,17 @@ export async function saveTaxDecision(
 }
 
 /** Marks the decision as history: a document was written under it. */
-export async function freezeTaxSnapshot(principal: Principal, orderId: string, now: Date): Promise<void> {
+export async function freezeTaxSnapshot(
+  principal: Principal,
+  orderId: string,
+  now: Date,
+): Promise<void> {
   await prisma.orderTaxSnapshot.updateMany({
-    where: { orderId, shop: { domain: shopDomainOf(principal) }, frozenAt: null },
+    where: {
+      orderId,
+      shop: { domain: shopDomainOf(principal) },
+      frozenAt: null,
+    },
     data: { frozenAt: now },
   });
 }
@@ -631,7 +666,9 @@ export async function redactTaxSnapshot(orderId: string): Promise<void> {
     where: { id: row.id },
     data: {
       vatNumber: null,
-      ...(scrubbed ? { decision: scrubbed as unknown as Prisma.InputJsonValue } : {}),
+      ...(scrubbed
+        ? { decision: scrubbed as unknown as Prisma.InputJsonValue }
+        : {}),
     },
   });
 }
@@ -659,7 +696,9 @@ export async function getTaxDiagnosticsFacts(
   } = {},
 ): Promise<TaxDiagnosticsFacts> {
   const domain = shopDomainOf(principal);
-  const since = new Date(now.getTime() - DIAGNOSTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000);
+  const since = new Date(
+    now.getTime() - DIAGNOSTICS_WINDOW_DAYS * 24 * 60 * 60 * 1000,
+  );
   const includeWarnings = options.includeWarnings ?? true;
 
   const [config, snapshots, exceptions] = await Promise.all([
@@ -695,7 +734,10 @@ export async function getTaxDiagnosticsFacts(
     }),
   ]);
 
-  const observed = new Map<string, { orders: number; countries: Set<string>; lastSeenAt: Date }>();
+  const observed = new Map<
+    string,
+    { orders: number; countries: Set<string>; lastSeenAt: Date }
+  >();
   const warnings = new Map<TaxIssueKind, number>();
 
   for (const snapshot of snapshots) {
@@ -706,8 +748,10 @@ export async function getTaxDiagnosticsFacts(
         lastSeenAt: snapshot.decidedAt,
       };
       entry.orders += 1;
-      if (snapshot.destinationCountry) entry.countries.add(snapshot.destinationCountry);
-      if (snapshot.decidedAt > entry.lastSeenAt) entry.lastSeenAt = snapshot.decidedAt;
+      if (snapshot.destinationCountry)
+        entry.countries.add(snapshot.destinationCountry);
+      if (snapshot.decidedAt > entry.lastSeenAt)
+        entry.lastSeenAt = snapshot.decidedAt;
       observed.set(rateKey, entry);
     }
 
@@ -729,8 +773,14 @@ export async function getTaxDiagnosticsFacts(
       countries: [...entry.countries].sort(),
       lastSeenAt: entry.lastSeenAt.toISOString(),
     })),
-    openExceptions: exceptions.map((row) => ({ kind: row.kind, count: row._count._all })),
-    recentWarnings: [...warnings.entries()].map(([kind, count]) => ({ kind, count })),
+    openExceptions: exceptions.map((row) => ({
+      kind: row.kind,
+      count: row._count._all,
+    })),
+    recentWarnings: [...warnings.entries()].map(([kind, count]) => ({
+      kind,
+      count,
+    })),
     decidedOrders: snapshots.length,
   };
 }

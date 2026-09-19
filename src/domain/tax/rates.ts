@@ -50,14 +50,20 @@ export function factorToPpm(factor: string | number): number | null {
 /** ppm to the canonical percentage string: 220 000 → "22", 95 000 → "9.5". */
 export function ppmToRateKey(ppm: number): RateKey {
   const whole = Math.trunc(ppm / 10_000);
-  const fraction = (ppm % 10_000).toString().padStart(4, "0").replace(/0+$/, "");
+  const fraction = (ppm % 10_000)
+    .toString()
+    .padStart(4, "0")
+    .replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : String(whole);
 }
 
 /** ppm to the `tax_factor` decimal string MetaKocka takes: 220 000 → "0.22". */
 export function ppmToFactor(ppm: number): string {
   const whole = Math.trunc(ppm / 1_000_000);
-  const fraction = (ppm % 1_000_000).toString().padStart(6, "0").replace(/0+$/, "");
+  const fraction = (ppm % 1_000_000)
+    .toString()
+    .padStart(6, "0")
+    .replace(/0+$/, "");
   return fraction ? `${whole}.${fraction}` : String(whole);
 }
 

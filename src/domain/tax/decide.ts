@@ -71,7 +71,10 @@ function upper(value: string | null | undefined): string | null {
   return trimmed ? trimmed : null;
 }
 
-function jurisdictionOf(config: TaxConfig, destination: string | null): Jurisdiction {
+function jurisdictionOf(
+  config: TaxConfig,
+  destination: string | null,
+): Jurisdiction {
   if (!destination) return "unknown";
   if (destination === config.domesticCountry.toUpperCase()) return "domestic";
   if (isEuVatArea(destination)) return "eu";
@@ -136,7 +139,11 @@ function lineTotal(line: OrderLineTaxInput): number {
 }
 
 /** Tax computed from a rate on the order's price basis. */
-function computedTax(amountMinor: number, rateKey: RateKey, taxesIncluded: boolean): number {
+function computedTax(
+  amountMinor: number,
+  rateKey: RateKey,
+  taxesIncluded: boolean,
+): number {
   const ppm = rateKeyToPpm(rateKey) ?? 0;
   return taxesIncluded
     ? taxInGrossMinor(amountMinor, ppm)
@@ -313,7 +320,11 @@ function classifyZero(
     };
   }
 
-  if (jurisdiction === "eu" && customerKind === "b2b" && order.customer.vatNumber) {
+  if (
+    jurisdiction === "eu" &&
+    customerKind === "b2b" &&
+    order.customer.vatNumber
+  ) {
     return {
       treatment: "EU_REVERSE_CHARGE",
       zeroReason: `EU business buyer with VAT number ${order.customer.vatNumber}, cross-border supply, no VAT charged by Shopify`,
@@ -381,7 +392,8 @@ function fallbackFor(
   if (allowed) {
     return {
       rateKey: config.domesticRateKey!,
-      treatment: jurisdiction === "domestic" ? "DOMESTIC_VAT" : "EU_DISTANCE_SALE",
+      treatment:
+        jurisdiction === "domestic" ? "DOMESTIC_VAT" : "EU_DISTANCE_SALE",
     };
   }
 
@@ -420,7 +432,11 @@ function overrideFor(ctx: Context, sku: string): TaxOverrideConfig | null {
 }
 
 /** Attaches the MetaKocka mapping, or the issue that it is missing. */
-function withMapping(ctx: Context, decision: LineTaxDecision, label: string): LineTaxDecision {
+function withMapping(
+  ctx: Context,
+  decision: LineTaxDecision,
+  label: string,
+): LineTaxDecision {
   if (decision.rateKey === null || decision.treatment === "UNKNOWN") {
     return {
       ...decision,
@@ -484,11 +500,16 @@ function decideLine(ctx: Context, base: LineBase): LineTaxDecision {
     classified = override.treatment
       ? {
           treatment: override.treatment,
-          zeroReason: isPositive(rateKey) ? null : `Override "${override.reason}"`,
+          zeroReason: isPositive(rateKey)
+            ? null
+            : `Override "${override.reason}"`,
         }
       : isPositive(rateKey)
         ? classifyPositiveRate(ctx, rateKey, base.lineId, base.label)
-        : { treatment: "ZERO_RATED", zeroReason: `Override "${override.reason}" sets 0%` };
+        : {
+            treatment: "ZERO_RATED",
+            zeroReason: `Override "${override.reason}" sets 0%`,
+          };
   } else if (!base.taxable) {
     rateKey = "0";
     classified = { treatment: "NO_TAX", zeroReason: NON_TAXABLE_ZERO };
@@ -536,7 +557,12 @@ function decideLine(ctx: Context, base: LineBase): LineTaxDecision {
     }
   }
 
-  if (override && override.rateKey == null && override.treatment && !insufficient) {
+  if (
+    override &&
+    override.rateKey == null &&
+    override.treatment &&
+    !insufficient
+  ) {
     /*
      * An override of the treatment alone. The rate stays whatever it was; a
      * line that had no answer now has one, so the issue raised for it is
@@ -579,7 +605,10 @@ function decideLine(ctx: Context, base: LineBase): LineTaxDecision {
 function shippingDecision(
   ctx: Context,
   amountMinor: number,
-  fields: Pick<LineTaxDecision, "rateKey" | "treatment" | "source" | "zeroReason">,
+  fields: Pick<
+    LineTaxDecision,
+    "rateKey" | "treatment" | "source" | "zeroReason"
+  >,
   taxMinor: number,
 ): LineTaxDecision {
   return withMapping(
@@ -588,7 +617,9 @@ function shippingDecision(
       lineId: "shipping",
       sku: "",
       ...fields,
-      taxableMinor: ctx.order.taxesIncluded ? amountMinor - taxMinor : amountMinor,
+      taxableMinor: ctx.order.taxesIncluded
+        ? amountMinor - taxMinor
+        : amountMinor,
       taxMinor,
       metakockaTaxFactor: null,
       mapping: "not_applicable",
@@ -682,7 +713,8 @@ function decideShipping(
       metakockaTaxFactor: null,
       mapping: "not_applicable",
       overrideId: null,
-      issues: decided.length === 0 ? ["treatment_unknown"] : ["data_insufficient"],
+      issues:
+        decided.length === 0 ? ["treatment_unknown"] : ["data_insufficient"],
     };
   }
 
@@ -693,7 +725,8 @@ function decideShipping(
    * Shopify's total).
    */
   const linesTax = order.lines.reduce(
-    (sum, line) => sum + line.taxLines.reduce((inner, tax) => inner + tax.amountMinor, 0),
+    (sum, line) =>
+      sum + line.taxLines.reduce((inner, tax) => inner + tax.amountMinor, 0),
     0,
   );
   const residual = order.totalTaxMinor - linesTax;
@@ -716,14 +749,20 @@ function decideShipping(
 
   const candidates = [
     ...new Set(
-      lines.map((line) => line.rateKey).filter((key): key is string => key !== null),
+      lines
+        .map((line) => line.rateKey)
+        .filter((key): key is string => key !== null),
     ),
   ];
   const match = candidates.find(
     (rateKey) =>
-      computedTax(shipping.amountMinor, rateKey, order.taxesIncluded) === residual,
+      computedTax(shipping.amountMinor, rateKey, order.taxesIncluded) ===
+      residual,
   );
-  const template = match === undefined ? undefined : lines.find((line) => line.rateKey === match);
+  const template =
+    match === undefined
+      ? undefined
+      : lines.find((line) => line.rateKey === match);
 
   if (match !== undefined && template && residual > 0) {
     return shippingDecision(
@@ -772,8 +811,12 @@ function tolerance(taxedLines: number): number {
   return Math.max(1, Math.min(taxedLines, 5));
 }
 
-export function decideOrderTax(order: NormalizedOrderTax, config: TaxConfig): TaxDecision {
-  const destination = upper(order.destinationCountry) ?? upper(order.billingCountry);
+export function decideOrderTax(
+  order: NormalizedOrderTax,
+  config: TaxConfig,
+): TaxDecision {
+  const destination =
+    upper(order.destinationCountry) ?? upper(order.billingCountry);
   const ctx: Context = {
     config,
     order,
@@ -794,7 +837,9 @@ export function decideOrderTax(order: NormalizedOrderTax, config: TaxConfig): Ta
     }),
   );
 
-  const shipping = order.shipping ? decideShipping(ctx, order.shipping, lines) : null;
+  const shipping = order.shipping
+    ? decideShipping(ctx, order.shipping, lines)
+    : null;
 
   const all = shipping ? [...lines, shipping] : lines;
   const taxMinor = all.reduce((sum, line) => sum + line.taxMinor, 0);
@@ -811,10 +856,16 @@ export function decideOrderTax(order: NormalizedOrderTax, config: TaxConfig): Ta
   );
   const differenceMinor = taxMinor - order.totalTaxMinor;
   const taxed = all.filter((line) => line.taxMinor !== 0).length;
-  const blockedAlready = ctx.issues.some((entry) => entry.severity === "blocking");
+  const blockedAlready = ctx.issues.some(
+    (entry) => entry.severity === "blocking",
+  );
   let reconciled = true;
 
-  if (comparable && !blockedAlready && Math.abs(differenceMinor) > tolerance(taxed)) {
+  if (
+    comparable &&
+    !blockedAlready &&
+    Math.abs(differenceMinor) > tolerance(taxed)
+  ) {
     reconciled = false;
     issue(
       ctx,
@@ -829,7 +880,11 @@ export function decideOrderTax(order: NormalizedOrderTax, config: TaxConfig): Ta
   const treatments = [...new Set(all.map((line) => line.treatment))];
   const sources = [...new Set(all.map((line) => line.source))];
   const rateKeys = [
-    ...new Set(all.map((line) => line.rateKey).filter((key): key is string => key !== null)),
+    ...new Set(
+      all
+        .map((line) => line.rateKey)
+        .filter((key): key is string => key !== null),
+    ),
   ].sort((a, b) => (rateKeyToPpm(a) ?? 0) - (rateKeyToPpm(b) ?? 0));
 
   return {

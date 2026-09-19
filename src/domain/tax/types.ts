@@ -138,12 +138,7 @@ export interface VatRegistrationConfig {
 }
 
 export type CountryRateKind =
-  | "standard"
-  | "reduced"
-  | "super_reduced"
-  | "parking"
-  | "zero"
-  | "other";
+  "standard" | "reduced" | "super_reduced" | "parking" | "zero" | "other";
 
 export interface CountryRateConfig {
   country: string;

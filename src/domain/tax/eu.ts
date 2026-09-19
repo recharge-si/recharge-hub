@@ -17,9 +17,33 @@ import type { CountryRateConfig, RateKey } from "~/domain/tax/types";
 
 /** ISO 3166-1 alpha-2 codes of the EU member states. */
 export const EU_MEMBER_STATES = [
-  "AT", "BE", "BG", "HR", "CY", "CZ", "DK", "EE", "FI", "FR", "DE", "GR",
-  "HU", "IE", "IT", "LV", "LT", "LU", "MT", "NL", "PL", "PT", "RO", "SK",
-  "SI", "ES", "SE",
+  "AT",
+  "BE",
+  "BG",
+  "HR",
+  "CY",
+  "CZ",
+  "DK",
+  "EE",
+  "FI",
+  "FR",
+  "DE",
+  "GR",
+  "HU",
+  "IE",
+  "IT",
+  "LV",
+  "LT",
+  "LU",
+  "MT",
+  "NL",
+  "PL",
+  "PT",
+  "RO",
+  "SK",
+  "SI",
+  "ES",
+  "SE",
 ] as const;
 
 export type EuMemberState = (typeof EU_MEMBER_STATES)[number];
@@ -104,7 +128,12 @@ const REFERENCE: Record<EuMemberState, ReferenceEntry> = {
   DE: { standard: "19", reduced: ["7"] },
   GR: { standard: "24", reduced: ["6", "13"] },
   HU: { standard: "27", reduced: ["5", "18"] },
-  IE: { standard: "23", reduced: ["9", "13.5"], superReduced: "4.8", parking: "13.5" },
+  IE: {
+    standard: "23",
+    reduced: ["9", "13.5"],
+    superReduced: "4.8",
+    parking: "13.5",
+  },
   IT: { standard: "22", reduced: ["5", "10"], superReduced: "4" },
   LV: { standard: "21", reduced: ["5", "12"] },
   LT: { standard: "21", reduced: ["5", "9"] },
@@ -134,7 +163,13 @@ export function referenceCountryRates(): CountryRateConfig[] {
       origin: "reference",
     });
     for (const rate of entry.reduced ?? []) {
-      rows.push({ country, kind: "reduced", rateKey: rate, label: null, origin: "reference" });
+      rows.push({
+        country,
+        kind: "reduced",
+        rateKey: rate,
+        label: null,
+        origin: "reference",
+      });
     }
     if (entry.superReduced) {
       rows.push({
@@ -146,22 +181,44 @@ export function referenceCountryRates(): CountryRateConfig[] {
       });
     }
     if (entry.parking) {
-      rows.push({ country, kind: "parking", rateKey: entry.parking, label: null, origin: "reference" });
+      rows.push({
+        country,
+        kind: "parking",
+        rateKey: entry.parking,
+        label: null,
+        origin: "reference",
+      });
     }
   }
 
   // Northern Ireland follows the UK's rates inside the EU VAT area for goods.
-  rows.push({ country: "XI", kind: "standard", rateKey: "20", label: null, origin: "reference" });
-  rows.push({ country: "XI", kind: "reduced", rateKey: "5", label: null, origin: "reference" });
+  rows.push({
+    country: "XI",
+    kind: "standard",
+    rateKey: "20",
+    label: null,
+    origin: "reference",
+  });
+  rows.push({
+    country: "XI",
+    kind: "reduced",
+    rateKey: "5",
+    label: null,
+    origin: "reference",
+  });
 
   return rows;
 }
 
 /** The reference standard rate of a country, or null outside the table. */
-export function referenceStandardRate(country: string | null | undefined): RateKey | null {
+export function referenceStandardRate(
+  country: string | null | undefined,
+): RateKey | null {
   if (!country) return null;
   const upper = country.trim().toUpperCase();
   if (upper === "XI") return "20";
-  const entry = (REFERENCE as Record<string, ReferenceEntry | undefined>)[upper];
+  const entry = (REFERENCE as Record<string, ReferenceEntry | undefined>)[
+    upper
+  ];
   return entry?.standard ?? null;
 }

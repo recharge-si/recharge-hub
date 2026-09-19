@@ -32,8 +32,7 @@
  */
 
 export type AppEntry =
-  | { kind: "embedded"; to: string }
-  | { kind: "login"; to: "/auth/login" };
+  { kind: "embedded"; to: string } | { kind: "login"; to: "/auth/login" };
 
 /**
  * The admin's own markers. `shop` is deliberately not one of them: it is also
@@ -59,8 +58,7 @@ export function isEmbeddedRequest(request: Request): boolean {
  */
 export function appEntryFor(request: Request): AppEntry {
   const embedded =
-    isEmbeddedRequest(request) ||
-    new URL(request.url).searchParams.has("shop");
+    isEmbeddedRequest(request) || new URL(request.url).searchParams.has("shop");
   if (!embedded) return { kind: "login", to: "/auth/login" };
 
   const search = new URL(request.url).search;

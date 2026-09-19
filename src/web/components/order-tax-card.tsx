@@ -65,13 +65,22 @@ export interface OrderTaxView {
     reconciled: boolean;
   };
   ok: boolean;
-  issues: { kind: TaxIssueKind; severity: "blocking" | "warning"; message: string }[];
+  issues: {
+    kind: TaxIssueKind;
+    severity: "blocking" | "warning";
+    message: string;
+  }[];
   lines: OrderTaxLineView[];
   shipping: OrderTaxLineView | null;
   refunds: {
     refundId: string;
     createdAt: string | null;
-    totals: { rateKey: string | null; treatment: TaxTreatment; taxableMinor: number; taxMinor: number }[];
+    totals: {
+      rateKey: string | null;
+      treatment: TaxTreatment;
+      taxableMinor: number;
+      taxMinor: number;
+    }[];
     totalTaxMinor: number;
   }[];
 }
@@ -113,7 +122,9 @@ export function OrderTaxCard({ tax }: { tax: OrderTaxView | null }) {
           <s-banner tone="critical" heading="VAT could not be filed safely">
             <s-stack direction="block" gap="small-300">
               {blocking.map((issue) => (
-                <s-paragraph key={`${issue.kind}:${issue.message}`}>{issue.message}</s-paragraph>
+                <s-paragraph key={`${issue.kind}:${issue.message}`}>
+                  {issue.message}
+                </s-paragraph>
               ))}
             </s-stack>
             <s-link slot="primary-action" href={TAX_ROUTES.overview}>
@@ -128,7 +139,11 @@ export function OrderTaxCard({ tax }: { tax: OrderTaxView | null }) {
         >
           <Fact
             label="Destination"
-            value={tax.destinationCountry ? countryName(tax.destinationCountry) : "Unknown"}
+            value={
+              tax.destinationCountry
+                ? countryName(tax.destinationCountry)
+                : "Unknown"
+            }
           />
           <Fact
             label="Customer"
@@ -146,20 +161,32 @@ export function OrderTaxCard({ tax }: { tax: OrderTaxView | null }) {
           gridTemplateColumns="@container (inline-size <= 480px) 1fr 1fr, 1fr 1fr 1fr 1fr"
           gap="base"
         >
-          <Fact label="Taxable amount" value={formatMoney(tax.totals.taxableMinor, tax.currency)} />
-          <Fact label="VAT" value={formatMoney(tax.totals.taxMinor, tax.currency)} />
+          <Fact
+            label="Taxable amount"
+            value={formatMoney(tax.totals.taxableMinor, tax.currency)}
+          />
+          <Fact
+            label="VAT"
+            value={formatMoney(tax.totals.taxMinor, tax.currency)}
+          />
           <Fact label="Total" value={formatMoney(total, tax.currency)} />
           {singleRate ? (
             <Fact
               label="Rate"
               value={`${formatRate(tax.rateKeys[0] ?? null)}${
-                all[0]?.metakockaTaxFactor ? `, MetaKocka ${all[0].metakockaTaxFactor}` : ""
+                all[0]?.metakockaTaxFactor
+                  ? `, MetaKocka ${all[0].metakockaTaxFactor}`
+                  : ""
               }`}
             />
           ) : (
             <Fact
               label="Rates"
-              value={tax.rateKeys.length === 0 ? "—" : tax.rateKeys.map(formatRate).join(", ")}
+              value={
+                tax.rateKeys.length === 0
+                  ? "—"
+                  : tax.rateKeys.map(formatRate).join(", ")
+              }
             />
           )}
         </s-grid>
@@ -207,16 +234,28 @@ export function OrderTaxCard({ tax }: { tax: OrderTaxView | null }) {
                   <s-table-row key={line.lineId}>
                     <s-table-cell>
                       <s-stack direction="block" gap="small-500">
-                        <s-text type="strong">{line.lineId === "shipping" ? "Shipping" : line.title}</s-text>
-                        {line.sku ? <s-text color="subdued">{line.sku}</s-text> : null}
-                        {line.zeroReason ? <s-text color="subdued">{line.zeroReason}</s-text> : null}
+                        <s-text type="strong">
+                          {line.lineId === "shipping" ? "Shipping" : line.title}
+                        </s-text>
+                        {line.sku ? (
+                          <s-text color="subdued">{line.sku}</s-text>
+                        ) : null}
+                        {line.zeroReason ? (
+                          <s-text color="subdued">{line.zeroReason}</s-text>
+                        ) : null}
                       </s-stack>
                     </s-table-cell>
                     <s-table-cell>{formatRate(line.rateKey)}</s-table-cell>
-                    <s-table-cell>{TREATMENT_LABEL[line.treatment]}</s-table-cell>
+                    <s-table-cell>
+                      {TREATMENT_LABEL[line.treatment]}
+                    </s-table-cell>
                     <s-table-cell>{SOURCE_LABEL[line.source]}</s-table-cell>
-                    <s-table-cell>{formatMoney(line.taxableMinor, tax.currency)}</s-table-cell>
-                    <s-table-cell>{formatMoney(line.taxMinor, tax.currency)}</s-table-cell>
+                    <s-table-cell>
+                      {formatMoney(line.taxableMinor, tax.currency)}
+                    </s-table-cell>
+                    <s-table-cell>
+                      {formatMoney(line.taxMinor, tax.currency)}
+                    </s-table-cell>
                     <s-table-cell>
                       {line.mapping === "mapped" ? (
                         <s-text color="subdued">{`tax_factor ${line.metakockaTaxFactor}`}</s-text>
@@ -247,7 +286,9 @@ export function OrderTaxCard({ tax }: { tax: OrderTaxView | null }) {
                         (entry) =>
                           `${formatMoney(entry.taxMinor, tax.currency)} at ${formatRate(entry.rateKey)} (${TREATMENT_LABEL[entry.treatment]})`,
                       )
-                      .join(", ")}. Reverses the treatment this order was filed under, not today's settings.`}
+                      .join(
+                        ", ",
+                      )}. Reverses the treatment this order was filed under, not today's settings.`}
                   </s-text>
                 ))}
               </s-stack>

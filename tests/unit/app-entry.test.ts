@@ -1,7 +1,4 @@
-import {
-  RouterContextProvider,
-  type LoaderFunctionArgs,
-} from "react-router";
+import { RouterContextProvider, type LoaderFunctionArgs } from "react-router";
 import { describe, expect, it } from "vitest";
 
 import { appEntryFor, isEmbeddedRequest } from "~/web/lib/app-entry";
@@ -43,7 +40,10 @@ async function redirectOf(
     await run();
   } catch (thrown) {
     if (thrown instanceof Response) {
-      return { status: thrown.status, location: thrown.headers.get("location") };
+      return {
+        status: thrown.status,
+        location: thrown.headers.get("location"),
+      };
     }
     throw thrown;
   }
@@ -91,7 +91,9 @@ describe("appEntryFor", () => {
 describe("the root route", () => {
   it("redirects an embedded request to /app with its query string intact", async () => {
     const result = await redirectOf(() =>
-      rootLoader(args(get("/?shop=demo.myshopify.com&host=abc&embedded=1"), "/")),
+      rootLoader(
+        args(get("/?shop=demo.myshopify.com&host=abc&embedded=1"), "/"),
+      ),
     );
     expect(result).toEqual({
       status: 302,
@@ -107,9 +109,7 @@ describe("the root route", () => {
   });
 
   it("redirects an outside request to the login form", async () => {
-    const result = await redirectOf(() =>
-      rootLoader(args(get("/"), "/")),
-    );
+    const result = await redirectOf(() => rootLoader(args(get("/"), "/")));
     expect(result).toEqual({ status: 302, location: "/auth/login" });
   });
 });
@@ -117,7 +117,12 @@ describe("the root route", () => {
 describe("the login route", () => {
   it("never renders the form for a request from inside the admin", async () => {
     const result = await redirectOf(() =>
-      loginLoader(args(get("/auth/login?host=abc&embedded=1&shop=demo.myshopify.com"), "/auth/login")),
+      loginLoader(
+        args(
+          get("/auth/login?host=abc&embedded=1&shop=demo.myshopify.com"),
+          "/auth/login",
+        ),
+      ),
     );
     expect(result).toEqual({
       status: 302,
@@ -128,7 +133,10 @@ describe("the login route", () => {
   it("never renders the form for an App Bridge data fetch", async () => {
     const result = await redirectOf(() =>
       loginLoader(
-        args(get("/auth/login", { authorization: "Bearer session" }), "/auth/login"),
+        args(
+          get("/auth/login", { authorization: "Bearer session" }),
+          "/auth/login",
+        ),
       ),
     );
     expect(result).toEqual({ status: 302, location: "/app" });
@@ -141,7 +149,9 @@ describe("the login route", () => {
 
   it("does not loop: a shop named on the login page goes to Shopify, not back to /app", async () => {
     const result = await redirectOf(() =>
-      loginLoader(args(get("/auth/login?shop=demo.myshopify.com"), "/auth/login")),
+      loginLoader(
+        args(get("/auth/login?shop=demo.myshopify.com"), "/auth/login"),
+      ),
     );
     expect(result?.status).toBe(302);
     expect(result?.location).not.toMatch(/^\/app/);

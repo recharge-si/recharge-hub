@@ -54,20 +54,21 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const config = await getTaxConfig(principal);
 
   return {
-    rows: config.overrides.map(
-      (row): Row => ({
-        key: row.id,
-        scope: row.scope,
-        match: row.match,
-        treatment: row.treatment ?? "",
-        rate: row.rateKey ?? "",
-        reason: row.reason,
-        enabled: row.enabled,
-      }),
-    ),
+    rows: config.overrides.map((row): Row => ({
+      key: row.id,
+      scope: row.scope,
+      match: row.match,
+      treatment: row.treatment ?? "",
+      rate: row.rateKey ?? "",
+      reason: row.reason,
+      enabled: row.enabled,
+    })),
     unmappedRates: config.overrides
       .map((row) => row.rateKey)
-      .filter((rate): rate is string => rate !== null && mappingFor(config, rate) === null),
+      .filter(
+        (rate): rate is string =>
+          rate !== null && mappingFor(config, rate) === null,
+      ),
   };
 };
 
@@ -86,7 +87,9 @@ type SaveResult =
   | { ok: true; message: string }
   | { ok: false; field?: string; message: string };
 
-export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResult> => {
+export const action = async ({
+  request,
+}: ActionFunctionArgs): Promise<SaveResult> => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
@@ -94,11 +97,19 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
   try {
     json = JSON.parse(String((await request.formData()).get("rows") ?? ""));
   } catch {
-    return { ok: false, message: "The overrides could not be read. Reload the page and try again." };
+    return {
+      ok: false,
+      message:
+        "The overrides could not be read. Reload the page and try again.",
+    };
   }
   const parsed = formSchema.safeParse(json);
   if (!parsed.success) {
-    return { ok: false, message: "The overrides could not be read. Reload the page and try again." };
+    return {
+      ok: false,
+      message:
+        "The overrides could not be read. Reload the page and try again.",
+    };
   }
 
   const config = await getTaxConfig(principal);
@@ -117,18 +128,25 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
       return {
         ok: false,
         field,
-        message: row.scope === "country" ? "Choose a country." : "Enter the SKU the override applies to.",
+        message:
+          row.scope === "country"
+            ? "Choose a country."
+            : "Enter the SKU the override applies to.",
       };
     }
     if (row.reason === "") {
       return {
         ok: false,
         field,
-        message: "Give the reason for this override. It is recorded on every order it touches.",
+        message:
+          "Give the reason for this override. It is recorded on every order it touches.",
       };
     }
 
-    const treatment = row.treatment === "" ? null : TAX_TREATMENTS.find((entry) => entry === row.treatment) ?? null;
+    const treatment =
+      row.treatment === ""
+        ? null
+        : (TAX_TREATMENTS.find((entry) => entry === row.treatment) ?? null);
     if (row.treatment !== "" && treatment === null) {
       return { ok: false, field, message: "Choose a treatment from the list." };
     }
@@ -138,14 +156,16 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
       return {
         ok: false,
         field,
-        message: "The rate must be a percentage between 0 and 100, for example 9.5, or left empty to keep Shopify's rate.",
+        message:
+          "The rate must be a percentage between 0 and 100, for example 9.5, or left empty to keep Shopify's rate.",
       };
     }
     if (treatment === null && rateKey === null) {
       return {
         ok: false,
         field,
-        message: "An override sets a treatment, a rate, or both. This one sets neither.",
+        message:
+          "An override sets a treatment, a rate, or both. This one sets neither.",
       };
     }
     if (rateKey !== null && mappingFor(config, rateKey) === null) {
@@ -157,7 +177,11 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
     }
 
     const match = row.scope === "country" ? row.match.toUpperCase() : row.match;
-    if (overrides.some((entry) => entry.scope === row.scope && entry.match === match)) {
+    if (
+      overrides.some(
+        (entry) => entry.scope === row.scope && entry.match === match,
+      )
+    ) {
       return {
         ok: false,
         field,
@@ -165,7 +189,14 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
       };
     }
 
-    overrides.push({ scope: row.scope, match, treatment, rateKey, reason: row.reason, enabled: row.enabled });
+    overrides.push({
+      scope: row.scope,
+      match,
+      treatment,
+      rateKey,
+      reason: row.reason,
+      enabled: row.enabled,
+    });
   }
 
   await replaceTaxOverrides(principal, overrides);
@@ -174,7 +205,8 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
     event: "tax.overrides.saved",
     detail: {
       overrides: overrides.map(
-        (row) => `${row.scope}:${row.match} → ${row.treatment ?? "-"} ${row.rateKey ?? ""}${row.enabled ? "" : " (off)"}`,
+        (row) =>
+          `${row.scope}:${row.match} → ${row.treatment ?? "-"} ${row.rateKey ?? ""}${row.enabled ? "" : " (off)"}`,
       ),
     },
   });
@@ -221,7 +253,9 @@ export default function TaxOverrides() {
   }, [result]);
 
   const update = (key: string, patch: Partial<Row>) =>
-    setRows((current) => current.map((row) => (row.key === key ? { ...row, ...patch } : row)));
+    setRows((current) =>
+      current.map((row) => (row.key === key ? { ...row, ...patch } : row)),
+    );
 
   const add = () => {
     nextKey += 1;
@@ -257,10 +291,15 @@ export default function TaxOverrides() {
     );
 
   const errorFor = (index: number) =>
-    result && !result.ok && result.field === `row-${index}` ? result.message : undefined;
+    result && !result.ok && result.field === `row-${index}`
+      ? result.message
+      : undefined;
 
   const countries = countryOptions();
-  const treatments = [{ value: "", label: "Keep the decided treatment" }, ...OVERRIDE_TREATMENTS];
+  const treatments = [
+    { value: "", label: "Keep the decided treatment" },
+    ...OVERRIDE_TREATMENTS,
+  ];
 
   return (
     <s-page heading="Overrides">
@@ -269,7 +308,11 @@ export default function TaxOverrides() {
       </s-link>
 
       <ui-save-bar id={SAVE_BAR_ID}>
-        <button variant="primary" onClick={save} {...(saving ? { loading: "" } : {})}>
+        <button
+          variant="primary"
+          onClick={save}
+          {...(saving ? { loading: "" } : {})}
+        >
           Save
         </button>
         <button onClick={reset}>Discard</button>
@@ -283,7 +326,10 @@ export default function TaxOverrides() {
         ) : null}
 
         {unmappedRates.length > 0 ? (
-          <s-banner tone="warning" heading="An override points at an unmapped rate">
+          <s-banner
+            tone="warning"
+            heading="An override points at an unmapped rate"
+          >
             <s-paragraph>
               {`${unmappedRates.map(formatRateKey).join(", ")} ${unmappedRates.length === 1 ? "has" : "have"} no MetaKocka mapping, so every order the override touches is held.`}
             </s-paragraph>
@@ -307,7 +353,10 @@ export default function TaxOverrides() {
             </s-text>
 
             {rows.length === 0 ? (
-              <s-text color="subdued">No overrides. Shopify&apos;s tax and the policy decide every order.</s-text>
+              <s-text color="subdued">
+                No overrides. Shopify&apos;s tax and the policy decide every
+                order.
+              </s-text>
             ) : null}
 
             {rows.map((row, index) => (
@@ -353,13 +402,19 @@ export default function TaxOverrides() {
                         name={`match-${row.key}`}
                         label="SKU"
                         value={row.match}
-                        onChange={(event) => update(row.key, { match: event.currentTarget.value })}
+                        onChange={(event) =>
+                          update(row.key, { match: event.currentTarget.value })
+                        }
                       />
                     )}
                     <s-button
                       variant="tertiary"
                       tone="critical"
-                      onClick={() => setRows((current) => current.filter((entry) => entry.key !== row.key))}
+                      onClick={() =>
+                        setRows((current) =>
+                          current.filter((entry) => entry.key !== row.key),
+                        )
+                      }
                     >
                       Remove
                     </s-button>
@@ -382,7 +437,9 @@ export default function TaxOverrides() {
                       label="Rate (%)"
                       details="Empty keeps Shopify's rate."
                       value={row.rate}
-                      onChange={(event) => update(row.key, { rate: event.currentTarget.value })}
+                      onChange={(event) =>
+                        update(row.key, { rate: event.currentTarget.value })
+                      }
                     />
                   </s-grid>
 
@@ -391,7 +448,9 @@ export default function TaxOverrides() {
                     label="Reason"
                     details="Recorded on every order this override touches."
                     value={row.reason}
-                    onChange={(event) => update(row.key, { reason: event.currentTarget.value })}
+                    onChange={(event) =>
+                      update(row.key, { reason: event.currentTarget.value })
+                    }
                     {...(errorFor(index) ? { error: errorFor(index) } : {})}
                   />
 
@@ -400,7 +459,9 @@ export default function TaxOverrides() {
                     value="on"
                     label="Enabled"
                     checked={row.enabled}
-                    onChange={(event) => update(row.key, { enabled: event.currentTarget.checked })}
+                    onChange={(event) =>
+                      update(row.key, { enabled: event.currentTarget.checked })
+                    }
                   />
                 </s-stack>
               </s-box>

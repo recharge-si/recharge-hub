@@ -92,7 +92,8 @@ const LINKS: ConfigureLink[] = [
   },
   {
     title: "MetaKocka mappings",
-    description: "Which tax factor MetaKocka is sent for each VAT rate an order uses.",
+    description:
+      "Which tax factor MetaKocka is sent for each VAT rate an order uses.",
     href: TAX_ROUTES.mappings,
   },
   {
@@ -107,7 +108,9 @@ export default function Taxes() {
   const { diagnostics, observed, decidedOrders, home } =
     useLoaderData<typeof loader>();
 
-  const attention = diagnostics.checks.filter((check) => check.status === "attention");
+  const attention = diagnostics.checks.filter(
+    (check) => check.status === "attention",
+  );
 
   return (
     <s-page heading="Taxes & VAT">
@@ -164,7 +167,10 @@ export default function Taxes() {
             }
           >
             <s-paragraph>
-              {attention.map((check) => check.reason).filter(Boolean).join(" ")}
+              {attention
+                .map((check) => check.reason)
+                .filter(Boolean)
+                .join(" ")}
             </s-paragraph>
             {attention[0]?.action ? (
               <s-link slot="primary-action" href={attention[0].action.href}>
@@ -187,13 +193,21 @@ export default function Taxes() {
                     <s-text type="strong">{check.title}</s-text>
                     <s-text color="subdued">{check.summary}</s-text>
                   </s-stack>
-                  <s-stack direction="inline" gap="small-300" alignItems="center">
+                  <s-stack
+                    direction="inline"
+                    gap="small-300"
+                    alignItems="center"
+                  >
                     {check.status !== "ok" ? (
-                      <s-badge tone={TONE[check.status]}>{LABEL[check.status]}</s-badge>
+                      <s-badge tone={TONE[check.status]}>
+                        {LABEL[check.status]}
+                      </s-badge>
                     ) : null}
                     {check.action ? (
                       <s-button
-                        variant={check.status === "attention" ? "primary" : "tertiary"}
+                        variant={
+                          check.status === "attention" ? "primary" : "tertiary"
+                        }
                         href={check.action.href}
                       >
                         {check.action.label}
@@ -227,15 +241,21 @@ export default function Taxes() {
                 <s-table-header-row>
                   <s-table-header listSlot="primary">Rate</s-table-header>
                   <s-table-header listSlot="labeled">Orders</s-table-header>
-                  <s-table-header listSlot="labeled">Destinations</s-table-header>
+                  <s-table-header listSlot="labeled">
+                    Destinations
+                  </s-table-header>
                   <s-table-header listSlot="labeled">Last seen</s-table-header>
-                  <s-table-header listSlot="labeled">MetaKocka mapping</s-table-header>
+                  <s-table-header listSlot="labeled">
+                    MetaKocka mapping
+                  </s-table-header>
                 </s-table-header-row>
                 <s-table-body>
                   {observed.map((row) => (
                     <s-table-row key={row.rateKey}>
                       <s-table-cell>
-                        <s-text type="strong">{formatRateKey(row.rateKey)}</s-text>
+                        <s-text type="strong">
+                          {formatRateKey(row.rateKey)}
+                        </s-text>
                       </s-table-cell>
                       <s-table-cell>{row.orders}</s-table-cell>
                       <s-table-cell>
@@ -250,9 +270,15 @@ export default function Taxes() {
                         {row.mapped ? (
                           <s-text color="subdued">Mapped</s-text>
                         ) : (
-                          <s-stack direction="inline" gap="small-300" alignItems="center">
+                          <s-stack
+                            direction="inline"
+                            gap="small-300"
+                            alignItems="center"
+                          >
                             <s-badge tone="critical">Not mapped</s-badge>
-                            <s-link href={TAX_ROUTES.mappings}>Configure mapping</s-link>
+                            <s-link href={TAX_ROUTES.mappings}>
+                              Configure mapping
+                            </s-link>
                           </s-stack>
                         )}
                       </s-table-cell>

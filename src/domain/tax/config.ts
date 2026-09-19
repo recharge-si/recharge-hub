@@ -30,9 +30,7 @@ export function effectiveCountryRates(
   );
 
   return [
-    ...reference.filter(
-      (row) => !replaced.has(`${row.country}:${row.kind}`),
-    ),
+    ...reference.filter((row) => !replaced.has(`${row.country}:${row.kind}`)),
     ...merchant.map((row) => ({ ...row, country: row.country.toUpperCase() })),
   ].sort(
     (a, b) =>
@@ -52,20 +50,35 @@ const KIND_ORDER: CountryRateConfig["kind"][] = [
 ];
 
 /** The rates the configuration expects for a country. */
-export function ratesFor(config: TaxConfig, country: string | null): CountryRateConfig[] {
+export function ratesFor(
+  config: TaxConfig,
+  country: string | null,
+): CountryRateConfig[] {
   if (!country) return [];
   const upper = country.toUpperCase();
   return config.countryRates.filter((row) => row.country === upper);
 }
 
 /** The configured standard rate of a country, or null. */
-export function standardRateFor(config: TaxConfig, country: string | null): RateKey | null {
-  return ratesFor(config, country).find((row) => row.kind === "standard")?.rateKey ?? null;
+export function standardRateFor(
+  config: TaxConfig,
+  country: string | null,
+): RateKey | null {
+  return (
+    ratesFor(config, country).find((row) => row.kind === "standard")?.rateKey ??
+    null
+  );
 }
 
 /** Whether a rate is one the configuration lists for the country. */
-export function isExpectedRate(config: TaxConfig, country: string | null, rateKey: RateKey): boolean {
-  return ratesFor(config, country).some((row) => sameRate(row.rateKey, rateKey));
+export function isExpectedRate(
+  config: TaxConfig,
+  country: string | null,
+  rateKey: RateKey,
+): boolean {
+  return ratesFor(config, country).some((row) =>
+    sameRate(row.rateKey, rateKey),
+  );
 }
 
 /** An enabled registration of a kind, optionally in a country. */
@@ -86,10 +99,15 @@ export function registrationFor(
 }
 
 /** The enabled mapping for a rate, or null. */
-export function mappingFor(config: TaxConfig, rateKey: RateKey | null): TaxMappingConfig | null {
+export function mappingFor(
+  config: TaxConfig,
+  rateKey: RateKey | null,
+): TaxMappingConfig | null {
   if (rateKey === null) return null;
   return (
-    config.mappings.find((row) => row.enabled && sameRate(row.rateKey, rateKey)) ?? null
+    config.mappings.find(
+      (row) => row.enabled && sameRate(row.rateKey, rateKey),
+    ) ?? null
   );
 }
 

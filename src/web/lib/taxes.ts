@@ -72,8 +72,14 @@ export const OVERRIDE_TREATMENTS: { value: TaxTreatment; label: string }[] = [
   { value: "DOMESTIC_VAT", label: TREATMENT_LABEL.DOMESTIC_VAT },
   { value: "EU_OSS", label: TREATMENT_LABEL.EU_OSS },
   { value: "EU_DISTANCE_SALE", label: TREATMENT_LABEL.EU_DISTANCE_SALE },
-  { value: "EU_LOCAL_REGISTRATION", label: TREATMENT_LABEL.EU_LOCAL_REGISTRATION },
-  { value: "NON_EU_LOCAL_REGISTRATION", label: TREATMENT_LABEL.NON_EU_LOCAL_REGISTRATION },
+  {
+    value: "EU_LOCAL_REGISTRATION",
+    label: TREATMENT_LABEL.EU_LOCAL_REGISTRATION,
+  },
+  {
+    value: "NON_EU_LOCAL_REGISTRATION",
+    label: TREATMENT_LABEL.NON_EU_LOCAL_REGISTRATION,
+  },
 ];
 
 export interface CountryOption {

@@ -78,8 +78,12 @@ describe("tax arithmetic in minor units", () => {
   it("rounds half up and mirrors the sign, so a refund is the exact negation", () => {
     for (const gross of [1, 5, 99, 101, 12345, 99999]) {
       // `+ 0` folds a `-0` so a zero tax compares as the zero it is.
-      expect(taxInGrossMinor(-gross, 95_000)).toBe(-taxInGrossMinor(gross, 95_000) + 0);
-      expect(taxOnNetMinor(-gross, 95_000)).toBe(-taxOnNetMinor(gross, 95_000) + 0);
+      expect(taxInGrossMinor(-gross, 95_000)).toBe(
+        -taxInGrossMinor(gross, 95_000) + 0,
+      );
+      expect(taxOnNetMinor(-gross, 95_000)).toBe(
+        -taxOnNetMinor(gross, 95_000) + 0,
+      );
     }
     // 0.5 cent ties go up: 1.00 net at 0.5% is 0.005 → 0.01.
     expect(taxOnNetMinor(100, 5_000)).toBe(1);

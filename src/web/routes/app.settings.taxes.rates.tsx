@@ -20,7 +20,11 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { effectiveCountryRates, mappingFor } from "~/domain/tax/config";
 import { TAX_ROUTES } from "~/domain/tax/diagnostics";
 import { countryName, referenceCountryRates } from "~/domain/tax/eu";
-import { formatRateKey, rateKeyFromPercent, sameRate } from "~/domain/tax/rates";
+import {
+  formatRateKey,
+  rateKeyFromPercent,
+  sameRate,
+} from "~/domain/tax/rates";
 import type { CountryRateKind } from "~/domain/tax/types";
 import { principalFromSession } from "~/web/lib/principal.server";
 import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
@@ -59,8 +63,13 @@ function join(rates: string[]): string {
  * A reduced rate. The table holds one row per (country, kind), so a second
  * merchant-entered reduced rate is stored as `other` labelled "reduced".
  */
-function isReduced(row: { kind: CountryRateKind; label: string | null }): boolean {
-  return row.kind === "reduced" || (row.kind === "other" && row.label === "reduced");
+function isReduced(row: {
+  kind: CountryRateKind;
+  label: string | null;
+}): boolean {
+  return (
+    row.kind === "reduced" || (row.kind === "other" && row.label === "reduced")
+  );
 }
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
@@ -72,8 +81,8 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     listMerchantCountryRates(principal),
   ]);
   const effective = effectiveCountryRates(merchant);
-  const countries = [...new Set(effective.map((row) => row.country))].sort((a, b) =>
-    countryName(a).localeCompare(countryName(b)),
+  const countries = [...new Set(effective.map((row) => row.country))].sort(
+    (a, b) => countryName(a).localeCompare(countryName(b)),
   );
 
   const rows: Row[] = countries.map((country) => {
@@ -87,10 +96,17 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       reduced: join(reduced.map((row) => row.rateKey)),
       other: rates
         .filter((row) => row.kind !== "standard" && !isReduced(row))
-        .map((row) => `${row.kind.replace("_", " ")} ${formatRateKey(row.rateKey)}`),
+        .map(
+          (row) =>
+            `${row.kind.replace("_", " ")} ${formatRateKey(row.rateKey)}`,
+        ),
       standardOrigin: standard?.origin ?? "reference",
-      reducedOrigin: reduced.some((row) => row.origin === "merchant") ? "merchant" : "reference",
-      standardMapped: standard ? mappingFor(config, standard.rateKey) !== null : false,
+      reducedOrigin: reduced.some((row) => row.origin === "merchant")
+        ? "merchant"
+        : "reference",
+      standardMapped: standard
+        ? mappingFor(config, standard.rateKey) !== null
+        : false,
     };
   });
 
@@ -120,7 +136,9 @@ function reference(country: string, kind: CountryRateKind): string[] {
     .map((row) => row.rateKey);
 }
 
-export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResult> => {
+export const action = async ({
+  request,
+}: ActionFunctionArgs): Promise<SaveResult> => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
@@ -128,11 +146,17 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
   try {
     json = JSON.parse(String((await request.formData()).get("rows") ?? ""));
   } catch {
-    return { ok: false, message: "The rates could not be read. Reload the page and try again." };
+    return {
+      ok: false,
+      message: "The rates could not be read. Reload the page and try again.",
+    };
   }
   const parsed = formSchema.safeParse(json);
   if (!parsed.success) {
-    return { ok: false, message: "The rates could not be read. Reload the page and try again." };
+    return {
+      ok: false,
+      message: "The rates could not be read. Reload the page and try again.",
+    };
   }
 
   /*
@@ -141,12 +165,21 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
    * difference against the rows that exist is written, so saving a page with
    * one edit is one write and not eighty.
    */
-  const desired = new Map<string, { country: string; kind: CountryRateKind; rateKey: string; label: string | null }>();
+  const desired = new Map<
+    string,
+    {
+      country: string;
+      kind: CountryRateKind;
+      rateKey: string;
+      label: string | null;
+    }
+  >();
 
   for (const row of parsed.data) {
     const country = row.country.toUpperCase();
 
-    const standard = row.standard === "" ? null : rateKeyFromPercent(row.standard);
+    const standard =
+      row.standard === "" ? null : rateKeyFromPercent(row.standard);
     if (row.standard !== "" && standard === null) {
       return {
         ok: false,
@@ -156,7 +189,10 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
     }
 
     const reducedKeys: string[] = [];
-    for (const part of row.reduced.split(",").map((value) => value.trim()).filter(Boolean)) {
+    for (const part of row.reduced
+      .split(",")
+      .map((value) => value.trim())
+      .filter(Boolean)) {
       const key = rateKeyFromPercent(part);
       if (key === null) {
         return {
@@ -179,18 +215,35 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
     const refReduced = reference(country, "reduced");
 
     if (standard !== null && !sameRate(standard, refStandard ?? null)) {
-      desired.set(`${country}:standard`, { country, kind: "standard", rateKey: standard, label: null });
+      desired.set(`${country}:standard`, {
+        country,
+        kind: "standard",
+        rateKey: standard,
+        label: null,
+      });
     }
 
     const sameReduced =
       reducedKeys.length === refReduced.length &&
-      reducedKeys.every((key, index) => sameRate(key, refReduced[index] ?? null));
+      reducedKeys.every((key, index) =>
+        sameRate(key, refReduced[index] ?? null),
+      );
     if (!sameReduced) {
       if (reducedKeys[0] !== undefined) {
-        desired.set(`${country}:reduced`, { country, kind: "reduced", rateKey: reducedKeys[0], label: null });
+        desired.set(`${country}:reduced`, {
+          country,
+          kind: "reduced",
+          rateKey: reducedKeys[0],
+          label: null,
+        });
       }
       if (reducedKeys[1] !== undefined) {
-        desired.set(`${country}:other`, { country, kind: "other", rateKey: reducedKeys[1], label: "reduced" });
+        desired.set(`${country}:other`, {
+          country,
+          kind: "other",
+          rateKey: reducedKeys[1],
+          label: "reduced",
+        });
       }
     }
   }
@@ -199,16 +252,31 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
   const changes: string[] = [];
 
   for (const row of existing) {
-    if (row.kind !== "standard" && row.kind !== "reduced" && row.kind !== "other") continue;
+    if (
+      row.kind !== "standard" &&
+      row.kind !== "reduced" &&
+      row.kind !== "other"
+    )
+      continue;
     const want = desired.get(`${row.country}:${row.kind}`);
     if (!want) {
-      await deleteCountryRate(principal, { country: row.country, kind: row.kind });
+      await deleteCountryRate(principal, {
+        country: row.country,
+        kind: row.kind,
+      });
       changes.push(`${row.country} ${row.kind}: back to reference`);
     }
   }
   for (const [key, want] of desired) {
-    const current = existing.find((row) => `${row.country}:${row.kind}` === key);
-    if (current && sameRate(current.rateKey, want.rateKey) && current.label === want.label) continue;
+    const current = existing.find(
+      (row) => `${row.country}:${row.kind}` === key,
+    );
+    if (
+      current &&
+      sameRate(current.rateKey, want.rateKey) &&
+      current.label === want.label
+    )
+      continue;
     await upsertCountryRate(principal, want);
     changes.push(`${want.country} ${want.kind}: ${want.rateKey}`);
   }
@@ -221,7 +289,13 @@ export const action = async ({ request }: ActionFunctionArgs): Promise<SaveResul
     });
   }
 
-  return { ok: true, message: changes.length === 0 ? "Nothing changed." : "Saved the country VAT rates." };
+  return {
+    ok: true,
+    message:
+      changes.length === 0
+        ? "Nothing changed."
+        : "Saved the country VAT rates.",
+  };
 };
 
 function normalise(rows: Row[]): string {
@@ -261,14 +335,20 @@ export default function TaxRates() {
 
   const update = (country: string, patch: Partial<Row>) =>
     setRows((current) =>
-      current.map((row) => (row.country === country ? { ...row, ...patch } : row)),
+      current.map((row) =>
+        row.country === country ? { ...row, ...patch } : row,
+      ),
     );
 
   const save = () =>
     saver.submit(
       {
         rows: JSON.stringify(
-          rows.map(({ country, standard, reduced }) => ({ country, standard, reduced })),
+          rows.map(({ country, standard, reduced }) => ({
+            country,
+            standard,
+            reduced,
+          })),
         ),
       },
       { method: "post" },
@@ -292,7 +372,11 @@ export default function TaxRates() {
       </s-link>
 
       <ui-save-bar id={SAVE_BAR_ID}>
-        <button variant="primary" onClick={save} {...(saving ? { loading: "" } : {})}>
+        <button
+          variant="primary"
+          onClick={save}
+          {...(saving ? { loading: "" } : {})}
+        >
           Save
         </button>
         <button onClick={reset}>Discard</button>
@@ -313,9 +397,9 @@ export default function TaxRates() {
               rate not listed here is noted on the order, never replaced.
             </s-paragraph>
             <s-text color="subdued">
-              Reference rates as published by the European Commission,
-              September 2026. Edit a rate to replace the reference for that
-              country; type the reference back to restore it.
+              Reference rates as published by the European Commission, September
+              2026. Edit a rate to replace the reference for that country; type
+              the reference back to restore it.
             </s-text>
 
             <s-box maxInlineSize="320px">
@@ -333,10 +417,16 @@ export default function TaxRates() {
             <s-table variant="auto">
               <s-table-header-row>
                 <s-table-header listSlot="primary">Country</s-table-header>
-                <s-table-header listSlot="labeled">Standard VAT (%)</s-table-header>
-                <s-table-header listSlot="labeled">Reduced rates (%)</s-table-header>
+                <s-table-header listSlot="labeled">
+                  Standard VAT (%)
+                </s-table-header>
+                <s-table-header listSlot="labeled">
+                  Reduced rates (%)
+                </s-table-header>
                 <s-table-header listSlot="labeled">Source</s-table-header>
-                <s-table-header listSlot="labeled">Standard rate mapped</s-table-header>
+                <s-table-header listSlot="labeled">
+                  Standard rate mapped
+                </s-table-header>
               </s-table-header-row>
               <s-table-body>
                 {visible.map((row) => (
@@ -345,7 +435,9 @@ export default function TaxRates() {
                       <s-stack direction="block" gap="small-500">
                         <s-text type="strong">{row.name}</s-text>
                         <s-text color="subdued">
-                          {row.country === domesticCountry ? `${row.country} · home country` : row.country}
+                          {row.country === domesticCountry
+                            ? `${row.country} · home country`
+                            : row.country}
                         </s-text>
                       </s-stack>
                     </s-table-cell>
@@ -356,7 +448,11 @@ export default function TaxRates() {
                           label={`Standard VAT rate for ${row.name}`}
                           labelAccessibilityVisibility="exclusive"
                           value={row.standard}
-                          onChange={(event) => update(row.country, { standard: event.currentTarget.value })}
+                          onChange={(event) =>
+                            update(row.country, {
+                              standard: event.currentTarget.value,
+                            })
+                          }
                           {...(errorFor(`${row.country}:standard`)
                             ? { error: errorFor(`${row.country}:standard`) }
                             : {})}
@@ -372,20 +468,27 @@ export default function TaxRates() {
                             labelAccessibilityVisibility="exclusive"
                             placeholder="For example 5, 9.5"
                             value={row.reduced}
-                            onChange={(event) => update(row.country, { reduced: event.currentTarget.value })}
+                            onChange={(event) =>
+                              update(row.country, {
+                                reduced: event.currentTarget.value,
+                              })
+                            }
                             {...(errorFor(`${row.country}:reduced`)
                               ? { error: errorFor(`${row.country}:reduced`) }
                               : {})}
                           />
                         </s-box>
                         {row.other.length > 0 ? (
-                          <s-text color="subdued">{row.other.join(", ")}</s-text>
+                          <s-text color="subdued">
+                            {row.other.join(", ")}
+                          </s-text>
                         ) : null}
                       </s-stack>
                     </s-table-cell>
                     <s-table-cell>
                       <s-text color="subdued">
-                        {row.standardOrigin === "merchant" || row.reducedOrigin === "merchant"
+                        {row.standardOrigin === "merchant" ||
+                        row.reducedOrigin === "merchant"
                           ? "Configured by you"
                           : "Reference"}
                       </s-text>

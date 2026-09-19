@@ -103,7 +103,9 @@ export function requiredRates(config: TaxConfig): RateKey[] {
   return [...new Set(keys)];
 }
 
-export function computeTaxDiagnostics(facts: TaxDiagnosticsFacts): TaxDiagnostics {
+export function computeTaxDiagnostics(
+  facts: TaxDiagnosticsFacts,
+): TaxDiagnostics {
   const { config } = facts;
   const checks: TaxCheck[] = [];
 
@@ -166,9 +168,14 @@ export function computeTaxDiagnostics(facts: TaxDiagnosticsFacts): TaxDiagnostic
 
   /* Mappings --------------------------------------------------------------- */
   const needed = [
-    ...new Set([...requiredRates(config), ...facts.observed.map((row) => row.rateKey)]),
+    ...new Set([
+      ...requiredRates(config),
+      ...facts.observed.map((row) => row.rateKey),
+    ]),
   ];
-  const unmappedRates = needed.filter((rateKey) => mappingFor(config, rateKey) === null);
+  const unmappedRates = needed.filter(
+    (rateKey) => mappingFor(config, rateKey) === null,
+  );
   const mapped = config.mappings.filter((row) => row.enabled).length;
 
   if (unmappedRates.length === 0) {
@@ -207,7 +214,10 @@ export function computeTaxDiagnostics(facts: TaxDiagnosticsFacts): TaxDiagnostic
       : config.fallbackScope === "domestic"
         ? `Home orders only`
         : `Home and EU consumer orders`;
-  const nonEu = config.nonEuNoTaxPolicy === "export" ? "filed as export at 0%" : "held for review";
+  const nonEu =
+    config.nonEuNoTaxPolicy === "export"
+      ? "filed as export at 0%"
+      : "held for review";
   const ossAndWideFallback = config.fallbackScope === "eu" && ossActive(config);
   checks.push({
     key: "fallback",
@@ -221,7 +231,9 @@ export function computeTaxDiagnostics(facts: TaxDiagnosticsFacts): TaxDiagnostic
   });
 
   /* Exceptions ------------------------------------------------------------- */
-  const open = facts.openExceptions.filter((row) => TAX_EXCEPTION_KINDS.has(row.kind));
+  const open = facts.openExceptions.filter((row) =>
+    TAX_EXCEPTION_KINDS.has(row.kind),
+  );
   const blockedOrders = open.reduce((sum, row) => sum + row.count, 0);
   if (blockedOrders > 0) {
     checks.push({
@@ -248,9 +260,14 @@ export function computeTaxDiagnostics(facts: TaxDiagnosticsFacts): TaxDiagnostic
   }
 
   /* Warnings --------------------------------------------------------------- */
-  const warnings = facts.recentWarnings.reduce((sum, row) => sum + row.count, 0);
+  const warnings = facts.recentWarnings.reduce(
+    (sum, row) => sum + row.count,
+    0,
+  );
   if (warnings > 0) {
-    const mismatches = facts.recentWarnings.find((row) => row.kind === "rate_mismatch")?.count ?? 0;
+    const mismatches =
+      facts.recentWarnings.find((row) => row.kind === "rate_mismatch")?.count ??
+      0;
     checks.push({
       key: "warnings",
       status: "warning",
@@ -265,7 +282,9 @@ export function computeTaxDiagnostics(facts: TaxDiagnosticsFacts): TaxDiagnostic
   }
 
   return {
-    status: checks.some((check) => check.status === "attention") ? "needs_attention" : "ready",
+    status: checks.some((check) => check.status === "attention")
+      ? "needs_attention"
+      : "ready",
     checks,
     unmappedRates,
     blockedOrders,

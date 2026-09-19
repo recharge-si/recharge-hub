@@ -45,7 +45,12 @@ function config(overrides: Partial<TaxConfig> = {}): TaxConfig {
     nonEuNoTaxPolicy: "review",
     ossEnabled: false,
     registrations: [
-      { kind: "domestic", country: "SI", vatNumber: "SI12345678", enabled: true },
+      {
+        kind: "domestic",
+        country: "SI",
+        vatNumber: "SI12345678",
+        enabled: true,
+      },
     ],
     countryRates: effectiveCountryRates([]),
     mappings: [
@@ -61,15 +66,21 @@ function config(overrides: Partial<TaxConfig> = {}): TaxConfig {
   };
 }
 
-function order(overrides: Partial<NormalizedOrderTax> = {}): NormalizedOrderTax {
-  const lines = overrides.lines ?? [line({ lineId: "1", taxLines: [tax("22", 2200)] })];
+function order(
+  overrides: Partial<NormalizedOrderTax> = {},
+): NormalizedOrderTax {
+  const lines = overrides.lines ?? [
+    line({ lineId: "1", taxLines: [tax("22", 2200)] }),
+  ];
   const totalTaxMinor =
     overrides.totalTaxMinor ??
     lines.reduce(
-      (sum, entry) => sum + entry.taxLines.reduce((s, t) => s + t.amountMinor, 0),
+      (sum, entry) =>
+        sum + entry.taxLines.reduce((s, t) => s + t.amountMinor, 0),
       0,
     ) +
-      (overrides.shipping?.taxLines?.reduce((s, t) => s + t.amountMinor, 0) ?? 0);
+      (overrides.shipping?.taxLines?.reduce((s, t) => s + t.amountMinor, 0) ??
+        0);
 
   return {
     currency: "EUR",
@@ -86,7 +97,9 @@ function order(overrides: Partial<NormalizedOrderTax> = {}): NormalizedOrderTax 
 }
 
 const blocking = (decision: ReturnType<typeof decideOrderTax>) =>
-  decision.issues.filter((issue) => issue.severity === "blocking").map((issue) => issue.kind);
+  decision.issues
+    .filter((issue) => issue.severity === "blocking")
+    .map((issue) => issue.kind);
 
 describe("domestic and EU consumer sales", () => {
   it("SI consumer at 22%: Shopify's rate, Shopify's amounts, domestic VAT", () => {
@@ -118,30 +131,45 @@ describe("domestic and EU consumer sales", () => {
     ["AT", "20", 12000, 2000],
     ["DE", "19", 11900, 1900],
     ["HR", "25", 12500, 2500],
-  ])("%s consumer under OSS: destination VAT at %s%% is EU_OSS", (country, rate, gross, vat) => {
-    const decision = decideOrderTax(
-      order({
-        destinationCountry: country,
-        lines: [line({ lineId: "1", unitPriceMinor: gross, taxLines: [tax(rate, vat)] })],
-      }),
-      config({ ossEnabled: true }),
-    );
+  ])(
+    "%s consumer under OSS: destination VAT at %s%% is EU_OSS",
+    (country, rate, gross, vat) => {
+      const decision = decideOrderTax(
+        order({
+          destinationCountry: country,
+          lines: [
+            line({
+              lineId: "1",
+              unitPriceMinor: gross,
+              taxLines: [tax(rate, vat)],
+            }),
+          ],
+        }),
+        config({ ossEnabled: true }),
+      );
 
-    expect(decision.ok).toBe(true);
-    expect(decision.treatment).toBe("EU_OSS");
-    expect(decision.lines[0]).toMatchObject({
-      rateKey: rate,
-      taxMinor: vat,
-      taxableMinor: 10000,
-      source: "SHOPIFY",
-    });
-  });
+      expect(decision.ok).toBe(true);
+      expect(decision.treatment).toBe("EU_OSS");
+      expect(decision.lines[0]).toMatchObject({
+        rateKey: rate,
+        taxMinor: vat,
+        taxableMinor: 10000,
+        source: "SHOPIFY",
+      });
+    },
+  );
 
   it("destination VAT with no OSS and no local registration is held, not guessed", () => {
     const decision = decideOrderTax(
       order({
         destinationCountry: "AT",
-        lines: [line({ lineId: "1", unitPriceMinor: 12000, taxLines: [tax("20", 2000)] })],
+        lines: [
+          line({
+            lineId: "1",
+            unitPriceMinor: 12000,
+            taxLines: [tax("20", 2000)],
+          }),
+        ],
       }),
       config(),
     );
@@ -156,12 +184,23 @@ describe("domestic and EU consumer sales", () => {
     const decision = decideOrderTax(
       order({
         destinationCountry: "DE",
-        lines: [line({ lineId: "1", unitPriceMinor: 11900, taxLines: [tax("19", 1900)] })],
+        lines: [
+          line({
+            lineId: "1",
+            unitPriceMinor: 11900,
+            taxLines: [tax("19", 1900)],
+          }),
+        ],
       }),
       config({
         registrations: [
           { kind: "domestic", country: "SI", vatNumber: null, enabled: true },
-          { kind: "local", country: "DE", vatNumber: "DE123456789", enabled: true },
+          {
+            kind: "local",
+            country: "DE",
+            vatNumber: "DE123456789",
+            enabled: true,
+          },
         ],
       }),
     );
@@ -185,7 +224,13 @@ describe("domestic and EU consumer sales", () => {
     const decision = decideOrderTax(
       order({
         destinationCountry: "AT",
-        lines: [line({ lineId: "1", unitPriceMinor: 11000, taxLines: [tax("10", 1000)] })],
+        lines: [
+          line({
+            lineId: "1",
+            unitPriceMinor: 11000,
+            taxLines: [tax("10", 1000)],
+          }),
+        ],
       }),
       config({
         ossEnabled: true,
@@ -204,7 +249,13 @@ describe("domestic and EU consumer sales", () => {
     const unusual = decideOrderTax(
       order({
         destinationCountry: "AT",
-        lines: [line({ lineId: "1", unitPriceMinor: 11100, taxLines: [tax("11", 1100)] })],
+        lines: [
+          line({
+            lineId: "1",
+            unitPriceMinor: 11100,
+            taxLines: [tax("11", 1100)],
+          }),
+        ],
       }),
       config({
         ossEnabled: true,
@@ -216,9 +267,9 @@ describe("domestic and EU consumer sales", () => {
     );
     expect(unusual.ok).toBe(true);
     expect(unusual.lines[0]?.rateKey).toBe("11");
-    expect(unusual.issues.map((issue) => [issue.kind, issue.severity])).toEqual([
-      ["rate_mismatch", "warning"],
-    ]);
+    expect(unusual.issues.map((issue) => [issue.kind, issue.severity])).toEqual(
+      [["rate_mismatch", "warning"]],
+    );
   });
 });
 
@@ -227,7 +278,11 @@ describe("zero is not one thing", () => {
     const decision = decideOrderTax(
       order({
         destinationCountry: "DE",
-        customer: { isBusiness: true, vatNumber: "DE123456789", taxExempt: false },
+        customer: {
+          isBusiness: true,
+          vatNumber: "DE123456789",
+          taxExempt: false,
+        },
         lines: [line({ lineId: "1", unitPriceMinor: 10000, taxLines: [] })],
       }),
       config(),
@@ -249,8 +304,18 @@ describe("zero is not one thing", () => {
     const decision = decideOrderTax(
       order({
         destinationCountry: "DE",
-        customer: { isBusiness: true, vatNumber: "DE123456789", taxExempt: false },
-        lines: [line({ lineId: "1", unitPriceMinor: 11900, taxLines: [tax("19", 1900)] })],
+        customer: {
+          isBusiness: true,
+          vatNumber: "DE123456789",
+          taxExempt: false,
+        },
+        lines: [
+          line({
+            lineId: "1",
+            unitPriceMinor: 11900,
+            taxLines: [tax("19", 1900)],
+          }),
+        ],
       }),
       config({ ossEnabled: true }),
     );
@@ -288,7 +353,9 @@ describe("zero is not one thing", () => {
     const decision = decideOrderTax(
       order({
         destinationCountry: "US",
-        lines: [line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] })],
+        lines: [
+          line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] }),
+        ],
       }),
       config(),
     );
@@ -300,7 +367,9 @@ describe("zero is not one thing", () => {
     const decision = decideOrderTax(
       order({
         customer: { isBusiness: false, vatNumber: null, taxExempt: true },
-        lines: [line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] })],
+        lines: [
+          line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] }),
+        ],
       }),
       config(),
     );
@@ -327,8 +396,12 @@ describe("zero is not one thing", () => {
     });
 
     const unmappedZero = decideOrderTax(
-      order({ lines: [line({ lineId: "2", unitPriceMinor: 500, taxable: false })] }),
-      config({ mappings: config().mappings.filter((row) => row.rateKey !== "0") }),
+      order({
+        lines: [line({ lineId: "2", unitPriceMinor: 500, taxable: false })],
+      }),
+      config({
+        mappings: config().mappings.filter((row) => row.rateKey !== "0"),
+      }),
     );
     expect(unmappedZero.ok).toBe(false);
     expect(blocking(unmappedZero)).toEqual(["mapping_missing"]);
@@ -336,7 +409,11 @@ describe("zero is not one thing", () => {
 
   it("an explicit 0% on a domestic sale is zero-rated goods", () => {
     const decision = decideOrderTax(
-      order({ lines: [line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] })] }),
+      order({
+        lines: [
+          line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] }),
+        ],
+      }),
       config(),
     );
     expect(decision.ok).toBe(true);
@@ -367,15 +444,24 @@ describe("when Shopify charges no tax at all", () => {
 
   it("on a tax-exclusive shop the same fallback is computed on the net", () => {
     const decision = decideOrderTax(
-      order({ taxesIncluded: false, lines: [line({ lineId: "1", unitPriceMinor: 17131 })] }),
+      order({
+        taxesIncluded: false,
+        lines: [line({ lineId: "1", unitPriceMinor: 17131 })],
+      }),
       config(),
     );
-    expect(decision.lines[0]).toMatchObject({ taxableMinor: 17131, taxMinor: 3769 });
+    expect(decision.lines[0]).toMatchObject({
+      taxableMinor: 17131,
+      taxMinor: 3769,
+    });
   });
 
   it("an EU consumer sale takes the home rate only when the fallback reaches the EU", () => {
     const held = decideOrderTax(
-      order({ destinationCountry: "AT", lines: [line({ lineId: "1", unitPriceMinor: 10000 })] }),
+      order({
+        destinationCountry: "AT",
+        lines: [line({ lineId: "1", unitPriceMinor: 10000 })],
+      }),
       config({ fallbackScope: "domestic" }),
     );
     expect(held.ok).toBe(false);
@@ -383,7 +469,10 @@ describe("when Shopify charges no tax at all", () => {
     expect(held.issues[0]?.message).toContain("cross-border EU");
 
     const origin = decideOrderTax(
-      order({ destinationCountry: "AT", lines: [line({ lineId: "1", unitPriceMinor: 10000 })] }),
+      order({
+        destinationCountry: "AT",
+        lines: [line({ lineId: "1", unitPriceMinor: 10000 })],
+      }),
       config({ fallbackScope: "eu" }),
     );
     expect(origin.ok).toBe(true);
@@ -435,20 +524,37 @@ describe("mixed rates, discounts and shipping", () => {
     const decision = decideOrderTax(
       order({
         lines: [
-          line({ lineId: "a", unitPriceMinor: 12200, taxLines: [tax("22", 2200)] }),
-          line({ lineId: "b", unitPriceMinor: 10950, taxLines: [tax("9.5", 950)] }),
-          line({ lineId: "c", unitPriceMinor: 10500, taxLines: [tax("5", 500)] }),
+          line({
+            lineId: "a",
+            unitPriceMinor: 12200,
+            taxLines: [tax("22", 2200)],
+          }),
+          line({
+            lineId: "b",
+            unitPriceMinor: 10950,
+            taxLines: [tax("9.5", 950)],
+          }),
+          line({
+            lineId: "c",
+            unitPriceMinor: 10500,
+            taxLines: [tax("5", 500)],
+          }),
         ],
       }),
       config({
-        mappings: [...config().mappings, { rateKey: "5", metakockaTaxFactor: "0.05", enabled: true }],
+        mappings: [
+          ...config().mappings,
+          { rateKey: "5", metakockaTaxFactor: "0.05", enabled: true },
+        ],
       }),
     );
 
     expect(decision.ok).toBe(true);
     expect(decision.treatment).toBe("DOMESTIC_VAT");
     expect(decision.rateKeys).toEqual(["5", "9.5", "22"]);
-    expect(decision.lines.map((entry) => [entry.rateKey, entry.metakockaTaxFactor])).toEqual([
+    expect(
+      decision.lines.map((entry) => [entry.rateKey, entry.metakockaTaxFactor]),
+    ).toEqual([
       ["22", "0.22"],
       ["9.5", "0.095"],
       ["5", "0.05"],
@@ -471,7 +577,10 @@ describe("mixed rates, discounts and shipping", () => {
       }),
       config(),
     );
-    expect(decision.lines[0]).toMatchObject({ taxableMinor: 18000, taxMinor: 3960 });
+    expect(decision.lines[0]).toMatchObject({
+      taxableMinor: 18000,
+      taxMinor: 3960,
+    });
   });
 
   it("a 100% discounted line is free and blocks nothing", () => {
@@ -479,13 +588,22 @@ describe("mixed rates, discounts and shipping", () => {
       order({
         lines: [
           line({ lineId: "1", taxLines: [tax("22", 2200)] }),
-          line({ lineId: "free", unitPriceMinor: 3000, discountMinor: 3000, taxLines: [] }),
+          line({
+            lineId: "free",
+            unitPriceMinor: 3000,
+            discountMinor: 3000,
+            taxLines: [],
+          }),
         ],
       }),
       config(),
     );
     expect(decision.ok).toBe(true);
-    expect(decision.lines[1]).toMatchObject({ taxMinor: 0, taxableMinor: 0, rateKey: "0" });
+    expect(decision.lines[1]).toMatchObject({
+      taxMinor: 0,
+      taxableMinor: 0,
+      rateKey: "0",
+    });
   });
 
   it("taxed shipping uses Shopify's own shipping tax lines", () => {
@@ -512,7 +630,11 @@ describe("mixed rates, discounts and shipping", () => {
       config(),
     );
     expect(decision.ok).toBe(true);
-    expect(decision.shipping).toMatchObject({ rateKey: "0", taxMinor: 0, treatment: "NO_TAX" });
+    expect(decision.shipping).toMatchObject({
+      rateKey: "0",
+      taxMinor: 0,
+      treatment: "NO_TAX",
+    });
   });
 
   it("shipping tax reported only in the order total is derived when one rate explains it exactly", () => {
@@ -524,7 +646,11 @@ describe("mixed rates, discounts and shipping", () => {
       config(),
     );
     expect(decision.ok).toBe(true);
-    expect(decision.shipping).toMatchObject({ rateKey: "22", taxMinor: 110, source: "FALLBACK" });
+    expect(decision.shipping).toMatchObject({
+      rateKey: "22",
+      taxMinor: 110,
+      source: "FALLBACK",
+    });
     expect(decision.totals.reconciled).toBe(true);
   });
 
@@ -552,7 +678,11 @@ describe("mixed rates, discounts and shipping", () => {
       config(),
     );
     expect(decision.ok).toBe(true);
-    expect(decision.shipping).toMatchObject({ rateKey: "22", taxMinor: 110, treatment: "DOMESTIC_VAT" });
+    expect(decision.shipping).toMatchObject({
+      rateKey: "22",
+      taxMinor: 110,
+      treatment: "DOMESTIC_VAT",
+    });
   });
 
   it("shipping with nothing to inherit from is a blocking gap, never an invented rate", () => {
@@ -566,7 +696,15 @@ describe("mixed rates, discounts and shipping", () => {
       }),
       config({
         overrides: [
-          { id: "o", scope: "sku", match: "B", treatment: null, rateKey: "9.5", reason: "books", enabled: true },
+          {
+            id: "o",
+            scope: "sku",
+            match: "B",
+            treatment: null,
+            rateKey: "9.5",
+            reason: "books",
+            enabled: true,
+          },
         ],
       }),
     );
@@ -596,13 +734,26 @@ describe("mixed rates, discounts and shipping", () => {
 describe("mapping and reconciliation", () => {
   it("an unmapped rate is the one exception it should be, naming the rate", () => {
     const decision = decideOrderTax(
-      order({ lines: [line({ lineId: "1", unitPriceMinor: 10950, taxLines: [tax("9.5", 950)] })] }),
-      config({ mappings: config().mappings.filter((row) => row.rateKey !== "9.5") }),
+      order({
+        lines: [
+          line({
+            lineId: "1",
+            unitPriceMinor: 10950,
+            taxLines: [tax("9.5", 950)],
+          }),
+        ],
+      }),
+      config({
+        mappings: config().mappings.filter((row) => row.rateKey !== "9.5"),
+      }),
     );
 
     expect(decision.ok).toBe(false);
     expect(blocking(decision)).toEqual(["mapping_missing"]);
-    expect(decision.lines[0]).toMatchObject({ mapping: "missing", metakockaTaxFactor: null });
+    expect(decision.lines[0]).toMatchObject({
+      mapping: "missing",
+      metakockaTaxFactor: null,
+    });
     expect(decision.issues[0]?.message).toBe(
       "line SKU-1 uses a VAT rate of 9.5%, but no MetaKocka mapping exists for 9.5%. Map it on the Taxes & VAT page before orders using this rate can be sent.",
     );
@@ -612,20 +763,22 @@ describe("mapping and reconciliation", () => {
     const decision = decideOrderTax(
       order(),
       config({
-        mappings: [{ rateKey: "22", metakockaTaxFactor: "0.2200", enabled: true }],
+        mappings: [
+          { rateKey: "22", metakockaTaxFactor: "0.2200", enabled: true },
+        ],
       }),
     );
     expect(decision.lines[0]?.metakockaTaxFactor).toBe("0.2200");
   });
 
   it("holds an order whose line taxes do not add up to Shopify's total", () => {
-    const decision = decideOrderTax(
-      order({ totalTaxMinor: 2800 }),
-      config(),
-    );
+    const decision = decideOrderTax(order({ totalTaxMinor: 2800 }), config());
     expect(decision.ok).toBe(false);
     expect(blocking(decision)).toEqual(["reconciliation_failed"]);
-    expect(decision.totals).toMatchObject({ differenceMinor: -600, reconciled: false });
+    expect(decision.totals).toMatchObject({
+      differenceMinor: -600,
+      reconciled: false,
+    });
   });
 
   it("allows a cent of rounding per taxed line and no more", () => {
@@ -637,14 +790,19 @@ describe("mapping and reconciliation", () => {
   });
 
   it("records the configuration version it was decided under", () => {
-    expect(decideOrderTax(order(), config({ version: 41 })).configVersion).toBe(41);
+    expect(decideOrderTax(order(), config({ version: 41 })).configVersion).toBe(
+      41,
+    );
   });
 });
 
 describe("overrides", () => {
   it("a country override answers an unknown zero, visibly", () => {
     const decision = decideOrderTax(
-      order({ destinationCountry: "CH", lines: [line({ lineId: "1", unitPriceMinor: 10000 })] }),
+      order({
+        destinationCountry: "CH",
+        lines: [line({ lineId: "1", unitPriceMinor: 10000 })],
+      }),
       config({
         overrides: [
           {
@@ -662,13 +820,25 @@ describe("overrides", () => {
 
     expect(decision.ok).toBe(true);
     expect(decision.treatment).toBe("NON_EU_EXPORT");
-    expect(decision.lines[0]).toMatchObject({ rateKey: "0", overrideId: "ovr-ch" });
+    expect(decision.lines[0]).toMatchObject({
+      rateKey: "0",
+      overrideId: "ovr-ch",
+    });
     expect(decision.lines[0]?.zeroReason).toContain("Swiss agent");
   });
 
   it("a SKU override sets the rate and is recorded as a product rule", () => {
     const decision = decideOrderTax(
-      order({ lines: [line({ lineId: "1", sku: "BOOK-1", unitPriceMinor: 10950, taxLines: [tax("22", 1975)] })] }),
+      order({
+        lines: [
+          line({
+            lineId: "1",
+            sku: "BOOK-1",
+            unitPriceMinor: 10950,
+            taxLines: [tax("22", 1975)],
+          }),
+        ],
+      }),
       config({
         overrides: [
           {
@@ -699,7 +869,10 @@ describe("overrides", () => {
 
   it("a disabled override does nothing", () => {
     const decision = decideOrderTax(
-      order({ destinationCountry: "CH", lines: [line({ lineId: "1", unitPriceMinor: 10000 })] }),
+      order({
+        destinationCountry: "CH",
+        lines: [line({ lineId: "1", unitPriceMinor: 10000 })],
+      }),
       config({
         overrides: [
           {
@@ -727,7 +900,15 @@ describe("overrides", () => {
       }),
       config({
         overrides: [
-          { id: "o", scope: "sku", match: "X", treatment: "ZERO_RATED", rateKey: null, reason: "r", enabled: true },
+          {
+            id: "o",
+            scope: "sku",
+            match: "X",
+            treatment: "ZERO_RATED",
+            rateKey: null,
+            reason: "r",
+            enabled: true,
+          },
         ],
       }),
     );
@@ -742,7 +923,9 @@ describe("multi-currency", () => {
       order({
         currency: "USD",
         destinationCountry: "US",
-        lines: [line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] })],
+        lines: [
+          line({ lineId: "1", unitPriceMinor: 10000, taxLines: [tax("0", 0)] }),
+        ],
       }),
       config(),
     );
