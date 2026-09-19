@@ -20,7 +20,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     status: 200,
     headers: {
       "Content-Type": "application/json; charset=utf-8",
-      "Content-Disposition": `attachment; filename="attributes-${date}.json"`,
+      "Content-Disposition": `attachment; filename="product-setup-${date}.json"`,
       "Cache-Control": "no-store",
     },
   });

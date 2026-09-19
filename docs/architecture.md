@@ -52,10 +52,10 @@ is a database name:
 Home              /app                  operations dashboard
 Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
                                         /app/sales/:id/variants every variant it touches
-Attributes        /app/attributes       the attribute catalogue; /app/attributes/:id is one
-                                        attribute, /app/attributes/types/:typeId? the tree of
-                                        product types beside the selected one,
-                                        /app/attributes/settings import, export, sets and reset
+Product setup     /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
+                                        product types beside the selected one; the workspace's
+                                        own navigation reaches /attributes (the catalogue,
+                                        /attributes/:id one attribute), /sets and /settings
 MetaKocka         /app/metakocka        the integration's front door: how each side is
                                         doing, opening onto
   Orders          /app/orders           list, and /app/orders/settings
@@ -526,7 +526,7 @@ What every product type should carry, planned as one document per shop and
 inherited down a tree of types — `docs/attributes.md`. Pure rules in
 `src/domain/attributes/` (parse and check, resolve inheritance, every change
 as a function over the document); one row in `attribute_schema` with a
-revision every write is conditional on; screens under `app.attributes.*`
+revision every write is conditional on; screens under `app.product-setup.*`
 sharing `web/lib/attributes.server.ts` as the one path that changes it.
 Nothing here reads or writes Shopify yet.
 
@@ -610,7 +610,7 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Payment rule                   | `src/domain/payments/` and `src/jobs/orders/payment-reconciler.ts`           |
 | Tax rule, treatment or mapping | `src/domain/tax/`, then `src/jobs/orders/tax-decider.ts`; screens under `app.settings.taxes.*` |
 | Sale pricing, rule or conflict rule | `src/domain/sales/`; the write path is `src/adapters/sales/writer.server.ts`; screens under `app.sales.*` |
-| Attribute schema rule or screen | `src/domain/attributes/`, then `web/lib/attributes.server.ts`; screens under `app.attributes.*` |
+| Attribute schema rule or screen | `src/domain/attributes/`, then `web/lib/attributes.server.ts`; screens under `app.product-setup.*` |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
 | What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |

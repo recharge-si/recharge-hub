@@ -88,8 +88,8 @@ describe("route table", () => {
       "routes/app.locations._index.tsx",
     );
     expect(await fileFor("/app/sales")).toBe("routes/app.sales._index.tsx");
-    expect(await fileFor("/app/attributes")).toBe(
-      "routes/app.attributes._index.tsx",
+    expect(await fileFor("/app/product-setup")).toBe(
+      "routes/app.product-setup._index.tsx",
     );
     expect(await fileFor("/app/metakocka")).toBe("routes/app.metakocka.tsx");
     expect(await fileFor("/app/settings")).toBe(
@@ -157,26 +157,31 @@ describe("route table", () => {
     );
   });
 
-  it("keeps the attribute pages static above the attribute editor", async () => {
-    // `/app/attributes/:attributeId` sits beside three static siblings. Static
-    // wins in React Router's ranking; this is what keeps "types", "settings"
-    // and the export from becoming lookups for attributes with those ids.
-    expect(await fileFor("/app/attributes/abc123")).toBe(
-      "routes/app.attributes.$attributeId.tsx",
-    );
-    expect(await fileFor("/app/attributes/settings")).toBe(
-      "routes/app.attributes.settings.tsx",
-    );
-    expect(await fileFor("/app/attributes/schema.json")).toBe(
-      "routes/app.attributes.schema[.json].tsx",
+  it("gives product setup one address per section", async () => {
+    // `/app/product-setup` lands on product types; every section is a
+    // route of its own so a refresh, a link and Back all work.
+    expect(await fileFor("/app/product-setup/types")).toBe(
+      "routes/app.product-setup.types.($typeId).tsx",
     );
     // One route, optional segment: the tree with nothing chosen and the tree
     // with a type chosen are the same page.
-    expect(await fileFor("/app/attributes/types")).toBe(
-      "routes/app.attributes.types.($typeId).tsx",
+    expect(await fileFor("/app/product-setup/types/wave")).toBe(
+      "routes/app.product-setup.types.($typeId).tsx",
     );
-    expect(await fileFor("/app/attributes/types/wave")).toBe(
-      "routes/app.attributes.types.($typeId).tsx",
+    expect(await fileFor("/app/product-setup/attributes")).toBe(
+      "routes/app.product-setup.attributes._index.tsx",
+    );
+    expect(await fileFor("/app/product-setup/attributes/abc123")).toBe(
+      "routes/app.product-setup.attributes.$attributeId.tsx",
+    );
+    expect(await fileFor("/app/product-setup/sets")).toBe(
+      "routes/app.product-setup.sets.tsx",
+    );
+    expect(await fileFor("/app/product-setup/settings")).toBe(
+      "routes/app.product-setup.settings.tsx",
+    );
+    expect(await fileFor("/app/product-setup/schema.json")).toBe(
+      "routes/app.product-setup.schema[.json].tsx",
     );
   });
 

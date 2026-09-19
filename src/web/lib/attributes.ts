@@ -5,19 +5,39 @@ import type {
 } from "~/domain/attributes/types";
 
 /**
- * The attribute schema in the merchant's words (docs/ui-conventions.md).
- * Pure and client-safe: the catalogue, the editor, the product types page
- * and the settings page all read from here so one concept has one name.
+ * Product setup in the merchant's words (docs/ui-conventions.md). Pure and
+ * client-safe: every screen under /app/product-setup reads from here so one
+ * concept has one name.
  */
 
-export const ATTRIBUTE_ROUTES = {
-  index: "/app/attributes",
-  types: "/app/attributes/types",
-  settings: "/app/attributes/settings",
-  export: "/app/attributes/schema.json",
-  attribute: (id: string) => `/app/attributes/${id}`,
-  type: (id: string) => `/app/attributes/types/${id}`,
+export const PRODUCT_SETUP_ROUTES = {
+  home: "/app/product-setup",
+  types: "/app/product-setup/types",
+  type: (id: string) => `/app/product-setup/types/${id}`,
+  attributes: "/app/product-setup/attributes",
+  attribute: (id: string) => `/app/product-setup/attributes/${id}`,
+  sets: "/app/product-setup/sets",
+  settings: "/app/product-setup/settings",
+  export: "/app/product-setup/schema.json",
 } as const;
+
+/** The workspace's own navigation, in order. */
+export const PRODUCT_SETUP_SECTIONS = [
+  { key: "types", label: "Product types", href: PRODUCT_SETUP_ROUTES.types },
+  {
+    key: "attributes",
+    label: "Attributes",
+    href: PRODUCT_SETUP_ROUTES.attributes,
+  },
+  { key: "sets", label: "Attribute sets", href: PRODUCT_SETUP_ROUTES.sets },
+  { key: "settings", label: "Settings", href: PRODUCT_SETUP_ROUTES.settings },
+] as const;
+
+export type ProductSetupSection =
+  (typeof PRODUCT_SETUP_SECTIONS)[number]["key"];
+
+/** Where the last chosen product type is remembered, per browser. */
+export const LAST_TYPE_KEY = "product-setup:last-type";
 
 export const DATA_TYPE_LABEL: Record<DataType, string> = {
   text: "Text",
@@ -25,10 +45,23 @@ export const DATA_TYPE_LABEL: Record<DataType, string> = {
   decimal: "Decimal number",
   boolean: "Yes or no",
   single_select: "Single choice",
-  multi_select: "Multiple choice",
+  multi_select: "Multiple choices",
   measurement: "Measurement",
   reference: "Reference",
   date: "Date",
+};
+
+/** One line under the format picker, so a choice explains itself. */
+export const DATA_TYPE_HELP: Record<DataType, string> = {
+  text: "Free text, such as a model name.",
+  integer: "A whole number, such as a year or a count.",
+  decimal: "A number with decimals, such as a weight.",
+  boolean: "Yes or no.",
+  single_select: "One option from a list you define.",
+  multi_select: "Any number of options from a list you define.",
+  measurement: "A number with a unit, such as 4.7 m² or 430 cm.",
+  reference: "A link to another product or page.",
+  date: "A calendar date.",
 };
 
 export const DATA_TYPE_OPTIONS = (
@@ -53,19 +86,33 @@ export const IMPLEMENTATION_OPTIONS = (
   Object.entries(IMPLEMENTATION_LABEL) as Array<[Implementation, string]>
 ).map(([value, label]) => ({ value, label }));
 
-/** "Measurement · cm · Variant" — one line under an attribute's name. */
+/** Whether the format carries a unit worth asking for. */
+export function takesUnit(dataType: DataType): boolean {
+  return (
+    dataType === "measurement" ||
+    dataType === "integer" ||
+    dataType === "decimal"
+  );
+}
+
+/** "Measurement (cm)" — the format with its unit when it has one. */
+export function formatLabel(attribute: {
+  dataType: DataType;
+  unit: string;
+}): string {
+  const label = DATA_TYPE_LABEL[attribute.dataType];
+  return attribute.unit && takesUnit(attribute.dataType)
+    ? `${label} (${attribute.unit})`
+    : label;
+}
+
+/** "Measurement (cm) · Variant" — one line under an attribute's name. */
 export function describeAttribute(attribute: {
   dataType: DataType;
   unit: string;
   scope: Scope;
 }): string {
-  return [
-    DATA_TYPE_LABEL[attribute.dataType],
-    attribute.unit || null,
-    SCOPE_LABEL[attribute.scope],
-  ]
-    .filter((part): part is string => part !== null)
-    .join(" · ");
+  return `${formatLabel(attribute)} · ${SCOPE_LABEL[attribute.scope]}`;
 }
 
 export function countOf(n: number, one: string, many = `${one}s`): string {

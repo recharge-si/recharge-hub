@@ -228,13 +228,33 @@ export interface NewAttribute {
   name: string;
   dataType: DataType;
   unit: string;
+  description: string;
   scope: Scope;
   /** Empty means generate one from the name. */
   key: string;
+  implementation: Implementation;
   setId: string | null;
   requiredDefault: boolean;
+  /** The options, for a select type; ignored for any other. */
+  options: ValueListItem[];
   /** Also attach it directly to this type, and so to its descendants. */
   attachToTypeId: string | null;
+}
+
+/** Trims and codes a list of options, or says what is wrong with them. */
+function normaliseOptions(
+  options: ValueListItem[],
+): { ok: true; items: ValueListItem[] } | { ok: false; message: string } {
+  const items = options.map((option) => ({
+    code: option.code.trim() || slugify(option.en),
+    en: option.en.trim(),
+    si: option.si.trim(),
+  }));
+  if (items.some((item) => item.en === ""))
+    return { ok: false, message: "Every option needs an English label." };
+  if (new Set(items.map((item) => item.code)).size !== items.length)
+    return { ok: false, message: "Every option needs a unique code." };
+  return { ok: true, items };
 }
 
 function keyTaken(
@@ -267,26 +287,36 @@ export function addAttribute(
   let key = input.key.trim() || keyFor(name);
   if (keyTaken(schema, key, input.scope, null)) key = `${key}_${id.slice(-4)}`;
 
+  let valueLists = schema.valueLists;
+  let valueListId: string | null = null;
+  if (isSelect(input.dataType)) {
+    const options = normaliseOptions(input.options);
+    if (!options.ok) return refuse(options.message);
+    valueListId = ids("options");
+    valueLists = [...valueLists, { id: valueListId, items: options.items }];
+  }
+
   const attribute: Attribute = {
     id,
     name,
     setId: input.setId,
     dataType: input.dataType,
     unit: input.unit.trim(),
-    description: "",
+    description: input.description.trim(),
     scope: input.scope,
     key,
-    implementation: "custom",
+    implementation: input.implementation,
     requiredDefault: input.requiredDefault,
     filterable: false,
     searchable: false,
     comparable: false,
-    valueListId: null,
+    valueListId,
   };
   const result = done(
     {
       ...schema,
       attributes: [...schema.attributes, attribute],
+      valueLists,
       attributeAssignments:
         input.attachToTypeId === null
           ? schema.attributeAssignments
@@ -338,15 +368,9 @@ export function updateAttribute(
   let valueLists = schema.valueLists;
   let valueListId = attribute.valueListId;
   if (isSelect(patch.dataType)) {
-    const items = patch.options.map((option) => ({
-      code: option.code.trim() || slugify(option.en),
-      en: option.en.trim(),
-      si: option.si.trim(),
-    }));
-    if (items.some((item) => item.en === ""))
-      return refuse("Every option needs an English label.");
-    if (new Set(items.map((item) => item.code)).size !== items.length)
-      return refuse("Every option needs a unique code.");
+    const options = normaliseOptions(patch.options);
+    if (!options.ok) return refuse(options.message);
+    const items = options.items;
 
     const shared = schema.attributes.some(
       (a) => a.id !== attributeId && a.valueListId === valueListId,
@@ -598,6 +622,42 @@ export function attachAttribute(
       ],
     },
     `“${attribute.name}” added.`,
+  );
+}
+
+/**
+ * Several attributes at once, as the picker adds them: each one attached
+ * directly, or restored where it was removed on this type; ones already
+ * active are left alone rather than refused.
+ */
+export function attachAttributes(
+  schema: AttributeSchema,
+  typeId: string,
+  attributeIds: string[],
+  ids: IdSource,
+): MutationResult {
+  if (typeById(schema, typeId) === null)
+    return refuse("That product type no longer exists.");
+  let next = schema;
+  let added = 0;
+  for (const attributeId of attributeIds) {
+    const attribute = next.attributes.find((a) => a.id === attributeId);
+    if (!attribute) return refuse("One of those attributes no longer exists.");
+    if (
+      activeAttributes(next, typeId).some(
+        (row) => row.attribute.id === attributeId,
+      )
+    )
+      continue;
+    const result = attachAttribute(next, typeId, attributeId, ids);
+    if (!result.ok) return result;
+    next = result.schema;
+    added += 1;
+  }
+  if (added === 0) return refuse("Those attributes are already on this type.");
+  return done(
+    next,
+    added === 1 ? "1 attribute added." : `${added} attributes added.`,
   );
 }
 

@@ -62,11 +62,11 @@ Completed work belongs in Git history, not in this file.
   vendors, tags, categories, product data, prices and typed metafields, a
   preview that writes nothing, a product-side view, CSV export, and an audit
   trail on `event_log`
-- An attribute schema (`docs/attributes.md`): a tree of product types, an
-  attribute catalogue and sets with inheritance and exact-type exceptions,
-  planned as one document per shop under a revision guard, with JSON export
-  and import (including the standalone builder's own files); nothing is
-  written to Shopify from it yet
+- Product setup (`docs/attributes.md`): a tree of product types beside the
+  selected type, an attribute catalogue and sets with inheritance and
+  exact-type exceptions, planned as one document per shop under a revision
+  guard, with JSON export and import (including the standalone builder's own
+  files); nothing is written to Shopify from it yet
 - 916 fixture-driven tests across pure domain, adapters, presentation helpers,
   the route table, the app's entry points, the order-to-MetaKocka vertical
   slice and the tax pipeline end to end, plus PostgreSQL tests for the
@@ -214,7 +214,7 @@ a merchant-consent event (see T-07), so it is a decision rather than a task.
   `orders/delete` branches there may never match. Noticed, not changed — it is
   outside the sale work and needs its own verification against a delivery.
 
-### T-25 — Attribute schema: a plan with no Shopify side yet
+### T-25 — Product setup: a plan with no Shopify side yet
 
 - **Nothing is created in Shopify.** The schema names a Shopify field per
   attribute and a category per type, but no metafield definition, category
@@ -227,6 +227,13 @@ a merchant-consent event (see T-07), so it is a decision rather than a task.
   in.
 - **One option list per select attribute from the UI.** Lists shared between
   attributes only arise through import and fork on first edit.
+- **No drag-and-drop in the tree.** Move to…, Under and Move up/down do the
+  job with the consequences stated; a drag handle needs markup Polaris web
+  components do not expose.
+- **The embedded pages were not driven in a browser by the agent that built
+  them.** `shopify app dev` needs a linked dev app and a store login. Types,
+  lint, the domain and route-table tests and the build pass; the merchant
+  walkthrough in `docs/attributes.md` § Screens is what to click through.
 
 ### T-08 — Shopify fulfilment orders are not moved or split
 

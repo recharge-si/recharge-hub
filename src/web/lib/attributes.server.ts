@@ -1,5 +1,7 @@
 import { randomBytes } from "node:crypto";
 
+import { z } from "zod";
+
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import {
   getAttributeSchema,
@@ -7,7 +9,13 @@ import {
 } from "~/adapters/db/repositories/attribute-schema.server";
 import type { MutationResult } from "~/domain/attributes/mutations";
 import { schemaProblems } from "~/domain/attributes/schema";
-import type { AttributeSchema, IdSource } from "~/domain/attributes/types";
+import {
+  DATA_TYPES,
+  IMPLEMENTATIONS,
+  SCOPES,
+  type AttributeSchema,
+  type IdSource,
+} from "~/domain/attributes/types";
 import type { Principal } from "~/domain/types";
 
 /**
@@ -75,3 +83,22 @@ export async function commitSchemaChange(
   });
   return { ok: true, message: result.message, revision: saved.revision };
 }
+
+/** What the attribute form posts, to create and to save alike. */
+export const attributeFormPayload = z.object({
+  name: z.string(),
+  dataType: z.enum(DATA_TYPES),
+  unit: z.string(),
+  description: z.string(),
+  scope: z.enum(SCOPES),
+  requiredDefault: z.boolean(),
+  filterable: z.boolean().default(false),
+  searchable: z.boolean().default(false),
+  comparable: z.boolean().default(false),
+  key: z.string(),
+  setId: z.string(),
+  implementation: z.enum(IMPLEMENTATIONS),
+  options: z.array(
+    z.object({ code: z.string(), en: z.string(), si: z.string() }),
+  ),
+});

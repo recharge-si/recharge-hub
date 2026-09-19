@@ -1,8 +1,10 @@
-# Attributes
+# Product setup
 
 The attribute schema: what information every product type needs, decided
-once and inherited down a tree of types. It is the **Attributes** entry in the
-primary navigation.
+once and inherited down a tree of types. It is the **Product setup** entry in
+the primary navigation, named for the whole job — product types, their
+attributes, reusable sets and the Shopify mappings — rather than for one of
+its tables.
 
 It is planning data. Nothing in this module reads or writes Shopify: the
 Shopify field key on an attribute names where a metafield definition would be
@@ -68,7 +70,8 @@ come from an injected `IdSource`. The ones with rules worth knowing:
   direct assignment per attribute.
 - **Attach a set** on a type lifts exclusions of its members on that type.
 - **Attach an attribute** that is excluded on that type restores it instead;
-  one already active is refused.
+  one already active is refused. **Attach several** (the picker) does the
+  same per attribute and skips the ones already there.
 - **Restore** an attribute whose source has since been detached attaches it
   directly, so restore always means "it is back".
 - **Set a requirement** writes an override only when it differs from the
@@ -78,6 +81,16 @@ come from an injected `IdSource`. The ones with rules worth knowing:
   the other attribute keeps its options.
 - **Delete an attribute** removes it everywhere with its rules, and its option
   list if nothing else uses it.
+- **Add an attribute** of a choice format takes its options in the same step,
+  so a dropdown never exists without them.
+
+`domain/attributes/impact.ts` answers two questions before a structural
+change is confirmed — what deleting a type takes from the types beneath it,
+and what moving one gains and loses for it and its descendants — by running
+the change on a copy and diffing every affected type's active attributes. It
+also answers where the workspace stands: `empty` (nothing configured),
+`partial` (only categories, or types without attributes), `issues` (checks
+found something) or `ok`. Nothing configured is never reported as passing.
 
 `web/lib/attributes.server.ts` is the one path every screen changes the
 document through: read, check the revision the form was made against, apply
@@ -100,13 +113,28 @@ no query that anything needs yet.
 
 ## Screens
 
-| Route                             | What it is                                                                 |
-| --------------------------------- | -------------------------------------------------------------------------- |
-| `/app/attributes`                 | The catalogue: overview counts and what needs attention, every attribute with where it is used, new attribute, delete everywhere. An empty shop is offered the starter example or an import. |
-| `/app/attributes/:attributeId`    | One attribute's shared definition, its options when it is a select, where it is used, and the advanced mapping (set, Shopify field, scope, implementation). Saved through the contextual save bar. |
-| `/app/attributes/types/:typeId?`  | The tree beside the selected type: its active attributes grouped by where they come from, requirement per row (saved at once), remove and restore, its sources with detach, its details (save bar), and a preview of the fields a product would carry. |
-| `/app/attributes/settings`        | Export and import of the whole document, the sets and where they are attached, the decisions single types have made, and starting again from the example or from nothing. |
-| `/app/attributes/schema.json`     | The export, fetched by `DownloadButton` so the session token travels with it. |
+Every hub page opens with the workspace's own navigation — Product types |
+Attributes | Attribute sets | Settings — as links, the current one stated.
+The Product types link returns to the type last chosen in this browser
+(`localStorage`), so leaving for the catalogue and coming back lands where the
+person was.
+
+| Route                                        | What it is                                                                 |
+| -------------------------------------------- | -------------------------------------------------------------------------- |
+| `/app/product-setup`                         | Lands on product types.                                                    |
+| `/app/product-setup/types/:typeId?`          | The workspace: a searchable tree beside the selected type. The type's name, its parents as a breadcrumb, a one-line summary, an actions menu (add child, rename, move to, move up or down, delete) and three local tabs held in `?tab=`: **Attributes** (a table of name, format, requirement, source and a row menu; the picker adds several attributes and sets at once or opens the create dialog with the type preselected; removals and sources sit beneath), **Details** (name, parent with the move's consequences stated live, product type or organising category, Shopify category; saved through the save bar) and **Preview**. With no type chosen, a wide screen picks the remembered or first type; a narrow screen shows the list and the editor in turn, with a way back. A missing type id returns to the tree. |
+| `/app/product-setup/attributes`              | The catalogue: name, format, where used, Shopify field. Search is kept in `?q=`. New attribute is one dialog, complete with options, unit and where to add it. |
+| `/app/product-setup/attributes/:attributeId` | The focused editor with a breadcrumb back, the same form as creation plus the flags, the types it is on, and the one delete that reaches everywhere. |
+| `/app/product-setup/sets`                    | Sets with members and where each is attached; new, edit, delete, attach, detach. |
+| `/app/product-setup/settings`                | The checks in their four states, export and import, exceptions single types have made, and starting again. |
+| `/app/product-setup/schema.json`             | The export, fetched by `DownloadButton` so the session token travels with it. |
+
+Consequences are stated where the action is taken, in numbers from
+`impact.ts`: a delete confirmation says how many children move up, what
+attached here goes with it and how many fields the types beneath lose; a move
+says what the type and its descendants gain and lose. Removing an attribute
+from one type, detaching a source and deleting the definition are three
+different actions in three different places.
 
 The starter example (`domain/attributes/starter.ts`) is loaded only when a
 person asks for it.
@@ -127,6 +155,12 @@ described under *Document*.
 - No sharing of one option list between two attributes from the UI; each
   select attribute owns its list. Lists shared through import keep working and
   fork on first edit.
-- No drag-and-drop in the tree; a type is moved with *Under* in its details
-  and ordered with *Move up* / *Move down*.
+- No drag-and-drop in the tree: Polaris web components own their internal
+  DOM, so a drag handle cannot be attached to a row without custom markup. A
+  type is moved with *Move to…* in its actions menu or *Under* in its
+  details, both stating the consequences, and ordered with *Move up* /
+  *Move down*.
+- The requirement per row saves as soon as it is changed; the details form
+  and the attribute editor save through the contextual save bar, which is
+  also what asks before a type or a route is left with edits unsaved.
 - Nothing is created in Shopify from the plan yet.
