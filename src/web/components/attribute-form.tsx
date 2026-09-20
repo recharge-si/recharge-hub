@@ -512,7 +512,11 @@ export function AttributeCreateModal({
       ref={(element) => {
         overlay.current = (element as Overlay) ?? null;
       }}
-      onAfterHide={() => {
+      onAfterHide={(event) => {
+        // The format and scope lists are popovers inside this dialog, and
+        // their own `afterhide` bubbles up here when a choice closes them.
+        // Only the dialog closing resets the form.
+        if (event.target !== event.currentTarget) return;
         setForm(blankAttributeForm());
         setTried(false);
         setServerError(null);
