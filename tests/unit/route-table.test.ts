@@ -97,6 +97,40 @@ describe("route table", () => {
     );
   });
 
+  it("gives Translations its languages, one language, and its sections", async () => {
+    // `app.translations._index.tsx` rather than `app.translations.tsx`, for
+    // the reason Locations gives: a leaf with children is a layout with no
+    // outlet, and every section would render blank.
+    expect(await fileFor("/app/translations")).toBe(
+      "routes/app.translations._index.tsx",
+    );
+    expect(await fileFor("/app/translations/add")).toBe(
+      "routes/app.translations.add.tsx",
+    );
+    expect(await fileFor("/app/translations/languages/de")).toBe(
+      "routes/app.translations.languages.$locale.tsx",
+    );
+    expect(await fileFor("/app/translations/editor")).toBe(
+      "routes/app.translations.editor.tsx",
+    );
+    expect(await fileFor("/app/translations/translate")).toBe(
+      "routes/app.translations.translate.tsx",
+    );
+    // Syncs is a list beside its detail page, the Orders shape again.
+    expect(await fileFor("/app/translations/syncs")).toBe(
+      "routes/app.translations.syncs._index.tsx",
+    );
+    expect(await fileFor("/app/translations/syncs/abc123")).toBe(
+      "routes/app.translations.syncs.$syncId.tsx",
+    );
+    expect(await fileFor("/app/translations/glossary")).toBe(
+      "routes/app.translations.glossary.tsx",
+    );
+    expect(await fileFor("/app/translations/usage")).toBe(
+      "routes/app.translations.usage.tsx",
+    );
+  });
+
   it("gives a sale campaign its editor, its variants and its export", async () => {
     // `app.sales.$campaignId._index.tsx` rather than `app.sales.$campaignId.tsx`,
     // for the reason Locations gives: a leaf with children becomes a layout

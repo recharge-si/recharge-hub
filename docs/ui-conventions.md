@@ -148,6 +148,14 @@ differs it is given, because the code is not going to be renamed to match.
 | **On sale** | A variant whose compare-at is above its price, whoever set it. | `isOnSale` |
 | **Put back** / **restore** | Writing the recorded original pair back. Never "reset". | `restoreRows`, `restored` |
 | **Needs a decision** | A variant whose price was changed outside its campaign and waits for a person. Never "conflict" in copy for this; "conflict" is two campaigns. | `state = review`, `sale_price_conflict` |
+| **Language** | A Shopify locale as a merchant sees it: "German (de)". "Locale" is the code beneath it and stays where the code is shown. | `ShopLocale`, `locale` |
+| **Default language** | The store's primary locale, which the AI translates from. Never "primary" in copy. | `ShopLocale.primary`, `sourceLocale` |
+| **Published** / **Unpublished** | What Shopify says about a language: visible to shoppers or not. A Shopify fact, never a consequence of AI settings. | `ShopLocale.published` |
+| **AI translation** | This app's engine working on a language. Its state is "Off", "On, when asked" or "Automatic"; never "published". | `TranslationLanguage.aiEnabled` |
+| **Sync** (translations) | One translation run, with its items. Never "job" in copy. | `TranslationSync`, `/app/translations/syncs` |
+| **Edited by a person** | A translation a person wrote or corrected, which the AI protects. Never "manual" in copy. | `owner = manual` |
+| **Outdated** | Shopify's own word for a translation whose source has changed since. | `Translation.outdated` |
+| **Estimated cost** | Every money figure on the AI usage pages; the provider reports tokens, not money. Never "cost" alone. | `estimated_cost_micros`, `PRICING_VERSION` |
 
 Words that must not appear in merchant-facing copy: **article** (the build
 specification's word for a MetaKocka product), **token**, **template**, **code**

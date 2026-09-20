@@ -22,16 +22,19 @@ export interface NavItem {
 export const APP_HOME = "/app";
 
 /**
- * Five visible entries. Orders, Products and Locations are all the MetaKocka
+ * Six visible entries. Orders, Products and Locations are all the MetaKocka
  * integration seen from three sides, and three top-level items for one job
  * made the menu longer than the job; they live under one **MetaKocka** entry
  * whose page (`/app/metakocka`) opens onto them. Their own addresses are
- * unchanged, so every link and bookmark still lands.
+ * unchanged, so every link and bookmark still lands. **Translations**
+ * (docs/translations.md) is the store's languages and their translations,
+ * with its own sections beneath it.
  */
 export const APP_NAV: readonly NavItem[] = [
   { href: APP_HOME, label: "Home", rel: "home" },
   { href: "/app/sales", label: "Sales" },
   { href: "/app/product-setup", label: "Metafields" },
+  { href: "/app/translations", label: "Translations" },
   { href: "/app/metakocka", label: "MetaKocka" },
   { href: "/app/exceptions", label: "Needs attention" },
   { href: "/app/settings", label: "Settings" },

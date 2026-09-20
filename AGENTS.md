@@ -20,6 +20,9 @@ documentation, or Git—not only in a conversation.
   machine, price snapshot and restore, conflicts, scheduler and known limits.
 - `docs/attributes.md` owns product setup (the attribute schema): document,
   inheritance, changes, persistence, screens, import and export, known limits.
+- `docs/translations.md` owns the translations module: ownership between
+  Shopify, this app and the environment, the data model, the overwrite rules,
+  the provider and usage accounting, jobs, screens, scopes and known limits.
 - Code and tests define implemented behavior. Git records historical behavior.
 - `docs/agent/HANDOFF.md`, when present, is the concise state of substantial
   unfinished work. It is not a permanent backlog.

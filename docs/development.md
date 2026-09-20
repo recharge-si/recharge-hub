@@ -100,10 +100,12 @@ HMAC verification and can look like an application regression.
 | `SHOPIFY_API_KEY`                                   |      yes | Shopify public app key; injected by CLI in normal dev                |
 | `SHOPIFY_API_SECRET`                                |      yes | Shopify app secret; never commit it                                  |
 | `SHOPIFY_APP_URL`                                   |      yes | Absolute public/tunnel URL                                           |
-| `SCOPES`                                            |      yes | Comma-separated Shopify scopes, kept aligned with `shopify.app.toml`. `read_discounts` was added for sale campaigns on 2026-09-19; the merchant approves it on next open |
+| `SCOPES`                                            |      yes | Comma-separated Shopify scopes, kept aligned with `shopify.app.toml`. `read_discounts` was added for sale campaigns on 2026-09-19; the locale, translation, markets and content read scopes for translations on 2026-09-20 (docs/translations.md § Required scopes); the merchant approves them on next open |
 | `DATABASE_URL`                                      |      yes | Host-process PostgreSQL connection                                   |
 | `ENCRYPTION_KEY`                                    |      yes | 32 random bytes encoded as Base64                                    |
 | `SHOP_CUSTOM_DOMAIN`                                |       no | Custom shop domain accepted by Shopify auth                          |
+| `OPENAI_API_KEY`                                    |       no | The one server-side key AI translation uses (docs/translations.md § The provider). Never shown, stored or logged; blank disables AI translation and every other feature still works |
+| `OPENAI_TRANSLATION_MODEL`                          |       no | The OpenAI model to translate with; defaults to `gpt-4.1-mini`. Costs are estimated only for models in `src/domain/translations/pricing.ts` |
 | `SENTRY_DSN`                                        |       no | Error reporting; blank disables Sentry                               |
 | `SENTRY_ENVIRONMENT`                                |       no | Environment label sent to Sentry                                     |
 | `LOG_LEVEL`                                         |       no | pino level; defaults to `info`                                       |

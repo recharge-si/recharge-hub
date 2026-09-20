@@ -31,7 +31,7 @@ Completed work belongs in Git history, not in this file.
   `sync_stock` safeguards
 - Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
   visibility, dashboard, orders, and exceptions UI
-- Five-area information architecture with settings under the thing they
+- Six-area information architecture with settings under the thing they
   configure, and redirects from the three routes that moved
 - The app's name in the admin nav opens Home: `/app` is the named home route
   and the root decides embedded-or-outside from the admin's own markers, so an
@@ -67,7 +67,17 @@ Completed work belongs in Git history, not in this file.
   exact-type exceptions, planned as one document per shop under a revision
   guard, with JSON export and import (including the standalone builder's own
   files); nothing is written to Shopify from it yet
-- 916 fixture-driven tests across pure domain, adapters, presentation helpers,
+- Translations (`docs/translations.md`): the store's languages read live from
+  Shopify and managed from the app (add, publish, unpublish, markets, remove),
+  AI translation through one server-side OpenAI key with per-language
+  settings, content scope and overwrite policy, a translation editor that
+  saves natively to Shopify and records a person's edits so the AI never
+  overwrites them, per-resource source-language overrides with detection as a
+  suggestion, a glossary, Translate store with an estimate, background syncs
+  with progress, cancel and per-item outcomes, automatic translation of new
+  and changed products and a nightly pass for the rest, and an AI usage ledger
+  with one row per provider request and a versioned estimated cost
+- 1085 fixture-driven tests across pure domain, adapters, presentation helpers,
   the route table, the app's entry points, the order-to-MetaKocka vertical
   slice and the tax pipeline end to end, plus PostgreSQL tests for the
   reconciliation lock, the `count_code` claim, the payment ledger's unique
@@ -213,6 +223,35 @@ a merchant-consent event (see T-07), so it is a decision rather than a task.
   delivers `ORDERS_EDITED`; the `refunds/create`, `orders/edited` and
   `orders/delete` branches there may never match. Noticed, not changed — it is
   outside the sale work and needs its own verification against a delivery.
+
+### T-26 — Translations: known limits
+
+The module is described in `docs/translations.md`; its § Known limits is the
+current list. The ones a person may want to decide on:
+
+- **Only products have a webhook.** Collections, pages, articles, navigation
+  and metafields are translated automatically by the nightly sync. Adding
+  `collections/update`, `articles/*` and `pages/*` subscriptions would make
+  them immediate.
+- **The primary locale's text cannot be written.** Shopify refuses
+  translations for the primary locale, so a resource written in another
+  language (a Slovenian article in an English store) gets every other
+  language directly from Slovenian but its English text stays whatever is in
+  the resource itself. Writing the original would be editing content, which
+  this module deliberately does not do.
+- **Cost is estimated, never billed.** The provider reports tokens; the price
+  per token is `src/domain/translations/pricing.ts` under `PRICING_VERSION`.
+  Bump the version and the table when OpenAI changes prices; rows already
+  recorded keep the version they were priced under.
+- **The embedded pages were not driven in a browser by the agent that built
+  them,** for the reason T-25 gives. Types, lint, the domain tests, the
+  route-table test and the build pass; the walkthrough in
+  `docs/translations.md` § Screens is what to click through. The one path
+  that most needs a live check is `shopLocaleUpdate` with
+  `marketWebPresenceIds`, whose behaviour for a market's default locale is
+  read from the schema, not observed.
+- **No database tests yet** for the ownership upsert and the sync cursor
+  (T-01/T-04 apply).
 
 ### T-25 — Product setup: a plan with no Shopify side yet
 

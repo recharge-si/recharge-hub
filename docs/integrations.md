@@ -18,6 +18,7 @@ probe evidence belong in `docs/metakocka-verification.md`.
 | Inventory for `shopify_to_mk` locations  | Shopify → MetaKocka         | Complete `sync_stock` write for that warehouse only         |
 | Fulfilment-order placement               | Planned app → Shopify       | Queue exists; no consumer yet                               |
 | Tracking                                 | Planned MetaKocka → Shopify | Blocked: verified sales-order payload has no tracking field |
+| Store languages and translations         | Shopify ↔ app ↔ OpenAI      | `docs/translations.md`: Shopify owns locales and every string; the app owns AI settings, ownership and usage; OpenAI only computes |
 
 Missing directions and product decisions are tracked in
 `docs/project-status.md` rather than implied here.
@@ -35,6 +36,10 @@ Missing directions and product decisions are tracked in
 | `write_inventory` | Writing MetaKocka stock into Shopify for `mk_to_shopify` locations. |
 | `write_products` | Merchant-enabled MetaKocka product-name and product-creation sync (off by default), and sale campaigns writing variant `price` / `compareAtPrice` (`docs/sale-campaigns.md`). |
 | `read_discounts` | One warning only: a sale campaign's preview names the automatic discounts Shopify would apply at checkout on top of the catalogue price. Until granted, the preview says "not checked". |
+| `read_locales`, `write_locales` | Listing, adding, publishing, unpublishing and removing the store's languages (`docs/translations.md`). |
+| `read_translations`, `write_translations` | Reading translatable content and existing translations; registering and removing translations, which is the only way a translation reaches the storefront. |
+| `read_markets` | Which market web presences serve a language, shown on the Languages and language pages. |
+| `read_content`, `read_online_store_pages`, `read_online_store_navigation` | The translation editor's title search for articles and blogs, pages, and menus. Nothing is written. |
 
 **`write_orders` is deliberately not requested.** Synchronising Shopify into
 MetaKocka never writes to a Shopify order, so asking for it would be permission
@@ -118,6 +123,17 @@ adapter so the parsers cannot drift:
 requires optimistic `changeFromQuantity` values, applies idempotency directives,
 activates missing levels, batches writes, and refuses a location not owned by
 this app.
+
+## OpenAI
+
+One server-side key, `OPENAI_API_KEY`, and one model,
+`OPENAI_TRANSLATION_MODEL`, read from the environment by
+`src/adapters/ai/openai.server.ts` and nowhere else. The key is never returned
+through an endpoint, stored in Shopify or the database, or logged. Every
+request goes through that module's `callModel`, which records an `ai_usage`
+row for every attempt that reaches the provider (docs/translations.md § The
+provider). OpenAI computes translations and language detection; it holds no
+state of ours.
 
 ## MetaKocka
 

@@ -34,7 +34,7 @@ Caddy is the only production ingress and proxies to the web process.
 | Area            | Responsibility                                                                             | May depend on                   |
 | --------------- | ------------------------------------------------------------------------------------------ | ------------------------------- |
 | `src/domain/`   | Pure allocation, money, order-state, product-template, supply-default, tax, sale and attribute-schema rules | Domain only                     |
-| `src/adapters/` | External boundaries: Shopify, MetaKocka, Prisma, queues, crypto, logs, Sentry, environment; `adapters/sales/` is the sale-campaign service layer both web and jobs call | Domain |
+| `src/adapters/` | External boundaries: Shopify, MetaKocka, Prisma, queues, crypto, logs, Sentry, environment, OpenAI (`adapters/ai/`); `adapters/sales/` and `adapters/translations/` are service layers both web and jobs call | Domain |
 | `src/jobs/`     | Application orchestration and pg-boss handlers                                             | Domain and adapters             |
 | `src/web/`      | React Router loaders/actions, webhook endpoints, and embedded UI                           | Domain and adapters, never jobs |
 
@@ -44,7 +44,7 @@ randomness; callers inject time and inputs.
 
 ## Merchant-facing shape
 
-Five visible entries in `s-app-nav`, each a job rather than a table. Every
+Six visible entries in `s-app-nav`, each a job rather than a table. Every
 settings page lives with the thing it configures, so nothing in the navigation
 is a database name:
 
@@ -56,6 +56,9 @@ Metafields        /app/product-setup    lands on /app/product-setup/types/:typeI
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
                                         /attributes/:id one attribute), /sets and /settings
+Translations      /app/translations     the store's languages (docs/translations.md); its own
+                                        navigation reaches /add, /languages/:locale, /editor,
+                                        /translate, /syncs (/:syncId), /glossary and /usage
 MetaKocka         /app/metakocka        the integration's front door: how each side is
                                         doing, opening onto
   Orders          /app/orders           list, and /app/orders/settings
@@ -530,6 +533,31 @@ revision every write is conditional on; screens under `app.product-setup.*`
 sharing `web/lib/attributes.server.ts` as the one path that changes it.
 Nothing here reads or writes Shopify yet.
 
+### Translations
+
+The store's languages and their translations, managed from inside the app
+with Shopify as the source of truth and OpenAI doing the translating —
+`docs/translations.md`. Pure rules in `src/domain/translations/` (which
+fields to translate and who owns a translation, the prompt and its strict
+parser, a versioned pricing table, estimates, coverage); Shopify locale and
+translation operations in `adapters/shopify/locales.ts` and
+`translations.ts`; **one provider path** in `adapters/ai/openai.server.ts`
+that records every request as an `ai_usage` row; the engine and the sync
+start in `adapters/translations/`; screens under `app.translations.*`.
+
+```text
+/app/translations … ── startSync ──▶ translation-sync (one page per pass, cursor over recorded work)
+  → engine: plan → OpenAI → translationsRegister → translation_ownership
+products/create, products/update → translation-resource-event: one product, inline
+nightly tick → automatic sync per language with automatic translation on; translation-coverage per shop
+```
+
+The safety boundary is ownership: every value this app writes is hashed in
+`translation_ownership`, an AI-owned value that no longer matches was edited
+by a person and is protected from then on, and a translation Shopify held
+before this app is treated as human work. Nothing of Shopify's — locales,
+publication, original or translated strings — is stored.
+
 ### Catalogue and product names
 
 - `sync-catalogue` reads Shopify variants and MetaKocka products into the SKU
@@ -545,11 +573,13 @@ Nothing here reads or writes Shopify yet.
 
 - every 5 minutes: inventory sync;
 - every 15 minutes: warehouse refresh, Shopify order reconciliation, exception
-  re-check, due merchant-scheduled catalogue work, and the catalogue snapshot
-  for shops with a scheduled or dynamic sale campaign;
+  re-check, due merchant-scheduled catalogue work, the catalogue snapshot
+  for shops with a scheduled or dynamic sale campaign, and giving up on
+  translation syncs whose job died;
 - hourly: MetaKocka document read-back;
 - nightly: payment/profit-centre/pricelist refresh, the catalogue snapshot for
-  every shop, and PII retention.
+  every shop, PII retention, one automatic translation sync per language with
+  automatic translation on, and the translation coverage count per shop.
 
 The sale campaign scheduler is a fifth cron entry of its own, every minute on
 the `sale-campaign-scheduler` queue, because a sale that starts at midnight
@@ -593,7 +623,12 @@ history under `prisma/migrations/`. Major groups are:
   `CatalogPriceList`, with `shop.catalogue_snapshot_at` and the bulk
   operation in flight;
 - attributes: `AttributeSchema`, the whole planned schema as one JSON
-  document per shop with a `revision` for conditional writes.
+  document per shop with a `revision` for conditional writes;
+- translations: `TranslationLanguage` (the engine's settings per locale),
+  `TranslationCoverage` (a counted cache), `TranslationGlossaryTerm`,
+  `TranslationSourceOverride`, `TranslationOwnership` (what this app wrote,
+  hashed), `TranslationSync` and `TranslationSyncItem`, `AiUsage` (one row
+  per provider request, with an estimated cost and the pricing version).
 
 Most tables are tenant-owned through `shopId`. The current repository-layer
 enforcement gap is tracked in `docs/project-status.md`.
@@ -611,6 +646,7 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Tax rule, treatment or mapping | `src/domain/tax/`, then `src/jobs/orders/tax-decider.ts`; screens under `app.settings.taxes.*` |
 | Sale pricing, rule or conflict rule | `src/domain/sales/`; the write path is `src/adapters/sales/writer.server.ts`; screens under `app.sales.*` |
 | Attribute schema rule or screen | `src/domain/attributes/`, then `web/lib/attributes.server.ts`; screens under `app.product-setup.*` |
+| Translation rule, prompt or price | `src/domain/translations/`; the engine is `src/adapters/translations/engine.server.ts`, the provider `src/adapters/ai/openai.server.ts`; screens under `app.translations.*` |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
 | What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |
