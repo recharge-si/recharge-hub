@@ -13,6 +13,7 @@ import {
   detachSet,
   excludeAttribute,
   moveType,
+  placeType,
   restoreAttribute,
   setRequirement,
   updateAttribute,
@@ -139,6 +140,33 @@ describe("product types", () => {
         ),
       ).toBe(false);
       expect(schemaProblems(result.schema)).toEqual([]);
+    });
+  });
+
+  it("places a type before a sibling, at the end, or under another parent", () => {
+    const schema = starterSchema();
+    const before = ok(placeType(schema, "freeride", "sails", "wave"));
+    expect(childrenOf(before.schema, "sails").map((t) => t.id)).toEqual([
+      "freeride",
+      "wave",
+    ]);
+    expect(before.message).toBe("Order changed.");
+    const end = ok(placeType(before.schema, "freeride", "sails", null));
+    expect(childrenOf(end.schema, "sails").map((t) => t.id)).toEqual([
+      "wave",
+      "freeride",
+    ]);
+    const moved = ok(placeType(schema, "wave", "boards", "waveboard"));
+    expect(childrenOf(moved.schema, "boards").map((t) => t.id)).toEqual([
+      "wave",
+      "waveboard",
+    ]);
+    expect(moved.message).toBe("Product type moved.");
+    expect(placeType(schema, "sails", "wave", null)).toMatchObject({
+      ok: false,
+    });
+    expect(placeType(schema, "wave", "sails", "nope")).toMatchObject({
+      ok: false,
     });
   });
 

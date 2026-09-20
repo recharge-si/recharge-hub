@@ -185,6 +185,60 @@ export function deleteType(
   );
 }
 
+/**
+ * Puts a type under a parent at a place among its siblings: before
+ * `beforeId`, or last when that is null. The parent may be the one it has,
+ * which makes this a reorder, or another, which makes it a move as well.
+ */
+export function placeType(
+  schema: AttributeSchema,
+  typeId: string,
+  parentId: string | null,
+  beforeId: string | null,
+): MutationResult {
+  const type = typeById(schema, typeId);
+  if (!type) return refuse("That product type no longer exists.");
+  if (parentId !== null) {
+    if (typeById(schema, parentId) === null)
+      return refuse("The parent product type no longer exists.");
+    if (isWithin(schema, parentId, typeId))
+      return refuse(
+        "A product type cannot be moved under itself or one of its descendants.",
+      );
+  }
+  if (
+    childrenOf(schema, parentId).some(
+      (t) => t.id !== typeId && same(t.name, type.name),
+    )
+  )
+    return refuse(
+      "A product type with that name already exists under the same parent.",
+    );
+
+  const siblings = childrenOf(schema, parentId).filter((t) => t.id !== typeId);
+  const at =
+    beforeId === null ? -1 : siblings.findIndex((t) => t.id === beforeId);
+  if (beforeId !== null && at === -1)
+    return refuse("The product type to place it before is no longer there.");
+  const ordered = [...siblings];
+  ordered.splice(at === -1 ? ordered.length : at, 0, { ...type, parentId });
+  const order = new Map(ordered.map((t, index) => [t.id, (index + 1) * 1000]));
+
+  return done(
+    {
+      ...schema,
+      types: schema.types.map((t) =>
+        t.id === typeId
+          ? { ...t, parentId, sortOrder: order.get(t.id) as number }
+          : order.has(t.id)
+            ? { ...t, sortOrder: order.get(t.id) as number }
+            : t,
+      ),
+    },
+    parentId === type.parentId ? "Order changed." : "Product type moved.",
+  );
+}
+
 export function moveType(
   schema: AttributeSchema,
   typeId: string,

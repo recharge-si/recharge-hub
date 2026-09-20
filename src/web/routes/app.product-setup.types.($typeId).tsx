@@ -28,6 +28,7 @@ import {
   detachSet,
   excludeAttribute,
   moveType,
+  placeType,
   restoreAttribute,
   setRequirement,
   updateType,
@@ -109,6 +110,19 @@ interface Details {
 }
 
 type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
+
+/** Where a dragged row lands: among a row's siblings, or beneath it. */
+type DropPosition = "before" | "after" | "inside";
+
+/** The top and bottom quarters of a row place beside it; the middle nests. */
+function positionFrom(event: {
+  clientY: number;
+  currentTarget: Element;
+}): DropPosition {
+  const box = event.currentTarget.getBoundingClientRect();
+  const y = (event.clientY - box.top) / Math.max(box.height, 1);
+  return y < 0.25 ? "before" : y > 0.75 ? "after" : "inside";
+}
 
 /** The tree flattened in display order, so the client only decides what to hide. */
 function flatten(schema: AttributeSchema) {
@@ -425,6 +439,31 @@ export const action = async ({
         });
       });
     }
+    case "place-type": {
+      const position = field("position");
+      if (
+        position !== "before" &&
+        position !== "after" &&
+        position !== "inside"
+      )
+        return unreadable;
+      const target = field("target") || null;
+      return commit("attribute_schema.type.moved", (schema) => {
+        if (position === "inside")
+          return placeType(schema, typeId, target, null);
+        if (target === null) return placeType(schema, typeId, null, null);
+        const anchor = typeById(schema, target);
+        if (!anchor)
+          return { ok: false, message: "That product type no longer exists." };
+        const siblings = childrenOf(schema, anchor.parentId).filter(
+          (t) => t.id !== typeId,
+        );
+        const index = siblings.findIndex((t) => t.id === target);
+        const before =
+          position === "before" ? target : (siblings[index + 1]?.id ?? null);
+        return placeType(schema, typeId, anchor.parentId, before);
+      });
+    }
     case "move-to":
       return commit("attribute_schema.type.moved", (schema) => {
         const type = typeById(schema, typeId);
@@ -624,12 +663,16 @@ export default function ProductTypes() {
   } | null>(null);
   const pickerOverlay = useRef<Overlay | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
-  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<{
+    id: string;
+    position: DropPosition;
+  } | null>(null);
   const [pendingDrop, setPendingDrop] = useState<{
     sourceId: string;
     sourceName: string;
-    targetId: string | null;
-    targetName: string;
+    target: string | null;
+    position: DropPosition;
+    parentName: string;
   } | null>(null);
   const impactFetcher = useFetcher<typeof loader>();
   const [editing, setEditing] = useState<{
@@ -772,18 +815,45 @@ export default function ProductTypes() {
   const nameOfRow = (id: string) =>
     tree.find((row) => row.id === id)?.name ?? "";
 
-  const askToDrop = (sourceId: string, targetId: string | null) => {
+  const drop = (
+    sourceId: string,
+    target: string | null,
+    position: DropPosition,
+  ) => {
     setDragging(null);
     setDropTarget(null);
-    if (targetId !== null && isWithinRow(targetId, sourceId)) return;
-    if ((parentOf.get(sourceId) ?? null) === targetId) return;
+    if (target !== null && isWithinRow(target, sourceId)) return;
+    if (target === sourceId) return;
+    const newParent =
+      target === null
+        ? null
+        : position === "inside"
+          ? target
+          : (parentOf.get(target) ?? null);
+    const sameParent = (parentOf.get(sourceId) ?? null) === newParent;
+    if (sameParent && position === "inside") return;
+    // A reorder among the same siblings changes what nobody inherits, so it
+    // just happens; a new parent is confirmed with what it changes.
+    if (sameParent) {
+      submit({
+        intent: "place-type",
+        typeId: sourceId,
+        target: target ?? "",
+        position,
+      });
+      return;
+    }
     setPendingDrop({
       sourceId,
       sourceName: nameOfRow(sourceId),
-      targetId,
-      targetName: targetId === null ? "the top level" : nameOfRow(targetId),
+      target,
+      position,
+      parentName: newParent === null ? "the top level" : nameOfRow(newParent),
     });
-    const query = new URLSearchParams({ impact: sourceId, to: targetId ?? "" });
+    const query = new URLSearchParams({
+      impact: sourceId,
+      to: newParent ?? "",
+    });
     void impactFetcher.load(
       `${PRODUCT_SETUP_ROUTES.types}?${query.toString()}`,
     );
@@ -839,18 +909,23 @@ export default function ProductTypes() {
               if (isWithinRow(row.id, dragging)) return;
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
-              if (dropTarget !== row.id) setDropTarget(row.id);
+              const position = positionFrom(event);
+              if (dropTarget?.id !== row.id || dropTarget.position !== position)
+                setDropTarget({ id: row.id, position });
             }}
             onDragLeave={() => {
-              if (dropTarget === row.id) setDropTarget(null);
+              if (dropTarget?.id === row.id) setDropTarget(null);
             }}
             onDrop={(event) => {
               event.preventDefault();
               const sourceId =
                 dragging ?? event.dataTransfer.getData("text/plain");
-              if (sourceId) askToDrop(sourceId, row.id);
+              if (sourceId) drop(sourceId, row.id, positionFrom(event));
             }}
           >
+            {dropTarget?.id === row.id && dropTarget.position === "before" ? (
+              <s-box blockSize="3px" background="strong" borderRadius="base" />
+            ) : null}
             <s-box
               paddingInlineStart={
                 row.depth === 0
@@ -897,7 +972,8 @@ export default function ProductTypes() {
                   paddingBlock="small-400"
                   inlineSize="100%"
                   background={
-                    dropTarget === row.id
+                    dropTarget?.id === row.id &&
+                    dropTarget.position === "inside"
                       ? "strong"
                       : selected?.id === row.id
                         ? "subdued"
@@ -949,6 +1025,9 @@ export default function ProductTypes() {
                 />
               </s-grid>
             </s-box>
+            {dropTarget?.id === row.id && dropTarget.position === "after" ? (
+              <s-box blockSize="3px" background="strong" borderRadius="base" />
+            ) : null}
           </div>
         ))}
         {dragging !== null && (parentOf.get(dragging) ?? null) !== null ? (
@@ -956,14 +1035,15 @@ export default function ProductTypes() {
             onDragOver={(event) => {
               event.preventDefault();
               event.dataTransfer.dropEffect = "move";
-              if (dropTarget !== "") setDropTarget("");
+              if (dropTarget?.id !== "")
+                setDropTarget({ id: "", position: "inside" });
             }}
             onDragLeave={() => {
-              if (dropTarget === "") setDropTarget(null);
+              if (dropTarget?.id === "") setDropTarget(null);
             }}
             onDrop={(event) => {
               event.preventDefault();
-              if (dragging) askToDrop(dragging, null);
+              if (dragging) drop(dragging, null, "inside");
             }}
           >
             <s-box
@@ -971,8 +1051,8 @@ export default function ProductTypes() {
               borderRadius="base"
               borderWidth="base"
               borderStyle="dashed"
-              borderColor={dropTarget === "" ? "strong" : "subdued"}
-              background={dropTarget === "" ? "strong" : "transparent"}
+              borderColor={dropTarget?.id === "" ? "strong" : "subdued"}
+              background={dropTarget?.id === "" ? "strong" : "transparent"}
             >
               <s-text color="subdued">
                 Drop here to make it a top-level type
@@ -981,7 +1061,7 @@ export default function ProductTypes() {
           </div>
         ) : null}
         <s-text color="subdued">
-          {`Numbers are attributes on the type. A dot marks a category, which only organises the types beneath it. Drag a row onto another to move it there.`}
+          {`Numbers are attributes on the type. A dot marks a category, which only organises the types beneath it. Drag a row onto another to put it beneath, or to the edge of a row to place it beside.`}
         </s-text>
       </s-stack>
     </s-section>
@@ -1095,7 +1175,7 @@ export default function ProductTypes() {
 
       <s-modal
         id={DROP_MODAL_ID}
-        heading={`Move “${pendingDrop?.sourceName ?? ""}” under ${pendingDrop?.targetName ?? ""}?`}
+        heading={`Move “${pendingDrop?.sourceName ?? ""}” under ${pendingDrop?.parentName ?? ""}?`}
       >
         <s-paragraph>
           {impactFetcher.state !== "idle"
@@ -1112,9 +1192,10 @@ export default function ProductTypes() {
           onClick={() => {
             if (!pendingDrop) return;
             submit({
-              intent: "move-to",
+              intent: "place-type",
               typeId: pendingDrop.sourceId,
-              parentId: pendingDrop.targetId ?? "",
+              target: pendingDrop.target ?? "",
+              position: pendingDrop.position,
             });
             setPendingDrop(null);
           }}
