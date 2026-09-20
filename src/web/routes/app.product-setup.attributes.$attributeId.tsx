@@ -137,7 +137,9 @@ export const action = async ({
       (schema) => deleteAttribute(schema, attributeId),
       actor,
     );
-    if (result.ok)
+    // A dialog on another page deletes with `stay`; only the editor page
+    // itself has nowhere left to be and goes back to the catalogue.
+    if (result.ok && String(formData.get("stay") ?? "") !== "1")
       throw redirectWithin(request, PRODUCT_SETUP_ROUTES.attributes);
     return result;
   }

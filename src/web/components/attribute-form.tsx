@@ -566,3 +566,236 @@ export function AttributeCreateModal({
     </s-modal>
   );
 }
+
+/* -------------------------------------------------------------------------- */
+/* Editing                                                                    */
+/* -------------------------------------------------------------------------- */
+
+export interface EditableAttribute {
+  id: string;
+  name: string;
+  form: AttributeFormValue;
+  /** How many product types it is on, for the delete confirmation. */
+  usedBy: number;
+}
+
+/**
+ * The attribute's editor as a dialog, so the catalogue and a product type's
+ * list edit in place. Saves and deletes through the attribute's own route
+ * with `stay`, which keeps the page that opened it where it is. Deleting is
+ * a second step inside the same dialog, since a dialog cannot open another.
+ */
+export function AttributeEditModal({
+  id,
+  revision,
+  sets,
+  attribute,
+}: {
+  id: string;
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  /** Null until a row is chosen; the dialog then renders that attribute. */
+  attribute: EditableAttribute | null;
+}) {
+  return attribute ? (
+    <AttributeEditDialog
+      key={attribute.id}
+      id={id}
+      revision={revision}
+      sets={sets}
+      attribute={attribute}
+    />
+  ) : (
+    <s-modal id={id} heading="Edit attribute" size="large" />
+  );
+}
+
+function AttributeEditDialog({
+  id,
+  revision,
+  sets,
+  attribute,
+}: {
+  id: string;
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  attribute: EditableAttribute;
+}) {
+  const fetcher = useFetcher<CreateResult>();
+  const busy = fetcher.state !== "idle";
+  const overlay = useRef<Overlay | null>(null);
+  const [form, setForm] = useState<AttributeFormValue>(attribute.form);
+  const [tried, setTried] = useState(false);
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [serverError, setServerError] = useState<string | null>(null);
+
+  const errors = tried ? attributeFormErrors(form) : {};
+  const missing = Object.keys(errors).length;
+  const action = PRODUCT_SETUP_ROUTES.attribute(attribute.id);
+
+  useEffect(() => {
+    if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (fetcher.data.ok) {
+      overlay.current?.hideOverlay?.();
+      if (typeof shopify !== "undefined")
+        shopify.toast.show(fetcher.data.message);
+    } else {
+      setServerError(fetcher.data.message);
+    }
+  }, [fetcher.state, fetcher.data]);
+
+  const save = () => {
+    setTried(true);
+    setServerError(null);
+    if (Object.keys(attributeFormErrors(form)).length > 0) return;
+    fetcher.submit(
+      {
+        intent: "save",
+        stay: "1",
+        revision: String(revision),
+        form: JSON.stringify(serialiseAttributeForm(form)),
+      },
+      { method: "post", action },
+    );
+  };
+
+  const remove = () =>
+    fetcher.submit(
+      { intent: "delete", stay: "1", revision: String(revision) },
+      { method: "post", action },
+    );
+
+  return (
+    <s-modal
+      id={id}
+      heading={attribute.name}
+      size="large"
+      ref={(element) => {
+        overlay.current = (element as Overlay) ?? null;
+      }}
+      onAfterHide={(event) => {
+        if (event.target !== event.currentTarget) return;
+        setForm(attribute.form);
+        setTried(false);
+        setConfirmingDelete(false);
+        setServerError(null);
+      }}
+    >
+      <s-stack direction="block" gap="base">
+        {serverError ? (
+          <s-banner tone="critical" heading="Not saved">
+            <s-paragraph>{serverError}</s-paragraph>
+          </s-banner>
+        ) : null}
+        <AttributeFields
+          value={form}
+          onChange={setForm}
+          errors={errors}
+          sets={sets}
+          mode="edit"
+        />
+        {tried && missing > 0 ? (
+          <s-text tone="critical">
+            {missing === 1
+              ? "One field above needs attention before this can be saved."
+              : `${missing} fields above need attention before this can be saved.`}
+          </s-text>
+        ) : null}
+        <s-divider />
+        {confirmingDelete ? (
+          <s-stack direction="block" gap="small-300">
+            <s-text>
+              {attribute.usedBy === 0
+                ? `Delete “${attribute.name}” everywhere? It is on no product type; it leaves the catalogue with its options. This cannot be undone.`
+                : `Delete “${attribute.name}” everywhere? It leaves the catalogue and ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}, with every requirement change and removal about it. This cannot be undone.`}
+            </s-text>
+            <s-stack direction="inline" gap="small-300">
+              <s-button
+                tone="critical"
+                variant="primary"
+                onClick={remove}
+                {...(busy ? { disabled: true, loading: true } : {})}
+              >
+                Delete everywhere
+              </s-button>
+              <s-button onClick={() => setConfirmingDelete(false)}>
+                Keep it
+              </s-button>
+            </s-stack>
+          </s-stack>
+        ) : (
+          <s-stack direction="inline" gap="small-300" alignItems="center">
+            <s-button
+              variant="tertiary"
+              tone="critical"
+              onClick={() => setConfirmingDelete(true)}
+            >
+              Delete attribute
+            </s-button>
+            <s-text color="subdued">
+              {attribute.usedBy === 0
+                ? "On no product type."
+                : `On ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}.`}
+            </s-text>
+          </s-stack>
+        )}
+      </s-stack>
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        onClick={save}
+        {...(busy ? { loading: true, disabled: true } : {})}
+      >
+        Save
+      </s-button>
+      <s-button slot="secondary-actions" command="--hide" commandFor={id}>
+        Cancel
+      </s-button>
+    </s-modal>
+  );
+}
+
+/** The dialog's own copy of an attribute, from the stored one. */
+export function editableAttribute(
+  attribute: {
+    id: string;
+    name: string;
+    dataType: DataType;
+    unit: string;
+    description: string;
+    scope: Scope;
+    requiredDefault: boolean;
+    filterable: boolean;
+    searchable: boolean;
+    comparable: boolean;
+    key: string;
+    setId: string | null;
+    implementation: Implementation;
+  },
+  options: Array<{ code: string; en: string; si: string }>,
+  usedBy: number,
+): EditableAttribute {
+  return {
+    id: attribute.id,
+    name: attribute.name,
+    usedBy,
+    form: {
+      name: attribute.name,
+      dataType: attribute.dataType,
+      unit: attribute.unit,
+      description: attribute.description,
+      scope: attribute.scope,
+      requiredDefault: attribute.requiredDefault,
+      filterable: attribute.filterable,
+      searchable: attribute.searchable,
+      comparable: attribute.comparable,
+      key: attribute.key,
+      setId: attribute.setId ?? "",
+      implementation: attribute.implementation,
+      options: options.map((item, index) => ({
+        key: `saved-${index}`,
+        ...item,
+      })),
+    },
+  };
+}

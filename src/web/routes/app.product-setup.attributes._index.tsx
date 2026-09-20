@@ -1,5 +1,5 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
@@ -14,7 +14,11 @@ import { workspaceState } from "~/domain/attributes/impact";
 import { addAttribute } from "~/domain/attributes/mutations";
 import { pathOf, typesUsing } from "~/domain/attributes/resolve";
 import { starterSchema } from "~/domain/attributes/starter";
-import { AttributeCreateModal } from "~/web/components/attribute-form";
+import {
+  AttributeCreateModal,
+  AttributeEditModal,
+  editableAttribute,
+} from "~/web/components/attribute-form";
 import { ProductSetupNav } from "~/web/components/product-setup-nav";
 import {
   PRODUCT_SETUP_ROUTES,
@@ -40,6 +44,7 @@ import {
  * creating happens here, in one dialog, complete with options.
  */
 const NEW_MODAL_ID = "new-attribute";
+const EDIT_MODAL_ID = "edit-attribute";
 
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
@@ -51,13 +56,22 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stage: workspaceState(schema).stage,
     hasTypes: schema.types.length > 0,
     attributes: schema.attributes
-      .map((attribute) => ({
-        id: attribute.id,
-        name: attribute.name,
-        key: attribute.key,
-        format: formatLabel(attribute),
-        usedBy: typesUsing(schema, attribute.id).length,
-      }))
+      .map((attribute) => {
+        const usedBy = typesUsing(schema, attribute.id).length;
+        return {
+          id: attribute.id,
+          name: attribute.name,
+          key: attribute.key,
+          format: formatLabel(attribute),
+          usedBy,
+          editable: editableAttribute(
+            attribute,
+            schema.valueLists.find((l) => l.id === attribute.valueListId)
+              ?.items ?? [],
+            usedBy,
+          ),
+        };
+      })
       .sort((a, b) => a.name.localeCompare(b.name)),
     types: schema.types
       .map((type) => ({
@@ -142,6 +156,10 @@ export default function AttributeCatalogue() {
   const result = fetcher.data;
   const [searchParams, setSearchParams] = useSearchParams();
   const query = searchParams.get("q") ?? "";
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const editing =
+    attributes.find((attribute) => attribute.id === editingId)?.editable ??
+    null;
 
   useEffect(() => {
     if (!result?.ok) return;
@@ -189,6 +207,12 @@ export default function AttributeCatalogue() {
         sets={sets}
         types={types}
         preselectedTypeId={null}
+      />
+      <AttributeEditModal
+        id={EDIT_MODAL_ID}
+        revision={revision}
+        sets={sets}
+        attribute={editing}
       />
 
       <s-stack direction="block" gap="base">
@@ -264,7 +288,9 @@ export default function AttributeCatalogue() {
                       <s-table-row key={attribute.id}>
                         <s-table-cell>
                           <s-link
-                            href={PRODUCT_SETUP_ROUTES.attribute(attribute.id)}
+                            command="--show"
+                            commandFor={EDIT_MODAL_ID}
+                            onClick={() => setEditingId(attribute.id)}
                           >
                             {attribute.name}
                           </s-link>

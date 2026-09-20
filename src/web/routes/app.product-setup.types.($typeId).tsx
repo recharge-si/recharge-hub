@@ -45,7 +45,11 @@ import {
 import { starterSchema } from "~/domain/attributes/starter";
 import type { AttributeSchema } from "~/domain/attributes/types";
 import { Advanced } from "~/web/components/advanced";
-import { AttributeCreateModal } from "~/web/components/attribute-form";
+import {
+  AttributeCreateModal,
+  AttributeEditModal,
+  editableAttribute,
+} from "~/web/components/attribute-form";
 import { ConfirmModal } from "~/web/components/confirm-modal";
 import { Dropdown } from "~/web/components/dropdown";
 import {
@@ -91,6 +95,7 @@ const DETACH_MODAL_ID = "detach-source";
 const MOVE_MODAL_ID = "move-product-type";
 const MENU_ID = "product-type-actions";
 const DROP_MODAL_ID = "confirm-drop";
+const EDIT_ATTRIBUTE_MODAL_ID = "edit-attribute";
 const EDIT_TYPE_MODAL_ID = "edit-product-type";
 
 const TABS = ["attributes", "details", "preview"] as const;
@@ -157,6 +162,14 @@ function flatten(schema: AttributeSchema) {
   return rows;
 }
 
+function typesUsingCount(schema: AttributeSchema, attributeId: string) {
+  return schema.types.filter((type) =>
+    activeAttributes(schema, type.id).some(
+      (row) => row.attribute.id === attributeId,
+    ),
+  ).length;
+}
+
 function describeSelected(schema: AttributeSchema, typeId: string) {
   const type = typeById(schema, typeId);
   if (!type) return null;
@@ -210,6 +223,12 @@ function describeSelected(schema: AttributeSchema, typeId: string) {
     rows: rows.map((row) => ({
       attributeId: row.attribute.id,
       name: row.attribute.name,
+      editable: editableAttribute(
+        row.attribute,
+        schema.valueLists.find((l) => l.id === row.attribute.valueListId)
+          ?.items ?? [],
+        typesUsingCount(schema, row.attribute.id),
+      ),
       format: formatLabel(row.attribute),
       scope: SCOPE_LABEL[row.attribute.scope],
       sourceTypeId: row.sourceTypeId,
@@ -681,6 +700,12 @@ export default function ProductTypes() {
     details: Details;
   } | null>(null);
   const [editTried, setEditTried] = useState(false);
+  const [editingAttributeId, setEditingAttributeId] = useState<string | null>(
+    null,
+  );
+  const editingAttribute =
+    selected?.rows.find((row) => row.attributeId === editingAttributeId)
+      ?.editable ?? null;
 
   const savedDetails = selected?.details ?? null;
   const [details, setDetails] = useState<Details | null>(savedDetails);
@@ -1317,6 +1342,13 @@ export default function ProductTypes() {
         </s-button>
       </s-modal>
 
+      <AttributeEditModal
+        id={EDIT_ATTRIBUTE_MODAL_ID}
+        revision={revision}
+        sets={sets}
+        attribute={editingAttribute}
+      />
+
       <AttributeCreateModal
         id={NEW_ATTRIBUTE_MODAL_ID}
         revision={revision}
@@ -1846,9 +1878,13 @@ export default function ProductTypes() {
                                     <s-table-row key={row.attributeId}>
                                       <s-table-cell>
                                         <s-link
-                                          href={PRODUCT_SETUP_ROUTES.attribute(
-                                            row.attributeId,
-                                          )}
+                                          command="--show"
+                                          commandFor={EDIT_ATTRIBUTE_MODAL_ID}
+                                          onClick={() =>
+                                            setEditingAttributeId(
+                                              row.attributeId,
+                                            )
+                                          }
                                         >
                                           {row.name}
                                         </s-link>
@@ -1912,11 +1948,15 @@ export default function ProductTypes() {
                                           accessibilityLabel={`Actions for ${row.name}`}
                                         >
                                           <s-button
-                                            href={PRODUCT_SETUP_ROUTES.attribute(
-                                              row.attributeId,
-                                            )}
+                                            command="--show"
+                                            commandFor={EDIT_ATTRIBUTE_MODAL_ID}
+                                            onClick={() =>
+                                              setEditingAttributeId(
+                                                row.attributeId,
+                                              )
+                                            }
                                           >
-                                            Open attribute
+                                            Edit attribute
                                           </s-button>
                                           {row.overridden ? (
                                             <s-button
