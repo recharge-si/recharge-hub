@@ -91,6 +91,9 @@ const TYPE_MODAL_ID = "product-type";
 const MENU_ID = "product-type-actions";
 const DROP_MODAL_ID = "confirm-drop";
 
+/** One level of the tree, in pixels; the same step every level down. */
+const INDENT_PX = 28;
+
 interface Details {
   name: string;
   parentId: string;
@@ -727,6 +730,24 @@ export default function ProductTypes() {
   useEffect(() => {
     if (selected) rememberType(selected.id);
   }, [selected]);
+
+  // While a row is being dragged, the page accepts every dragover as a
+  // move, so the cursor never turns into a "not allowed" sign over a gap or
+  // an invalid target; dropping somewhere that means nothing does nothing.
+  useEffect(() => {
+    if (dragging === null) return;
+    const allow = (event: DragEvent) => {
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "move";
+    };
+    const swallow = (event: DragEvent) => event.preventDefault();
+    document.addEventListener("dragover", allow);
+    document.addEventListener("drop", swallow);
+    return () => {
+      document.removeEventListener("dragover", allow);
+      document.removeEventListener("drop", swallow);
+    };
+  }, [dragging]);
 
   useEffect(() => {
     if (!selected) {
@@ -2075,17 +2096,7 @@ export default function ProductTypes() {
                       borderRadius="base"
                     />
                   ) : null}
-                  <s-box
-                    paddingInlineStart={
-                      row.depth === 0
-                        ? "none"
-                        : row.depth === 1
-                          ? "base"
-                          : row.depth === 2
-                            ? "large-200"
-                            : "large-500"
-                    }
-                  >
+                  <div style={{ paddingInlineStart: row.depth * INDENT_PX }}>
                     <s-grid
                       gridTemplateColumns="auto auto 1fr auto"
                       gap="none"
@@ -2175,7 +2186,7 @@ export default function ProductTypes() {
                         onClick={() => open(row.id, "details")}
                       />
                     </s-grid>
-                  </s-box>
+                  </div>
                   {dropTarget?.id === row.id &&
                   dropTarget.position === "after" ? (
                     <s-box
