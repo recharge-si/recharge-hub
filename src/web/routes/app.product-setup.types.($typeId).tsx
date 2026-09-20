@@ -2040,6 +2040,9 @@ export default function ProductTypes() {
               .ps-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 32px; margin-inline-end: 2px; border-radius: 6px; cursor: grab; user-select: none; -webkit-user-drag: element; touch-action: none; }
               .ps-drag-handle:hover { background: #ebebeb; }
               .ps-drag-handle:active { cursor: grabbing; }
+              .ps-twisty { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 28px; margin-inline-end: 2px; padding: 0; border: 0; background: transparent; border-radius: 6px; cursor: pointer; }
+              button.ps-twisty:hover { background: #ebebeb; }
+              button.ps-twisty:disabled { cursor: default; opacity: .5; }
               .ps-drop-line { height: 0; border-top: 2px solid #005bd3; border-radius: 2px; position: relative; }
               .ps-drop-line::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #005bd3; }
             `}</style>
@@ -2141,29 +2144,35 @@ export default function ProductTypes() {
                           <s-icon type="drag-handle" color="subdued" />
                         </span>
                         {row.hasChildren ? (
-                          <s-button
-                            variant="tertiary"
-                            icon={
-                              collapsed[row.id] && !needle
-                                ? "chevron-right"
-                                : "chevron-down"
-                            }
-                            accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
-                            {...(needle ? { disabled: true } : {})}
+                          <button
+                            type="button"
+                            className="ps-twisty"
+                            aria-label={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
+                            aria-expanded={!(collapsed[row.id] && !needle)}
+                            disabled={Boolean(needle)}
                             onClick={() =>
                               setCollapsed({
                                 ...collapsed,
                                 [row.id]: !collapsed[row.id],
                               })
                             }
-                          />
+                          >
+                            <s-icon
+                              type={
+                                collapsed[row.id] && !needle
+                                  ? "chevron-right"
+                                  : "chevron-down"
+                              }
+                              color="subdued"
+                            />
+                          </button>
                         ) : (
-                          <s-box inlineSize="28px" />
+                          <span className="ps-twisty" aria-hidden="true" />
                         )}
                         <s-clickable
                           onClick={() => open(row.id)}
                           borderRadius="base"
-                          paddingInline="small-300"
+                          paddingInline="small-400"
                           paddingBlock="small-400"
                           inlineSize="100%"
                           background="transparent"
