@@ -2067,6 +2067,17 @@ export default function ProductTypes() {
                  */
                 <div
                   key={row.id}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", row.id);
+                    attachDragGhost(event, row.name);
+                    startDrag(row.id);
+                  }}
+                  onDragEnd={() => {
+                    startDrag(null);
+                    setDropTarget(null);
+                  }}
                   onDragOver={(event) => {
                     const source = draggingRef.current;
                     if (source === null || source === row.id) return;
@@ -2124,26 +2135,13 @@ export default function ProductTypes() {
                         alignItems="center"
                       >
                         {/*
-                         * The handle is the draggable thing, so a click on the
-                         * row still opens it and a drag from the dots is
-                         * unmistakably a drag. Its cursor and hover come from
-                         * the small stylesheet above the tree.
+                         * The whole row drags; the dots say so and give a grab
+                         * cursor. A click without movement still opens the row.
                          */}
                         <span
                           className="ps-drag-handle"
-                          draggable
                           title={`Drag to move ${row.name}`}
                           aria-label={`Drag to move ${row.name}`}
-                          onDragStart={(event) => {
-                            event.dataTransfer.effectAllowed = "move";
-                            event.dataTransfer.setData("text/plain", row.id);
-                            attachDragGhost(event, row.name);
-                            startDrag(row.id);
-                          }}
-                          onDragEnd={() => {
-                            startDrag(null);
-                            setDropTarget(null);
-                          }}
                         >
                           <s-icon type="drag-handle" color="subdued" />
                         </span>
