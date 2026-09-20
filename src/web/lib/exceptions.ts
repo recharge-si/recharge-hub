@@ -201,6 +201,12 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "Some variants still show the sale price after the campaign ended. The campaign page lists each one with Shopify's reason; retry the failed variants. Their original prices are kept until they are back.",
   },
+  translation_failed: {
+    label: "Translation not finished",
+    short: "whose translation could not be finished",
+    guidance:
+      "A translation sync stopped, or some content could not be translated after retries. The sync page lists each resource with the reason; fix what it names, or run the translation again. Nothing already translated is affected.",
+  },
 };
 
 const FALLBACK: ExceptionCopy = {
@@ -267,6 +273,7 @@ const ACTIONS: Record<string, ExceptionAction> = {
   sale_price_conflict: { label: "Open sales", href: "/app/sales" },
   sale_apply_failed: { label: "Open sales", href: "/app/sales" },
   sale_restore_failed: { label: "Open sales", href: "/app/sales" },
+  translation_failed: { label: "Open syncs", href: "/app/translations/syncs" },
 };
 
 export function exceptionAction(kind: string): ExceptionAction | null {

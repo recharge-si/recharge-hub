@@ -110,6 +110,11 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
   sale_apply_failed: "none",
   sale_restore_failed: "none",
   /*
+   * Translations are not orders either. A failed sync is retried from its
+   * own page (docs/translations.md), which the exception links to.
+   */
+  translation_failed: "none",
+  /*
    * An order whose MetaKocka documents do not add up to what Shopify says.
    *
    * The repair is the reconciliation itself — update what exists — and it is

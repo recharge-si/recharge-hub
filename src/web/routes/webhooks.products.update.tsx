@@ -10,4 +10,8 @@ import { receiveWebhook } from "~/web/lib/webhook.server";
  * anything a change (docs/sale-campaigns.md § Loop prevention).
  */
 export const action = ({ request }: ActionFunctionArgs) =>
-  receiveWebhook(request, QUEUES.saleProductEvent);
+  receiveWebhook(request, [
+    QUEUES.saleProductEvent,
+    // Automatic translation of a changed product (docs/translations.md).
+    QUEUES.translationResourceEvent,
+  ]);

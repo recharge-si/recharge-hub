@@ -27,6 +27,22 @@ const envSchema = z.object({
       "ENCRYPTION_KEY must be 32 bytes, base64 encoded. Generate one with: node -e \"console.log(require('crypto').randomBytes(32).toString('base64'))\"",
     ),
 
+  /**
+   * The one OpenAI key this deployment translates with (docs/translations.md
+   * § OpenAI). Server-side only: never sent to the browser, never stored, never
+   * logged. Optional, so a deployment without it still runs — the Translations
+   * pages say that AI translation is not configured and every other feature
+   * works.
+   */
+  OPENAI_API_KEY: z.string().optional(),
+  // `.env.example` ships the variable blank, and a blank means the default.
+  OPENAI_TRANSLATION_MODEL: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value && value.trim() !== "" ? value.trim() : "gpt-4.1-mini",
+    ),
+
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().default("development"),
 

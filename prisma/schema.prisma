@@ -142,6 +142,14 @@ model Shop {
   catalogVariants        CatalogVariant[]
   catalogPriceLists      CatalogPriceList[]
   attributeSchema        AttributeSchema?
+  translationLanguages   TranslationLanguage[]
+  translationCoverages   TranslationCoverage[]
+  translationGlossary    TranslationGlossaryTerm[]
+  translationSources     TranslationSourceOverride[]
+  translationOwnerships  TranslationOwnership[]
+  translationSyncs       TranslationSync[]
+  translationSyncItems   TranslationSyncItem[]
+  aiUsage                AiUsage[]
 
   @@map("shop")
 }
@@ -1394,6 +1402,9 @@ enum ExceptionKind {
   sale_apply_failed
   /// A campaign could not restore some of its variants after retries.
   sale_restore_failed
+  /// A translation sync could not finish, or a resource could not be
+  /// translated after retries (docs/translations.md).
+  translation_failed
 
   @@map("exception_kind")
 }
@@ -2249,4 +2260,330 @@ model AttributeSchema {
   shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
 
   @@map("attribute_schema")
+}
+
+// ---------------------------------------------------------------------------
+// Translations (docs/translations.md).
+//
+// Shopify owns the locales, their publication state, the original content,
+// the translated content and the outdated flag. Nothing below copies any of
+// that. These tables hold what Shopify has no notion of: how the AI should
+// behave per language, the glossary, which language a resource is really
+// written in, what this app itself wrote (so a person's correction is never
+// overwritten), the syncs it ran, and what they cost.
+// ---------------------------------------------------------------------------
+
+/// What the AI may change when it meets a translation that already exists.
+enum TranslationOverwritePolicy {
+  /// Fill missing fields only. Never change an existing translation.
+  protect_existing
+  /// Fill missing fields and update outdated translations this app wrote
+  /// itself. A translation a person wrote or edited is left alone.
+  update_ai_managed
+  /// Every field in scope may be rewritten, whoever wrote it.
+  overwrite_all
+
+  @@map("translation_overwrite_policy")
+}
+
+/// The translation engine's settings for one Shopify locale. Shopify decides
+/// whether the locale exists and is published; this row exists only once the
+/// merchant has configured AI translation for it.
+model TranslationLanguage {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+  locale String
+
+  aiEnabled          Boolean                    @default(false) @map("ai_enabled")
+  autoTranslateNew   Boolean                    @default(false) @map("auto_translate_new")
+  autoUpdateOutdated Boolean                    @default(false) @map("auto_update_outdated")
+  /// Content groups (`domain/translations` `CONTENT_GROUPS`), e.g. "products".
+  contentScope       String[]                   @map("content_scope")
+  overwritePolicy    TranslationOverwritePolicy @default(update_ai_managed) @map("overwrite_policy")
+
+  lastSyncAt           DateTime? @map("last_sync_at")
+  lastSuccessfulSyncAt DateTime? @map("last_successful_sync_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, locale])
+  @@map("translation_language")
+}
+
+/// Derived counts, per locale and resource type, from one pass over Shopify's
+/// translatable resources. A cache with a timestamp, not a copy of state:
+/// coverage on the Languages page and the estimate behind "Translate store"
+/// both read from here so no page load scans the store.
+model TranslationCoverage {
+  id           String @id @default(cuid())
+  shopId       String @map("shop_id")
+  locale       String
+  resourceType String @map("resource_type")
+
+  resources     Int @default(0)
+  fields        Int @default(0)
+  translated    Int @default(0)
+  outdated      Int @default(0)
+  missing       Int @default(0)
+  /// Characters of source text behind the missing and outdated fields; what
+  /// an estimate is made from.
+  missingChars  Int @default(0) @map("missing_chars")
+  outdatedChars Int @default(0) @map("outdated_chars")
+
+  readAt DateTime @map("read_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, locale, resourceType])
+  @@map("translation_coverage")
+}
+
+enum TranslationGlossaryKind {
+  /// Translate the source term as the target term, in the target locale.
+  translate
+  /// Never translate this term, in any language.
+  protect
+
+  @@map("translation_glossary_kind")
+}
+
+model TranslationGlossaryTerm {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  kind         TranslationGlossaryKind
+  /// Null for a protected term, which applies to every language.
+  targetLocale String?                 @map("target_locale")
+  sourceTerm   String                  @map("source_term")
+  targetTerm   String?                 @map("target_term")
+  note         String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, targetLocale])
+  @@map("translation_glossary_term")
+}
+
+/// The language a resource is actually written in, when it is not the shop's
+/// primary locale. Translation always goes directly from this language to
+/// each target. `detected_locale` is a suggestion and decides nothing.
+model TranslationSourceOverride {
+  id           String @id @default(cuid())
+  shopId       String @map("shop_id")
+  resourceId   String @map("resource_id")
+  resourceType String @map("resource_type")
+
+  sourceLocale   String  @map("source_locale")
+  detectedLocale String? @map("detected_locale")
+  setBy          String? @map("set_by")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, resourceId])
+  @@map("translation_source_override")
+}
+
+enum TranslationOwner {
+  /// Written by this app's AI and unchanged since.
+  ai
+  /// Written or edited by a person: through this app's editor, or detected
+  /// because Shopify's value no longer matches what the AI wrote.
+  manual
+
+  @@map("translation_owner")
+}
+
+/// What this app wrote, per field and language, and a hash of the value so a
+/// later pass can tell whether a person has changed it since. The safety
+/// boundary that keeps a manual correction from being overwritten.
+model TranslationOwnership {
+  id           String @id @default(cuid())
+  shopId       String @map("shop_id")
+  resourceId   String @map("resource_id")
+  resourceType String @map("resource_type")
+  key          String
+  locale       String
+
+  owner        TranslationOwner
+  /// SHA-256 of the translation value as written, base64url.
+  valueHash    String           @map("value_hash")
+  /// Shopify's digest of the source content the translation was made from.
+  sourceDigest String?          @map("source_digest")
+  syncId       String?          @map("sync_id")
+  writtenBy    String?          @map("written_by")
+  writtenAt    DateTime         @map("written_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, resourceId, key, locale])
+  @@index([shopId, locale, owner])
+  @@map("translation_ownership")
+}
+
+enum TranslationSyncKind {
+  /// The merchant's "Translate store" action.
+  translate_store
+  /// An action from one language's page.
+  language
+  /// Created by the nightly tick for languages with automatic translation on.
+  automatic
+  /// One resource, from a webhook or from the editor.
+  resource
+
+  @@map("translation_sync_kind")
+}
+
+enum TranslationSyncMode {
+  missing
+  missing_outdated
+  force
+
+  @@map("translation_sync_mode")
+}
+
+enum TranslationSyncStatus {
+  queued
+  running
+  completed
+  failed
+  cancelled
+
+  @@map("translation_sync_status")
+}
+
+model TranslationSync {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  kind   TranslationSyncKind
+  mode   TranslationSyncMode
+  status TranslationSyncStatus @default(queued)
+
+  sourceLocale  String   @map("source_locale")
+  targetLocales String[] @map("target_locales")
+  resourceTypes String[] @map("resource_types")
+  /// Set for a `resource` sync; empty means every resource of the types.
+  resourceIds   String[] @map("resource_ids")
+
+  /// The estimate shown before the merchant pressed Start, kept for comparison.
+  estimate Json?
+  /// Where the job is: `{ typeIndex, after }`. Advanced only over work done.
+  cursor   Json?
+
+  totalResources   Int @default(0) @map("total_resources")
+  doneResources    Int @default(0) @map("done_resources")
+  translatedFields Int @default(0) @map("translated_fields")
+  copiedFields     Int @default(0) @map("copied_fields")
+  skippedFields    Int @default(0) @map("skipped_fields")
+  failedFields     Int @default(0) @map("failed_fields")
+
+  cancelRequested Boolean   @default(false) @map("cancel_requested")
+  requestedBy     String?   @map("requested_by")
+  lastError       String?   @map("last_error")
+  startedAt       DateTime? @map("started_at")
+  finishedAt      DateTime? @map("finished_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop  Shop                  @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  items TranslationSyncItem[]
+  usage AiUsage[]
+
+  @@index([shopId, createdAt])
+  @@index([shopId, status])
+  @@map("translation_sync")
+}
+
+enum TranslationItemStatus {
+  translated
+  /// The original text was registered as this locale's translation because
+  /// the resource is written in that language.
+  copied
+  skipped
+  failed
+
+  @@map("translation_item_status")
+}
+
+/// One resource in one language inside one sync, and what became of it.
+model TranslationSyncItem {
+  id           String  @id @default(cuid())
+  syncId       String  @map("sync_id")
+  shopId       String  @map("shop_id")
+  resourceId   String  @map("resource_id")
+  resourceType String  @map("resource_type")
+  locale       String
+  /// The resource's title at the time, for the list. Display only.
+  title        String?
+
+  status TranslationItemStatus
+  fields Int                   @default(0)
+  /// Why fields were skipped or what failed, for the sync page.
+  detail Json?
+  error  String?
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  shop Shop            @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sync TranslationSync @relation(fields: [syncId], references: [id], onDelete: Cascade)
+
+  @@index([syncId, createdAt])
+  @@index([syncId, status])
+  @@map("translation_sync_item")
+}
+
+enum AiUsageResult {
+  ok
+  failed
+
+  @@map("ai_usage_result")
+}
+
+/// One provider request, whatever came of it. Retries and failed requests
+/// that reported usage are rows too; cached or skipped translations never
+/// reach the provider and so never appear here.
+model AiUsage {
+  id     String  @id @default(cuid())
+  shopId String  @map("shop_id")
+  syncId String? @map("sync_id")
+
+  resourceId   String? @map("resource_id")
+  resourceType String? @map("resource_type")
+  sourceLocale String  @map("source_locale")
+  targetLocale String  @map("target_locale")
+  /// What the request was for: `translate` or `detect`.
+  purpose      String
+
+  model             String
+  inputTokens       Int    @map("input_tokens")
+  cachedInputTokens Int    @default(0) @map("cached_input_tokens")
+  outputTokens      Int    @map("output_tokens")
+  totalTokens       Int    @map("total_tokens")
+
+  result       AiUsageResult
+  errorMessage String?       @map("error_message")
+
+  /// `domain/translations/pricing` version the cost was computed under, and
+  /// the cost in micro-USD. Null when the model is not in the table.
+  pricingVersion      String? @map("pricing_version")
+  estimatedCostMicros BigInt? @map("estimated_cost_micros")
+
+  createdAt DateTime @default(now()) @map("created_at")
+
+  shop Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
+  sync TranslationSync? @relation(fields: [syncId], references: [id], onDelete: SetNull)
+
+  @@index([shopId, createdAt])
+  @@index([syncId])
+  @@map("ai_usage")
 }

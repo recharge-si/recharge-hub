@@ -38,6 +38,10 @@ export const QUEUES = {
   saleCampaignRun: "sale-campaign-run",
   saleProductEvent: "sale-product-event",
   catalogueSnapshot: "catalogue-snapshot",
+  // Translations (docs/translations.md § Jobs).
+  translationSync: "translation-sync",
+  translationCoverage: "translation-coverage",
+  translationResourceEvent: "translation-resource-event",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -74,6 +78,16 @@ export function saleRunKey(campaignId: string): string {
 /** At most one catalogue read waiting per shop; Shopify allows one at a time anyway. */
 export function catalogueSnapshotKey(shopDomain: string): string {
   return `catalogue:${shopDomain}`;
+}
+
+/** At most one job waiting per sync: the pass hands over to itself page by page. */
+export function translationSyncKey(syncId: string): string {
+  return `translation-sync:${syncId}`;
+}
+
+/** At most one coverage read waiting per shop. */
+export function translationCoverageKey(shopDomain: string): string {
+  return `translation-coverage:${shopDomain}`;
 }
 
 type QueueOptions = Omit<Queue, "name">;
@@ -365,6 +379,42 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 60,
     retryBackoff: true,
     expireInSeconds: 1800,
+  },
+  /*
+   * Translations (docs/translations.md § Jobs).
+   *
+   * A sync pass reads one page of resources, translates it, advances the
+   * cursor and re-enqueues itself, the way the catalogue read does; the
+   * cursor only moves over work that was recorded, so a retry repeats a page
+   * rather than skipping one, and every write to Shopify is a replace. A
+   * pass that dies for good is merchant-visible, because the store is half
+   * translated. `short` so the singleton key per sync actually holds.
+   *
+   * Coverage is a read: a dropped run only means the numbers are older.
+   * The resource event carries a webhook and is guarded by webhook id.
+   */
+  [QUEUES.translationSync]: {
+    policy: "short",
+    deadLetter: DEAD_LETTER,
+    retryLimit: 4,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 1800,
+  },
+  [QUEUES.translationCoverage]: {
+    policy: "short",
+    retryLimit: 2,
+    retryDelay: 120,
+    retryBackoff: true,
+    expireInSeconds: 3600,
+  },
+  [QUEUES.translationResourceEvent]: {
+    policy: "short",
+    deadLetter: DEAD_LETTER,
+    retryLimit: 4,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 600,
   },
   // A retention promise, so it retries like the other compliance work rather
   // than being dropped after a couple of attempts.

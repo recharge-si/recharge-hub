@@ -18,17 +18,23 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
  */
 export async function receiveWebhook(
   request: Request,
-  queue: QueueName,
+  queue: QueueName | readonly QueueName[],
 ): Promise<Response> {
   const { shop, topic, webhookId, payload } =
     await authenticate.webhook(request);
+  // One topic may feed more than one consumer (products/update feeds the sale
+  // campaign event and the translation event). The webhook id dedupes within
+  // each queue, so a redelivery still collapses to one job per consumer.
+  const queues = Array.isArray(queue) ? queue : [queue];
 
   try {
-    await enqueue(
-      queue,
-      { shopDomain: shop, webhookId, topic, payload },
-      { singletonKey: webhookId },
-    );
+    for (const name of queues) {
+      await enqueue(
+        name,
+        { shopDomain: shop, webhookId, topic, payload },
+        { singletonKey: webhookId },
+      );
+    }
   } catch (error) {
     // Returning 500 asks Shopify to redeliver. Swallowing it would lose the event.
     getLogger().error(

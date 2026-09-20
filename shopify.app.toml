@@ -95,13 +95,26 @@ api_version = "2026-07"
   topics = [ "products/delete" ]
   uri = "/webhooks/products/delete"
 
+  # Translations (docs/translations.md § Automatic translation). A new
+  # product is translated into every language with automatic translation on;
+  # products/update above feeds the same handler for changed products.
+  [[webhooks.subscriptions]]
+  topics = [ "products/create" ]
+  uri = "/webhooks/products/create"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 # `read_discounts` is for one warning only: a sale campaign's preview names
 # the automatic discounts Shopify would apply at checkout on top of the
 # catalogue price (docs/sale-campaigns.md § Required scopes). Until the
 # merchant approves it the preview says "not checked" and nothing else changes.
-scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_discounts"
+# Translations (docs/translations.md § Required scopes): `read_locales` and
+# `write_locales` manage the store's languages, `read_translations` and
+# `write_translations` read and write the translations themselves,
+# `read_markets` shows which markets a language is available in, and
+# `read_content`, `read_online_store_pages` and `read_online_store_navigation`
+# are for the editor's search only (articles, blogs, pages, menus by title).
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders,write_merchant_managed_fulfillment_orders,read_discounts,read_locales,write_locales,read_translations,write_translations,read_markets,read_content,read_online_store_pages,read_online_store_navigation"
 use_legacy_install_flow = false
 
 [auth]

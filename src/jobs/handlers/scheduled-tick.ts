@@ -7,9 +7,22 @@ import {
   QUEUES,
   catalogueSnapshotKey,
   inventorySyncKey,
+  translationCoverageKey,
 } from "~/adapters/queue/queues";
+import {
+  abandonStaleSyncs,
+  listActiveSyncs,
+  listAutomaticLanguages,
+} from "~/adapters/db/repositories/translations.server";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { captureException } from "~/adapters/observability/sentry.server";
+import { startSync } from "~/adapters/translations/syncs.server";
+import {
+  typesForGroups,
+  type ContentGroup,
+  type SyncMode,
+} from "~/domain/translations/types";
+import { serviceToken } from "~/domain/types";
 
 export const scheduledTickJobSchema = z.object({
   /** Which cadence fired, so one handler can serve several schedules. */
@@ -98,7 +111,95 @@ export async function handleScheduledTick(job: Job<unknown>): Promise<void> {
   );
 
   await fanOutCatalogueSnapshots(cadence);
+  await fanOutTranslations(cadence);
 }
+
+/**
+ * Automatic translation (docs/translations.md § Automatic translation).
+ *
+ * Its own fan-out too, for the same reason as the catalogue: translation
+ * needs Shopify and OpenAI, not MetaKocka. Nightly, every language with
+ * automatic translation on gets one `automatic` sync over its content scope
+ * — missing fields, and outdated ones where the language asks — which is
+ * what catches the collections, pages and articles no webhook reports, and
+ * anything a webhook missed. The coverage cache is re-read nightly for every
+ * installed shop so the Languages page is never more than a day old.
+ *
+ * Quarter-hourly, syncs whose job died for good are marked failed rather
+ * than shown as running for ever.
+ */
+async function fanOutTranslations(cadence: Cadence): Promise<void> {
+  const log = getLogger();
+
+  if (cadence === "quarter_hourly") {
+    const stale = new Date(Date.now() - STALE_SYNC_MS);
+    const abandoned = await abandonStaleSyncs(stale, new Date());
+    if (abandoned > 0)
+      log.warn({ abandoned }, "Translation syncs given up on");
+    return;
+  }
+  if (cadence !== "nightly") return;
+
+  const languages = await listAutomaticLanguages();
+  const byShop = new Map<string, typeof languages>();
+  for (const language of languages) {
+    byShop.set(language.shopDomain, [
+      ...(byShop.get(language.shopDomain) ?? []),
+      language,
+    ]);
+  }
+  for (const [shopDomain, rows] of byShop) {
+    const principal = serviceToken(shopDomain, "scheduled-tick");
+    try {
+      // The store's primary locale is read by the sync itself; a language
+      // that turns out to be primary or disabled is dropped there.
+      const active = await listActiveSyncs(principal);
+      if (active.some((sync) => sync.kind === "automatic")) continue;
+      const byMode = new Map<SyncMode, typeof rows>();
+      for (const row of rows) {
+        const mode: SyncMode = row.settings.autoUpdateOutdated
+          ? "missing_outdated"
+          : "missing";
+        byMode.set(mode, [...(byMode.get(mode) ?? []), row]);
+      }
+      for (const [mode, group] of byMode) {
+        const scope = new Set<ContentGroup>();
+        for (const row of group)
+          for (const item of row.settings.contentScope) scope.add(item);
+        await startSync(principal, {
+          kind: "automatic",
+          mode,
+          sourceLocale: "",
+          targetLocales: group.map((row) => row.settings.locale),
+          resourceTypes: typesForGroups([...scope]),
+          requestedBy: null,
+        });
+      }
+    } catch (error) {
+      log.error(
+        { err: error, shop: shopDomain },
+        "Could not start the nightly automatic translation",
+      );
+      captureException(error, { shop: shopDomain, cadence });
+    }
+  }
+
+  const shops = await prisma.shop.findMany({
+    where: { uninstalledAt: null, installState: "installed" },
+    select: { domain: true },
+  });
+  for (const shop of shops) {
+    await enqueueThrottled(
+      QUEUES.translationCoverage,
+      { shopDomain: shop.domain },
+      translationCoverageKey(shop.domain),
+      20 * 60 * 60,
+    );
+  }
+}
+
+/** A sync untouched for this long has no job coming back for it. */
+const STALE_SYNC_MS = 6 * 60 * 60_000;
 
 /**
  * The catalogue snapshot behind sale campaigns (docs/sale-campaigns.md).
