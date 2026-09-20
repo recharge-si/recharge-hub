@@ -111,7 +111,7 @@ function positionFrom(event: {
 }): DropPosition {
   const box = event.currentTarget.getBoundingClientRect();
   const y = (event.clientY - box.top) / Math.max(box.height, 1);
-  return y < 0.25 ? "before" : y > 0.75 ? "after" : "inside";
+  return y < 0.3 ? "before" : y > 0.7 ? "after" : "inside";
 }
 
 /** The tree flattened in display order, so the client only decides what to hide. */
@@ -2032,9 +2032,16 @@ export default function ProductTypes() {
              * handle. Scoped to the class, nothing else is touched.
              */}
             <style>{`
-              .ps-drag-handle { display: inline-flex; align-items: center; padding: 6px 4px; margin-inline-end: 4px; border-radius: 6px; cursor: grab; }
+              .ps-row { display: flex; align-items: stretch; border-radius: 8px; }
+              .ps-row.is-target { outline: 2px solid #005bd3; outline-offset: -2px; background: #f1f6fd; }
+              .ps-row.is-dragging { opacity: .45; }
+              .ps-guide { flex: 0 0 ${INDENT_PX - 12}px; margin-left: 12px; border-left: 1px solid #e3e3e3; }
+              .ps-row-body { flex: 1; min-width: 0; }
+              .ps-drag-handle { display: inline-flex; align-items: center; justify-content: center; width: 24px; height: 32px; margin-inline-end: 2px; border-radius: 6px; cursor: grab; user-select: none; -webkit-user-drag: element; touch-action: none; }
               .ps-drag-handle:hover { background: #ebebeb; }
               .ps-drag-handle:active { cursor: grabbing; }
+              .ps-drop-line { height: 0; border-top: 2px solid #005bd3; border-radius: 2px; position: relative; }
+              .ps-drop-line::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #005bd3; }
             `}</style>
             <s-stack direction="block" gap="small-300">
               {tree.length > 6 ? (
@@ -2083,109 +2090,116 @@ export default function ProductTypes() {
                 >
                   {dropTarget?.id === row.id &&
                   dropTarget.position === "before" ? (
-                    <s-box
-                      blockSize="3px"
-                      background="strong"
-                      borderRadius="base"
+                    <div
+                      className="ps-drop-line"
+                      style={{ marginInlineStart: row.depth * INDENT_PX + 12 }}
                     />
                   ) : null}
-                  <div style={{ paddingInlineStart: row.depth * INDENT_PX }}>
-                    <s-grid
-                      gridTemplateColumns="auto auto 1fr auto"
-                      gap="none"
-                      alignItems="center"
-                    >
-                      {/*
-                       * The handle is the draggable thing, so a click on the
-                       * row still opens it and a drag from the dots is
-                       * unmistakably a drag. Its cursor and hover come from
-                       * the small stylesheet above the tree.
-                       */}
+                  <div
+                    className={`ps-row${
+                      dropTarget?.id === row.id &&
+                      dropTarget.position === "inside"
+                        ? " is-target"
+                        : ""
+                    }${dragging === row.id ? " is-dragging" : ""}`}
+                  >
+                    {Array.from({ length: row.depth }, (_, level) => (
                       <span
-                        className="ps-drag-handle"
-                        draggable
-                        title={`Drag to move ${row.name}`}
-                        aria-label={`Drag to move ${row.name}`}
-                        onDragStart={(event) => {
-                          event.dataTransfer.effectAllowed = "move";
-                          event.dataTransfer.setData("text/plain", row.id);
-                          attachDragGhost(event, row.name);
-                          startDrag(row.id);
-                        }}
-                        onDragEnd={() => {
-                          startDrag(null);
-                          setDropTarget(null);
-                        }}
+                        key={level}
+                        className="ps-guide"
+                        aria-hidden="true"
+                      />
+                    ))}
+                    <div className="ps-row-body">
+                      <s-grid
+                        gridTemplateColumns="auto auto 1fr auto"
+                        gap="none"
+                        alignItems="center"
                       >
-                        <s-icon type="drag-handle" color="subdued" />
-                      </span>
-                      {row.hasChildren ? (
+                        {/*
+                         * The handle is the draggable thing, so a click on the
+                         * row still opens it and a drag from the dots is
+                         * unmistakably a drag. Its cursor and hover come from
+                         * the small stylesheet above the tree.
+                         */}
+                        <span
+                          className="ps-drag-handle"
+                          draggable
+                          title={`Drag to move ${row.name}`}
+                          aria-label={`Drag to move ${row.name}`}
+                          onDragStart={(event) => {
+                            event.dataTransfer.effectAllowed = "move";
+                            event.dataTransfer.setData("text/plain", row.id);
+                            attachDragGhost(event, row.name);
+                            startDrag(row.id);
+                          }}
+                          onDragEnd={() => {
+                            startDrag(null);
+                            setDropTarget(null);
+                          }}
+                        >
+                          <s-icon type="drag-handle" color="subdued" />
+                        </span>
+                        {row.hasChildren ? (
+                          <s-button
+                            variant="tertiary"
+                            icon={
+                              collapsed[row.id] && !needle
+                                ? "chevron-right"
+                                : "chevron-down"
+                            }
+                            accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
+                            {...(needle ? { disabled: true } : {})}
+                            onClick={() =>
+                              setCollapsed({
+                                ...collapsed,
+                                [row.id]: !collapsed[row.id],
+                              })
+                            }
+                          />
+                        ) : (
+                          <s-box inlineSize="28px" />
+                        )}
+                        <s-clickable
+                          onClick={() => open(row.id)}
+                          borderRadius="base"
+                          paddingInline="small-300"
+                          paddingBlock="small-400"
+                          inlineSize="100%"
+                          background="transparent"
+                          accessibilityLabel={`Open ${row.name}, ${row.leaf ? "product type" : "category"}, ${countOf(row.count, "attribute")}`}
+                        >
+                          <s-grid
+                            gridTemplateColumns="1fr auto"
+                            gap="small-300"
+                            alignItems="center"
+                          >
+                            <s-text
+                              {...(row.leaf ? {} : { type: "strong" as const })}
+                            >
+                              {row.name}
+                            </s-text>
+                            <s-text color="subdued">
+                              {row.leaf
+                                ? countOf(row.count, "attribute")
+                                : `category · ${countOf(row.count, "attribute")}`}
+                            </s-text>
+                          </s-grid>
+                        </s-clickable>
                         <s-button
                           variant="tertiary"
-                          icon={
-                            collapsed[row.id] && !needle
-                              ? "chevron-right"
-                              : "chevron-down"
-                          }
-                          accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
-                          {...(needle ? { disabled: true } : {})}
-                          onClick={() =>
-                            setCollapsed({
-                              ...collapsed,
-                              [row.id]: !collapsed[row.id],
-                            })
-                          }
+                          icon="edit"
+                          accessibilityLabel={`Edit ${row.name}`}
+                          onClick={() => open(row.id, "details")}
                         />
-                      ) : (
-                        <s-box inlineSize="28px" />
-                      )}
-                      <s-clickable
-                        onClick={() => open(row.id)}
-                        borderRadius="base"
-                        paddingInline="small-300"
-                        paddingBlock="small-400"
-                        inlineSize="100%"
-                        background={
-                          dropTarget?.id === row.id &&
-                          dropTarget.position === "inside"
-                            ? "strong"
-                            : dragging === row.id
-                              ? "subdued"
-                              : "transparent"
-                        }
-                        accessibilityLabel={`Open ${row.name}, ${row.leaf ? "product type" : "category"}, ${countOf(row.count, "attribute")}`}
-                      >
-                        <s-grid
-                          gridTemplateColumns="1fr auto"
-                          gap="small-300"
-                          alignItems="center"
-                        >
-                          <s-text
-                            {...(row.leaf ? {} : { type: "strong" as const })}
-                          >
-                            {row.name}
-                          </s-text>
-                          <s-text color="subdued">
-                            {row.leaf
-                              ? countOf(row.count, "attribute")
-                              : `category · ${countOf(row.count, "attribute")}`}
-                          </s-text>
-                        </s-grid>
-                      </s-clickable>
-                      <s-button
-                        variant="tertiary"
-                        icon="edit"
-                        accessibilityLabel={`Edit ${row.name}`}
-                        onClick={() => open(row.id, "details")}
-                      />
-                    </s-grid>
+                      </s-grid>
+                    </div>
                   </div>
                   {dropTarget?.id === row.id &&
                   dropTarget.position === "after" ? (
-                    <s-box
-                      blockSize="3px"
-                      background="strong"
-                      borderRadius="base"
+                    <div
+                      className="ps-drop-line"
+                      style={{ marginInlineStart: row.depth * INDENT_PX + 12 }}
                     />
                   ) : null}
                 </div>
