@@ -744,40 +744,57 @@ export function AttributeEditPanel({
             : `${missing} fields above need attention before this can be saved.`}
         </s-text>
       ) : null}
-      <s-divider />
-      {state.confirmingDelete ? (
-        <s-stack direction="block" gap="small-300">
-          <s-text>
-            {attribute.usedBy === 0
-              ? `Delete “${attribute.name}” everywhere? It is on no product type; it leaves the catalogue with its options. This cannot be undone.`
-              : `Delete “${attribute.name}” everywhere? It leaves the catalogue and ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}, with every requirement change and removal about it. This cannot be undone.`}
-          </s-text>
-          <s-stack direction="inline" gap="small-300">
+      <s-box
+        padding="base"
+        borderRadius="base"
+        borderWidth="base"
+        borderStyle="solid"
+        borderColor="subdued"
+        background="subdued"
+      >
+        {state.confirmingDelete ? (
+          <s-stack direction="block" gap="small-300">
+            <s-text type="strong">{`Delete “${attribute.name}” everywhere?`}</s-text>
+            <s-text>
+              {attribute.usedBy === 0
+                ? "It is on no product type; it leaves the catalogue with its options. This cannot be undone."
+                : `It leaves the catalogue and ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}, with every requirement change and removal about it. This cannot be undone.`}
+            </s-text>
+            <s-stack direction="inline" gap="small-300">
+              <s-button
+                tone="critical"
+                variant="primary"
+                onClick={state.remove}
+                {...(state.busy ? { disabled: true, loading: true } : {})}
+              >
+                Delete everywhere
+              </s-button>
+              <s-button onClick={() => state.setConfirmingDelete(false)}>
+                Keep it
+              </s-button>
+            </s-stack>
+          </s-stack>
+        ) : (
+          <s-grid
+            gridTemplateColumns="@container (inline-size <= 480px) 1fr, 1fr auto"
+            gap="base"
+            alignItems="center"
+          >
+            <s-stack direction="block" gap="small-500">
+              <s-text type="strong">Delete this attribute</s-text>
+              <s-text color="subdued">
+                {`${usage} Deleting removes it from the catalogue and from every type that has it.`}
+              </s-text>
+            </s-stack>
             <s-button
               tone="critical"
-              variant="primary"
-              onClick={state.remove}
-              {...(state.busy ? { disabled: true, loading: true } : {})}
+              onClick={() => state.setConfirmingDelete(true)}
             >
-              Delete everywhere
+              Delete attribute
             </s-button>
-            <s-button onClick={() => state.setConfirmingDelete(false)}>
-              Keep it
-            </s-button>
-          </s-stack>
-        </s-stack>
-      ) : (
-        <s-stack direction="inline" gap="small-300" alignItems="center">
-          <s-button
-            variant="tertiary"
-            tone="critical"
-            onClick={() => state.setConfirmingDelete(true)}
-          >
-            Delete attribute
-          </s-button>
-          <s-text color="subdued">{usage}</s-text>
-        </s-stack>
-      )}
+          </s-grid>
+        )}
+      </s-box>
     </s-stack>
   );
 }

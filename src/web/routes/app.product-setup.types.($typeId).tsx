@@ -663,7 +663,14 @@ export default function ProductTypes() {
 
   const [treeQuery, setTreeQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Which row is being dragged: a ref for the drop targets, which read it
+  // in `dragover` before React has re-rendered, and state for what shows.
+  const draggingRef = useRef<string | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
+  const startDrag = (id: string | null) => {
+    draggingRef.current = id;
+    setDragging(id);
+  };
   const [dropTarget, setDropTarget] = useState<{
     id: string;
     position: DropPosition;
@@ -821,7 +828,7 @@ export default function ProductTypes() {
     target: string | null,
     position: DropPosition,
   ) => {
-    setDragging(null);
+    startDrag(null);
     setDropTarget(null);
     if (target !== null && isWithinRow(target, sourceId)) return;
     if (target === sourceId) return;
@@ -1670,75 +1677,81 @@ export default function ProductTypes() {
                       }
                     />
                   ) : null}
-                  {selected.picker.attributes.length === 0 ? (
-                    <s-text color="subdued">
-                      No attributes are defined yet. Create the first one with
-                      the button below.
-                    </s-text>
-                  ) : (
-                    <s-stack direction="block" gap="small-300">
-                      <s-text type="strong">Attributes</s-text>
-                      {pickableAttributes.length === 0 ? (
-                        <s-text color="subdued">No attribute matches.</s-text>
-                      ) : null}
-                      {pickableAttributes.map((attribute) => (
-                        <s-checkbox
-                          key={attribute.id}
-                          label={attribute.name}
-                          details={
-                            attribute.state === "added"
-                              ? `${attribute.format} · already on this type`
-                              : attribute.state === "removed"
-                                ? `${attribute.format} · removed from this type; adding it restores it`
-                                : attribute.format
-                          }
-                          checked={pickedAttributes.includes(attribute.id)}
-                          {...(attribute.state === "added"
-                            ? { disabled: true }
-                            : {})}
-                          onChange={(event) =>
-                            setPickedAttributes(
-                              toggle(
-                                pickedAttributes,
-                                attribute.id,
-                                event.currentTarget.checked,
-                              ),
-                            )
-                          }
-                        />
-                      ))}
-                    </s-stack>
-                  )}
-                  {selected.picker.sets.length > 0 ? (
-                    <s-stack direction="block" gap="small-300">
-                      <s-text type="strong">Attribute sets</s-text>
-                      {pickableSets.length === 0 ? (
-                        <s-text color="subdued">No set matches.</s-text>
-                      ) : null}
-                      {pickableSets.map((set) => (
-                        <s-checkbox
-                          key={set.id}
-                          label={set.name}
-                          details={
-                            set.attachedHere
-                              ? `${set.members || "Empty set"} · already attached here`
-                              : set.members || "Empty set"
-                          }
-                          checked={pickedSets.includes(set.id)}
-                          {...(set.attachedHere ? { disabled: true } : {})}
-                          onChange={(event) =>
-                            setPickedSets(
-                              toggle(
-                                pickedSets,
-                                set.id,
-                                event.currentTarget.checked,
-                              ),
-                            )
-                          }
-                        />
-                      ))}
-                    </s-stack>
-                  ) : null}
+                  <s-grid
+                    gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr"
+                    gap="large"
+                    alignItems="start"
+                  >
+                    {selected.picker.attributes.length === 0 ? (
+                      <s-text color="subdued">
+                        No attributes are defined yet. Create the first one with
+                        the button below.
+                      </s-text>
+                    ) : (
+                      <s-stack direction="block" gap="small-300">
+                        <s-text type="strong">Attributes</s-text>
+                        {pickableAttributes.length === 0 ? (
+                          <s-text color="subdued">No attribute matches.</s-text>
+                        ) : null}
+                        {pickableAttributes.map((attribute) => (
+                          <s-checkbox
+                            key={attribute.id}
+                            label={attribute.name}
+                            details={
+                              attribute.state === "added"
+                                ? `${attribute.format} · already on this type`
+                                : attribute.state === "removed"
+                                  ? `${attribute.format} · removed from this type; adding it restores it`
+                                  : attribute.format
+                            }
+                            checked={pickedAttributes.includes(attribute.id)}
+                            {...(attribute.state === "added"
+                              ? { disabled: true }
+                              : {})}
+                            onChange={(event) =>
+                              setPickedAttributes(
+                                toggle(
+                                  pickedAttributes,
+                                  attribute.id,
+                                  event.currentTarget.checked,
+                                ),
+                              )
+                            }
+                          />
+                        ))}
+                      </s-stack>
+                    )}
+                    {selected.picker.sets.length > 0 ? (
+                      <s-stack direction="block" gap="small-300">
+                        <s-text type="strong">Attribute sets</s-text>
+                        {pickableSets.length === 0 ? (
+                          <s-text color="subdued">No set matches.</s-text>
+                        ) : null}
+                        {pickableSets.map((set) => (
+                          <s-checkbox
+                            key={set.id}
+                            label={set.name}
+                            details={
+                              set.attachedHere
+                                ? `${set.members || "Empty set"} · already attached here`
+                                : set.members || "Empty set"
+                            }
+                            checked={pickedSets.includes(set.id)}
+                            {...(set.attachedHere ? { disabled: true } : {})}
+                            onChange={(event) =>
+                              setPickedSets(
+                                toggle(
+                                  pickedSets,
+                                  set.id,
+                                  event.currentTarget.checked,
+                                ),
+                              )
+                            }
+                          />
+                        ))}
+                      </s-stack>
+                    ) : null}
+                  </s-grid>
                   {pickerTried && pickedCount === 0 ? (
                     <s-text tone="critical">
                       Choose at least one attribute or set.
@@ -1999,6 +2012,16 @@ export default function ProductTypes() {
           </s-section>
         ) : (
           <s-section heading="Product types">
+            {/*
+             * The one piece of styling of our own in the app: a drag handle
+             * needs a grab cursor and a hover, and Polaris has no drag
+             * handle. Scoped to the class, nothing else is touched.
+             */}
+            <style>{`
+              .ps-drag-handle { display: inline-flex; align-items: center; padding: 6px 4px; margin-inline-end: 4px; border-radius: 6px; cursor: grab; }
+              .ps-drag-handle:hover { background: #ebebeb; }
+              .ps-drag-handle:active { cursor: grabbing; }
+            `}</style>
             <s-stack direction="block" gap="small-300">
               {tree.length > 6 ? (
                 <s-search-field
@@ -2020,20 +2043,10 @@ export default function ProductTypes() {
                  */
                 <div
                   key={row.id}
-                  draggable
-                  onDragStart={(event) => {
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData("text/plain", row.id);
-                    attachDragGhost(event, row.name);
-                    setDragging(row.id);
-                  }}
-                  onDragEnd={() => {
-                    setDragging(null);
-                    setDropTarget(null);
-                  }}
                   onDragOver={(event) => {
-                    if (dragging === null || dragging === row.id) return;
-                    if (isWithinRow(row.id, dragging)) return;
+                    const source = draggingRef.current;
+                    if (source === null || source === row.id) return;
+                    if (isWithinRow(row.id, source)) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = "move";
                     const position = positionFrom(event);
@@ -2049,7 +2062,8 @@ export default function ProductTypes() {
                   onDrop={(event) => {
                     event.preventDefault();
                     const sourceId =
-                      dragging ?? event.dataTransfer.getData("text/plain");
+                      draggingRef.current ??
+                      event.dataTransfer.getData("text/plain");
                     if (sourceId) drop(sourceId, row.id, positionFrom(event));
                   }}
                 >
@@ -2077,9 +2091,30 @@ export default function ProductTypes() {
                       gap="none"
                       alignItems="center"
                     >
-                      <s-box paddingInlineEnd="small-500">
+                      {/*
+                       * The handle is the draggable thing, so a click on the
+                       * row still opens it and a drag from the dots is
+                       * unmistakably a drag. Its cursor and hover come from
+                       * the small stylesheet above the tree.
+                       */}
+                      <span
+                        className="ps-drag-handle"
+                        draggable
+                        title={`Drag to move ${row.name}`}
+                        aria-label={`Drag to move ${row.name}`}
+                        onDragStart={(event) => {
+                          event.dataTransfer.effectAllowed = "move";
+                          event.dataTransfer.setData("text/plain", row.id);
+                          attachDragGhost(event, row.name);
+                          startDrag(row.id);
+                        }}
+                        onDragEnd={() => {
+                          startDrag(null);
+                          setDropTarget(null);
+                        }}
+                      >
                         <s-icon type="drag-handle" color="subdued" />
-                      </s-box>
+                      </span>
                       {row.hasChildren ? (
                         <s-button
                           variant="tertiary"
@@ -2165,7 +2200,8 @@ export default function ProductTypes() {
                   }}
                   onDrop={(event) => {
                     event.preventDefault();
-                    if (dragging) drop(dragging, null, "inside");
+                    const source = draggingRef.current;
+                    if (source) drop(source, null, "inside");
                   }}
                 >
                   <s-box
