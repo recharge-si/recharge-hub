@@ -272,6 +272,28 @@ export async function addGlossaryTerm(
   });
 }
 
+/**
+ * Rewrites one term in place. The row keeps its id, so a rule a merchant
+ * corrects stays the rule they saw; `false` when the term is gone already.
+ */
+export async function updateGlossaryTerm(
+  principal: Principal,
+  id: string,
+  term: GlossaryTerm & { note?: string | null },
+): Promise<boolean> {
+  const updated = await prisma.translationGlossaryTerm.updateMany({
+    where: { id, shop: { domain: shopDomainOf(principal) } },
+    data: {
+      kind: term.kind,
+      targetLocale: term.kind === "protect" ? null : term.targetLocale,
+      sourceTerm: term.sourceTerm,
+      targetTerm: term.kind === "protect" ? null : term.targetTerm,
+      note: term.note ?? null,
+    },
+  });
+  return updated.count === 1;
+}
+
 export async function deleteGlossaryTerm(
   principal: Principal,
   id: string,
@@ -927,4 +949,85 @@ export async function usageForSync(
     costMicros: aggregate._sum.estimatedCostMicros ?? 0n,
     unpriced,
   };
+}
+
+export interface UsageTrendRow {
+  /** The bucket's first instant. */
+  at: Date;
+  requests: number;
+  totalTokens: number;
+  costMicros: bigint;
+}
+
+/**
+ * Usage over time for the usage page's chart: one row per day or month that
+ * saw a request, oldest first. The same sums as `usageTotals`, cut by
+ * `created_at`; Prisma's `groupBy` cannot truncate a date, so this is SQL.
+ */
+export async function usageTrend(
+  principal: Principal,
+  since: Date | null,
+  bucket: "day" | "month",
+): Promise<UsageTrendRow[]> {
+  const shopId = await shopIdFor(principal);
+  const sinceClause = since
+    ? Prisma.sql`AND "created_at" >= ${since}`
+    : Prisma.empty;
+  const rows = await prisma.$queryRaw<
+    Array<{
+      at: Date;
+      requests: number;
+      total_tokens: bigint;
+      cost_micros: bigint;
+    }>
+  >`
+    SELECT
+      date_trunc(${bucket}::text, "created_at") AS "at",
+      count(*)::int AS "requests",
+      coalesce(sum("total_tokens"), 0)::bigint AS "total_tokens",
+      coalesce(sum("estimated_cost_micros"), 0)::bigint AS "cost_micros"
+    FROM "ai_usage"
+    WHERE "shop_id" = ${shopId} ${sinceClause}
+    GROUP BY 1
+    ORDER BY 1
+  `;
+  return rows.map((row) => ({
+    at: row.at,
+    requests: Number(row.requests),
+    totalTokens: Number(row.total_tokens),
+    costMicros: BigInt(row.cost_micros),
+  }));
+}
+
+export type SyncSummary = Pick<
+  Sync,
+  | "id"
+  | "kind"
+  | "mode"
+  | "status"
+  | "sourceLocale"
+  | "targetLocales"
+  | "doneResources"
+  | "createdAt"
+>;
+
+/** The syncs behind a usage breakdown, so a row can be named and linked. */
+export async function syncSummaries(
+  principal: Principal,
+  ids: readonly string[],
+): Promise<SyncSummary[]> {
+  if (ids.length === 0) return [];
+  return prisma.translationSync.findMany({
+    where: { shop: { domain: shopDomainOf(principal) }, id: { in: [...ids] } },
+    select: {
+      id: true,
+      kind: true,
+      mode: true,
+      status: true,
+      sourceLocale: true,
+      targetLocales: true,
+      doneResources: true,
+      createdAt: true,
+    },
+  });
 }

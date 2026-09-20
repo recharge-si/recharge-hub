@@ -1,4 +1,4 @@
-import { useId, useState } from "react";
+import { useId, useState, type ReactNode } from "react";
 
 /**
  * A single-choice picker whose open list floats above the page, drawn by
@@ -36,6 +36,8 @@ import { useId, useState } from "react";
 export interface DropdownOption {
   value: string;
   label: string;
+  /** Drawn before the label, in the field and in the list: a flag, an icon. */
+  icon?: ReactNode;
 }
 
 export function Dropdown({
@@ -98,9 +100,12 @@ export function Dropdown({
           gap="small-200"
           alignItems="center"
         >
-          <s-text color={selected ? "base" : "subdued"}>
-            {selected?.label ?? placeholder}
-          </s-text>
+          <s-stack direction="inline" gap="small-200" alignItems="center">
+            {selected?.icon}
+            <s-text color={selected ? "base" : "subdued"}>
+              {selected?.label ?? placeholder}
+            </s-text>
+          </s-stack>
           <s-icon type={open ? "chevron-up" : "chevron-down"} />
         </s-grid>
       </s-clickable>
@@ -137,7 +142,10 @@ export function Dropdown({
                 gap="small-200"
                 alignItems="center"
               >
-                <s-text>{option.label}</s-text>
+                <s-stack direction="inline" gap="small-200" alignItems="center">
+                  {option.icon}
+                  <s-text>{option.label}</s-text>
+                </s-stack>
                 {option.value === value ? (
                   <s-icon type="check" />
                 ) : (
