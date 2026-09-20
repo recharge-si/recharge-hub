@@ -76,7 +76,7 @@ export function CampaignSchedule({
               {form.startMode === "at" ? (
                 <s-grid
                   slot="secondary-content"
-                  gridTemplateColumns="@container (inline-size <= 420px) 1fr, minmax(160px, 220px) minmax(100px, 140px)"
+                  gridTemplateColumns="@container (inline-size <= 420px) 1fr, 'minmax(160px, 220px) minmax(100px, 140px)'"
                   gap="small-300"
                   alignItems="start"
                 >
@@ -124,7 +124,7 @@ export function CampaignSchedule({
             {form.endMode === "at" ? (
               <s-grid
                 slot="secondary-content"
-                gridTemplateColumns="@container (inline-size <= 420px) 1fr, minmax(160px, 220px) minmax(100px, 140px)"
+                gridTemplateColumns="@container (inline-size <= 420px) 1fr, 'minmax(160px, 220px) minmax(100px, 140px)'"
                 gap="small-300"
                 alignItems="start"
               >

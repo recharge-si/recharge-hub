@@ -41,7 +41,10 @@ import {
 import { ContextSource } from "~/adapters/translations/context.server";
 import { hashValue } from "~/adapters/translations/engine.server";
 import { translateResourceNow } from "~/adapters/translations/inline.server";
-import { describeConfidence, detectionSample } from "~/domain/translations/detection";
+import {
+  describeConfidence,
+  detectionSample,
+} from "~/domain/translations/detection";
 import { isMemorable, memoryKey } from "~/domain/translations/memory";
 import { classifyField, isTranslatableField } from "~/domain/translations/plan";
 import {
@@ -90,7 +93,14 @@ import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
 const SAVE_BAR_ID = "translation-editor-save-bar";
 const PAGE = 25;
 
-/** The rail folds away behind the editor below this width of the workspace. */
+/**
+ * The rail folds away behind the editor below this width of the workspace.
+ *
+ * A track list with a function in it — `minmax(…)`, `repeat(…)` — is quoted
+ * inside a responsive value: Polaris tokenises the value itself and an
+ * unquoted identifier ends at a parenthesis, which makes the whole value
+ * invalid and the grid a single column.
+ */
 const NARROW = "(inline-size <= 760px)";
 const WIDE = "(inline-size > 760px)";
 
@@ -892,7 +902,7 @@ function Workspace({
 
         <s-query-container id="translation-workspace" containerName="workspace">
           <s-grid
-            gridTemplateColumns={`@container workspace ${NARROW} 1fr, 288px minmax(0, 1fr)`}
+            gridTemplateColumns={`@container workspace ${NARROW} 1fr, '288px minmax(0, 1fr)'`}
             gap="base"
             alignItems="stretch"
           >
@@ -995,70 +1005,77 @@ function Rail({
             maxHeight: "calc(100vh - 32px)",
           }}
         >
-          <s-box padding="small-200">
-            <s-stack direction="block" gap="small-300">
-              <Dropdown
-                name="locale"
-                label="Translate into"
-                hideLabel
-                value={data.locale}
-                options={data.languages.map((l) => ({
-                  value: l.locale,
-                  label: localeLabel(l.locale, l.name),
-                }))}
-                onChange={(next) => onOpen({ locale: next })}
-                disabled={busy}
-              />
-              <s-grid gridTemplateColumns="1fr 1fr" gap="small-300">
+          {/*
+           * Only the list gives way when the rail is taller than the window.
+           * A flex child shrinks by default, and a shrunken header lets the
+           * search field overflow onto the first rows.
+           */}
+          <div style={{ flexShrink: 0 }}>
+            <s-box padding="small-200">
+              <s-stack direction="block" gap="small-300">
                 <Dropdown
-                  name="type"
-                  label="Content"
+                  name="locale"
+                  label="Translate into"
                   hideLabel
-                  value={data.type}
-                  options={ALL_RESOURCE_TYPES.map((type) => ({
-                    value: type,
-                    label: RESOURCE_TYPE_LABEL[type],
+                  value={data.locale}
+                  options={data.languages.map((l) => ({
+                    value: l.locale,
+                    label: localeLabel(l.locale, l.name),
                   }))}
-                  onChange={(next) => {
-                    if (isResourceType(next)) onOpen({ type: next });
-                  }}
+                  onChange={(next) => onOpen({ locale: next })}
                   disabled={busy}
                 />
-                <Dropdown
-                  name="status"
-                  label="Show"
-                  hideLabel
-                  value={data.status}
-                  options={STATUS_FILTERS.map((status) => ({
-                    value: status,
-                    label: STATUS_FILTER_LABEL[status],
-                  }))}
-                  onChange={(next) => {
-                    if (isStatusFilter(next)) onOpen({ status: next });
+                <s-grid gridTemplateColumns="1fr 1fr" gap="small-300">
+                  <Dropdown
+                    name="type"
+                    label="Content"
+                    hideLabel
+                    value={data.type}
+                    options={ALL_RESOURCE_TYPES.map((type) => ({
+                      value: type,
+                      label: RESOURCE_TYPE_LABEL[type],
+                    }))}
+                    onChange={(next) => {
+                      if (isResourceType(next)) onOpen({ type: next });
+                    }}
+                    disabled={busy}
+                  />
+                  <Dropdown
+                    name="status"
+                    label="Show"
+                    hideLabel
+                    value={data.status}
+                    options={STATUS_FILTERS.map((status) => ({
+                      value: status,
+                      label: STATUS_FILTER_LABEL[status],
+                    }))}
+                    onChange={(next) => {
+                      if (isStatusFilter(next)) onOpen({ status: next });
+                    }}
+                    disabled={busy}
+                  />
+                </s-grid>
+                <s-search-field
+                  label={`Search ${noun}s by title`}
+                  labelAccessibilityVisibility="exclusive"
+                  placeholder={
+                    data.searchable
+                      ? `Search ${noun}s`
+                      : `${RESOURCE_TYPE_LABEL[data.type]}s cannot be searched`
+                  }
+                  value={q}
+                  onInput={(event) => setQ(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setQ(event.currentTarget.value);
+                    onOpen({ q: event.currentTarget.value });
                   }}
-                  disabled={busy}
+                  {...(busy || !data.searchable ? { disabled: true } : {})}
                 />
-              </s-grid>
-              <s-search-field
-                label={`Search ${noun}s by title`}
-                labelAccessibilityVisibility="exclusive"
-                placeholder={
-                  data.searchable
-                    ? `Search ${noun}s`
-                    : `${RESOURCE_TYPE_LABEL[data.type]}s cannot be searched`
-                }
-                value={q}
-                onInput={(event) => setQ(event.currentTarget.value)}
-                onChange={(event) => {
-                  setQ(event.currentTarget.value);
-                  onOpen({ q: event.currentTarget.value });
-                }}
-                {...(busy || !data.searchable ? { disabled: true } : {})}
-              />
-            </s-stack>
-          </s-box>
+              </s-stack>
+            </s-box>
 
-          <s-divider />
+            <s-divider />
+          </div>
 
           <div
             style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}
@@ -1093,32 +1110,34 @@ function Rail({
             </s-box>
           </div>
 
-          <s-divider />
+          <div style={{ flexShrink: 0 }}>
+            <s-divider />
 
-          <s-box paddingInline="small-200" paddingBlock="small-300">
-            <s-grid
-              gridTemplateColumns="1fr auto"
-              gap="small-300"
-              alignItems="center"
-            >
-              <s-text color="subdued">
-                {data.rows.length === 1
-                  ? `1 ${noun}`
-                  : `${data.rows.length} ${noun}s`}
-                {data.filteredOut > 0 ? ` · ${data.filteredOut} hidden` : ""}
-              </s-text>
-              {data.hasNextPage && data.endCursor ? (
-                <s-button
-                  variant="tertiary"
-                  icon="chevron-right"
-                  onClick={() => onOpen({ after: data.endCursor })}
-                  {...(busy ? { disabled: true } : {})}
-                >
-                  Next page
-                </s-button>
-              ) : null}
-            </s-grid>
-          </s-box>
+            <s-box paddingInline="small-200" paddingBlock="small-300">
+              <s-grid
+                gridTemplateColumns="1fr auto"
+                gap="small-300"
+                alignItems="center"
+              >
+                <s-text color="subdued">
+                  {data.rows.length === 1
+                    ? `1 ${noun}`
+                    : `${data.rows.length} ${noun}s`}
+                  {data.filteredOut > 0 ? ` · ${data.filteredOut} hidden` : ""}
+                </s-text>
+                {data.hasNextPage && data.endCursor ? (
+                  <s-button
+                    variant="tertiary"
+                    icon="chevron-right"
+                    onClick={() => onOpen({ after: data.endCursor })}
+                    {...(busy ? { disabled: true } : {})}
+                  >
+                    Next page
+                  </s-button>
+                ) : null}
+              </s-grid>
+            </s-box>
+          </div>
         </div>
       </s-section>
     </div>
@@ -1361,7 +1380,7 @@ function ResourcePane({
         <s-stack direction="block" gap="small-300">
           <BackToRail data={data} onBack={() => onChoose(null)} />
           <s-grid
-            gridTemplateColumns={`@container workspace (inline-size <= 980px) 1fr, minmax(0, 1fr) auto`}
+            gridTemplateColumns={`@container workspace (inline-size <= 980px) 1fr, 'minmax(0, 1fr) auto'`}
             gap="base"
             alignItems="start"
           >
@@ -1478,7 +1497,7 @@ function SourceRow({
       : null;
   return (
     <s-grid
-      gridTemplateColumns="@container workspace (inline-size <= 640px) 1fr, auto minmax(200px, 320px) auto minmax(0, 1fr)"
+      gridTemplateColumns="@container workspace (inline-size <= 640px) 1fr, 'auto minmax(200px, 320px) auto minmax(0, 1fr)'"
       gap="small-300"
       alignItems="center"
     >
@@ -1557,7 +1576,7 @@ function FieldRow({
 
   return (
     <s-grid
-      gridTemplateColumns={`@container workspace (inline-size <= 900px) 1fr, minmax(0, 1fr) minmax(0, 1fr)`}
+      gridTemplateColumns={`@container workspace (inline-size <= 900px) 1fr, 'minmax(0, 1fr) minmax(0, 1fr)'`}
       gap="base"
       alignItems="stretch"
     >

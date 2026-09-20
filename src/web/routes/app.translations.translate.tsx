@@ -352,7 +352,7 @@ export default function TranslateStore() {
             ) : (
               <>
                 <s-grid
-                  gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, repeat(4, 1fr)"
+                  gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, 'repeat(4, 1fr)'"
                   gap="base"
                 >
                   <Stat

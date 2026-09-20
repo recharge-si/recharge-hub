@@ -364,7 +364,7 @@ export default function SyncPage() {
 
         <s-section heading="Result">
           <s-grid
-            gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, repeat(4, 1fr)"
+            gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, 'repeat(4, 1fr)'"
             gap="base"
           >
             <Stat
@@ -386,7 +386,7 @@ export default function SyncPage() {
         <s-section heading="AI usage">
           <s-stack direction="block" gap="base">
             <s-grid
-              gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, repeat(4, 1fr)"
+              gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, 'repeat(4, 1fr)'"
               gap="base"
             >
               <Stat label="Requests" value={formatCount(usage.requests)} />

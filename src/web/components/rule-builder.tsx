@@ -410,7 +410,7 @@ function RuleRow({
 
   return (
     <s-grid
-      gridTemplateColumns="@container (inline-size <= 700px) 1fr, minmax(140px, 1fr) minmax(140px, 1fr) minmax(180px, 2fr) auto"
+      gridTemplateColumns="@container (inline-size <= 700px) 1fr, 'minmax(140px, 1fr) minmax(140px, 1fr) minmax(180px, 2fr) auto'"
       gap="small-300"
       alignItems="start"
     >

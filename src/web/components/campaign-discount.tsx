@@ -109,7 +109,7 @@ export function CampaignDiscount({
         </s-stack>
 
         <s-grid
-          gridTemplateColumns="@container (inline-size <= 520px) 1fr, minmax(140px, 200px) minmax(200px, 1fr)"
+          gridTemplateColumns="@container (inline-size <= 520px) 1fr, 'minmax(140px, 200px) minmax(200px, 1fr)'"
           gap="base"
           alignItems="start"
         >
