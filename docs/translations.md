@@ -225,12 +225,26 @@ have a webhook here.
 Translations        /app/translations                       Languages: Shopify state, AI state, coverage, needs work, last sync
   Add language      /app/translations/add                   pick a Shopify-supported locale; publish; markets; AI; initial translation
   Language          /app/translations/languages/:locale     In Shopify (publish / unpublish, markets, remove) · AI translation · Coverage · Translate · Recent syncs
-  Editor            /app/translations/editor                language · content · status · search; a resource's fields, source beside translation; source language; translate now
+  Editor            /app/translations/editor                workspace: a rail of resources beside the one open; each field's source beside its translation; source language; translate now
   Translate store   /app/translations/translate             source · languages · content · mode · estimate · start
   Syncs             /app/translations/syncs, /:syncId       list; one sync with result, usage, every item and its reason; stop
   Glossary          /app/translations/glossary              translate-as terms per language or all; never-translate terms
   AI usage          /app/translations/usage                 today / this month / all time; by language, content, model, sync
 ```
+
+The editor is one screen, not a list and a page. The rail on the left —
+language, content, status, search, then a page of resources — stays put
+while the resource on the right is edited, and choosing another resource
+swaps the right side without leaving the page: the route loader reads the
+rail, and the pane fetches its resource from the same loader with
+`part=resource`; `shouldRevalidate` keeps a change of resource from
+re-reading the rail, while every save and translation revalidates both. The
+address carries the open resource so a reload or a bookmark returns to it.
+Below about 760px of width the two take turns, the rail until something is
+chosen and the pane with a way back after. The pane's columns are capped so
+prose is never stretched across a wide window; a longer window is for the
+rail beside them. Unsaved edits hold a change of resource behind the save
+bar's own leave confirmation.
 
 Every Shopify mutation shows what Shopify answered, not what was asked.
 Removing a language explains that Shopify deletes its translations, and

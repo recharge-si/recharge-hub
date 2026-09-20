@@ -1,11 +1,13 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
+  useNavigate,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
+  type ShouldRevalidateFunction,
 } from "react-router";
 import { z } from "zod";
 
@@ -47,11 +49,11 @@ import {
 } from "~/domain/translations/types";
 import { Dropdown } from "~/web/components/dropdown";
 import { TranslationsNav } from "~/web/components/translations-nav";
+import { formatListDateTime } from "~/web/lib/datetime";
 import {
   actorFromSession,
   principalFromSession,
 } from "~/web/lib/principal.server";
-import { redirectWithin } from "~/web/lib/redirects";
 import {
   TRANSLATION_ROUTES,
   describeResourceId,
@@ -60,22 +62,30 @@ import {
 import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
 
 /**
- * The translation editor (docs/translations.md § Editor): browse what
- * Shopify holds for one language and one kind of content, open a resource,
- * see each field's source beside its translation and its state, and save.
+ * The translation workspace (docs/translations.md § Editor): a rail of
+ * resources on the left that stays where it is, and the one chosen resource
+ * on the right with every field's source beside its translation.
+ *
+ * Choosing a resource never leaves the page. The rail is what the route
+ * loader reads — a page of Shopify's `translatableResources`, filtered here
+ * because Shopify offers no query on that connection — and the chosen
+ * resource is a second, smaller read of the same loader (`part=resource`)
+ * made from the browser. The address is kept current so a reload or a
+ * bookmark opens the same resource, but `shouldRevalidate` keeps a change of
+ * resource from re-reading the whole rail.
  *
  * Saving is `translationsRegister` — the translation lands in Shopify and
  * nowhere else — and records the field as a person's work, which the AI
  * then leaves alone. An emptied field is `translationsRemove`. The source
  * language a resource is written in is shown and can be changed here;
  * detection only suggests.
- *
- * The list is a page of Shopify's `translatableResources`, filtered in this
- * request: Shopify offers no query on that connection, so a search goes to
- * the resource's own connection by title first.
  */
 const SAVE_BAR_ID = "translation-editor-save-bar";
 const PAGE = 25;
+
+/** The rail folds away behind the editor below this width of the workspace. */
+const NARROW = "(inline-size <= 760px)";
+const WIDE = "(inline-size > 760px)";
 
 const STATUS_FILTERS = ["all", "missing", "outdated", "manual", "ai"] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -88,14 +98,21 @@ const STATUS_FILTER_LABEL: Record<StatusFilter, string> = {
   ai: "Written by AI",
 };
 
-function editorUrl(params: {
+function isStatusFilter(value: string): value is StatusFilter {
+  return (STATUS_FILTERS as readonly string[]).includes(value);
+}
+
+interface ListParams {
   locale: string;
   type: ResourceType;
   status: StatusFilter;
   q: string;
   after?: string | null;
-  resource?: string | null;
-}): string {
+}
+
+function editorUrl(
+  params: ListParams & { resource?: string | null; part?: "resource" },
+): string {
   const search = new URLSearchParams();
   search.set("locale", params.locale);
   search.set("type", params.type);
@@ -103,6 +120,7 @@ function editorUrl(params: {
   if (params.q) search.set("q", params.q);
   if (params.after) search.set("after", params.after);
   if (params.resource) search.set("resource", params.resource);
+  if (params.part) search.set("part", params.part);
   return `${TRANSLATION_ROUTES.editor}?${search.toString()}`;
 }
 
@@ -144,6 +162,47 @@ function countStates(
   return counts;
 }
 
+/** One resource as the editor pane shows it. */
+function describeSelected(
+  resource: TranslatableResource,
+  locale: string,
+  primaryLocale: string,
+  ownership: readonly OwnershipRecord[],
+  override: { sourceLocale: string; detectedLocale: string | null } | null,
+) {
+  const translations = new Map(
+    (resource.translations.get(locale) ?? []).map((t) => [t.key, t]),
+  );
+  const records = new Map(
+    ownership.filter((r) => r.locale === locale).map((r) => [r.key, r]),
+  );
+  return {
+    id: resource.resourceId,
+    title: resourceTitle(resource.fields, resource.resourceId),
+    sourceLocale: override?.sourceLocale ?? primaryLocale,
+    sourceIsOverride:
+      override !== null && override.sourceLocale !== primaryLocale,
+    detectedLocale: override?.detectedLocale ?? null,
+    fields: resource.fields
+      .filter((field) => field.digest !== null)
+      .map((field) => {
+        const translation = translations.get(field.key);
+        return {
+          key: field.key,
+          label: fieldLabel(field.key),
+          type: field.type,
+          source: field.value,
+          digest: field.digest ?? "",
+          translation: translation?.value ?? "",
+          state: classifyField(translation, records.get(field.key), hashValue),
+          outdated: translation?.outdated ?? false,
+          updatedAt: translation?.updatedAt ?? null,
+          prose: isTranslatableField(field),
+        };
+      }),
+  };
+}
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
@@ -172,16 +231,40 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const typeParam = url.searchParams.get("type") ?? "PRODUCT";
   const type: ResourceType = isResourceType(typeParam) ? typeParam : "PRODUCT";
   const statusParam = url.searchParams.get("status") ?? "all";
-  const status: StatusFilter = (STATUS_FILTERS as readonly string[]).includes(
-    statusParam,
-  )
-    ? (statusParam as StatusFilter)
+  const status: StatusFilter = isStatusFilter(statusParam)
+    ? statusParam
     : "all";
   const q = (url.searchParams.get("q") ?? "").trim().slice(0, 100);
   const after = url.searchParams.get("after");
   const selectedId = url.searchParams.get("resource");
 
-  // The list: a search by title where the type allows it, else a page.
+  // The small read: one resource for the pane, nothing for the rail.
+  if (url.searchParams.get("part") === "resource") {
+    if (!selectedId) return { kind: "resource" as const, selected: null };
+    const [read, ownership, override] = await Promise.all([
+      readTranslatableResourcesByIds(admin, {
+        ids: [selectedId],
+        locales: [locale],
+      }),
+      listOwnership(principal, [selectedId]),
+      getSourceOverride(principal, selectedId),
+    ]);
+    const resource = read[0];
+    return {
+      kind: "resource" as const,
+      selected: resource
+        ? describeSelected(
+            resource,
+            locale,
+            primary.locale,
+            ownership.get(selectedId) ?? [],
+            override,
+          )
+        : null,
+    };
+  }
+
+  // The rail: a search by title where the type allows it, else a page.
   let page: {
     resources: TranslatableResource[];
     hasNextPage: boolean;
@@ -237,54 +320,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     (selectedId && page.resources.find((r) => r.resourceId === selectedId)) ||
     selectedRead[0] ||
     null;
-  const selectedOwnership = selectedId ? (ownership.get(selectedId) ?? []) : [];
-  const selected = selectedResource
-    ? (() => {
-        const translations = new Map(
-          (selectedResource.translations.get(locale) ?? []).map((t) => [
-            t.key,
-            t,
-          ]),
-        );
-        const records = new Map(
-          selectedOwnership
-            .filter((r) => r.locale === locale)
-            .map((r) => [r.key, r]),
-        );
-        return {
-          id: selectedResource.resourceId,
-          title: resourceTitle(
-            selectedResource.fields,
-            selectedResource.resourceId,
-          ),
-          sourceLocale: override?.sourceLocale ?? primary.locale,
-          sourceIsOverride:
-            override !== null && override.sourceLocale !== primary.locale,
-          detectedLocale: override?.detectedLocale ?? null,
-          fields: selectedResource.fields
-            .filter((field) => field.digest !== null)
-            .map((field) => {
-              const translation = translations.get(field.key);
-              return {
-                key: field.key,
-                label: fieldLabel(field.key),
-                type: field.type,
-                source: field.value,
-                digest: field.digest ?? "",
-                translation: translation?.value ?? "",
-                state: classifyField(
-                  translation,
-                  records.get(field.key),
-                  hashValue,
-                ),
-                outdated: translation?.outdated ?? false,
-                updatedAt: translation?.updatedAt ?? null,
-                prose: isTranslatableField(field),
-              };
-            }),
-        };
-      })()
-    : null;
+  const selected =
+    selectedResource && selectedId
+      ? describeSelected(
+          selectedResource,
+          locale,
+          primary.locale,
+          ownership.get(selectedId) ?? [],
+          override,
+        )
+      : null;
 
   return {
     kind: "read" as const,
@@ -299,6 +344,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     type,
     status,
     q,
+    after,
     searchable: isSearchable(type),
     rows,
     filteredOut: page.resources.length - rows.length,
@@ -307,6 +353,29 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     selected,
     aiConfigured: isConfigured(),
   };
+};
+
+/**
+ * Changing only which resource is open is the one navigation that must not
+ * re-read the rail: the pane fetches the resource itself. Everything else —
+ * a filter, a search, a page, and every save — revalidates as usual.
+ */
+export const shouldRevalidate: ShouldRevalidateFunction = ({
+  currentUrl,
+  nextUrl,
+  formMethod,
+  defaultShouldRevalidate,
+}) => {
+  if (formMethod && formMethod !== "GET") return defaultShouldRevalidate;
+  if (currentUrl.pathname !== nextUrl.pathname) return defaultShouldRevalidate;
+  const before = new URLSearchParams(currentUrl.search);
+  const next = new URLSearchParams(nextUrl.search);
+  before.delete("resource");
+  next.delete("resource");
+  before.sort();
+  next.sort();
+  if (before.toString() === next.toString()) return false;
+  return defaultShouldRevalidate;
 };
 
 const saveSchema = z.object({
@@ -565,28 +634,13 @@ export const action = async ({
     };
   }
 
-  if (intent === "open") {
-    // A search or filter change: rebuild the URL so it is bookmarkable.
-    const locale = String(formData.get("locale") ?? "");
-    const typeParam = String(formData.get("type") ?? "PRODUCT");
-    const statusParam = String(formData.get("status") ?? "all");
-    throw redirectWithin(
-      request,
-      editorUrl({
-        locale,
-        type: isResourceType(typeParam) ? typeParam : "PRODUCT",
-        status: (STATUS_FILTERS as readonly string[]).includes(statusParam)
-          ? (statusParam as StatusFilter)
-          : "all",
-        q: String(formData.get("q") ?? ""),
-      }),
-    );
-  }
-
   return { ok: false, message: "Unknown action." };
 };
 
-type ReadData = Extract<Awaited<ReturnType<typeof loader>>, { kind: "read" }>;
+type LoaderData = Awaited<ReturnType<typeof loader>>;
+type ReadData = Extract<LoaderData, { kind: "read" }>;
+type Selected = NonNullable<ReadData["selected"]>;
+type Row = ReadData["rows"][number];
 
 export default function Editor() {
   const data = useLoaderData<typeof loader>();
@@ -640,10 +694,28 @@ export default function Editor() {
       </s-page>
     );
   }
-  return <EditorPage data={data} fetcher={fetcher} result={result ?? null} />;
+  if (data.kind === "resource") {
+    // Only ever answered to the pane's own fetch, never rendered as a page.
+    return null;
+  }
+  return (
+    <Workspace
+      key={`${data.locale}|${data.type}|${data.status}|${data.q}|${data.after ?? ""}`}
+      data={data}
+      fetcher={fetcher}
+      result={result ?? null}
+    />
+  );
 }
 
-function EditorPage({
+/** The chosen resource as the pane knows it: what it shows, or why not. */
+type Pane =
+  | { kind: "none" }
+  | { kind: "loading"; id: string; title: string }
+  | { kind: "missing"; id: string }
+  | { kind: "ready"; id: string; selected: Selected };
+
+function Workspace({
   data,
   fetcher,
   result,
@@ -652,31 +724,94 @@ function EditorPage({
   fetcher: ReturnType<typeof useFetcher<typeof action>>;
   result: ActionResult | null;
 }) {
+  const navigate = useNavigate();
+  const resourceFetcher = useFetcher<typeof loader>();
   const busy = fetcher.state !== "idle";
-  const [q, setQ] = useState(data.q);
-  useResetWhenSaved(
-    data.q,
-    useCallback(() => setQ(data.q), [data.q]),
-  );
 
-  const open = (
-    patch: Partial<{
-      locale: string;
-      type: ResourceType;
-      status: StatusFilter;
-      q: string;
-    }>,
-  ) =>
-    fetcher.submit(
-      {
-        intent: "open",
-        locale: patch.locale ?? data.locale,
-        type: patch.type ?? data.type,
-        status: patch.status ?? data.status,
-        q: patch.q ?? q,
-      },
-      { method: "post" },
+  // The page the rail is on travels with every address built here, so
+  // choosing a resource on a later page does not fall back to the first.
+  const list: ListParams = {
+    locale: data.locale,
+    type: data.type,
+    status: data.status,
+    q: data.q,
+    after: data.after,
+  };
+
+  const [pane, setPane] = useState<Pane>(() =>
+    data.selected
+      ? { kind: "ready", id: data.selected.id, selected: data.selected }
+      : { kind: "none" },
+  );
+  const selectedId = pane.kind === "none" ? null : pane.id;
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
+
+  // A save or a translation revalidates the loader, which then carries the
+  // open resource fresh. The pane takes it only when it is still the one open.
+  useEffect(() => {
+    const fresh = data.selected;
+    if (fresh && fresh.id === selectedRef.current)
+      setPane({ kind: "ready", id: fresh.id, selected: fresh });
+  }, [data]);
+
+  useEffect(() => {
+    const answer = resourceFetcher.data;
+    if (!answer || answer.kind !== "resource") return;
+    const wanted = selectedRef.current;
+    if (wanted === null) return;
+    if (answer.selected && answer.selected.id === wanted)
+      setPane({ kind: "ready", id: wanted, selected: answer.selected });
+    else if (!answer.selected)
+      setPane((now) =>
+        now.kind === "loading" && now.id === wanted
+          ? { kind: "missing", id: wanted }
+          : now,
+      );
+  }, [resourceFetcher.data]);
+
+  const choose = async (row: Row | null) => {
+    if (typeof shopify !== "undefined") {
+      // Unsaved edits on the open resource: the merchant decides first.
+      // The confirmation resolves at once when no save bar is showing; an
+      // App Bridge without it lets the change through unasked rather than
+      // holding the rail hostage.
+      const confirm = shopify.saveBar.leaveConfirmation;
+      if (typeof confirm === "function") {
+        try {
+          await confirm.call(shopify.saveBar);
+        } catch {
+          return;
+        }
+      }
+    }
+    if (row === null) {
+      setPane({ kind: "none" });
+      void navigate(editorUrl(list), { replace: true });
+      return;
+    }
+    setPane({ kind: "loading", id: row.id, title: row.title });
+    void resourceFetcher.load(
+      editorUrl({ ...list, resource: row.id, part: "resource" }),
     );
+    void navigate(editorUrl({ ...list, resource: row.id }), {
+      replace: true,
+    });
+  };
+
+  const index = data.rows.findIndex((row) => row.id === selectedId);
+  const previous = index > 0 ? (data.rows[index - 1] ?? null) : null;
+  const next =
+    index >= 0 && index < data.rows.length - 1
+      ? (data.rows[index + 1] ?? null)
+      : null;
+
+  // A new filter or search starts from the first page; only "Next page"
+  // itself carries a cursor forward.
+  const open = (patch: Partial<ListParams>) =>
+    void navigate(editorUrl({ ...list, after: null, ...patch }));
+
+  const hasSelection = pane.kind !== "none";
 
   return (
     <s-page heading="Editor" inlineSize="large">
@@ -684,7 +819,7 @@ function EditorPage({
         Translations
       </s-link>
 
-      <s-stack direction="block" gap="large">
+      <s-stack direction="block" gap="base">
         <TranslationsNav current="editor" />
 
         {result && !result.ok ? (
@@ -693,144 +828,287 @@ function EditorPage({
           </s-banner>
         ) : null}
 
-        <s-section>
+        <s-query-container id="translation-workspace" containerName="workspace">
           <s-grid
-            gridTemplateColumns="@container (inline-size <= 720px) 1fr, 1fr 1fr 1fr 2fr"
+            gridTemplateColumns={`@container workspace ${NARROW} 1fr, 288px minmax(0, 1fr)`}
             gap="base"
-            alignItems="end"
+            alignItems="stretch"
           >
-            <Dropdown
-              name="locale"
-              label="Language"
-              value={data.locale}
-              options={data.languages.map((l) => ({
-                value: l.locale,
-                label: localeLabel(l.locale, l.name),
-              }))}
-              onChange={(next) => open({ locale: next })}
-              disabled={busy}
-            />
-            <Dropdown
-              name="type"
-              label="Content"
-              value={data.type}
-              options={ALL_RESOURCE_TYPES.map((type) => ({
-                value: type,
-                label: RESOURCE_TYPE_LABEL[type],
-              }))}
-              onChange={(next) => {
-                if (isResourceType(next)) open({ type: next });
-              }}
-              disabled={busy}
-            />
-            <Dropdown
-              name="status"
-              label="Show"
-              value={data.status}
-              options={STATUS_FILTERS.map((status) => ({
-                value: status,
-                label: STATUS_FILTER_LABEL[status],
-              }))}
-              onChange={(next) => {
-                if ((STATUS_FILTERS as readonly string[]).includes(next))
-                  open({ status: next as StatusFilter });
-              }}
-              disabled={busy}
-            />
-            <s-text-field
-              label="Search by title"
-              placeholder={
-                data.searchable
-                  ? "Patrik 5-Wave"
-                  : "Not searchable for this content"
+            {/*
+             * On a phone the rail and the pane take turns: the rail until
+             * something is chosen, the pane with a way back after.
+             */}
+            <s-box
+              display={
+                hasSelection
+                  ? `@container workspace ${NARROW} none, auto`
+                  : "auto"
               }
-              value={q}
-              onInput={(event) => setQ(event.currentTarget.value)}
-              onChange={(event) => {
-                setQ(event.currentTarget.value);
-                open({ q: event.currentTarget.value });
-              }}
-              {...(busy || !data.searchable ? { disabled: true } : {})}
-            />
+            >
+              <Rail
+                data={data}
+                selectedId={selectedId}
+                busy={busy}
+                onChoose={(row) => void choose(row)}
+                onOpen={open}
+              />
+            </s-box>
+
+            <s-box
+              display={
+                hasSelection
+                  ? "auto"
+                  : `@container workspace ${NARROW} none, auto`
+              }
+            >
+              {pane.kind === "ready" ? (
+                <ResourcePane
+                  key={`${pane.id}|${data.locale}`}
+                  data={data}
+                  selected={pane.selected}
+                  fetcher={fetcher}
+                  busy={busy}
+                  previous={previous}
+                  next={next}
+                  onChoose={(row) => void choose(row)}
+                />
+              ) : (
+                <PanePlaceholder
+                  data={data}
+                  pane={pane}
+                  onBack={() => void choose(null)}
+                />
+              )}
+            </s-box>
           </s-grid>
-        </s-section>
-
-        <s-grid
-          gridTemplateColumns="@container (inline-size <= 900px) 1fr, minmax(260px, 1fr) 2fr"
-          gap="large"
-          alignItems="start"
-        >
-          <s-section heading={`${RESOURCE_TYPE_LABEL[data.type]}s`}>
-            <s-stack direction="block" gap="small-300">
-              {data.rows.length === 0 ? (
-                <s-text color="subdued">
-                  {data.filteredOut > 0
-                    ? `None of the ${data.filteredOut} on this page match "${STATUS_FILTER_LABEL[data.status]}".`
-                    : "Nothing here."}
-                </s-text>
-              ) : null}
-              {data.rows.map((row) => (
-                <s-clickable
-                  key={row.id}
-                  href={editorUrl({
-                    locale: data.locale,
-                    type: data.type,
-                    status: data.status,
-                    q: data.q,
-                    resource: row.id,
-                  })}
-                  border="base"
-                  borderRadius="base"
-                  padding="small-200"
-                  {...(data.selected?.id === row.id
-                    ? { background: "subdued" as const }
-                    : {})}
-                >
-                  <s-stack direction="block" gap="small-500">
-                    <s-text type="strong">{row.title}</s-text>
-                    <s-text color="subdued">
-                      {summariseStates(row.states)}
-                    </s-text>
-                  </s-stack>
-                </s-clickable>
-              ))}
-              {data.hasNextPage && data.endCursor ? (
-                <s-stack direction="inline">
-                  <s-button
-                    href={editorUrl({
-                      locale: data.locale,
-                      type: data.type,
-                      status: data.status,
-                      q: data.q,
-                      after: data.endCursor,
-                    })}
-                  >
-                    Next page
-                  </s-button>
-                </s-stack>
-              ) : null}
-            </s-stack>
-          </s-section>
-
-          {data.selected ? (
-            <ResourcePanel
-              key={`${data.selected.id}|${data.locale}`}
-              data={data}
-              selected={data.selected}
-              fetcher={fetcher}
-              busy={busy}
-            />
-          ) : (
-            <s-section heading="Pick something to translate">
-              <s-text color="subdued">
-                Choose a resource on the left. Each field shows the source text
-                beside its translation, and where the translation came from.
-              </s-text>
-            </s-section>
-          )}
-        </s-grid>
+        </s-query-container>
       </s-stack>
     </s-page>
+  );
+}
+
+function Rail({
+  data,
+  selectedId,
+  busy,
+  onChoose,
+  onOpen,
+}: {
+  data: ReadData;
+  selectedId: string | null;
+  busy: boolean;
+  onChoose: (row: Row) => void;
+  onOpen: (patch: Partial<ListParams>) => void;
+}) {
+  const [q, setQ] = useState(data.q);
+  useResetWhenSaved(
+    data.q,
+    useCallback(() => setQ(data.q), [data.q]),
+  );
+  const noun = RESOURCE_TYPE_LABEL[data.type].toLowerCase();
+
+  return (
+    /*
+     * The rail stays put while the pane scrolls, so the next resource is
+     * always one click away, and its list scrolls inside the rail rather
+     * than pushing the pane down the page. Position and overflow are
+     * layout, which Polaris leaves to the page (compare the pattern editor's
+     * list); nothing is drawn here that Polaris did not draw.
+     */
+    <div
+      style={{
+        position: "sticky",
+        top: "16px",
+        maxHeight: "calc(100vh - 32px)",
+        display: "flex",
+        flexDirection: "column",
+      }}
+    >
+      <s-section padding="none" accessibilityLabel="Resources">
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            minHeight: 0,
+            maxHeight: "calc(100vh - 32px)",
+          }}
+        >
+          <s-box padding="small-200">
+            <s-stack direction="block" gap="small-300">
+              <Dropdown
+                name="locale"
+                label="Translate into"
+                hideLabel
+                value={data.locale}
+                options={data.languages.map((l) => ({
+                  value: l.locale,
+                  label: localeLabel(l.locale, l.name),
+                }))}
+                onChange={(next) => onOpen({ locale: next })}
+                disabled={busy}
+              />
+              <s-grid gridTemplateColumns="1fr 1fr" gap="small-300">
+                <Dropdown
+                  name="type"
+                  label="Content"
+                  hideLabel
+                  value={data.type}
+                  options={ALL_RESOURCE_TYPES.map((type) => ({
+                    value: type,
+                    label: RESOURCE_TYPE_LABEL[type],
+                  }))}
+                  onChange={(next) => {
+                    if (isResourceType(next)) onOpen({ type: next });
+                  }}
+                  disabled={busy}
+                />
+                <Dropdown
+                  name="status"
+                  label="Show"
+                  hideLabel
+                  value={data.status}
+                  options={STATUS_FILTERS.map((status) => ({
+                    value: status,
+                    label: STATUS_FILTER_LABEL[status],
+                  }))}
+                  onChange={(next) => {
+                    if (isStatusFilter(next)) onOpen({ status: next });
+                  }}
+                  disabled={busy}
+                />
+              </s-grid>
+              <s-search-field
+                label={`Search ${noun}s by title`}
+                labelAccessibilityVisibility="exclusive"
+                placeholder={
+                  data.searchable
+                    ? `Search ${noun}s`
+                    : `${RESOURCE_TYPE_LABEL[data.type]}s cannot be searched`
+                }
+                value={q}
+                onInput={(event) => setQ(event.currentTarget.value)}
+                onChange={(event) => {
+                  setQ(event.currentTarget.value);
+                  onOpen({ q: event.currentTarget.value });
+                }}
+                {...(busy || !data.searchable ? { disabled: true } : {})}
+              />
+            </s-stack>
+          </s-box>
+
+          <s-divider />
+
+          <div
+            style={{ flex: "1 1 auto", minHeight: 0, overflowY: "auto" }}
+            role="presentation"
+          >
+            <s-box padding="small-400">
+              <s-stack
+                direction="block"
+                gap="none"
+                accessibilityLabel={`${RESOURCE_TYPE_LABEL[data.type]}s`}
+              >
+                {data.rows.length === 0 ? (
+                  <s-box padding="small-200">
+                    <s-text color="subdued">
+                      {data.filteredOut > 0
+                        ? `None of the ${data.filteredOut} on this page are "${STATUS_FILTER_LABEL[data.status].toLowerCase()}".`
+                        : data.q
+                          ? `No ${noun} matches "${data.q}".`
+                          : `No ${noun}s here.`}
+                    </s-text>
+                  </s-box>
+                ) : null}
+                {data.rows.map((row) => (
+                  <RailRow
+                    key={row.id}
+                    row={row}
+                    current={row.id === selectedId}
+                    onChoose={() => onChoose(row)}
+                  />
+                ))}
+              </s-stack>
+            </s-box>
+          </div>
+
+          <s-divider />
+
+          <s-box paddingInline="small-200" paddingBlock="small-300">
+            <s-grid
+              gridTemplateColumns="1fr auto"
+              gap="small-300"
+              alignItems="center"
+            >
+              <s-text color="subdued">
+                {data.rows.length === 1
+                  ? `1 ${noun}`
+                  : `${data.rows.length} ${noun}s`}
+                {data.filteredOut > 0 ? ` · ${data.filteredOut} hidden` : ""}
+              </s-text>
+              {data.hasNextPage && data.endCursor ? (
+                <s-button
+                  variant="tertiary"
+                  icon="chevron-right"
+                  onClick={() => onOpen({ after: data.endCursor })}
+                  {...(busy ? { disabled: true } : {})}
+                >
+                  Next page
+                </s-button>
+              ) : null}
+            </s-grid>
+          </s-box>
+        </div>
+      </s-section>
+    </div>
+  );
+}
+
+function RailRow({
+  row,
+  current,
+  onChoose,
+}: {
+  row: Row;
+  current: boolean;
+  onChoose: () => void;
+}) {
+  const needsWork = row.states.missing + row.states.outdated;
+  return (
+    <s-clickable
+      type="button"
+      onClick={onChoose}
+      background={current ? "subdued" : "transparent"}
+      borderRadius="base"
+      paddingInline="small-200"
+      paddingBlock="small-300"
+      inlineSize="100%"
+      accessibilityLabel={`${row.title}${current ? ", open" : ""}${
+        needsWork > 0 ? `, ${summariseStates(row.states)}` : ""
+      }`}
+    >
+      <s-grid
+        gridTemplateColumns="minmax(0, 1fr) auto"
+        gap="small-300"
+        alignItems="center"
+      >
+        <s-paragraph lineClamp={1}>
+          <s-text type={current ? "strong" : "generic"}>{row.title}</s-text>
+        </s-paragraph>
+        {/*
+         * Colour marks what needs a person: a count of missing or outdated
+         * fields, and nothing for a resource that is done.
+         */}
+        {row.states.missing > 0 ? (
+          <s-badge tone="warning" size="base">
+            {`${row.states.missing} missing`}
+          </s-badge>
+        ) : row.states.outdated > 0 ? (
+          <s-badge tone="critical" size="base">
+            {`${row.states.outdated} outdated`}
+          </s-badge>
+        ) : null}
+      </s-grid>
+    </s-clickable>
   );
 }
 
@@ -841,21 +1119,107 @@ function summariseStates(states: StateCounts): string {
   if (states.manual > 0) parts.push(`${states.manual} by a person`);
   if (states.ai > 0) parts.push(`${states.ai} by AI`);
   if (states.existing > 0) parts.push(`${states.existing} existing`);
-  return parts.length === 0 ? "No text fields" : parts.join(" · ");
+  return parts.length === 0 ? "no text fields" : parts.join(", ");
 }
 
-type Selected = NonNullable<ReadData["selected"]>;
+/** The narrow-only way back from the pane to the rail. */
+function BackToRail({ data, onBack }: { data: ReadData; onBack: () => void }) {
+  return (
+    <s-box display={`@container workspace ${WIDE} none, auto`}>
+      <s-button variant="tertiary" icon="arrow-left" onClick={onBack}>
+        {`All ${RESOURCE_TYPE_LABEL[data.type].toLowerCase()}s`}
+      </s-button>
+    </s-box>
+  );
+}
 
-function ResourcePanel({
+function PanePlaceholder({
+  data,
+  pane,
+  onBack,
+}: {
+  data: ReadData;
+  pane: Exclude<Pane, { kind: "ready" }>;
+  onBack: () => void;
+}) {
+  const noun = RESOURCE_TYPE_LABEL[data.type].toLowerCase();
+  const needsWork = data.rows.filter(
+    (row) => row.states.missing + row.states.outdated > 0,
+  ).length;
+
+  if (pane.kind === "loading")
+    return (
+      <s-section padding="none">
+        <s-box padding="base">
+          <s-stack direction="block" gap="base">
+            <BackToRail data={data} onBack={onBack} />
+            <s-stack direction="block" gap="small-500">
+              <s-heading>{pane.title}</s-heading>
+              <s-text color="subdued">
+                {`${RESOURCE_TYPE_LABEL[data.type]} · ${localeLabel(data.primary.locale, data.primary.name)} → ${localeLabel(data.locale)}`}
+              </s-text>
+            </s-stack>
+          </s-stack>
+        </s-box>
+        <s-divider />
+        <s-box padding="large">
+          <s-stack direction="inline" gap="small-300" alignItems="center">
+            <s-spinner size="base" accessibilityLabel="Reading from Shopify" />
+            <s-text color="subdued">Reading from Shopify</s-text>
+          </s-stack>
+        </s-box>
+      </s-section>
+    );
+
+  if (pane.kind === "missing")
+    return (
+      <s-section padding="none">
+        <s-box padding="base">
+          <s-stack direction="block" gap="base">
+            <BackToRail data={data} onBack={onBack} />
+            <s-heading>Not found</s-heading>
+            <s-text color="subdued">
+              {`Shopify has no ${noun} ${describeResourceId(pane.id)} any more. Pick another on the left.`}
+            </s-text>
+          </s-stack>
+        </s-box>
+      </s-section>
+    );
+
+  return (
+    <s-section padding="none">
+      <s-box padding="large">
+        <s-stack direction="block" gap="small-300">
+          <s-heading>{`Pick a ${noun} to translate`}</s-heading>
+          <s-text color="subdued">
+            {data.rows.length === 0
+              ? "Nothing is listed on the left. Change the content or the filter, or search for a title."
+              : needsWork > 0
+                ? `${needsWork} of the ${data.rows.length} listed ${data.rows.length === 1 ? "needs" : "need"} work in ${localeLabel(data.locale)}. Each field shows the ${localeLabel(data.primary.locale, data.primary.name)} text beside its translation, and who wrote it.`
+                : `Everything listed is translated into ${localeLabel(data.locale)}. Open one to read it beside the ${localeLabel(data.primary.locale, data.primary.name)} text.`}
+          </s-text>
+        </s-stack>
+      </s-box>
+    </s-section>
+  );
+}
+
+function ResourcePane({
   data,
   selected,
   fetcher,
   busy,
+  previous,
+  next,
+  onChoose,
 }: {
   data: ReadData;
   selected: Selected;
   fetcher: ReturnType<typeof useFetcher<typeof action>>;
   busy: boolean;
+  previous: Row | null;
+  next: Row | null;
+  onChoose: (row: Row | null) => void;
 }) {
   const initial = Object.fromEntries(
     selected.fields.map((f) => [f.key, f.translation]),
@@ -889,6 +1253,18 @@ function ResourcePanel({
       { method: "post" },
     );
 
+  const translate = (mode: "missing_outdated" | "force") =>
+    fetcher.submit(
+      {
+        intent: "translate",
+        resource: selected.id,
+        type: data.type,
+        locale: data.locale,
+        mode,
+      },
+      { method: "post" },
+    );
+
   const sourceOptions = [
     {
       value: "",
@@ -899,8 +1275,14 @@ function ResourcePanel({
       .map((l) => ({ value: l.locale, label: localeLabel(l.locale, l.name) })),
   ];
 
+  const canTranslate =
+    !busy && data.aiConfigured && selected.sourceLocale !== data.locale;
+  const needsWork = selected.fields.filter(
+    (f) => f.prose && (f.state === "missing" || f.state === "outdated"),
+  ).length;
+
   return (
-    <s-section heading={selected.title}>
+    <s-section padding="none" accessibilityLabel={selected.title}>
       <ui-save-bar id={SAVE_BAR_ID}>
         <button
           variant="primary"
@@ -912,222 +1294,306 @@ function ResourcePanel({
         <button onClick={() => setValues(initial)}>Discard</button>
       </ui-save-bar>
 
-      <s-stack direction="block" gap="base">
-        <s-text color="subdued">
-          {`${RESOURCE_TYPE_LABEL[data.type]} · ${describeResourceId(selected.id)} · ${localeLabel(selected.sourceLocale)} → ${localeLabel(data.locale)}`}
-        </s-text>
-
-        <s-box padding="base" border="base" borderRadius="base">
+      {/* The header: what is open, where it goes, and the AI. */}
+      <s-box padding="base">
+        <s-stack direction="block" gap="small-300">
+          <BackToRail data={data} onBack={() => onChoose(null)} />
           <s-grid
-            gridTemplateColumns="@container (inline-size <= 560px) 1fr, 1fr auto"
+            gridTemplateColumns={`@container workspace (inline-size <= 980px) 1fr, minmax(0, 1fr) auto`}
             gap="base"
-            alignItems="end"
+            alignItems="start"
           >
-            <Dropdown
-              name="source"
-              label="Written in"
-              details={
-                selected.sourceIsOverride
-                  ? "Translated directly from this language, never through the store default."
-                  : "The store default. Change it if this text was written in another language."
-              }
-              value={selected.sourceIsOverride ? selected.sourceLocale : ""}
-              options={sourceOptions}
-              onChange={(next) =>
-                fetcher.submit(
-                  {
-                    intent: "set-source",
-                    resource: selected.id,
-                    type: data.type,
-                    source: next,
-                  },
-                  { method: "post" },
-                )
-              }
-              disabled={busy}
-            />
+            <s-stack direction="block" gap="small-500">
+              <s-heading lineClamp={2}>{selected.title}</s-heading>
+              <s-text color="subdued">
+                {`${RESOURCE_TYPE_LABEL[data.type]} · ${describeResourceId(selected.id)} · ${localeLabel(selected.sourceLocale)} → ${localeLabel(data.locale)}`}
+              </s-text>
+            </s-stack>
             <s-stack direction="inline" gap="small-300" alignItems="center">
-              {selected.detectedLocale &&
-              selected.detectedLocale !== selected.sourceLocale ? (
-                <s-text color="subdued">{`Looks like ${localeLabel(selected.detectedLocale)}`}</s-text>
-              ) : null}
+              <s-button-group accessibilityLabel="Move through the list">
+                <s-button
+                  variant="secondary"
+                  icon="chevron-up"
+                  accessibilityLabel={
+                    previous ? `Previous: ${previous.title}` : "Previous"
+                  }
+                  onClick={() => previous && onChoose(previous)}
+                  {...(previous ? {} : { disabled: true })}
+                />
+                <s-button
+                  variant="secondary"
+                  icon="chevron-down"
+                  accessibilityLabel={next ? `Next: ${next.title}` : "Next"}
+                  onClick={() => next && onChoose(next)}
+                  {...(next ? {} : { disabled: true })}
+                />
+              </s-button-group>
               <s-button
-                type="button"
-                onClick={() =>
-                  fetcher.submit(
-                    {
-                      intent: "detect-source",
-                      resource: selected.id,
-                      type: data.type,
-                    },
-                    { method: "post" },
-                  )
-                }
-                {...(busy || !data.aiConfigured ? { disabled: true } : {})}
+                variant="secondary"
+                onClick={() => translate("force")}
+                {...(canTranslate ? {} : { disabled: true })}
               >
-                Detect
+                Retranslate AI fields
+              </s-button>
+              <s-button
+                variant="primary"
+                onClick={() => translate("missing_outdated")}
+                {...(canTranslate && needsWork > 0 ? {} : { disabled: true })}
+                {...(busy ? { loading: true } : {})}
+              >
+                {needsWork > 0
+                  ? `Translate ${needsWork} with AI`
+                  : "Translate with AI"}
               </s-button>
             </s-stack>
           </s-grid>
-        </s-box>
-
-        <s-stack direction="inline" gap="small-300">
-          <s-button
-            type="button"
-            variant="primary"
-            onClick={() =>
-              fetcher.submit(
-                {
-                  intent: "translate",
-                  resource: selected.id,
-                  type: data.type,
-                  locale: data.locale,
-                  mode: "missing_outdated",
-                },
-                { method: "post" },
-              )
-            }
-            {...(busy ||
-            !data.aiConfigured ||
-            selected.sourceLocale === data.locale
-              ? { disabled: true }
-              : {})}
-            {...(busy ? { loading: true } : {})}
-          >
-            Translate missing and outdated with AI
-          </s-button>
-          <s-button
-            type="button"
-            onClick={() =>
-              fetcher.submit(
-                {
-                  intent: "translate",
-                  resource: selected.id,
-                  type: data.type,
-                  locale: data.locale,
-                  mode: "force",
-                },
-                { method: "post" },
-              )
-            }
-            {...(busy ||
-            !data.aiConfigured ||
-            selected.sourceLocale === data.locale
-              ? { disabled: true }
-              : {})}
-          >
-            Retranslate all AI fields
-          </s-button>
         </s-stack>
-        <s-text color="subdued">
-          Fields you edit here are yours: the AI leaves them alone on every
-          later run, unless the language allows overwriting everything.
-        </s-text>
+      </s-box>
 
-        <s-divider />
+      <s-divider />
 
-        {selected.fields.length === 0 ? (
+      {/*
+       * Capped: two columns of prose read best around 500px each, and a
+       * wide admin window is for the rail beside them, not for longer lines.
+       */}
+      <s-box padding="base" maxInlineSize="1080px">
+        <s-stack direction="block" gap="large">
+          <SourceRow
+            data={data}
+            selected={selected}
+            fetcher={fetcher}
+            busy={busy}
+            options={sourceOptions}
+          />
+
+          {selected.fields.length === 0 ? (
+            <s-text color="subdued">
+              Shopify reports no translatable fields on this resource.
+            </s-text>
+          ) : null}
+
+          {selected.fields.map((field) => (
+            <FieldRow
+              key={field.key}
+              field={field}
+              sourceLocale={selected.sourceLocale}
+              targetLocale={data.locale}
+              value={values[field.key] ?? ""}
+              busy={busy}
+              onChange={(value) =>
+                setValues((now) => ({ ...now, [field.key]: value }))
+              }
+            />
+          ))}
+
           <s-text color="subdued">
-            Shopify reports no translatable fields on this resource.
+            Fields you edit here are yours: the AI leaves them alone on every
+            later run, unless the language allows overwriting everything.
           </s-text>
-        ) : null}
-        {selected.fields.map((field) => {
-          const long =
-            field.type === "HTML" ||
-            field.source.length > 120 ||
-            field.source.includes("\n");
-          const value = values[field.key] ?? "";
-          return (
-            <s-stack key={field.key} direction="block" gap="small-300">
-              <s-stack direction="inline" gap="small-300" alignItems="center">
-                <s-text type="strong">{field.label}</s-text>
-                <FieldStateBadge state={field.state} />
-                {!field.prose && field.key === "handle" ? (
-                  <s-text color="subdued">
-                    Not translated by AI; a translated handle changes the URL.
-                  </s-text>
-                ) : null}
-              </s-stack>
-              <s-grid
-                gridTemplateColumns="@container (inline-size <= 720px) 1fr, 1fr 1fr"
-                gap="base"
-                alignItems="start"
-              >
-                <s-stack direction="block" gap="small-500">
-                  <s-text color="subdued">{`Source · ${localeLabel(selected.sourceLocale)}`}</s-text>
-                  <s-box
-                    padding="small-200"
-                    border="base"
-                    borderRadius="base"
-                    background="subdued"
-                  >
-                    <s-text>
-                      {field.source.length > 1500
-                        ? `${field.source.slice(0, 1500)}…`
-                        : field.source}
-                    </s-text>
-                  </s-box>
-                </s-stack>
-                {long ? (
-                  <s-text-area
-                    label={`${field.label} · ${localeLabel(data.locale)}`}
-                    rows={Math.min(
-                      14,
-                      Math.max(3, Math.ceil(field.source.length / 90)),
-                    )}
-                    value={value}
-                    onInput={(event) =>
-                      setValues((now) => ({
-                        ...now,
-                        [field.key]: event.currentTarget.value,
-                      }))
-                    }
-                    onChange={(event) =>
-                      setValues((now) => ({
-                        ...now,
-                        [field.key]: event.currentTarget.value,
-                      }))
-                    }
-                    {...(busy ? { disabled: true } : {})}
-                  />
-                ) : (
-                  <s-text-field
-                    label={`${field.label} · ${localeLabel(data.locale)}`}
-                    value={value}
-                    onInput={(event) =>
-                      setValues((now) => ({
-                        ...now,
-                        [field.key]: event.currentTarget.value,
-                      }))
-                    }
-                    onChange={(event) =>
-                      setValues((now) => ({
-                        ...now,
-                        [field.key]: event.currentTarget.value,
-                      }))
-                    }
-                    {...(busy ? { disabled: true } : {})}
-                  />
-                )}
-              </s-grid>
-            </s-stack>
-          );
-        })}
-      </s-stack>
+        </s-stack>
+      </s-box>
     </s-section>
   );
 }
 
+/** Which language the resource is written in: stated, changeable, detectable. */
+function SourceRow({
+  data,
+  selected,
+  fetcher,
+  busy,
+  options,
+}: {
+  data: ReadData;
+  selected: Selected;
+  fetcher: ReturnType<typeof useFetcher<typeof action>>;
+  busy: boolean;
+  options: { value: string; label: string }[];
+}) {
+  const suggestion =
+    selected.detectedLocale && selected.detectedLocale !== selected.sourceLocale
+      ? `Looks like ${localeLabel(selected.detectedLocale)}.`
+      : null;
+  return (
+    <s-grid
+      gridTemplateColumns="@container workspace (inline-size <= 640px) 1fr, auto minmax(200px, 320px) auto minmax(0, 1fr)"
+      gap="small-300"
+      alignItems="center"
+    >
+      <s-text color="subdued">Written in</s-text>
+      <Dropdown
+        name="source"
+        label="Written in"
+        hideLabel
+        value={selected.sourceIsOverride ? selected.sourceLocale : ""}
+        options={options}
+        onChange={(next) =>
+          fetcher.submit(
+            {
+              intent: "set-source",
+              resource: selected.id,
+              type: data.type,
+              source: next,
+            },
+            { method: "post" },
+          )
+        }
+        disabled={busy}
+      />
+      <s-button
+        variant="tertiary"
+        onClick={() =>
+          fetcher.submit(
+            {
+              intent: "detect-source",
+              resource: selected.id,
+              type: data.type,
+            },
+            { method: "post" },
+          )
+        }
+        {...(busy || !data.aiConfigured ? { disabled: true } : {})}
+      >
+        Detect
+      </s-button>
+      <s-text color="subdued">
+        {suggestion ??
+          (selected.sourceIsOverride
+            ? "Translated directly from this language, never through the store default."
+            : selected.sourceLocale === data.locale
+              ? `Written in ${localeLabel(data.locale)} already, so there is nothing to translate.`
+              : "")}
+      </s-text>
+    </s-grid>
+  );
+}
+
+type Field = Selected["fields"][number];
+
+/** One field: its source on the left, its translation on the right. */
+function FieldRow({
+  field,
+  sourceLocale,
+  targetLocale,
+  value,
+  busy,
+  onChange,
+}: {
+  field: Field;
+  sourceLocale: string;
+  targetLocale: string;
+  value: string;
+  busy: boolean;
+  onChange: (value: string) => void;
+}) {
+  const long =
+    field.type === "HTML" ||
+    field.source.length > 120 ||
+    field.source.includes("\n");
+  const rows = Math.min(16, Math.max(3, Math.ceil(field.source.length / 80)));
+  const targetLabel = `${field.label} · ${localeLabel(targetLocale)}`;
+
+  return (
+    <s-grid
+      gridTemplateColumns={`@container workspace (inline-size <= 900px) 1fr, minmax(0, 1fr) minmax(0, 1fr)`}
+      gap="base"
+      alignItems="stretch"
+    >
+      <s-stack direction="block" gap="small-400">
+        <s-stack direction="inline" gap="small-300" alignItems="center">
+          <s-text type="strong">{field.label}</s-text>
+          <FieldStateBadge state={field.state} />
+          <s-text color="subdued">{localeLabel(sourceLocale)}</s-text>
+        </s-stack>
+        <s-box
+          padding="small-200"
+          border="base"
+          borderRadius="base"
+          background="subdued"
+          minBlockSize={long ? "100%" : "0"}
+        >
+          {/*
+           * Source text keeps its line breaks and scrolls past a screen's
+           * worth rather than being cut off; a translator needs all of it.
+           */}
+          <div
+            style={{
+              whiteSpace: "pre-wrap",
+              overflowWrap: "anywhere",
+              maxHeight: "420px",
+              overflowY: "auto",
+            }}
+          >
+            {field.source === "" ? (
+              <s-text color="subdued">Empty</s-text>
+            ) : (
+              <s-text>{field.source}</s-text>
+            )}
+          </div>
+        </s-box>
+      </s-stack>
+
+      <s-stack direction="block" gap="small-400">
+        <s-stack
+          direction="inline"
+          gap="small-300"
+          alignItems="center"
+          justifyContent="space-between"
+        >
+          <s-text color="subdued">{localeLabel(targetLocale)}</s-text>
+          <s-text color="subdued">
+            {!field.prose && field.key === "handle"
+              ? "Not translated by AI; a translated handle changes the URL."
+              : field.updatedAt
+                ? `Updated ${formatListDateTime(field.updatedAt)}`
+                : ""}
+          </s-text>
+        </s-stack>
+        {long ? (
+          <s-text-area
+            label={targetLabel}
+            labelAccessibilityVisibility="exclusive"
+            placeholder="Not translated yet"
+            rows={rows}
+            value={value}
+            onInput={(event) => onChange(event.currentTarget.value)}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            {...(busy ? { disabled: true } : {})}
+          />
+        ) : (
+          <s-text-field
+            label={targetLabel}
+            labelAccessibilityVisibility="exclusive"
+            placeholder="Not translated yet"
+            value={value}
+            onInput={(event) => onChange(event.currentTarget.value)}
+            onChange={(event) => onChange(event.currentTarget.value)}
+            {...(busy ? { disabled: true } : {})}
+          />
+        )}
+      </s-stack>
+    </s-grid>
+  );
+}
+
+/**
+ * Colour marks what needs a person: missing and outdated. Who wrote an
+ * existing translation is information, not an alarm.
+ */
 function FieldStateBadge({ state }: { state: FieldState }) {
   const tone =
     state === "missing"
       ? ("warning" as const)
       : state === "outdated"
         ? ("critical" as const)
-        : state === "manual"
-          ? ("success" as const)
-          : ("info" as const);
-  return <s-badge tone={tone}>{FIELD_STATE_LABEL[state]}</s-badge>;
+        : state === "ai"
+          ? ("info" as const)
+          : ("neutral" as const);
+  return (
+    <s-badge tone={tone} size="base">
+      {FIELD_STATE_LABEL[state]}
+    </s-badge>
+  );
 }
 
 export const headers: HeadersFunction = (headersArgs) =>
