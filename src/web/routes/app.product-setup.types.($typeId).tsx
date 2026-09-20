@@ -89,6 +89,8 @@ const DELETE_MODAL_ID = "delete-product-type";
 const DETACH_MODAL_ID = "detach-source";
 const MOVE_MODAL_ID = "move-product-type";
 const MENU_ID = "product-type-actions";
+const DROP_MODAL_ID = "confirm-drop";
+const EDIT_TYPE_MODAL_ID = "edit-product-type";
 
 const TABS = ["attributes", "details", "preview"] as const;
 type Tab = (typeof TABS)[number];
@@ -119,6 +121,7 @@ function flatten(schema: AttributeSchema) {
     leaf: boolean;
     hasChildren: boolean;
     path: string;
+    label: string;
   }> = [];
   const walk = (parentId: string | null, depth: number) => {
     for (const type of childrenOf(schema, parentId)) {
@@ -131,6 +134,7 @@ function flatten(schema: AttributeSchema) {
         leaf: type.leaf,
         hasChildren: childrenOf(schema, type.id).length > 0,
         path: pathOf(schema, type.id).join(" › ").toLowerCase(),
+        label: pathOf(schema, type.id).join(" › "),
       });
       walk(type.id, depth + 1);
     }
@@ -279,12 +283,25 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   }
   const state = workspaceState(schema);
 
+  // A drop asks what it would do before it happens: `?impact=<type>&to=<parent>`.
+  const url = new URL(request.url);
+  const impactOf = url.searchParams.get("impact");
+  const dragImpact =
+    impactOf === null
+      ? null
+      : impactOfMovingType(
+          schema,
+          impactOf,
+          url.searchParams.get("to") || null,
+        );
+
   return {
     revision,
     stage: state.stage,
     summary: state.summary,
     tree,
     selected,
+    dragImpact,
     typeOptions: schema.types
       .map((type) => ({
         value: type.id,
@@ -321,11 +338,13 @@ export const action = async ({
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
   const actor = actorFromSession(session);
-  const typeId = String(params.typeId ?? "");
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "");
   const revision = revisionFrom(formData);
   const field = (name: string) => String(formData.get(name) ?? "");
+  // The tree edits and moves rows other than the selected one, so a form
+  // may name its type; the editor's own forms leave it to the address.
+  const typeId = field("typeId") || String(params.typeId ?? "");
   const json = (name: string): unknown => {
     try {
       return JSON.parse(field(name));
@@ -387,6 +406,24 @@ export const action = async ({
           archetype: parsed.data.archetype,
         }),
       );
+    }
+    case "edit-type": {
+      const parsed = detailsForm
+        .omit({ shopifyCategory: true, archetype: true })
+        .safeParse(json("form"));
+      if (!parsed.success) return unreadable;
+      return commit("attribute_schema.type.saved", (schema) => {
+        const type = typeById(schema, typeId);
+        if (!type)
+          return { ok: false, message: "That product type no longer exists." };
+        return updateType(schema, typeId, {
+          name: parsed.data.name,
+          parentId: parsed.data.parentId || null,
+          leaf: parsed.data.kind === "type",
+          shopifyCategory: type.shopifyCategory,
+          archetype: type.archetype,
+        });
+      });
     }
     case "move-to":
       return commit("attribute_schema.type.moved", (schema) => {
@@ -586,6 +623,21 @@ export default function ProductTypes() {
     name: string;
   } | null>(null);
   const pickerOverlay = useRef<Overlay | null>(null);
+  const [dragging, setDragging] = useState<string | null>(null);
+  const [dropTarget, setDropTarget] = useState<string | null>(null);
+  const [pendingDrop, setPendingDrop] = useState<{
+    sourceId: string;
+    sourceName: string;
+    targetId: string | null;
+    targetName: string;
+  } | null>(null);
+  const impactFetcher = useFetcher<typeof loader>();
+  const [editing, setEditing] = useState<{
+    id: string;
+    name: string;
+    details: Details;
+  } | null>(null);
+  const [editTried, setEditTried] = useState(false);
 
   const savedDetails = selected?.details ?? null;
   const [details, setDetails] = useState<Details | null>(savedDetails);
@@ -707,6 +759,44 @@ export default function ProductTypes() {
     setPickerTried(false);
   };
 
+  // Ancestry from the flattened tree, for what a row may be dropped on.
+  const parentOf = new Map(tree.map((row) => [row.id, row.parentId]));
+  const isWithinRow = (candidate: string, ancestor: string): boolean => {
+    let current: string | null = candidate;
+    while (current !== null) {
+      if (current === ancestor) return true;
+      current = parentOf.get(current) ?? null;
+    }
+    return false;
+  };
+  const nameOfRow = (id: string) =>
+    tree.find((row) => row.id === id)?.name ?? "";
+
+  const askToDrop = (sourceId: string, targetId: string | null) => {
+    setDragging(null);
+    setDropTarget(null);
+    if (targetId !== null && isWithinRow(targetId, sourceId)) return;
+    if ((parentOf.get(sourceId) ?? null) === targetId) return;
+    setPendingDrop({
+      sourceId,
+      sourceName: nameOfRow(sourceId),
+      targetId,
+      targetName: targetId === null ? "the top level" : nameOfRow(targetId),
+    });
+    const query = new URLSearchParams({ impact: sourceId, to: targetId ?? "" });
+    void impactFetcher.load(
+      `${PRODUCT_SETUP_ROUTES.types}?${query.toString()}`,
+    );
+    (document.getElementById(DROP_MODAL_ID) as Overlay | null)?.showOverlay?.();
+  };
+
+  const editOptions = (id: string) => [
+    { value: "", label: "Top level" },
+    ...tree
+      .filter((row) => !isWithinRow(row.id, id))
+      .map((row) => ({ value: row.id, label: row.label })),
+  ];
+
   const showTree = narrow !== true || selected === null;
   const showEditor = narrow !== true || selected !== null;
 
@@ -726,75 +816,172 @@ export default function ProductTypes() {
           <s-text color="subdued">No product type matches.</s-text>
         ) : null}
         {visibleTree.map((row) => (
-          <s-box
+          /*
+           * A plain element carries the drag, because the Polaris row owns
+           * its own DOM: dragging starts anywhere on the row and lands on
+           * another row, which becomes the new parent after a confirmation
+           * that says what changes. Move to… in the menu is the keyboard way.
+           */
+          <div
             key={row.id}
-            paddingInlineStart={
-              row.depth === 0
-                ? "none"
-                : row.depth === 1
-                  ? "base"
-                  : row.depth === 2
-                    ? "large-200"
-                    : "large-500"
-            }
+            draggable
+            onDragStart={(event) => {
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", row.id);
+              setDragging(row.id);
+            }}
+            onDragEnd={() => {
+              setDragging(null);
+              setDropTarget(null);
+            }}
+            onDragOver={(event) => {
+              if (dragging === null || dragging === row.id) return;
+              if (isWithinRow(row.id, dragging)) return;
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (dropTarget !== row.id) setDropTarget(row.id);
+            }}
+            onDragLeave={() => {
+              if (dropTarget === row.id) setDropTarget(null);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const sourceId =
+                dragging ?? event.dataTransfer.getData("text/plain");
+              if (sourceId) askToDrop(sourceId, row.id);
+            }}
           >
-            <s-grid
-              gridTemplateColumns="auto 1fr"
-              gap="none"
-              alignItems="center"
+            <s-box
+              paddingInlineStart={
+                row.depth === 0
+                  ? "none"
+                  : row.depth === 1
+                    ? "base"
+                    : row.depth === 2
+                      ? "large-200"
+                      : "large-500"
+              }
             >
-              {row.hasChildren ? (
+              <s-grid
+                gridTemplateColumns="auto auto 1fr auto"
+                gap="none"
+                alignItems="center"
+              >
+                <s-box paddingInlineEnd="small-500">
+                  <s-icon type="drag-handle" color="subdued" />
+                </s-box>
+                {row.hasChildren ? (
+                  <s-button
+                    variant="tertiary"
+                    icon={
+                      collapsed[row.id] && !needle
+                        ? "chevron-right"
+                        : "chevron-down"
+                    }
+                    accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
+                    {...(needle ? { disabled: true } : {})}
+                    onClick={() =>
+                      setCollapsed({
+                        ...collapsed,
+                        [row.id]: !collapsed[row.id],
+                      })
+                    }
+                  />
+                ) : (
+                  <s-box inlineSize="28px" />
+                )}
+                <s-clickable
+                  href={PRODUCT_SETUP_ROUTES.type(row.id)}
+                  borderRadius="base"
+                  paddingInline="small-300"
+                  paddingBlock="small-400"
+                  inlineSize="100%"
+                  background={
+                    dropTarget === row.id
+                      ? "strong"
+                      : selected?.id === row.id
+                        ? "subdued"
+                        : "transparent"
+                  }
+                  accessibilityLabel={`${row.name}, ${row.leaf ? "product type" : "category"}, ${countOf(row.count, "attribute")}${selected?.id === row.id ? ", selected" : ""}`}
+                >
+                  <s-grid
+                    gridTemplateColumns="1fr auto"
+                    gap="small-300"
+                    alignItems="center"
+                  >
+                    <s-text
+                      {...(selected?.id === row.id
+                        ? { type: "strong" as const }
+                        : {})}
+                    >
+                      {row.name}
+                    </s-text>
+                    <s-text color="subdued">
+                      {row.leaf
+                        ? String(row.count)
+                        : row.count > 0
+                          ? `${row.count} ·`
+                          : "·"}
+                    </s-text>
+                  </s-grid>
+                </s-clickable>
                 <s-button
                   variant="tertiary"
-                  icon={
-                    collapsed[row.id] && !needle
-                      ? "chevron-right"
-                      : "chevron-down"
-                  }
-                  accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
-                  {...(needle ? { disabled: true } : {})}
-                  onClick={() =>
-                    setCollapsed({ ...collapsed, [row.id]: !collapsed[row.id] })
-                  }
+                  icon="edit"
+                  accessibilityLabel={`Edit ${row.name}`}
+                  command="--show"
+                  commandFor={EDIT_TYPE_MODAL_ID}
+                  onClick={() => {
+                    setEditing({
+                      id: row.id,
+                      name: row.name,
+                      details: {
+                        name: row.name,
+                        parentId: row.parentId ?? "",
+                        kind: row.leaf ? "type" : "category",
+                        shopifyCategory: "",
+                        archetype: "",
+                      },
+                    });
+                    setEditTried(false);
+                  }}
                 />
-              ) : (
-                <s-box inlineSize="28px" />
-              )}
-              <s-clickable
-                href={PRODUCT_SETUP_ROUTES.type(row.id)}
-                borderRadius="base"
-                paddingInline="small-300"
-                paddingBlock="small-400"
-                inlineSize="100%"
-                background={selected?.id === row.id ? "subdued" : "transparent"}
-                accessibilityLabel={`${row.name}, ${row.leaf ? "product type" : "category"}, ${countOf(row.count, "attribute")}${selected?.id === row.id ? ", selected" : ""}`}
-              >
-                <s-grid
-                  gridTemplateColumns="1fr auto"
-                  gap="small-300"
-                  alignItems="center"
-                >
-                  <s-text
-                    {...(selected?.id === row.id
-                      ? { type: "strong" as const }
-                      : {})}
-                  >
-                    {row.name}
-                  </s-text>
-                  <s-text color="subdued">
-                    {row.leaf
-                      ? String(row.count)
-                      : row.count > 0
-                        ? `${row.count} ·`
-                        : "·"}
-                  </s-text>
-                </s-grid>
-              </s-clickable>
-            </s-grid>
-          </s-box>
+              </s-grid>
+            </s-box>
+          </div>
         ))}
+        {dragging !== null && (parentOf.get(dragging) ?? null) !== null ? (
+          <div
+            onDragOver={(event) => {
+              event.preventDefault();
+              event.dataTransfer.dropEffect = "move";
+              if (dropTarget !== "") setDropTarget("");
+            }}
+            onDragLeave={() => {
+              if (dropTarget === "") setDropTarget(null);
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (dragging) askToDrop(dragging, null);
+            }}
+          >
+            <s-box
+              padding="small-300"
+              borderRadius="base"
+              borderWidth="base"
+              borderStyle="dashed"
+              borderColor={dropTarget === "" ? "strong" : "subdued"}
+              background={dropTarget === "" ? "strong" : "transparent"}
+            >
+              <s-text color="subdued">
+                Drop here to make it a top-level type
+              </s-text>
+            </s-box>
+          </div>
+        ) : null}
         <s-text color="subdued">
-          {`Numbers are attributes on the type. A dot marks a category, which only organises the types beneath it.`}
+          {`Numbers are attributes on the type. A dot marks a category, which only organises the types beneath it. Drag a row onto another to move it there.`}
         </s-text>
       </s-stack>
     </s-section>
@@ -901,6 +1088,149 @@ export default function ProductTypes() {
           slot="secondary-actions"
           command="--hide"
           commandFor={ADD_MODAL_ID}
+        >
+          Cancel
+        </s-button>
+      </s-modal>
+
+      <s-modal
+        id={DROP_MODAL_ID}
+        heading={`Move “${pendingDrop?.sourceName ?? ""}” under ${pendingDrop?.targetName ?? ""}?`}
+      >
+        <s-paragraph>
+          {impactFetcher.state !== "idle"
+            ? "Working out what changes…"
+            : impactFetcher.data?.dragImpact
+              ? describeMove(impactFetcher.data.dragImpact)
+              : "It takes what the new parent inherits instead of what the old one did."}
+        </s-paragraph>
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          command="--hide"
+          commandFor={DROP_MODAL_ID}
+          onClick={() => {
+            if (!pendingDrop) return;
+            submit({
+              intent: "move-to",
+              typeId: pendingDrop.sourceId,
+              parentId: pendingDrop.targetId ?? "",
+            });
+            setPendingDrop(null);
+          }}
+          {...(busy ? { disabled: true } : {})}
+        >
+          Move
+        </s-button>
+        <s-button
+          slot="secondary-actions"
+          command="--hide"
+          commandFor={DROP_MODAL_ID}
+          onClick={() => setPendingDrop(null)}
+        >
+          Cancel
+        </s-button>
+      </s-modal>
+
+      <s-modal
+        id={EDIT_TYPE_MODAL_ID}
+        heading={editing ? `Edit “${editing.name}”` : "Edit product type"}
+        onAfterHide={(event) => {
+          if (event.target !== event.currentTarget) return;
+          setEditing(null);
+          setEditTried(false);
+        }}
+      >
+        {editing ? (
+          <s-stack direction="block" gap="base">
+            <s-text-field
+              label="Name"
+              value={editing.details.name}
+              onInput={(event) =>
+                setEditing({
+                  ...editing,
+                  details: {
+                    ...editing.details,
+                    name: event.currentTarget.value,
+                  },
+                })
+              }
+              {...(editTried && editing.details.name.trim() === ""
+                ? { error: "Enter a name." }
+                : {})}
+            />
+            <Dropdown
+              name="editParentId"
+              label="Under"
+              details={
+                editing.details.parentId === (parentOf.get(editing.id) ?? "")
+                  ? "It inherits every attribute of the type above it."
+                  : "Moving it changes what it and the types beneath it inherit."
+              }
+              value={editing.details.parentId}
+              options={editOptions(editing.id)}
+              onChange={(parentId) =>
+                setEditing({
+                  ...editing,
+                  details: { ...editing.details, parentId },
+                })
+              }
+            />
+            <s-choice-list
+              label="Kind"
+              name="editKind"
+              values={[editing.details.kind]}
+              onChange={(event) => {
+                const next = event.currentTarget.values[0];
+                if (next === "type" || next === "category")
+                  setEditing({
+                    ...editing,
+                    details: { ...editing.details, kind: next },
+                  });
+              }}
+            >
+              <s-choice value="type">
+                Product type
+                <s-text slot="details" color="subdued">
+                  Products can be assigned to it.
+                </s-text>
+              </s-choice>
+              <s-choice value="category">
+                Organising category
+                <s-text slot="details" color="subdued">
+                  Only groups the types beneath it.
+                </s-text>
+              </s-choice>
+            </s-choice-list>
+            <s-text color="subdued">
+              Its attributes, Shopify category and archetype are edited from the
+              type itself.
+            </s-text>
+          </s-stack>
+        ) : null}
+        <s-button
+          slot="primary-action"
+          variant="primary"
+          {...(editing && editing.details.name.trim() !== ""
+            ? { command: "--hide", commandFor: EDIT_TYPE_MODAL_ID }
+            : {})}
+          onClick={() => {
+            setEditTried(true);
+            if (!editing || editing.details.name.trim() === "") return;
+            submit({
+              intent: "edit-type",
+              typeId: editing.id,
+              form: JSON.stringify(editing.details),
+            });
+          }}
+          {...(busy ? { disabled: true } : {})}
+        >
+          Save
+        </s-button>
+        <s-button
+          slot="secondary-actions"
+          command="--hide"
+          commandFor={EDIT_TYPE_MODAL_ID}
         >
           Cancel
         </s-button>
@@ -1202,9 +1532,7 @@ export default function ProductTypes() {
         ) : (
           <s-grid
             gridTemplateColumns={
-              showTree && showEditor
-                ? "@container (inline-size <= 720px) 1fr, minmax(260px, 300px) minmax(0, 1fr)"
-                : "1fr"
+              showTree && showEditor ? "280px minmax(0, 1fr)" : "1fr"
             }
             gap="base"
             alignItems="start"

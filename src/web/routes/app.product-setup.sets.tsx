@@ -435,35 +435,40 @@ export default function AttributeSets() {
 
         {sets.length > 0 && typeOptions.length > 0 ? (
           <s-section heading="Attach a set to a product type">
-            <s-grid
-              gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr auto"
-              gap="base"
-              alignItems="end"
-            >
-              <Dropdown
-                name="setId"
-                label="Attribute set"
-                value={attach.setId}
-                options={setOptions}
-                onChange={(setId) => setAttach({ ...attach, setId })}
-              />
-              <Dropdown
-                name="typeId"
-                label="Product type"
-                details="The type and every type beneath it."
-                value={attach.typeId}
-                options={typeOptions}
-                onChange={(typeId) => setAttach({ ...attach, typeId })}
-              />
-              <s-button
-                onClick={() => submit({ intent: "attach-set", ...attach })}
-                {...(!attach.typeId || !attach.setId || busy
-                  ? { disabled: true }
-                  : {})}
+            <s-stack direction="block" gap="small-300">
+              <s-grid
+                gridTemplateColumns="@container (inline-size <= 640px) 1fr, 1fr 1fr auto"
+                gap="base"
+                alignItems="end"
               >
-                Attach
-              </s-button>
-            </s-grid>
+                <Dropdown
+                  name="setId"
+                  label="Attribute set"
+                  value={attach.setId}
+                  options={setOptions}
+                  onChange={(setId) => setAttach({ ...attach, setId })}
+                />
+                <Dropdown
+                  name="typeId"
+                  label="Product type"
+                  value={attach.typeId}
+                  options={typeOptions}
+                  onChange={(typeId) => setAttach({ ...attach, typeId })}
+                />
+                <s-button
+                  onClick={() => submit({ intent: "attach-set", ...attach })}
+                  {...(!attach.typeId || !attach.setId || busy
+                    ? { disabled: true }
+                    : {})}
+                >
+                  Attach
+                </s-button>
+              </s-grid>
+              <s-text color="subdued">
+                The type and every type beneath it get every attribute in the
+                set.
+              </s-text>
+            </s-stack>
           </s-section>
         ) : null}
       </s-stack>
