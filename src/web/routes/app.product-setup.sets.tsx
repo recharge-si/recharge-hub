@@ -8,6 +8,8 @@ import {
   type LoaderFunctionArgs,
 } from "react-router";
 
+import { z } from "zod";
+
 import { getAttributeSchema } from "~/adapters/db/repositories/attribute-schema.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
@@ -21,7 +23,11 @@ import { pathOf } from "~/domain/attributes/resolve";
 import { ConfirmModal } from "~/web/components/confirm-modal";
 import { Dropdown } from "~/web/components/dropdown";
 import { ProductSetupNav } from "~/web/components/product-setup-nav";
-import { PRODUCT_SETUP_ROUTES, countOf } from "~/web/lib/attributes";
+import {
+  PRODUCT_SETUP_ROUTES,
+  countOf,
+  formatLabel,
+} from "~/web/lib/attributes";
 import {
   commitSchemaChange,
   newId,
@@ -39,6 +45,8 @@ import {
  * editor; a set reaches a type from here or from the type's picker.
  */
 const NEW_MODAL_ID = "new-set";
+
+const memberList = z.array(z.string()).max(1000);
 const EDIT_MODAL_ID = "edit-set";
 const DELETE_MODAL_ID = "delete-set";
 const DETACH_MODAL_ID = "detach-set";
@@ -70,6 +78,16 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
           .sort((a, b) => a.label.localeCompare(b.label)),
       }))
       .sort((a, b) => a.name.localeCompare(b.name)),
+    attributes: schema.attributes
+      .map((attribute) => ({
+        id: attribute.id,
+        name: attribute.name,
+        format: formatLabel(attribute),
+        setId: attribute.setId,
+        setName:
+          schema.sets.find((set) => set.id === attribute.setId)?.name ?? null,
+      }))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     typeOptions: schema.types
       .map((type) => ({
         value: type.id,
@@ -89,6 +107,13 @@ export const action = async ({
   const intent = String(formData.get("intent") ?? "");
   const revision = revisionFrom(formData);
   const field = (name: string) => String(formData.get(name) ?? "");
+  const json = (name: string): unknown => {
+    try {
+      return JSON.parse(field(name));
+    } catch {
+      return null;
+    }
+  };
   const commit = (
     event: string,
     change: Parameters<typeof commitSchemaChange>[3],
@@ -96,20 +121,26 @@ export const action = async ({
 
   switch (intent) {
     case "add-set":
-      return commit("attribute_schema.set.added", (schema) =>
-        addSet(
-          schema,
-          { name: field("name"), description: field("description") },
-          newId,
-        ),
-      );
-    case "edit-set":
-      return commit("attribute_schema.set.renamed", (schema) =>
-        updateSet(schema, field("setId"), {
-          name: field("name"),
-          description: field("description"),
-        }),
-      );
+    case "edit-set": {
+      const members = memberList.safeParse(json("memberIds"));
+      if (!members.success)
+        return {
+          ok: false,
+          message: "The form could not be read. Reload the page and try again.",
+        };
+      const input = {
+        name: field("name"),
+        description: field("description"),
+        memberIds: members.data,
+      };
+      return intent === "add-set"
+        ? commit("attribute_schema.set.added", (schema) =>
+            addSet(schema, input, newId),
+          )
+        : commit("attribute_schema.set.saved", (schema) =>
+            updateSet(schema, field("setId"), input),
+          );
+    }
     case "delete-set":
       return commit("attribute_schema.set.deleted", (schema) =>
         deleteSet(schema, field("setId"), newId),
@@ -131,20 +162,24 @@ interface SetDraft {
   id: string;
   name: string;
   description: string;
+  memberIds: string[];
 }
 
+const BLANK_SET: SetDraft = {
+  id: "",
+  name: "",
+  description: "",
+  memberIds: [],
+};
+
 export default function AttributeSets() {
-  const { revision, hasAttributes, sets, typeOptions } =
+  const { revision, hasAttributes, sets, attributes, typeOptions } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
 
-  const [draft, setDraft] = useState<SetDraft>({
-    id: "",
-    name: "",
-    description: "",
-  });
+  const [draft, setDraft] = useState<SetDraft>(BLANK_SET);
   const [draftTried, setDraftTried] = useState(false);
   const [pendingDelete, setPendingDelete] = useState<
     (typeof sets)[number] | null
@@ -175,8 +210,11 @@ export default function AttributeSets() {
     <s-modal
       id={modalId}
       heading={
-        intent === "add-set" ? "New attribute set" : "Edit attribute set"
+        intent === "add-set"
+          ? "New attribute set"
+          : draft.name || "Edit attribute set"
       }
+      size="large"
     >
       <s-stack direction="block" gap="base">
         <s-text-field
@@ -195,11 +233,43 @@ export default function AttributeSets() {
             setDraft({ ...draft, description: event.currentTarget.value })
           }
         />
-        {intent === "add-set" ? (
-          <s-text color="subdued">
-            Attributes join a set from their own editor, under Advanced.
-          </s-text>
-        ) : null}
+        <s-stack direction="block" gap="small-300">
+          <s-text type="strong">Attributes in this set</s-text>
+          {attributes.length === 0 ? (
+            <s-text color="subdued">No attributes are defined yet.</s-text>
+          ) : (
+            <s-text color="subdued">
+              An attribute belongs to one set. Ticking one that is in another
+              set moves it here, on every type where either set is attached.
+            </s-text>
+          )}
+          {attributes.map((attribute) => {
+            const elsewhere =
+              attribute.setId !== null &&
+              attribute.setId !== draft.id &&
+              !draft.memberIds.includes(attribute.id);
+            return (
+              <s-checkbox
+                key={attribute.id}
+                label={attribute.name}
+                details={
+                  elsewhere && attribute.setName
+                    ? `${attribute.format} · in ${attribute.setName}`
+                    : attribute.format
+                }
+                checked={draft.memberIds.includes(attribute.id)}
+                onChange={(event) =>
+                  setDraft({
+                    ...draft,
+                    memberIds: event.currentTarget.checked
+                      ? [...new Set([...draft.memberIds, attribute.id])]
+                      : draft.memberIds.filter((id) => id !== attribute.id),
+                  })
+                }
+              />
+            );
+          })}
+        </s-stack>
       </s-stack>
       <s-button
         slot="primary-action"
@@ -215,6 +285,7 @@ export default function AttributeSets() {
             setId: draft.id,
             name: draft.name,
             description: draft.description,
+            memberIds: JSON.stringify(draft.memberIds),
           });
         }}
         {...(busy ? { disabled: true } : {})}
@@ -239,7 +310,7 @@ export default function AttributeSets() {
         command="--show"
         commandFor={NEW_MODAL_ID}
         onClick={() => {
-          setDraft({ id: "", name: "", description: "" });
+          setDraft(BLANK_SET);
           setDraftTried(false);
         }}
       >
@@ -309,7 +380,7 @@ export default function AttributeSets() {
                   command="--show"
                   commandFor={NEW_MODAL_ID}
                   onClick={() => {
-                    setDraft({ id: "", name: "", description: "" });
+                    setDraft(BLANK_SET);
                     setDraftTried(false);
                   }}
                 >
@@ -337,7 +408,21 @@ export default function AttributeSets() {
                   <s-table-row key={set.id}>
                     <s-table-cell>
                       <s-stack direction="block" gap="small-500">
-                        <s-text type="strong">{set.name}</s-text>
+                        <s-link
+                          command="--show"
+                          commandFor={EDIT_MODAL_ID}
+                          onClick={() => {
+                            setDraft({
+                              id: set.id,
+                              name: set.name,
+                              description: set.description,
+                              memberIds: set.members.map((m) => m.id),
+                            });
+                            setDraftTried(false);
+                          }}
+                        >
+                          {set.name}
+                        </s-link>
                         {set.description ? (
                           <s-text color="subdued">{set.description}</s-text>
                         ) : null}
@@ -410,6 +495,7 @@ export default function AttributeSets() {
                               id: set.id,
                               name: set.name,
                               description: set.description,
+                              memberIds: set.members.map((m) => m.id),
                             });
                             setDraftTried(false);
                           }}

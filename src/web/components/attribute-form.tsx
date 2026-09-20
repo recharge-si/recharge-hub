@@ -434,39 +434,34 @@ export function OptionsEditor({
 
 type Overlay = { showOverlay?: () => void; hideOverlay?: () => void };
 
-interface CreateResult {
+interface FormResult {
   ok: boolean;
   message: string;
 }
 
 /**
- * The New attribute dialog, complete in one flow: format, unit, options,
- * default requirement and where to put it. Posts to the catalogue's action
- * from wherever it is opened, so the product type page keeps its selection.
+ * The state behind creating an attribute, complete in one flow: format,
+ * unit, options, default requirement and where to put it. Posts to the
+ * catalogue's action from wherever it is used, so the page that hosts it
+ * keeps its place. The host renders the fields and the buttons; `onDone`
+ * fires once the server has accepted.
  */
-export function AttributeCreateModal({
-  id,
+export function useAttributeCreate({
   revision,
-  sets,
-  types,
   preselectedTypeId,
+  onDone,
 }: {
-  id: string;
   revision: number;
-  sets: Array<{ value: string; label: string }>;
-  types: Array<{ value: string; label: string }>;
-  /** The type the dialog was opened from; it is added there by default. */
   preselectedTypeId: string | null;
+  onDone: () => void;
 }) {
-  const fetcher = useFetcher<CreateResult>();
+  const fetcher = useFetcher<FormResult>();
   const busy = fetcher.state !== "idle";
-  const overlay = useRef<Overlay | null>(null);
   const [form, setForm] = useState<AttributeFormValue>(blankAttributeForm);
   const [attachTo, setAttachTo] = useState(preselectedTypeId ?? "");
   const [tried, setTried] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-
-  const errors = tried ? attributeFormErrors(form) : {};
+  const settled = useRef<FormResult | null>(null);
 
   useEffect(() => {
     setAttachTo(preselectedTypeId ?? "");
@@ -474,17 +469,26 @@ export function AttributeCreateModal({
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (settled.current === fetcher.data) return;
+    settled.current = fetcher.data;
     if (fetcher.data.ok) {
-      overlay.current?.hideOverlay?.();
       if (typeof shopify !== "undefined")
         shopify.toast.show(fetcher.data.message);
       setForm(blankAttributeForm());
       setTried(false);
       setServerError(null);
+      onDone();
     } else {
       setServerError(fetcher.data.message);
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [fetcher.state, fetcher.data, onDone]);
+
+  const reset = () => {
+    setForm(blankAttributeForm());
+    setTried(false);
+    setServerError(null);
+    setAttachTo(preselectedTypeId ?? "");
+  };
 
   const submit = () => {
     setTried(true);
@@ -501,8 +505,85 @@ export function AttributeCreateModal({
     );
   };
 
-  const typeOptions = [{ value: "", label: "Not yet" }, ...types];
-  const missing = Object.keys(errors).length;
+  return {
+    form,
+    setForm,
+    attachTo,
+    setAttachTo,
+    errors: tried ? attributeFormErrors(form) : {},
+    tried,
+    serverError,
+    busy,
+    submit,
+    reset,
+  };
+}
+
+/** The body of the create form, for a dialog or a panel inside one. */
+export function AttributeCreatePanel({
+  state,
+  sets,
+  types,
+}: {
+  state: ReturnType<typeof useAttributeCreate>;
+  sets: Array<{ value: string; label: string }>;
+  types: Array<{ value: string; label: string }>;
+}) {
+  const missing = Object.keys(state.errors).length;
+  return (
+    <s-stack direction="block" gap="base">
+      {state.serverError ? (
+        <s-banner tone="critical" heading="Not saved">
+          <s-paragraph>{state.serverError}</s-paragraph>
+        </s-banner>
+      ) : null}
+      <AttributeFields
+        value={state.form}
+        onChange={state.setForm}
+        errors={state.errors}
+        sets={sets}
+        mode="create"
+      />
+      <Dropdown
+        name="attachTo"
+        label="Add to product type"
+        details="The type and every type beneath it get the attribute. It can be added elsewhere later."
+        value={state.attachTo}
+        options={[{ value: "", label: "Not yet" }, ...types]}
+        onChange={state.setAttachTo}
+      />
+      {state.tried && missing > 0 ? (
+        <s-text tone="critical">
+          {missing === 1
+            ? "One field above needs attention before this can be saved."
+            : `${missing} fields above need attention before this can be saved.`}
+        </s-text>
+      ) : null}
+    </s-stack>
+  );
+}
+
+/** The New attribute dialog on its own. */
+export function AttributeCreateModal({
+  id,
+  revision,
+  sets,
+  types,
+  preselectedTypeId,
+}: {
+  id: string;
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  types: Array<{ value: string; label: string }>;
+  /** The type the dialog was opened from; it is added there by default. */
+  preselectedTypeId: string | null;
+}) {
+  const overlay = useRef<Overlay | null>(null);
+  const state = useAttributeCreate({
+    revision,
+    preselectedTypeId,
+    onDone: () => overlay.current?.hideOverlay?.(),
+  });
 
   return (
     <s-modal
@@ -517,46 +598,15 @@ export function AttributeCreateModal({
         // their own `afterhide` bubbles up here when a choice closes them.
         // Only the dialog closing resets the form.
         if (event.target !== event.currentTarget) return;
-        setForm(blankAttributeForm());
-        setTried(false);
-        setServerError(null);
-        setAttachTo(preselectedTypeId ?? "");
+        state.reset();
       }}
     >
-      <s-stack direction="block" gap="base">
-        {serverError ? (
-          <s-banner tone="critical" heading="Not saved">
-            <s-paragraph>{serverError}</s-paragraph>
-          </s-banner>
-        ) : null}
-        <AttributeFields
-          value={form}
-          onChange={setForm}
-          errors={errors}
-          sets={sets}
-          mode="create"
-        />
-        <Dropdown
-          name="attachTo"
-          label="Add to product type"
-          details="The type and every type beneath it get the attribute. It can be added elsewhere later."
-          value={attachTo}
-          options={typeOptions}
-          onChange={setAttachTo}
-        />
-        {tried && missing > 0 ? (
-          <s-text tone="critical">
-            {missing === 1
-              ? "One field above needs attention before this can be saved."
-              : `${missing} fields above need attention before this can be saved.`}
-          </s-text>
-        ) : null}
-      </s-stack>
+      <AttributeCreatePanel state={state} sets={sets} types={types} />
       <s-button
         slot="primary-action"
         variant="primary"
-        onClick={submit}
-        {...(busy ? { loading: true, disabled: true } : {})}
+        onClick={state.submit}
+        {...(state.busy ? { loading: true, disabled: true } : {})}
       >
         Add attribute
       </s-button>
@@ -580,69 +630,47 @@ export interface EditableAttribute {
 }
 
 /**
- * The attribute's editor as a dialog, so the catalogue and a product type's
- * list edit in place. Saves and deletes through the attribute's own route
- * with `stay`, which keeps the page that opened it where it is. Deleting is
- * a second step inside the same dialog, since a dialog cannot open another.
+ * The state behind editing one attribute in place. Saves and deletes
+ * through the attribute's own route with `stay`, which keeps the page that
+ * hosts it where it is.
  */
-export function AttributeEditModal({
-  id,
-  revision,
-  sets,
+export function useAttributeEdit({
   attribute,
-}: {
-  id: string;
-  revision: number;
-  sets: Array<{ value: string; label: string }>;
-  /** Null until a row is chosen; the dialog then renders that attribute. */
-  attribute: EditableAttribute | null;
-}) {
-  return attribute ? (
-    <AttributeEditDialog
-      key={attribute.id}
-      id={id}
-      revision={revision}
-      sets={sets}
-      attribute={attribute}
-    />
-  ) : (
-    <s-modal id={id} heading="Edit attribute" size="large" />
-  );
-}
-
-function AttributeEditDialog({
-  id,
   revision,
-  sets,
-  attribute,
+  onDone,
 }: {
-  id: string;
-  revision: number;
-  sets: Array<{ value: string; label: string }>;
   attribute: EditableAttribute;
+  revision: number;
+  onDone: () => void;
 }) {
-  const fetcher = useFetcher<CreateResult>();
+  const fetcher = useFetcher<FormResult>();
   const busy = fetcher.state !== "idle";
-  const overlay = useRef<Overlay | null>(null);
   const [form, setForm] = useState<AttributeFormValue>(attribute.form);
   const [tried, setTried] = useState(false);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const [serverError, setServerError] = useState<string | null>(null);
-
-  const errors = tried ? attributeFormErrors(form) : {};
-  const missing = Object.keys(errors).length;
+  const settled = useRef<FormResult | null>(null);
   const action = PRODUCT_SETUP_ROUTES.attribute(attribute.id);
 
   useEffect(() => {
     if (fetcher.state !== "idle" || !fetcher.data) return;
+    if (settled.current === fetcher.data) return;
+    settled.current = fetcher.data;
     if (fetcher.data.ok) {
-      overlay.current?.hideOverlay?.();
       if (typeof shopify !== "undefined")
         shopify.toast.show(fetcher.data.message);
+      onDone();
     } else {
       setServerError(fetcher.data.message);
     }
-  }, [fetcher.state, fetcher.data]);
+  }, [fetcher.state, fetcher.data, onDone]);
+
+  const reset = () => {
+    setForm(attribute.form);
+    setTried(false);
+    setConfirmingDelete(false);
+    setServerError(null);
+  };
 
   const save = () => {
     setTried(true);
@@ -665,93 +693,177 @@ function AttributeEditDialog({
       { method: "post", action },
     );
 
+  return {
+    form,
+    setForm,
+    errors: tried ? attributeFormErrors(form) : {},
+    tried,
+    serverError,
+    busy,
+    confirmingDelete,
+    setConfirmingDelete,
+    save,
+    remove,
+    reset,
+  };
+}
+
+/** The body of the edit form, with its two-step delete. */
+export function AttributeEditPanel({
+  state,
+  attribute,
+  sets,
+}: {
+  state: ReturnType<typeof useAttributeEdit>;
+  attribute: EditableAttribute;
+  sets: Array<{ value: string; label: string }>;
+}) {
+  const missing = Object.keys(state.errors).length;
+  const usage =
+    attribute.usedBy === 0
+      ? "On no product type."
+      : `On ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}.`;
+  return (
+    <s-stack direction="block" gap="base">
+      {state.serverError ? (
+        <s-banner tone="critical" heading="Not saved">
+          <s-paragraph>{state.serverError}</s-paragraph>
+        </s-banner>
+      ) : null}
+      <AttributeFields
+        value={state.form}
+        onChange={state.setForm}
+        errors={state.errors}
+        sets={sets}
+        mode="edit"
+      />
+      {state.tried && missing > 0 ? (
+        <s-text tone="critical">
+          {missing === 1
+            ? "One field above needs attention before this can be saved."
+            : `${missing} fields above need attention before this can be saved.`}
+        </s-text>
+      ) : null}
+      <s-divider />
+      {state.confirmingDelete ? (
+        <s-stack direction="block" gap="small-300">
+          <s-text>
+            {attribute.usedBy === 0
+              ? `Delete “${attribute.name}” everywhere? It is on no product type; it leaves the catalogue with its options. This cannot be undone.`
+              : `Delete “${attribute.name}” everywhere? It leaves the catalogue and ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}, with every requirement change and removal about it. This cannot be undone.`}
+          </s-text>
+          <s-stack direction="inline" gap="small-300">
+            <s-button
+              tone="critical"
+              variant="primary"
+              onClick={state.remove}
+              {...(state.busy ? { disabled: true, loading: true } : {})}
+            >
+              Delete everywhere
+            </s-button>
+            <s-button onClick={() => state.setConfirmingDelete(false)}>
+              Keep it
+            </s-button>
+          </s-stack>
+        </s-stack>
+      ) : (
+        <s-stack direction="inline" gap="small-300" alignItems="center">
+          <s-button
+            variant="tertiary"
+            tone="critical"
+            onClick={() => state.setConfirmingDelete(true)}
+          >
+            Delete attribute
+          </s-button>
+          <s-text color="subdued">{usage}</s-text>
+        </s-stack>
+      )}
+    </s-stack>
+  );
+}
+
+/**
+ * The attribute's editor as a dialog, so the catalogue edits in place.
+ *
+ * One `s-modal` for the page's lifetime, whatever it shows. A row's click
+ * both chooses the attribute and commands the dialog to show, and a command
+ * lands on the element that exists at that moment — so the element must
+ * stay and only its contents may change. The body is keyed by attribute so
+ * its form state starts fresh for each one.
+ */
+export function AttributeEditModal({
+  id,
+  revision,
+  sets,
+  attribute,
+}: {
+  id: string;
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  /** Null until a row is chosen; the dialog then renders that attribute. */
+  attribute: EditableAttribute | null;
+}) {
+  const overlay = useRef<Overlay | null>(null);
+  const [closedAt, setClosedAt] = useState(0);
+
   return (
     <s-modal
       id={id}
-      heading={attribute.name}
+      heading={attribute?.name ?? "Edit attribute"}
       size="large"
       ref={(element) => {
         overlay.current = (element as Overlay) ?? null;
       }}
       onAfterHide={(event) => {
         if (event.target !== event.currentTarget) return;
-        setForm(attribute.form);
-        setTried(false);
-        setConfirmingDelete(false);
-        setServerError(null);
+        // Remounts the body, which is what resets an abandoned edit.
+        setClosedAt(Date.now());
       }}
     >
-      <s-stack direction="block" gap="base">
-        {serverError ? (
-          <s-banner tone="critical" heading="Not saved">
-            <s-paragraph>{serverError}</s-paragraph>
-          </s-banner>
-        ) : null}
-        <AttributeFields
-          value={form}
-          onChange={setForm}
-          errors={errors}
+      {attribute ? (
+        <AttributeEditBody
+          key={`${attribute.id}:${closedAt}`}
+          revision={revision}
           sets={sets}
-          mode="edit"
+          attribute={attribute}
+          hide={() => overlay.current?.hideOverlay?.()}
+          cancelId={id}
         />
-        {tried && missing > 0 ? (
-          <s-text tone="critical">
-            {missing === 1
-              ? "One field above needs attention before this can be saved."
-              : `${missing} fields above need attention before this can be saved.`}
-          </s-text>
-        ) : null}
-        <s-divider />
-        {confirmingDelete ? (
-          <s-stack direction="block" gap="small-300">
-            <s-text>
-              {attribute.usedBy === 0
-                ? `Delete “${attribute.name}” everywhere? It is on no product type; it leaves the catalogue with its options. This cannot be undone.`
-                : `Delete “${attribute.name}” everywhere? It leaves the catalogue and ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}, with every requirement change and removal about it. This cannot be undone.`}
-            </s-text>
-            <s-stack direction="inline" gap="small-300">
-              <s-button
-                tone="critical"
-                variant="primary"
-                onClick={remove}
-                {...(busy ? { disabled: true, loading: true } : {})}
-              >
-                Delete everywhere
-              </s-button>
-              <s-button onClick={() => setConfirmingDelete(false)}>
-                Keep it
-              </s-button>
-            </s-stack>
-          </s-stack>
-        ) : (
-          <s-stack direction="inline" gap="small-300" alignItems="center">
-            <s-button
-              variant="tertiary"
-              tone="critical"
-              onClick={() => setConfirmingDelete(true)}
-            >
-              Delete attribute
-            </s-button>
-            <s-text color="subdued">
-              {attribute.usedBy === 0
-                ? "On no product type."
-                : `On ${attribute.usedBy === 1 ? "1 product type" : `${attribute.usedBy} product types`}.`}
-            </s-text>
-          </s-stack>
-        )}
-      </s-stack>
+      ) : null}
+    </s-modal>
+  );
+}
+
+/** The dialog's contents: the panel and the footer, as direct children. */
+function AttributeEditBody({
+  revision,
+  sets,
+  attribute,
+  hide,
+  cancelId,
+}: {
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  attribute: EditableAttribute;
+  hide: () => void;
+  cancelId: string;
+}) {
+  const state = useAttributeEdit({ attribute, revision, onDone: hide });
+  return (
+    <>
+      <AttributeEditPanel state={state} attribute={attribute} sets={sets} />
       <s-button
         slot="primary-action"
         variant="primary"
-        onClick={save}
-        {...(busy ? { loading: true, disabled: true } : {})}
+        onClick={state.save}
+        {...(state.busy ? { loading: true, disabled: true } : {})}
       >
         Save
       </s-button>
-      <s-button slot="secondary-actions" command="--hide" commandFor={id}>
+      <s-button slot="secondary-actions" command="--hide" commandFor={cancelId}>
         Cancel
       </s-button>
-    </s-modal>
+    </>
   );
 }
 

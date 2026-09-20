@@ -500,22 +500,58 @@ export function deleteAttribute(
 /* Attribute sets                                                             */
 /* -------------------------------------------------------------------------- */
 
+export interface SetInput {
+  name: string;
+  description: string;
+  /**
+   * Which attributes belong to the set, when given: named ones join it
+   * (leaving any other set), current members left out leave it. Omitted,
+   * the membership is not touched.
+   */
+  memberIds?: string[];
+}
+
+/** Applies a membership to the attributes, or says which id is unknown. */
+function withMembers(
+  schema: AttributeSchema,
+  setId: string,
+  memberIds: string[] | undefined,
+): { ok: true; attributes: Attribute[] } | { ok: false; message: string } {
+  if (memberIds === undefined) return { ok: true, attributes: schema.attributes };
+  const members = new Set(memberIds);
+  for (const id of members) {
+    if (!schema.attributes.some((a) => a.id === id))
+      return { ok: false, message: "One of those attributes no longer exists." };
+  }
+  return {
+    ok: true,
+    attributes: schema.attributes.map((a) =>
+      members.has(a.id)
+        ? { ...a, setId }
+        : a.setId === setId
+          ? { ...a, setId: null }
+          : a,
+    ),
+  };
+}
+
 export function addSet(
   schema: AttributeSchema,
-  input: { name: string; description: string },
+  input: SetInput,
   ids: IdSource,
 ): MutationResult {
   const name = input.name.trim();
   if (name === "") return refuse("Enter a name for the set.");
   if (schema.sets.some((s) => same(s.name, name)))
     return refuse("An attribute set with that name already exists.");
+  const id = ids("set");
+  const members = withMembers(schema, id, input.memberIds);
+  if (!members.ok) return refuse(members.message);
   return done(
     {
       ...schema,
-      sets: [
-        ...schema.sets,
-        { id: ids("set"), name, description: input.description.trim() },
-      ],
+      sets: [...schema.sets, { id, name, description: input.description.trim() }],
+      attributes: members.attributes,
     },
     "Attribute set created.",
   );
@@ -524,7 +560,7 @@ export function addSet(
 export function updateSet(
   schema: AttributeSchema,
   setId: string,
-  input: { name: string; description: string },
+  input: SetInput,
 ): MutationResult {
   if (!schema.sets.some((s) => s.id === setId))
     return refuse("That attribute set no longer exists.");
@@ -532,6 +568,8 @@ export function updateSet(
   if (name === "") return refuse("Enter a name for the set.");
   if (schema.sets.some((s) => s.id !== setId && same(s.name, name)))
     return refuse("An attribute set with that name already exists.");
+  const members = withMembers(schema, setId, input.memberIds);
+  if (!members.ok) return refuse(members.message);
   return done(
     {
       ...schema,
@@ -540,6 +578,7 @@ export function updateSet(
           ? { ...s, name, description: input.description.trim() }
           : s,
       ),
+      attributes: members.attributes,
     },
     "Attribute set updated.",
   );

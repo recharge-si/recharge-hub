@@ -4,7 +4,6 @@ import {
   useFetcher,
   useLoaderData,
   useNavigate,
-  useSearchParams,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -46,19 +45,19 @@ import { starterSchema } from "~/domain/attributes/starter";
 import type { AttributeSchema } from "~/domain/attributes/types";
 import { Advanced } from "~/web/components/advanced";
 import {
-  AttributeCreateModal,
-  AttributeEditModal,
+  AttributeCreatePanel,
+  AttributeEditPanel,
   editableAttribute,
+  useAttributeCreate,
+  useAttributeEdit,
+  type EditableAttribute,
 } from "~/web/components/attribute-form";
-import { ConfirmModal } from "~/web/components/confirm-modal";
 import { Dropdown } from "~/web/components/dropdown";
 import {
   ProductSetupNav,
   rememberType,
-  useNarrow,
 } from "~/web/components/product-setup-nav";
 import {
-  LAST_TYPE_KEY,
   PRODUCT_SETUP_ROUTES,
   SCOPE_LABEL,
   countOf,
@@ -75,36 +74,22 @@ import {
   principalFromSession,
 } from "~/web/lib/principal.server";
 import { redirectWithin } from "~/web/lib/redirects";
-import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
+import { useResetWhenSaved } from "~/web/lib/use-save-bar";
 
 /**
  * Product types (docs/attributes.md § Screens): the tree beside the
  * selected type. Choose a type, decide what information it needs.
  *
- * One route with an optional segment: the tree and the editor read one
- * document and change it through one action, and the URL says which type
- * and which tab, so a refresh, a link and the back button all land where
- * the person was. On a narrow screen the tree and the editor take turns.
+ * The tree is the page; a type opens as a dialog over it, with everything
+ * about that type inside — its attributes, its details, a preview, adding
+ * attributes, editing one, moving and deleting — as steps of one dialog,
+ * since a dialog cannot open another. The address names the open type, so
+ * a refresh, a link and the back button land on it.
  */
-const SAVE_BAR_ID = "product-type-save-bar";
 const ADD_MODAL_ID = "add-product-type";
-const NEW_ATTRIBUTE_MODAL_ID = "new-attribute-from-type";
-const PICKER_MODAL_ID = "add-attributes";
-const DELETE_MODAL_ID = "delete-product-type";
-const DETACH_MODAL_ID = "detach-source";
-const MOVE_MODAL_ID = "move-product-type";
+const TYPE_MODAL_ID = "product-type";
 const MENU_ID = "product-type-actions";
 const DROP_MODAL_ID = "confirm-drop";
-const EDIT_ATTRIBUTE_MODAL_ID = "edit-attribute";
-const EDIT_TYPE_MODAL_ID = "edit-product-type";
-
-const TABS = ["attributes", "details", "preview"] as const;
-type Tab = (typeof TABS)[number];
-const TAB_LABEL: Record<Tab, string> = {
-  attributes: "Attributes",
-  details: "Details",
-  preview: "Preview",
-};
 
 interface Details {
   name: string;
@@ -497,18 +482,10 @@ export const action = async ({
         });
       });
     case "delete-type": {
-      const current = await getAttributeSchema(principal);
-      const parentId = typeById(current.schema, typeId)?.parentId ?? null;
       const result = await commit("attribute_schema.type.deleted", (schema) =>
         deleteType(schema, typeId),
       );
-      if (result.ok)
-        throw redirectWithin(
-          request,
-          parentId === null
-            ? PRODUCT_SETUP_ROUTES.types
-            : PRODUCT_SETUP_ROUTES.type(parentId),
-        );
+      if (result.ok) throw redirectWithin(request, PRODUCT_SETUP_ROUTES.types);
       return result;
     }
     case "move-up":
@@ -642,12 +619,39 @@ function describeDelete(
   return sentences.join(" ");
 }
 
+/**
+ * What the type dialog shows. The first three are the tabs; the rest are
+ * steps a tab leads to and comes back from, so no second dialog is ever
+ * needed on top of this one.
+ */
+type View =
+  | "attributes"
+  | "details"
+  | "preview"
+  | "add"
+  | "new"
+  | "child"
+  | "move"
+  | "delete"
+  | `attribute:${string}`;
+
 const BLANK_TYPE = {
   name: "",
   parentId: "",
   kind: "type" as "type" | "category",
   shopifyCategory: "",
 };
+
+/** A drag ghost that follows the cursor: the row's name on a small card. */
+function attachDragGhost(event: React.DragEvent<HTMLElement>, name: string) {
+  const ghost = document.createElement("div");
+  ghost.textContent = name;
+  ghost.style.cssText =
+    "position:fixed;top:-1000px;left:-1000px;padding:6px 12px;background:#fff;color:#303030;border:1px solid #e3e3e3;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);font:13px/1.4 -apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;white-space:nowrap;";
+  document.body.appendChild(ghost);
+  event.dataTransfer.setDragImage(ghost, 12, 18);
+  setTimeout(() => ghost.remove(), 0);
+}
 
 export default function ProductTypes() {
   const { revision, stage, summary, tree, selected, typeOptions, sets } =
@@ -656,31 +660,9 @@ export default function ProductTypes() {
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
   const navigate = useNavigate();
-  const narrow = useNarrow();
-  const [searchParams, setSearchParams] = useSearchParams();
-  const tabParam = searchParams.get("tab");
-  const tab: Tab = TABS.includes(tabParam as Tab)
-    ? (tabParam as Tab)
-    : "attributes";
 
   const [treeQuery, setTreeQuery] = useState("");
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const [fieldQuery, setFieldQuery] = useState("");
-  const [requirementFilter, setRequirementFilter] = useState("all");
-  const [sourcesOpen, setSourcesOpen] = useState(false);
-  const [pickerQuery, setPickerQuery] = useState("");
-  const [pickedAttributes, setPickedAttributes] = useState<string[]>([]);
-  const [pickedSets, setPickedSets] = useState<string[]>([]);
-  const [pickerTried, setPickerTried] = useState(false);
-  const [newType, setNewType] = useState<typeof BLANK_TYPE>(BLANK_TYPE);
-  const [newTypeTried, setNewTypeTried] = useState(false);
-  const [moveTarget, setMoveTarget] = useState("");
-  const [pendingDetach, setPendingDetach] = useState<{
-    kind: "set" | "attribute";
-    assignmentId: string;
-    name: string;
-  } | null>(null);
-  const pickerOverlay = useRef<Overlay | null>(null);
   const [dragging, setDragging] = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<{
     id: string;
@@ -694,60 +676,75 @@ export default function ProductTypes() {
     parentName: string;
   } | null>(null);
   const impactFetcher = useFetcher<typeof loader>();
-  const [editing, setEditing] = useState<{
-    id: string;
+  const [newType, setNewType] = useState<typeof BLANK_TYPE>(BLANK_TYPE);
+  const [newTypeTried, setNewTypeTried] = useState(false);
+
+  // The type dialog. Opened by the address: choosing a row navigates to the
+  // type, and the dialog shows once the loader has it; closing it goes back
+  // to the bare tree. A refresh or a link with a type in it opens it too.
+  const typeOverlay = useRef<Overlay | null>(null);
+  const openedFor = useRef<string | null>(null);
+  const requestedView = useRef<View>("attributes");
+  const [view, setView] = useState<View>("attributes");
+  const [fieldQuery, setFieldQuery] = useState("");
+  const [requirementFilter, setRequirementFilter] = useState("all");
+  const [sourcesOpen, setSourcesOpen] = useState(false);
+  const [pendingDetach, setPendingDetach] = useState<{
+    kind: "set" | "attribute";
+    assignmentId: string;
     name: string;
-    details: Details;
   } | null>(null);
-  const [editTried, setEditTried] = useState(false);
-  const [editingAttributeId, setEditingAttributeId] = useState<string | null>(
-    null,
-  );
-  const editingAttribute =
-    selected?.rows.find((row) => row.attributeId === editingAttributeId)
-      ?.editable ?? null;
+  const [pickerQuery, setPickerQuery] = useState("");
+  const [pickedAttributes, setPickedAttributes] = useState<string[]>([]);
+  const [pickedSets, setPickedSets] = useState<string[]>([]);
+  const [pickerTried, setPickerTried] = useState(false);
+  const [moveTarget, setMoveTarget] = useState("");
+  const [child, setChild] = useState<typeof BLANK_TYPE>(BLANK_TYPE);
+  const [childTried, setChildTried] = useState(false);
 
   const savedDetails = selected?.details ?? null;
   const [details, setDetails] = useState<Details | null>(savedDetails);
   const [detailsTried, setDetailsTried] = useState(false);
   const savedKey = savedDetails ? normalise(savedDetails) : "";
-  const reset = useCallback(() => {
+  const resetDetails = useCallback(() => {
     setDetails(savedDetails);
     setDetailsTried(false);
   }, [savedDetails]);
-  useResetWhenSaved(`${selected?.id ?? ""}:${savedKey}`, reset);
-
-  const dirty =
-    details !== null &&
-    savedDetails !== null &&
-    normalise(details) !== savedKey;
-  useSaveBar(SAVE_BAR_ID, dirty);
+  useResetWhenSaved(`${selected?.id ?? ""}:${savedKey}`, resetDetails);
 
   useEffect(() => {
     if (!result?.ok) return;
     if (typeof shopify !== "undefined") shopify.toast.show(result.message);
   }, [result]);
 
-  // Remember the type on show, so the workspace's own link comes back here.
   useEffect(() => {
     if (selected) rememberType(selected.id);
   }, [selected]);
 
-  // With room for both columns, an unchosen tree chooses: the remembered
-  // type, else the first. A narrow screen shows the list and lets the person
-  // choose.
   useEffect(() => {
-    if (selected || narrow !== false || tree.length === 0) return;
-    let remembered: string | null = null;
-    try {
-      remembered = window.localStorage.getItem(LAST_TYPE_KEY);
-    } catch {
-      remembered = null;
+    if (!selected) {
+      openedFor.current = null;
+      return;
     }
-    const target = tree.find((row) => row.id === remembered)?.id ?? tree[0]?.id;
-    if (target)
-      void navigate(PRODUCT_SETUP_ROUTES.type(target), { replace: true });
-  }, [selected, narrow, tree, navigate]);
+    if (openedFor.current === selected.id) return;
+    openedFor.current = selected.id;
+    setView(requestedView.current);
+    requestedView.current = "attributes";
+    setFieldQuery("");
+    setRequirementFilter("all");
+    setSourcesOpen(false);
+    setPendingDetach(null);
+    typeOverlay.current?.showOverlay?.();
+  }, [selected]);
+
+  // Adding several attributes returns the dialog to the list once they are in.
+  const lastAttach = useRef<typeof result>(undefined);
+  useEffect(() => {
+    if (!result?.ok || result === lastAttach.current) return;
+    lastAttach.current = result;
+    if (view === "add" || view === "delete" || view === "move")
+      setView("attributes");
+  }, [result, view]);
 
   const submit = (fields: Record<string, string>) =>
     fetcher.submit(
@@ -755,16 +752,22 @@ export default function ProductTypes() {
       { method: "post" },
     );
 
-  const setTab = (next: Tab) =>
-    setSearchParams(
-      (current) => {
-        const params = new URLSearchParams(current);
-        if (next === "attributes") params.delete("tab");
-        else params.set("tab", next);
-        return params;
-      },
-      { replace: true },
-    );
+  const open = (typeId: string, at: View = "attributes") => {
+    requestedView.current = at;
+    if (selected?.id === typeId) {
+      setView(at);
+      typeOverlay.current?.showOverlay?.();
+      return;
+    }
+    void navigate(PRODUCT_SETUP_ROUTES.type(typeId));
+  };
+
+  const closeType = () => {
+    openedFor.current = null;
+    setView("attributes");
+    resetDetails();
+    if (selected) void navigate(PRODUCT_SETUP_ROUTES.types, { replace: true });
+  };
 
   const saveDetails = () => {
     if (!details) return;
@@ -799,33 +802,6 @@ export default function ProductTypes() {
     }
   }
   const visibleTree = tree.filter((row) => visibleIds.has(row.id));
-
-  const fieldNeedle = fieldQuery.trim().toLowerCase();
-  const rows = (selected?.rows ?? []).filter(
-    (row) =>
-      `${row.name} ${row.format}`.toLowerCase().includes(fieldNeedle) &&
-      (requirementFilter === "all" ||
-        (requirementFilter === "required") === row.required),
-  );
-
-  const pickerNeedle = pickerQuery.trim().toLowerCase();
-  const pickableAttributes = (selected?.picker.attributes ?? []).filter((a) =>
-    a.name.toLowerCase().includes(pickerNeedle),
-  );
-  const pickableSets = (selected?.picker.sets ?? []).filter((s) =>
-    `${s.name} ${s.members}`.toLowerCase().includes(pickerNeedle),
-  );
-  const pickedCount = pickedAttributes.length + pickedSets.length;
-
-  const toggle = (list: string[], id: string, on: boolean) =>
-    on ? [...new Set([...list, id])] : list.filter((entry) => entry !== id);
-
-  const openPicker = () => {
-    setPickerQuery("");
-    setPickedAttributes([]);
-    setPickedSets([]);
-    setPickerTried(false);
-  };
 
   // Ancestry from the flattened tree, for what a row may be dropped on.
   const parentOf = new Map(tree.map((row) => [row.id, row.parentId]));
@@ -885,212 +861,43 @@ export default function ProductTypes() {
     (document.getElementById(DROP_MODAL_ID) as Overlay | null)?.showOverlay?.();
   };
 
-  const editOptions = (id: string) => [
-    { value: "", label: "Top level" },
-    ...tree
-      .filter((row) => !isWithinRow(row.id, id))
-      .map((row) => ({ value: row.id, label: row.label })),
-  ];
-
-  const showTree = narrow !== true || selected === null;
-  const showEditor = narrow !== true || selected !== null;
-
-  const treeColumn = (
-    <s-section heading="Product types">
-      <s-stack direction="block" gap="small-300">
-        {tree.length > 6 ? (
-          <s-search-field
-            label="Search product types"
-            labelAccessibilityVisibility="exclusive"
-            placeholder="Search"
-            value={treeQuery}
-            onInput={(event) => setTreeQuery(event.currentTarget.value)}
-          />
-        ) : null}
-        {visibleTree.length === 0 ? (
-          <s-text color="subdued">No product type matches.</s-text>
-        ) : null}
-        {visibleTree.map((row) => (
-          /*
-           * A plain element carries the drag, because the Polaris row owns
-           * its own DOM: dragging starts anywhere on the row and lands on
-           * another row, which becomes the new parent after a confirmation
-           * that says what changes. Move to… in the menu is the keyboard way.
-           */
-          <div
-            key={row.id}
-            draggable
-            onDragStart={(event) => {
-              event.dataTransfer.effectAllowed = "move";
-              event.dataTransfer.setData("text/plain", row.id);
-              setDragging(row.id);
-            }}
-            onDragEnd={() => {
-              setDragging(null);
-              setDropTarget(null);
-            }}
-            onDragOver={(event) => {
-              if (dragging === null || dragging === row.id) return;
-              if (isWithinRow(row.id, dragging)) return;
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              const position = positionFrom(event);
-              if (dropTarget?.id !== row.id || dropTarget.position !== position)
-                setDropTarget({ id: row.id, position });
-            }}
-            onDragLeave={() => {
-              if (dropTarget?.id === row.id) setDropTarget(null);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              const sourceId =
-                dragging ?? event.dataTransfer.getData("text/plain");
-              if (sourceId) drop(sourceId, row.id, positionFrom(event));
-            }}
-          >
-            {dropTarget?.id === row.id && dropTarget.position === "before" ? (
-              <s-box blockSize="3px" background="strong" borderRadius="base" />
-            ) : null}
-            <s-box
-              paddingInlineStart={
-                row.depth === 0
-                  ? "none"
-                  : row.depth === 1
-                    ? "base"
-                    : row.depth === 2
-                      ? "large-200"
-                      : "large-500"
-              }
-            >
-              <s-grid
-                gridTemplateColumns="auto auto 1fr auto"
-                gap="none"
-                alignItems="center"
-              >
-                <s-box paddingInlineEnd="small-500">
-                  <s-icon type="drag-handle" color="subdued" />
-                </s-box>
-                {row.hasChildren ? (
-                  <s-button
-                    variant="tertiary"
-                    icon={
-                      collapsed[row.id] && !needle
-                        ? "chevron-right"
-                        : "chevron-down"
-                    }
-                    accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
-                    {...(needle ? { disabled: true } : {})}
-                    onClick={() =>
-                      setCollapsed({
-                        ...collapsed,
-                        [row.id]: !collapsed[row.id],
-                      })
-                    }
-                  />
-                ) : (
-                  <s-box inlineSize="28px" />
-                )}
-                <s-clickable
-                  href={PRODUCT_SETUP_ROUTES.type(row.id)}
-                  borderRadius="base"
-                  paddingInline="small-300"
-                  paddingBlock="small-400"
-                  inlineSize="100%"
-                  background={
-                    dropTarget?.id === row.id &&
-                    dropTarget.position === "inside"
-                      ? "strong"
-                      : selected?.id === row.id
-                        ? "subdued"
-                        : "transparent"
-                  }
-                  accessibilityLabel={`${row.name}, ${row.leaf ? "product type" : "category"}, ${countOf(row.count, "attribute")}${selected?.id === row.id ? ", selected" : ""}`}
-                >
-                  <s-grid
-                    gridTemplateColumns="1fr auto"
-                    gap="small-300"
-                    alignItems="center"
-                  >
-                    <s-text
-                      {...(selected?.id === row.id
-                        ? { type: "strong" as const }
-                        : {})}
-                    >
-                      {row.name}
-                    </s-text>
-                    <s-text color="subdued">
-                      {row.leaf
-                        ? String(row.count)
-                        : row.count > 0
-                          ? `${row.count} ·`
-                          : "·"}
-                    </s-text>
-                  </s-grid>
-                </s-clickable>
-                <s-button
-                  variant="tertiary"
-                  icon="edit"
-                  accessibilityLabel={`Edit ${row.name}`}
-                  command="--show"
-                  commandFor={EDIT_TYPE_MODAL_ID}
-                  onClick={() => {
-                    setEditing({
-                      id: row.id,
-                      name: row.name,
-                      details: {
-                        name: row.name,
-                        parentId: row.parentId ?? "",
-                        kind: row.leaf ? "type" : "category",
-                        shopifyCategory: "",
-                        archetype: "",
-                      },
-                    });
-                    setEditTried(false);
-                  }}
-                />
-              </s-grid>
-            </s-box>
-            {dropTarget?.id === row.id && dropTarget.position === "after" ? (
-              <s-box blockSize="3px" background="strong" borderRadius="base" />
-            ) : null}
-          </div>
-        ))}
-        {dragging !== null && (parentOf.get(dragging) ?? null) !== null ? (
-          <div
-            onDragOver={(event) => {
-              event.preventDefault();
-              event.dataTransfer.dropEffect = "move";
-              if (dropTarget?.id !== "")
-                setDropTarget({ id: "", position: "inside" });
-            }}
-            onDragLeave={() => {
-              if (dropTarget?.id === "") setDropTarget(null);
-            }}
-            onDrop={(event) => {
-              event.preventDefault();
-              if (dragging) drop(dragging, null, "inside");
-            }}
-          >
-            <s-box
-              padding="small-300"
-              borderRadius="base"
-              borderWidth="base"
-              borderStyle="dashed"
-              borderColor={dropTarget?.id === "" ? "strong" : "subdued"}
-              background={dropTarget?.id === "" ? "strong" : "transparent"}
-            >
-              <s-text color="subdued">
-                Drop here to make it a top-level type
-              </s-text>
-            </s-box>
-          </div>
-        ) : null}
-        <s-text color="subdued">
-          {`Numbers are attributes on the type. A dot marks a category, which only organises the types beneath it. Drag a row onto another to put it beneath, or to the edge of a row to place it beside.`}
-        </s-text>
-      </s-stack>
-    </s-section>
+  const fieldNeedle = fieldQuery.trim().toLowerCase();
+  const rows = (selected?.rows ?? []).filter(
+    (row) =>
+      `${row.name} ${row.format}`.toLowerCase().includes(fieldNeedle) &&
+      (requirementFilter === "all" ||
+        (requirementFilter === "required") === row.required),
   );
+
+  const pickerNeedle = pickerQuery.trim().toLowerCase();
+  const pickableAttributes = (selected?.picker.attributes ?? []).filter((a) =>
+    a.name.toLowerCase().includes(pickerNeedle),
+  );
+  const pickableSets = (selected?.picker.sets ?? []).filter((s) =>
+    `${s.name} ${s.members}`.toLowerCase().includes(pickerNeedle),
+  );
+  const pickedCount = pickedAttributes.length + pickedSets.length;
+  const toggle = (list: string[], id: string, on: boolean) =>
+    on ? [...new Set([...list, id])] : list.filter((entry) => entry !== id);
+  const openPicker = () => {
+    setPickerQuery("");
+    setPickedAttributes([]);
+    setPickedSets([]);
+    setPickerTried(false);
+    setView("add");
+  };
+
+  const editingAttribute =
+    view.startsWith("attribute:") && selected
+      ? (selected.rows.find((row) => row.attributeId === view.slice(10))
+          ?.editable ?? null)
+      : null;
+
+  const tabs: Array<{ key: View; label: string }> = [
+    { key: "attributes", label: "Attributes" },
+    { key: "details", label: "Details" },
+    { key: "preview", label: "Preview" },
+  ];
 
   return (
     <s-page heading="Product setup">
@@ -1104,13 +911,14 @@ export default function ProductTypes() {
         command="--show"
         commandFor={ADD_MODAL_ID}
         onClick={() => {
-          setNewType({ ...BLANK_TYPE, parentId: selected?.id ?? "" });
+          setNewType(BLANK_TYPE);
           setNewTypeTried(false);
         }}
       >
         Add product type
       </s-button>
 
+      {/* --- Add a product type (from the page) ---------------------------- */}
       <s-modal id={ADD_MODAL_ID} heading="Add product type">
         <s-stack direction="block" gap="base">
           <s-text-field
@@ -1198,6 +1006,7 @@ export default function ProductTypes() {
         </s-button>
       </s-modal>
 
+      {/* --- A drop that changes the parent ------------------------------- */}
       <s-modal
         id={DROP_MODAL_ID}
         heading={`Move “${pendingDrop?.sourceName ?? ""}” under ${pendingDrop?.parentName ?? ""}?`}
@@ -1238,359 +1047,905 @@ export default function ProductTypes() {
         </s-button>
       </s-modal>
 
+      {/* --- The type dialog ----------------------------------------------- */}
       <s-modal
-        id={EDIT_TYPE_MODAL_ID}
-        heading={editing ? `Edit “${editing.name}”` : "Edit product type"}
+        id={TYPE_MODAL_ID}
+        heading={selected?.name ?? "Product type"}
+        size="large"
+        ref={(element) => {
+          typeOverlay.current = (element as Overlay) ?? null;
+        }}
         onAfterHide={(event) => {
           if (event.target !== event.currentTarget) return;
-          setEditing(null);
-          setEditTried(false);
+          closeType();
         }}
       >
-        {editing ? (
-          <s-stack direction="block" gap="base">
-            <s-text-field
-              label="Name"
-              value={editing.details.name}
-              onInput={(event) =>
-                setEditing({
-                  ...editing,
-                  details: {
-                    ...editing.details,
-                    name: event.currentTarget.value,
-                  },
-                })
-              }
-              {...(editTried && editing.details.name.trim() === ""
-                ? { error: "Enter a name." }
-                : {})}
-            />
-            <Dropdown
-              name="editParentId"
-              label="Under"
-              details={
-                editing.details.parentId === (parentOf.get(editing.id) ?? "")
-                  ? "It inherits every attribute of the type above it."
-                  : "Moving it changes what it and the types beneath it inherit."
-              }
-              value={editing.details.parentId}
-              options={editOptions(editing.id)}
-              onChange={(parentId) =>
-                setEditing({
-                  ...editing,
-                  details: { ...editing.details, parentId },
-                })
-              }
-            />
-            <s-choice-list
-              label="Kind"
-              name="editKind"
-              values={[editing.details.kind]}
-              onChange={(event) => {
-                const next = event.currentTarget.values[0];
-                if (next === "type" || next === "category")
-                  setEditing({
-                    ...editing,
-                    details: { ...editing.details, kind: next },
-                  });
-              }}
-            >
-              <s-choice value="type">
-                Product type
-                <s-text slot="details" color="subdued">
-                  Products can be assigned to it.
-                </s-text>
-              </s-choice>
-              <s-choice value="category">
-                Organising category
-                <s-text slot="details" color="subdued">
-                  Only groups the types beneath it.
-                </s-text>
-              </s-choice>
-            </s-choice-list>
-            <s-text color="subdued">
-              Its attributes, Shopify category and archetype are edited from the
-              type itself.
-            </s-text>
-          </s-stack>
-        ) : null}
-        <s-button
-          slot="primary-action"
-          variant="primary"
-          {...(editing && editing.details.name.trim() !== ""
-            ? { command: "--hide", commandFor: EDIT_TYPE_MODAL_ID }
-            : {})}
-          onClick={() => {
-            setEditTried(true);
-            if (!editing || editing.details.name.trim() === "") return;
-            submit({
-              intent: "edit-type",
-              typeId: editing.id,
-              form: JSON.stringify(editing.details),
-            });
-          }}
-          {...(busy ? { disabled: true } : {})}
-        >
-          Save
-        </s-button>
-        <s-button
-          slot="secondary-actions"
-          command="--hide"
-          commandFor={EDIT_TYPE_MODAL_ID}
-        >
-          Cancel
-        </s-button>
-      </s-modal>
+        {selected && details ? (
+          <>
+            <s-box paddingBlockEnd="base">
+              <s-stack direction="block" gap="base">
+                <s-grid
+                  gridTemplateColumns="1fr auto"
+                  gap="base"
+                  alignItems="start"
+                >
+                  <s-stack direction="block" gap="small-500">
+                    {selected.parents.length > 0 ? (
+                      <s-text color="subdued">
+                        {selected.parents.join(" › ")}
+                      </s-text>
+                    ) : null}
+                    <s-text color="subdued">
+                      {selected.rows.length === 0
+                        ? selected.leaf
+                          ? "Product type · no attributes yet"
+                          : "Organising category · no attributes yet"
+                        : `${selected.leaf ? "Product type" : "Organising category"} · ${countOf(selected.rows.length, "attribute")} · ${selected.required} required · ${selected.rows.length - selected.required} optional`}
+                    </s-text>
+                  </s-stack>
+                  <s-button
+                    icon="menu-horizontal"
+                    accessibilityLabel={`More actions for ${selected.name}`}
+                    command="--show"
+                    commandFor={MENU_ID}
+                  />
+                  <s-menu
+                    id={MENU_ID}
+                    accessibilityLabel={`Actions for ${selected.name}`}
+                  >
+                    <s-button
+                      onClick={() => {
+                        setChild(BLANK_TYPE);
+                        setChildTried(false);
+                        setView("child");
+                      }}
+                    >
+                      Add child type
+                    </s-button>
+                    <s-button
+                      onClick={() => {
+                        setMoveTarget(selected.details.parentId);
+                        setView("move");
+                      }}
+                    >
+                      Move to…
+                    </s-button>
+                    <s-button
+                      onClick={() => submit({ intent: "move-up" })}
+                      {...(selected.isFirst || busy ? { disabled: true } : {})}
+                    >
+                      Move up
+                    </s-button>
+                    <s-button
+                      onClick={() => submit({ intent: "move-down" })}
+                      {...(selected.isLast || busy ? { disabled: true } : {})}
+                    >
+                      Move down
+                    </s-button>
+                    <s-button
+                      tone="critical"
+                      onClick={() => setView("delete")}
+                      {...(busy ? { disabled: true } : {})}
+                    >
+                      Delete
+                    </s-button>
+                  </s-menu>
+                </s-grid>
 
-      <AttributeEditModal
-        id={EDIT_ATTRIBUTE_MODAL_ID}
-        revision={revision}
-        sets={sets}
-        attribute={editingAttribute}
-      />
+                {view === "attributes" ||
+                view === "details" ||
+                view === "preview" ? (
+                  <s-stack
+                    direction="inline"
+                    gap="small-300"
+                    accessibilityRole="navigation"
+                    accessibilityLabel="Sections of this product type"
+                  >
+                    {tabs.map((entry) => (
+                      <s-button
+                        key={entry.key}
+                        variant={view === entry.key ? "secondary" : "tertiary"}
+                        accessibilityLabel={`${entry.label}${view === entry.key ? ", current" : ""}`}
+                        onClick={() => setView(entry.key)}
+                      >
+                        {entry.label}
+                      </s-button>
+                    ))}
+                  </s-stack>
+                ) : null}
+              </s-stack>
+            </s-box>
 
-      <AttributeCreateModal
-        id={NEW_ATTRIBUTE_MODAL_ID}
-        revision={revision}
-        sets={sets}
-        types={typeOptions}
-        preselectedTypeId={selected?.id ?? null}
-      />
+            {result && !result.ok ? (
+              <s-box paddingBlockEnd="base">
+                <s-banner tone="critical" heading="That did not work">
+                  <s-paragraph>{result.message}</s-paragraph>
+                </s-banner>
+              </s-box>
+            ) : null}
 
-      {selected ? (
-        <>
-          <s-modal
-            id={PICKER_MODAL_ID}
-            heading={`Add attributes to ${selected.name}`}
-            size="large"
-            ref={(element) => {
-              pickerOverlay.current = (element as Overlay) ?? null;
-            }}
-          >
-            <s-stack direction="block" gap="base">
-              <s-text color="subdued">
-                {`Whatever is added here reaches ${selected.name} and every type beneath it.`}
-              </s-text>
-              {selected.picker.attributes.length + selected.picker.sets.length >
-              6 ? (
-                <s-search-field
-                  label="Search attributes and sets"
-                  labelAccessibilityVisibility="exclusive"
-                  placeholder="Search"
-                  value={pickerQuery}
-                  onInput={(event) => setPickerQuery(event.currentTarget.value)}
-                />
-              ) : null}
+            {/* ---- Attributes ---- */}
+            {view === "attributes" ? (
+              <>
+                <s-stack direction="block" gap="base">
+                  {selected.rows.length === 0 ? (
+                    <s-text>{`No attributes assigned to ${selected.name}.`}</s-text>
+                  ) : (
+                    <>
+                      {selected.rows.length > 6 ? (
+                        <s-grid
+                          gridTemplateColumns="1fr 150px"
+                          gap="small-300"
+                          alignItems="end"
+                        >
+                          <s-search-field
+                            label="Find an attribute"
+                            labelAccessibilityVisibility="exclusive"
+                            placeholder="Find an attribute"
+                            value={fieldQuery}
+                            onInput={(event) =>
+                              setFieldQuery(event.currentTarget.value)
+                            }
+                          />
+                          <Dropdown
+                            name="requirementFilter"
+                            label="Show"
+                            hideLabel
+                            value={requirementFilter}
+                            options={[
+                              { value: "all", label: "All" },
+                              { value: "required", label: "Required" },
+                              { value: "optional", label: "Optional" },
+                            ]}
+                            onChange={setRequirementFilter}
+                          />
+                        </s-grid>
+                      ) : null}
+                      {rows.length === 0 ? (
+                        <s-text color="subdued">No attribute matches.</s-text>
+                      ) : (
+                        <s-table variant="auto">
+                          <s-table-header-row>
+                            <s-table-header listSlot="primary">
+                              Attribute
+                            </s-table-header>
+                            <s-table-header listSlot="secondary">
+                              Format
+                            </s-table-header>
+                            <s-table-header listSlot="labeled">
+                              Requirement
+                            </s-table-header>
+                            <s-table-header listSlot="kicker">
+                              Source
+                            </s-table-header>
+                            <s-table-header listSlot="inline">
+                              Actions
+                            </s-table-header>
+                          </s-table-header-row>
+                          <s-table-body>
+                            {rows.map((row) => (
+                              <s-table-row key={row.attributeId}>
+                                <s-table-cell>
+                                  <s-link
+                                    onClick={() =>
+                                      setView(`attribute:${row.attributeId}`)
+                                    }
+                                  >
+                                    {row.name}
+                                  </s-link>
+                                </s-table-cell>
+                                <s-table-cell>{`${row.format} · ${row.scope}`}</s-table-cell>
+                                <s-table-cell>
+                                  <s-stack direction="block" gap="small-500">
+                                    <Dropdown
+                                      name={`requirement-${row.attributeId}`}
+                                      label={`Requirement for ${row.name}`}
+                                      hideLabel
+                                      value={
+                                        row.required ? "required" : "optional"
+                                      }
+                                      options={[
+                                        {
+                                          value: "required",
+                                          label: "Required",
+                                        },
+                                        {
+                                          value: "optional",
+                                          label: "Optional",
+                                        },
+                                      ]}
+                                      disabled={busy}
+                                      onChange={(value) =>
+                                        submit({
+                                          intent: "set-requirement",
+                                          attributeId: row.attributeId,
+                                          value,
+                                        })
+                                      }
+                                    />
+                                    {row.overridden ? (
+                                      <s-text color="subdued">
+                                        Changed for this type
+                                      </s-text>
+                                    ) : null}
+                                  </s-stack>
+                                </s-table-cell>
+                                <s-table-cell>
+                                  {row.here ? "Here" : `From ${row.sourceName}`}
+                                </s-table-cell>
+                                <s-table-cell>
+                                  <s-button
+                                    icon="menu-horizontal"
+                                    variant="tertiary"
+                                    accessibilityLabel={`Actions for ${row.name}`}
+                                    command="--show"
+                                    commandFor={`row-menu-${row.attributeId}`}
+                                  />
+                                  <s-menu
+                                    id={`row-menu-${row.attributeId}`}
+                                    accessibilityLabel={`Actions for ${row.name}`}
+                                  >
+                                    <s-button
+                                      onClick={() =>
+                                        setView(`attribute:${row.attributeId}`)
+                                      }
+                                    >
+                                      Edit attribute
+                                    </s-button>
+                                    {row.overridden ? (
+                                      <s-button
+                                        onClick={() =>
+                                          submit({
+                                            intent: "set-requirement",
+                                            attributeId: row.attributeId,
+                                            value: "reset",
+                                          })
+                                        }
+                                      >
+                                        Reset to attribute default
+                                      </s-button>
+                                    ) : null}
+                                    <s-button
+                                      tone="critical"
+                                      onClick={() =>
+                                        submit({
+                                          intent: "remove",
+                                          attributeId: row.attributeId,
+                                        })
+                                      }
+                                    >
+                                      Remove from this type
+                                    </s-button>
+                                  </s-menu>
+                                </s-table-cell>
+                              </s-table-row>
+                            ))}
+                          </s-table-body>
+                        </s-table>
+                      )}
+                    </>
+                  )}
 
-              {selected.picker.attributes.length === 0 ? (
-                <s-text color="subdued">
-                  No attributes are defined yet. Create the first one below.
-                </s-text>
-              ) : (
-                <s-stack direction="block" gap="small-300">
-                  <s-text type="strong">Attributes</s-text>
-                  {pickableAttributes.length === 0 ? (
-                    <s-text color="subdued">No attribute matches.</s-text>
+                  {selected.removed.length > 0 ? (
+                    <s-stack direction="block" gap="small-300">
+                      <s-divider />
+                      <s-text type="strong">
+                        {`Removed from ${selected.name} (${selected.removed.length})`}
+                      </s-text>
+                      <s-text color="subdued">
+                        Hidden on this type alone; other types and the catalogue
+                        are unchanged.
+                      </s-text>
+                      {selected.removed.map((row) => (
+                        <s-grid
+                          key={row.attributeId}
+                          gridTemplateColumns="1fr auto"
+                          gap="small-300"
+                          alignItems="center"
+                        >
+                          <s-text>{row.name}</s-text>
+                          <s-button
+                            onClick={() =>
+                              submit({
+                                intent: "restore",
+                                attributeId: row.attributeId,
+                              })
+                            }
+                            {...(busy ? { disabled: true } : {})}
+                          >
+                            Restore
+                          </s-button>
+                        </s-grid>
+                      ))}
+                    </s-stack>
                   ) : null}
-                  {pickableAttributes.map((attribute) => (
-                    <s-checkbox
-                      key={attribute.id}
-                      label={attribute.name}
-                      details={
-                        attribute.state === "added"
-                          ? `${attribute.format} · already on this type`
-                          : attribute.state === "removed"
-                            ? `${attribute.format} · removed from this type; adding it restores it`
-                            : attribute.format
-                      }
-                      checked={pickedAttributes.includes(attribute.id)}
-                      {...(attribute.state === "added"
-                        ? { disabled: true }
-                        : {})}
-                      onChange={(event) =>
-                        setPickedAttributes(
-                          toggle(
-                            pickedAttributes,
-                            attribute.id,
-                            event.currentTarget.checked,
-                          ),
-                        )
+
+                  {selected.setSources.length +
+                    selected.attributeSources.length >
+                  0 ? (
+                    <s-stack direction="block" gap="small-300">
+                      <s-divider />
+                      <s-stack
+                        direction="inline"
+                        gap="small-300"
+                        alignItems="center"
+                      >
+                        <s-button
+                          variant="tertiary"
+                          icon={sourcesOpen ? "chevron-up" : "chevron-down"}
+                          accessibilityLabel={
+                            sourcesOpen ? "Hide sources" : "Show sources"
+                          }
+                          onClick={() => setSourcesOpen((now) => !now)}
+                        >
+                          {`Where these come from (${countOf(selected.setSources.length + selected.attributeSources.length, "source")})`}
+                        </s-button>
+                      </s-stack>
+                      {sourcesOpen ? (
+                        <s-stack direction="block" gap="small-300">
+                          <s-text color="subdued">
+                            A source attached here reaches this type and every
+                            type beneath it; detaching it takes it from all of
+                            them.
+                          </s-text>
+                          {[
+                            ...selected.setSources.map((s) => ({
+                              ...s,
+                              kind: "set" as const,
+                            })),
+                            ...selected.attributeSources.map((s) => ({
+                              ...s,
+                              kind: "attribute" as const,
+                            })),
+                          ].map((source) => (
+                            <s-grid
+                              key={`${source.kind}-${source.assignmentId}`}
+                              gridTemplateColumns="1fr auto"
+                              gap="small-300"
+                              alignItems="center"
+                            >
+                              <s-text>
+                                <s-text type="strong">{source.name}</s-text>
+                                {` · ${source.kind === "set" ? "set" : "attribute"} ${source.here ? "attached here" : `attached on ${source.typeName}`}`}
+                              </s-text>
+                              {pendingDetach?.assignmentId ===
+                              source.assignmentId ? (
+                                <s-stack direction="inline" gap="small-400">
+                                  <s-button
+                                    tone="critical"
+                                    variant="primary"
+                                    onClick={() => {
+                                      submit({
+                                        intent:
+                                          source.kind === "set"
+                                            ? "detach-set"
+                                            : "detach-attribute",
+                                        assignmentId: source.assignmentId,
+                                      });
+                                      setPendingDetach(null);
+                                    }}
+                                    {...(busy ? { disabled: true } : {})}
+                                  >
+                                    Detach
+                                  </s-button>
+                                  <s-button
+                                    onClick={() => setPendingDetach(null)}
+                                  >
+                                    Keep
+                                  </s-button>
+                                </s-stack>
+                              ) : source.here ? (
+                                <s-button
+                                  variant="tertiary"
+                                  tone="critical"
+                                  onClick={() =>
+                                    setPendingDetach({
+                                      kind: source.kind,
+                                      assignmentId: source.assignmentId,
+                                      name: source.name,
+                                    })
+                                  }
+                                  {...(busy ? { disabled: true } : {})}
+                                >
+                                  Detach
+                                </s-button>
+                              ) : (
+                                <s-button
+                                  variant="tertiary"
+                                  onClick={() => open(source.typeId)}
+                                >
+                                  {`Go to ${source.typeName}`}
+                                </s-button>
+                              )}
+                            </s-grid>
+                          ))}
+                          {pendingDetach ? (
+                            <s-text color="subdued">
+                              {`${selected.name} and every type beneath it lose ${pendingDetach.kind === "set" ? "the set's attributes" : "it"}, unless another source supplies ${pendingDetach.kind === "set" ? "them" : "it"}. To hide an attribute on this type alone, remove it from the list instead.`}
+                            </s-text>
+                          ) : null}
+                        </s-stack>
+                      ) : null}
+                    </s-stack>
+                  ) : null}
+                </s-stack>
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  onClick={openPicker}
+                >
+                  Add attributes
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  command="--hide"
+                  commandFor={TYPE_MODAL_ID}
+                >
+                  Close
+                </s-button>
+              </>
+            ) : null}
+
+            {/* ---- Details ---- */}
+            {view === "details" ? (
+              <>
+                <s-stack direction="block" gap="base">
+                  <s-text-field
+                    label="Name"
+                    value={details.name}
+                    onInput={(event) =>
+                      setDetails({
+                        ...details,
+                        name: event.currentTarget.value,
+                      })
+                    }
+                    {...(detailsTried && details.name.trim() === ""
+                      ? { error: "Enter a name." }
+                      : {})}
+                  />
+                  <Dropdown
+                    name="parentId"
+                    label="Under"
+                    details={
+                      details.parentId === selected.details.parentId
+                        ? "It inherits every attribute of the type above it."
+                        : describeMove(selected.moveImpacts[details.parentId])
+                    }
+                    value={details.parentId}
+                    options={selected.parentOptions}
+                    onChange={(parentId) =>
+                      setDetails({ ...details, parentId })
+                    }
+                  />
+                  <s-choice-list
+                    label="Kind"
+                    name="kind"
+                    values={[details.kind]}
+                    onChange={(event) => {
+                      const next = event.currentTarget.values[0];
+                      if (next === "type" || next === "category")
+                        setDetails({ ...details, kind: next });
+                    }}
+                  >
+                    <s-choice value="type">
+                      Product type
+                      <s-text slot="details" color="subdued">
+                        Products can be assigned to it.
+                      </s-text>
+                    </s-choice>
+                    <s-choice value="category">
+                      Organising category
+                      <s-text slot="details" color="subdued">
+                        Only groups the types beneath it; no product is assigned
+                        to it directly.
+                      </s-text>
+                    </s-choice>
+                  </s-choice-list>
+                  <s-text-field
+                    label="Shopify category (optional)"
+                    details="The standard product category this matches; a note for now."
+                    value={details.shopifyCategory}
+                    onInput={(event) =>
+                      setDetails({
+                        ...details,
+                        shopifyCategory: event.currentTarget.value,
+                      })
+                    }
+                  />
+                  <Advanced
+                    summary={
+                      details.archetype.trim()
+                        ? `Archetype ${details.archetype.trim()}.`
+                        : "No archetype."
+                    }
+                  >
+                    <s-text-field
+                      label="Archetype"
+                      value={details.archetype}
+                      onInput={(event) =>
+                        setDetails({
+                          ...details,
+                          archetype: event.currentTarget.value,
+                        })
                       }
                     />
-                  ))}
+                  </Advanced>
                 </s-stack>
-              )}
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  onClick={saveDetails}
+                  {...(busy || normalise(details) === savedKey
+                    ? { disabled: true }
+                    : {})}
+                >
+                  Save
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  onClick={() => {
+                    resetDetails();
+                    setView("attributes");
+                  }}
+                >
+                  Cancel
+                </s-button>
+              </>
+            ) : null}
 
-              {selected.picker.sets.length > 0 ? (
-                <s-stack direction="block" gap="small-300">
-                  <s-text type="strong">Attribute sets</s-text>
-                  {pickableSets.length === 0 ? (
-                    <s-text color="subdued">No set matches.</s-text>
-                  ) : null}
-                  {pickableSets.map((set) => (
-                    <s-checkbox
-                      key={set.id}
-                      label={set.name}
-                      details={
-                        set.attachedHere
-                          ? `${set.members || "Empty set"} · already attached here`
-                          : set.members || "Empty set"
-                      }
-                      checked={pickedSets.includes(set.id)}
-                      {...(set.attachedHere ? { disabled: true } : {})}
-                      onChange={(event) =>
-                        setPickedSets(
-                          toggle(
-                            pickedSets,
-                            set.id,
-                            event.currentTarget.checked,
-                          ),
-                        )
+            {/* ---- Preview ---- */}
+            {view === "preview" ? (
+              <>
+                <s-stack direction="block" gap="base">
+                  <s-text color="subdued">
+                    {`The fields a product of ${selected.name} would carry, in the order they would be asked for.`}
+                  </s-text>
+                  {selected.preview.length === 0 ? (
+                    <s-text color="subdued">No fields yet.</s-text>
+                  ) : (
+                    <s-table variant="auto">
+                      <s-table-header-row>
+                        <s-table-header listSlot="primary">
+                          Field
+                        </s-table-header>
+                        <s-table-header listSlot="secondary">
+                          Format
+                        </s-table-header>
+                        <s-table-header listSlot="labeled">
+                          Shopify field
+                        </s-table-header>
+                        <s-table-header listSlot="inline">
+                          Requirement
+                        </s-table-header>
+                      </s-table-header-row>
+                      <s-table-body>
+                        {selected.preview.map((row) => (
+                          <s-table-row key={row.attributeId}>
+                            <s-table-cell>{row.name}</s-table-cell>
+                            <s-table-cell>{row.format}</s-table-cell>
+                            <s-table-cell>
+                              {row.key ? (
+                                <s-text color="subdued">{row.key}</s-text>
+                              ) : (
+                                <s-badge tone="warning">Not mapped</s-badge>
+                              )}
+                            </s-table-cell>
+                            <s-table-cell>
+                              {row.required ? "Required" : "Optional"}
+                            </s-table-cell>
+                          </s-table-row>
+                        ))}
+                      </s-table-body>
+                    </s-table>
+                  )}
+                </s-stack>
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  command="--hide"
+                  commandFor={TYPE_MODAL_ID}
+                >
+                  Close
+                </s-button>
+              </>
+            ) : null}
+
+            {/* ---- Add attributes ---- */}
+            {view === "add" ? (
+              <>
+                <s-stack direction="block" gap="base">
+                  <s-text color="subdued">
+                    {`Whatever is added here reaches ${selected.name} and every type beneath it.`}
+                  </s-text>
+                  {selected.picker.attributes.length +
+                    selected.picker.sets.length >
+                  6 ? (
+                    <s-search-field
+                      label="Search attributes and sets"
+                      labelAccessibilityVisibility="exclusive"
+                      placeholder="Search"
+                      value={pickerQuery}
+                      onInput={(event) =>
+                        setPickerQuery(event.currentTarget.value)
                       }
                     />
-                  ))}
+                  ) : null}
+                  {selected.picker.attributes.length === 0 ? (
+                    <s-text color="subdued">
+                      No attributes are defined yet. Create the first one with
+                      the button below.
+                    </s-text>
+                  ) : (
+                    <s-stack direction="block" gap="small-300">
+                      <s-text type="strong">Attributes</s-text>
+                      {pickableAttributes.length === 0 ? (
+                        <s-text color="subdued">No attribute matches.</s-text>
+                      ) : null}
+                      {pickableAttributes.map((attribute) => (
+                        <s-checkbox
+                          key={attribute.id}
+                          label={attribute.name}
+                          details={
+                            attribute.state === "added"
+                              ? `${attribute.format} · already on this type`
+                              : attribute.state === "removed"
+                                ? `${attribute.format} · removed from this type; adding it restores it`
+                                : attribute.format
+                          }
+                          checked={pickedAttributes.includes(attribute.id)}
+                          {...(attribute.state === "added"
+                            ? { disabled: true }
+                            : {})}
+                          onChange={(event) =>
+                            setPickedAttributes(
+                              toggle(
+                                pickedAttributes,
+                                attribute.id,
+                                event.currentTarget.checked,
+                              ),
+                            )
+                          }
+                        />
+                      ))}
+                    </s-stack>
+                  )}
+                  {selected.picker.sets.length > 0 ? (
+                    <s-stack direction="block" gap="small-300">
+                      <s-text type="strong">Attribute sets</s-text>
+                      {pickableSets.length === 0 ? (
+                        <s-text color="subdued">No set matches.</s-text>
+                      ) : null}
+                      {pickableSets.map((set) => (
+                        <s-checkbox
+                          key={set.id}
+                          label={set.name}
+                          details={
+                            set.attachedHere
+                              ? `${set.members || "Empty set"} · already attached here`
+                              : set.members || "Empty set"
+                          }
+                          checked={pickedSets.includes(set.id)}
+                          {...(set.attachedHere ? { disabled: true } : {})}
+                          onChange={(event) =>
+                            setPickedSets(
+                              toggle(
+                                pickedSets,
+                                set.id,
+                                event.currentTarget.checked,
+                              ),
+                            )
+                          }
+                        />
+                      ))}
+                    </s-stack>
+                  ) : null}
+                  {pickerTried && pickedCount === 0 ? (
+                    <s-text tone="critical">
+                      Choose at least one attribute or set.
+                    </s-text>
+                  ) : null}
                 </s-stack>
-              ) : null}
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  onClick={() => {
+                    setPickerTried(true);
+                    if (pickedCount === 0) return;
+                    submit({
+                      intent: "attach-many",
+                      attributeIds: JSON.stringify(pickedAttributes),
+                      setIds: JSON.stringify(pickedSets),
+                    });
+                  }}
+                  {...(busy ? { disabled: true, loading: true } : {})}
+                >
+                  {pickedCount === 0
+                    ? "Add selected"
+                    : `Add ${pickedCount} selected`}
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  onClick={() => setView("new")}
+                >
+                  New attribute
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  onClick={() => setView("attributes")}
+                >
+                  Back
+                </s-button>
+              </>
+            ) : null}
 
-              {pickerTried && pickedCount === 0 ? (
-                <s-text tone="critical">
-                  Choose at least one attribute or set.
-                </s-text>
-              ) : null}
-            </s-stack>
-            <s-button
-              slot="primary-action"
-              variant="primary"
-              {...(pickedCount > 0
-                ? { command: "--hide", commandFor: PICKER_MODAL_ID }
-                : {})}
-              onClick={() => {
-                setPickerTried(true);
-                if (pickedCount === 0) return;
-                submit({
-                  intent: "attach-many",
-                  attributeIds: JSON.stringify(pickedAttributes),
-                  setIds: JSON.stringify(pickedSets),
-                });
-              }}
-              {...(busy ? { disabled: true } : {})}
-            >
-              {pickedCount === 0
-                ? "Add selected"
-                : `Add ${pickedCount} selected`}
-            </s-button>
-            <s-button
-              slot="secondary-actions"
-              onClick={() => {
-                pickerOverlay.current?.hideOverlay?.();
-                (
-                  document.getElementById(
-                    NEW_ATTRIBUTE_MODAL_ID,
-                  ) as Overlay | null
-                )?.showOverlay?.();
-              }}
-            >
-              New attribute
-            </s-button>
-            <s-button
-              slot="secondary-actions"
-              command="--hide"
-              commandFor={PICKER_MODAL_ID}
-            >
-              Cancel
-            </s-button>
-          </s-modal>
-
-          <ConfirmModal
-            id={DELETE_MODAL_ID}
-            heading={`Delete “${selected.name}”?`}
-            confirmLabel="Delete"
-            onConfirm={() => submit({ intent: "delete-type" })}
-          >
-            <s-paragraph>
-              {describeDelete(
-                selected.name,
-                selected.parentName,
-                selected.deleteImpact,
-              )}
-            </s-paragraph>
-          </ConfirmModal>
-
-          <ConfirmModal
-            id={DETACH_MODAL_ID}
-            heading={`Detach “${pendingDetach?.name ?? ""}”?`}
-            confirmLabel="Detach"
-            onConfirm={() => {
-              if (!pendingDetach) return;
-              submit({
-                intent:
-                  pendingDetach.kind === "set"
-                    ? "detach-set"
-                    : "detach-attribute",
-                assignmentId: pendingDetach.assignmentId,
-              });
-            }}
-          >
-            <s-paragraph>
-              {`${selected.name} and every type beneath it lose ${pendingDetach?.kind === "set" ? "the set's attributes" : "it"}, unless another source supplies ${pendingDetach?.kind === "set" ? "them" : "it"}. To hide an attribute on this type alone, remove it from the list instead.`}
-            </s-paragraph>
-          </ConfirmModal>
-
-          <s-modal id={MOVE_MODAL_ID} heading={`Move “${selected.name}”`}>
-            <s-stack direction="block" gap="base">
-              <Dropdown
-                name="moveTarget"
-                label="Under"
-                value={moveTarget}
-                options={selected.parentOptions}
-                onChange={setMoveTarget}
+            {/* ---- A new attribute, added here ---- */}
+            {view === "new" ? (
+              <NewAttributeView
+                revision={revision}
+                sets={sets}
+                types={typeOptions}
+                typeId={selected.id}
+                onDone={() => setView("attributes")}
+                onBack={() => setView("add")}
               />
-              <s-text color="subdued">
-                {moveTarget === (selected.details.parentId ?? "")
-                  ? "That is where it is now."
-                  : describeMove(selected.moveImpacts[moveTarget])}
-              </s-text>
-            </s-stack>
-            <s-button
-              slot="primary-action"
-              variant="primary"
-              command="--hide"
-              commandFor={MOVE_MODAL_ID}
-              onClick={() =>
-                submit({ intent: "move-to", parentId: moveTarget })
-              }
-              {...(moveTarget === selected.details.parentId || busy
-                ? { disabled: true }
-                : {})}
-            >
-              Move
-            </s-button>
-            <s-button
-              slot="secondary-actions"
-              command="--hide"
-              commandFor={MOVE_MODAL_ID}
-            >
-              Cancel
-            </s-button>
-          </s-modal>
+            ) : null}
 
-          <ui-save-bar id={SAVE_BAR_ID}>
-            <button
-              variant="primary"
-              onClick={saveDetails}
-              {...(busy ? { loading: "" } : {})}
-            >
-              Save
-            </button>
-            <button onClick={reset}>Discard</button>
-          </ui-save-bar>
-        </>
-      ) : null}
+            {/* ---- One attribute's definition ---- */}
+            {editingAttribute ? (
+              <EditAttributeView
+                key={editingAttribute.id}
+                revision={revision}
+                sets={sets}
+                attribute={editingAttribute}
+                onDone={() => setView("attributes")}
+                onBack={() => setView("attributes")}
+              />
+            ) : null}
+
+            {/* ---- A child type ---- */}
+            {view === "child" ? (
+              <>
+                <s-stack direction="block" gap="base">
+                  <s-text color="subdued">
+                    {`Under ${selected.name}; it inherits every attribute ${selected.name} has.`}
+                  </s-text>
+                  <s-text-field
+                    label="Name"
+                    placeholder="Freeride sails"
+                    value={child.name}
+                    onInput={(event) =>
+                      setChild({ ...child, name: event.currentTarget.value })
+                    }
+                    {...(childTried && child.name.trim() === ""
+                      ? { error: "Enter a name." }
+                      : {})}
+                  />
+                  <s-choice-list
+                    label="Kind"
+                    name="childKind"
+                    values={[child.kind]}
+                    onChange={(event) => {
+                      const next = event.currentTarget.values[0];
+                      if (next === "type" || next === "category")
+                        setChild({ ...child, kind: next });
+                    }}
+                  >
+                    <s-choice value="type">
+                      Product type
+                      <s-text slot="details" color="subdued">
+                        Products can be assigned to it.
+                      </s-text>
+                    </s-choice>
+                    <s-choice value="category">
+                      Organising category
+                      <s-text slot="details" color="subdued">
+                        Only groups the types beneath it.
+                      </s-text>
+                    </s-choice>
+                  </s-choice-list>
+                </s-stack>
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  onClick={() => {
+                    setChildTried(true);
+                    if (child.name.trim() === "") return;
+                    submit({
+                      intent: "add-type",
+                      name: child.name,
+                      parentId: selected.id,
+                      kind: child.kind,
+                      shopifyCategory: "",
+                    });
+                  }}
+                  {...(busy ? { disabled: true, loading: true } : {})}
+                >
+                  Add child type
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  onClick={() => setView("attributes")}
+                >
+                  Back
+                </s-button>
+              </>
+            ) : null}
+
+            {/* ---- Move ---- */}
+            {view === "move" ? (
+              <>
+                <s-stack direction="block" gap="base">
+                  <Dropdown
+                    name="moveTarget"
+                    label="Under"
+                    value={moveTarget}
+                    options={selected.parentOptions}
+                    onChange={setMoveTarget}
+                  />
+                  <s-text color="subdued">
+                    {moveTarget === selected.details.parentId
+                      ? "That is where it is now."
+                      : describeMove(selected.moveImpacts[moveTarget])}
+                  </s-text>
+                </s-stack>
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  onClick={() =>
+                    submit({ intent: "move-to", parentId: moveTarget })
+                  }
+                  {...(moveTarget === selected.details.parentId || busy
+                    ? { disabled: true }
+                    : {})}
+                >
+                  Move
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  onClick={() => setView("attributes")}
+                >
+                  Back
+                </s-button>
+              </>
+            ) : null}
+
+            {/* ---- Delete ---- */}
+            {view === "delete" ? (
+              <>
+                <s-paragraph>
+                  {describeDelete(
+                    selected.name,
+                    selected.parentName,
+                    selected.deleteImpact,
+                  )}
+                </s-paragraph>
+                <s-button
+                  slot="primary-action"
+                  variant="primary"
+                  tone="critical"
+                  command="--hide"
+                  commandFor={TYPE_MODAL_ID}
+                  onClick={() => submit({ intent: "delete-type" })}
+                  {...(busy ? { disabled: true } : {})}
+                >
+                  Delete
+                </s-button>
+                <s-button
+                  slot="secondary-actions"
+                  onClick={() => setView("attributes")}
+                >
+                  Keep it
+                </s-button>
+              </>
+            ) : null}
+          </>
+        ) : null}
+      </s-modal>
 
       <s-stack direction="block" gap="base">
         <ProductSetupNav current="types" />
 
-        {result && !result.ok ? (
+        {result && !result.ok && !selected ? (
           <s-banner tone="critical" heading="That did not work">
             <s-paragraph>{result.message}</s-paragraph>
           </s-banner>
@@ -1643,622 +1998,273 @@ export default function ProductTypes() {
             </s-stack>
           </s-section>
         ) : (
-          <s-grid
-            gridTemplateColumns={
-              showTree && showEditor ? "280px minmax(0, 1fr)" : "1fr"
-            }
-            gap="base"
-            alignItems="start"
-          >
-            {showTree ? treeColumn : null}
-
-            {showEditor && !selected ? (
-              <s-section heading="Choose a product type">
-                <s-text color="subdued">
-                  Pick one on the left to see and decide what it needs.
-                </s-text>
-              </s-section>
-            ) : null}
-
-            {showEditor && selected && details ? (
-              <s-stack direction="block" gap="base">
-                {narrow ? (
-                  <s-stack direction="inline">
-                    <s-button
-                      variant="tertiary"
-                      icon="chevron-left"
-                      onClick={() => {
-                        rememberType(null);
-                        void navigate(PRODUCT_SETUP_ROUTES.types);
-                      }}
-                    >
-                      All product types
-                    </s-button>
-                  </s-stack>
-                ) : null}
-
-                <s-section>
-                  <s-stack direction="block" gap="base">
+          <s-section heading="Product types">
+            <s-stack direction="block" gap="small-300">
+              {tree.length > 6 ? (
+                <s-search-field
+                  label="Search product types"
+                  labelAccessibilityVisibility="exclusive"
+                  placeholder="Search"
+                  value={treeQuery}
+                  onInput={(event) => setTreeQuery(event.currentTarget.value)}
+                />
+              ) : null}
+              {visibleTree.length === 0 ? (
+                <s-text color="subdued">No product type matches.</s-text>
+              ) : null}
+              {visibleTree.map((row) => (
+                /*
+                 * A plain element carries the drag, because the Polaris row
+                 * owns its own DOM. Dropping on a row's middle nests beneath
+                 * it; its top or bottom quarter places beside it.
+                 */
+                <div
+                  key={row.id}
+                  draggable
+                  onDragStart={(event) => {
+                    event.dataTransfer.effectAllowed = "move";
+                    event.dataTransfer.setData("text/plain", row.id);
+                    attachDragGhost(event, row.name);
+                    setDragging(row.id);
+                  }}
+                  onDragEnd={() => {
+                    setDragging(null);
+                    setDropTarget(null);
+                  }}
+                  onDragOver={(event) => {
+                    if (dragging === null || dragging === row.id) return;
+                    if (isWithinRow(row.id, dragging)) return;
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    const position = positionFrom(event);
+                    if (
+                      dropTarget?.id !== row.id ||
+                      dropTarget.position !== position
+                    )
+                      setDropTarget({ id: row.id, position });
+                  }}
+                  onDragLeave={() => {
+                    if (dropTarget?.id === row.id) setDropTarget(null);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    const sourceId =
+                      dragging ?? event.dataTransfer.getData("text/plain");
+                    if (sourceId) drop(sourceId, row.id, positionFrom(event));
+                  }}
+                >
+                  {dropTarget?.id === row.id &&
+                  dropTarget.position === "before" ? (
+                    <s-box
+                      blockSize="3px"
+                      background="strong"
+                      borderRadius="base"
+                    />
+                  ) : null}
+                  <s-box
+                    paddingInlineStart={
+                      row.depth === 0
+                        ? "none"
+                        : row.depth === 1
+                          ? "base"
+                          : row.depth === 2
+                            ? "large-200"
+                            : "large-500"
+                    }
+                  >
                     <s-grid
-                      gridTemplateColumns="1fr auto"
-                      gap="base"
-                      alignItems="start"
+                      gridTemplateColumns="auto auto 1fr auto"
+                      gap="none"
+                      alignItems="center"
                     >
-                      <s-stack direction="block" gap="small-500">
-                        {selected.parents.length > 0 ? (
-                          <s-text color="subdued">
-                            {selected.parents.join(" › ")}
+                      <s-box paddingInlineEnd="small-500">
+                        <s-icon type="drag-handle" color="subdued" />
+                      </s-box>
+                      {row.hasChildren ? (
+                        <s-button
+                          variant="tertiary"
+                          icon={
+                            collapsed[row.id] && !needle
+                              ? "chevron-right"
+                              : "chevron-down"
+                          }
+                          accessibilityLabel={`${collapsed[row.id] ? "Expand" : "Collapse"} ${row.name}`}
+                          {...(needle ? { disabled: true } : {})}
+                          onClick={() =>
+                            setCollapsed({
+                              ...collapsed,
+                              [row.id]: !collapsed[row.id],
+                            })
+                          }
+                        />
+                      ) : (
+                        <s-box inlineSize="28px" />
+                      )}
+                      <s-clickable
+                        onClick={() => open(row.id)}
+                        borderRadius="base"
+                        paddingInline="small-300"
+                        paddingBlock="small-400"
+                        inlineSize="100%"
+                        background={
+                          dropTarget?.id === row.id &&
+                          dropTarget.position === "inside"
+                            ? "strong"
+                            : dragging === row.id
+                              ? "subdued"
+                              : "transparent"
+                        }
+                        accessibilityLabel={`Open ${row.name}, ${row.leaf ? "product type" : "category"}, ${countOf(row.count, "attribute")}`}
+                      >
+                        <s-grid
+                          gridTemplateColumns="1fr auto"
+                          gap="small-300"
+                          alignItems="center"
+                        >
+                          <s-text
+                            {...(row.leaf ? {} : { type: "strong" as const })}
+                          >
+                            {row.name}
                           </s-text>
-                        ) : null}
-                        <s-heading>{selected.name}</s-heading>
-                        <s-text color="subdued">
-                          {selected.rows.length === 0
-                            ? selected.leaf
-                              ? "Product type · no attributes yet"
-                              : "Organising category · no attributes yet"
-                            : `${selected.leaf ? "Product type" : "Organising category"} · ${countOf(selected.rows.length, "attribute")} · ${selected.required} required · ${selected.rows.length - selected.required} optional`}
-                        </s-text>
-                      </s-stack>
-                      <s-stack direction="inline" gap="small-300">
-                        <s-button
-                          icon="menu-horizontal"
-                          accessibilityLabel={`More actions for ${selected.name}`}
-                          command="--show"
-                          commandFor={MENU_ID}
-                        />
-                        <s-menu
-                          id={MENU_ID}
-                          accessibilityLabel={`Actions for ${selected.name}`}
-                        >
-                          <s-button
-                            command="--show"
-                            commandFor={ADD_MODAL_ID}
-                            onClick={() => {
-                              setNewType({
-                                ...BLANK_TYPE,
-                                parentId: selected.id,
-                              });
-                              setNewTypeTried(false);
-                            }}
-                          >
-                            Add child type
-                          </s-button>
-                          <s-button onClick={() => setTab("details")}>
-                            Rename or edit details
-                          </s-button>
-                          <s-button
-                            command="--show"
-                            commandFor={MOVE_MODAL_ID}
-                            onClick={() =>
-                              setMoveTarget(selected.details.parentId)
-                            }
-                          >
-                            Move to…
-                          </s-button>
-                          <s-button
-                            onClick={() => submit({ intent: "move-up" })}
-                            {...(selected.isFirst || busy
-                              ? { disabled: true }
-                              : {})}
-                          >
-                            Move up
-                          </s-button>
-                          <s-button
-                            onClick={() => submit({ intent: "move-down" })}
-                            {...(selected.isLast || busy
-                              ? { disabled: true }
-                              : {})}
-                          >
-                            Move down
-                          </s-button>
-                          <s-button
-                            tone="critical"
-                            command="--show"
-                            commandFor={DELETE_MODAL_ID}
-                            {...(busy ? { disabled: true } : {})}
-                          >
-                            Delete
-                          </s-button>
-                        </s-menu>
-                      </s-stack>
+                          <s-text color="subdued">
+                            {row.leaf
+                              ? countOf(row.count, "attribute")
+                              : `category · ${countOf(row.count, "attribute")}`}
+                          </s-text>
+                        </s-grid>
+                      </s-clickable>
+                      <s-button
+                        variant="tertiary"
+                        icon="edit"
+                        accessibilityLabel={`Edit ${row.name}`}
+                        onClick={() => open(row.id, "details")}
+                      />
                     </s-grid>
-
-                    <s-stack
-                      direction="inline"
-                      gap="small-300"
-                      accessibilityRole="navigation"
-                      accessibilityLabel="Sections of this product type"
-                    >
-                      {TABS.map((entry) => (
-                        <s-button
-                          key={entry}
-                          variant={tab === entry ? "secondary" : "tertiary"}
-                          accessibilityLabel={`${TAB_LABEL[entry]}${tab === entry ? ", current" : ""}`}
-                          onClick={() => setTab(entry)}
-                        >
-                          {TAB_LABEL[entry]}
-                        </s-button>
-                      ))}
-                    </s-stack>
-
-                    {tab === "attributes" ? (
-                      <s-stack direction="block" gap="base">
-                        {selected.rows.length === 0 ? (
-                          <s-stack direction="block" gap="base">
-                            <s-text>{`No attributes assigned to ${selected.name}.`}</s-text>
-                            <s-stack direction="inline" gap="small-300">
-                              <s-button
-                                variant="primary"
-                                command="--show"
-                                commandFor={PICKER_MODAL_ID}
-                                onClick={openPicker}
-                              >
-                                Add attributes
-                              </s-button>
-                              {selected.picker.sets.some(
-                                (set) => !set.attachedHere,
-                              ) ? (
-                                <s-button
-                                  command="--show"
-                                  commandFor={PICKER_MODAL_ID}
-                                  onClick={openPicker}
-                                >
-                                  Choose an attribute set
-                                </s-button>
-                              ) : null}
-                            </s-stack>
-                          </s-stack>
-                        ) : (
-                          <>
-                            <s-grid
-                              gridTemplateColumns="@container (inline-size <= 560px) 1fr, 1fr 150px auto"
-                              gap="small-300"
-                              alignItems="end"
-                            >
-                              {selected.rows.length > 6 ? (
-                                <s-search-field
-                                  label="Find an attribute"
-                                  labelAccessibilityVisibility="exclusive"
-                                  placeholder="Find an attribute"
-                                  value={fieldQuery}
-                                  onInput={(event) =>
-                                    setFieldQuery(event.currentTarget.value)
-                                  }
-                                />
-                              ) : (
-                                <s-box />
-                              )}
-                              <Dropdown
-                                name="requirementFilter"
-                                label="Show"
-                                hideLabel
-                                value={requirementFilter}
-                                options={[
-                                  { value: "all", label: "All" },
-                                  { value: "required", label: "Required" },
-                                  { value: "optional", label: "Optional" },
-                                ]}
-                                onChange={setRequirementFilter}
-                              />
-                              <s-button
-                                variant="primary"
-                                command="--show"
-                                commandFor={PICKER_MODAL_ID}
-                                onClick={openPicker}
-                              >
-                                Add attributes
-                              </s-button>
-                            </s-grid>
-
-                            {rows.length === 0 ? (
-                              <s-text color="subdued">
-                                No attribute matches.
-                              </s-text>
-                            ) : (
-                              <s-table variant="auto">
-                                <s-table-header-row>
-                                  <s-table-header listSlot="primary">
-                                    Attribute
-                                  </s-table-header>
-                                  <s-table-header listSlot="secondary">
-                                    Format
-                                  </s-table-header>
-                                  <s-table-header listSlot="labeled">
-                                    Requirement
-                                  </s-table-header>
-                                  <s-table-header listSlot="kicker">
-                                    Source
-                                  </s-table-header>
-                                  <s-table-header listSlot="inline">
-                                    Actions
-                                  </s-table-header>
-                                </s-table-header-row>
-                                <s-table-body>
-                                  {rows.map((row) => (
-                                    <s-table-row key={row.attributeId}>
-                                      <s-table-cell>
-                                        <s-link
-                                          command="--show"
-                                          commandFor={EDIT_ATTRIBUTE_MODAL_ID}
-                                          onClick={() =>
-                                            setEditingAttributeId(
-                                              row.attributeId,
-                                            )
-                                          }
-                                        >
-                                          {row.name}
-                                        </s-link>
-                                      </s-table-cell>
-                                      <s-table-cell>{`${row.format} · ${row.scope}`}</s-table-cell>
-                                      <s-table-cell>
-                                        <s-stack
-                                          direction="block"
-                                          gap="small-500"
-                                        >
-                                          <Dropdown
-                                            name={`requirement-${row.attributeId}`}
-                                            label={`Requirement for ${row.name}`}
-                                            hideLabel
-                                            value={
-                                              row.required
-                                                ? "required"
-                                                : "optional"
-                                            }
-                                            options={[
-                                              {
-                                                value: "required",
-                                                label: "Required",
-                                              },
-                                              {
-                                                value: "optional",
-                                                label: "Optional",
-                                              },
-                                            ]}
-                                            disabled={busy}
-                                            onChange={(value) =>
-                                              submit({
-                                                intent: "set-requirement",
-                                                attributeId: row.attributeId,
-                                                value,
-                                              })
-                                            }
-                                          />
-                                          {row.overridden ? (
-                                            <s-text color="subdued">
-                                              Changed for this type
-                                            </s-text>
-                                          ) : null}
-                                        </s-stack>
-                                      </s-table-cell>
-                                      <s-table-cell>
-                                        {row.here
-                                          ? "Here"
-                                          : `From ${row.sourceName}`}
-                                      </s-table-cell>
-                                      <s-table-cell>
-                                        <s-button
-                                          icon="menu-horizontal"
-                                          variant="tertiary"
-                                          accessibilityLabel={`Actions for ${row.name}`}
-                                          command="--show"
-                                          commandFor={`row-menu-${row.attributeId}`}
-                                        />
-                                        <s-menu
-                                          id={`row-menu-${row.attributeId}`}
-                                          accessibilityLabel={`Actions for ${row.name}`}
-                                        >
-                                          <s-button
-                                            command="--show"
-                                            commandFor={EDIT_ATTRIBUTE_MODAL_ID}
-                                            onClick={() =>
-                                              setEditingAttributeId(
-                                                row.attributeId,
-                                              )
-                                            }
-                                          >
-                                            Edit attribute
-                                          </s-button>
-                                          {row.overridden ? (
-                                            <s-button
-                                              onClick={() =>
-                                                submit({
-                                                  intent: "set-requirement",
-                                                  attributeId: row.attributeId,
-                                                  value: "reset",
-                                                })
-                                              }
-                                            >
-                                              Reset to attribute default
-                                            </s-button>
-                                          ) : null}
-                                          <s-button
-                                            tone="critical"
-                                            onClick={() =>
-                                              submit({
-                                                intent: "remove",
-                                                attributeId: row.attributeId,
-                                              })
-                                            }
-                                          >
-                                            Remove from this type
-                                          </s-button>
-                                        </s-menu>
-                                      </s-table-cell>
-                                    </s-table-row>
-                                  ))}
-                                </s-table-body>
-                              </s-table>
-                            )}
-                          </>
-                        )}
-
-                        {selected.removed.length > 0 ? (
-                          <s-stack direction="block" gap="small-300">
-                            <s-divider />
-                            <s-text type="strong">
-                              {`Removed from ${selected.name} (${selected.removed.length})`}
-                            </s-text>
-                            <s-text color="subdued">
-                              Hidden on this type alone; other types and the
-                              catalogue are unchanged.
-                            </s-text>
-                            {selected.removed.map((row) => (
-                              <s-grid
-                                key={row.attributeId}
-                                gridTemplateColumns="1fr auto"
-                                gap="small-300"
-                                alignItems="center"
-                              >
-                                <s-text>{row.name}</s-text>
-                                <s-button
-                                  onClick={() =>
-                                    submit({
-                                      intent: "restore",
-                                      attributeId: row.attributeId,
-                                    })
-                                  }
-                                  {...(busy ? { disabled: true } : {})}
-                                >
-                                  Restore
-                                </s-button>
-                              </s-grid>
-                            ))}
-                          </s-stack>
-                        ) : null}
-
-                        {selected.setSources.length +
-                          selected.attributeSources.length >
-                        0 ? (
-                          <s-stack direction="block" gap="small-300">
-                            <s-divider />
-                            <s-stack
-                              direction="inline"
-                              gap="small-300"
-                              alignItems="center"
-                            >
-                              <s-button
-                                variant="tertiary"
-                                icon={
-                                  sourcesOpen ? "chevron-up" : "chevron-down"
-                                }
-                                accessibilityLabel={
-                                  sourcesOpen ? "Hide sources" : "Show sources"
-                                }
-                                onClick={() => setSourcesOpen((now) => !now)}
-                              >
-                                {`Where these come from (${countOf(selected.setSources.length + selected.attributeSources.length, "source")})`}
-                              </s-button>
-                            </s-stack>
-                            {sourcesOpen ? (
-                              <s-stack direction="block" gap="small-300">
-                                <s-text color="subdued">
-                                  A source attached here reaches this type and
-                                  every type beneath it; detaching it takes it
-                                  from all of them.
-                                </s-text>
-                                {[
-                                  ...selected.setSources.map((s) => ({
-                                    ...s,
-                                    kind: "set" as const,
-                                  })),
-                                  ...selected.attributeSources.map((s) => ({
-                                    ...s,
-                                    kind: "attribute" as const,
-                                  })),
-                                ].map((source) => (
-                                  <s-grid
-                                    key={`${source.kind}-${source.assignmentId}`}
-                                    gridTemplateColumns="1fr auto"
-                                    gap="small-300"
-                                    alignItems="center"
-                                  >
-                                    <s-text>
-                                      <s-text type="strong">
-                                        {source.name}
-                                      </s-text>
-                                      {` · ${source.kind === "set" ? "set" : "attribute"} ${source.here ? "attached here" : `attached on ${source.typeName}`}`}
-                                    </s-text>
-                                    {source.here ? (
-                                      <s-button
-                                        variant="tertiary"
-                                        tone="critical"
-                                        command="--show"
-                                        commandFor={DETACH_MODAL_ID}
-                                        onClick={() =>
-                                          setPendingDetach({
-                                            kind: source.kind,
-                                            assignmentId: source.assignmentId,
-                                            name: source.name,
-                                          })
-                                        }
-                                        {...(busy ? { disabled: true } : {})}
-                                      >
-                                        Detach
-                                      </s-button>
-                                    ) : (
-                                      <s-link
-                                        href={PRODUCT_SETUP_ROUTES.type(
-                                          source.typeId,
-                                        )}
-                                      >
-                                        {`Go to ${source.typeName}`}
-                                      </s-link>
-                                    )}
-                                  </s-grid>
-                                ))}
-                              </s-stack>
-                            ) : null}
-                          </s-stack>
-                        ) : null}
-                      </s-stack>
-                    ) : null}
-
-                    {tab === "details" ? (
-                      <s-stack direction="block" gap="base">
-                        <s-text-field
-                          label="Name"
-                          value={details.name}
-                          onInput={(event) =>
-                            setDetails({
-                              ...details,
-                              name: event.currentTarget.value,
-                            })
-                          }
-                          {...(detailsTried && details.name.trim() === ""
-                            ? { error: "Enter a name." }
-                            : {})}
-                        />
-                        <Dropdown
-                          name="parentId"
-                          label="Under"
-                          details={
-                            details.parentId === selected.details.parentId
-                              ? "It inherits every attribute of the type above it."
-                              : describeMove(
-                                  selected.moveImpacts[details.parentId],
-                                )
-                          }
-                          value={details.parentId}
-                          options={selected.parentOptions}
-                          onChange={(parentId) =>
-                            setDetails({ ...details, parentId })
-                          }
-                        />
-                        <s-choice-list
-                          label="Kind"
-                          name="kind"
-                          values={[details.kind]}
-                          onChange={(event) => {
-                            const next = event.currentTarget.values[0];
-                            if (next === "type" || next === "category")
-                              setDetails({ ...details, kind: next });
-                          }}
-                        >
-                          <s-choice value="type">
-                            Product type
-                            <s-text slot="details" color="subdued">
-                              Products can be assigned to it.
-                            </s-text>
-                          </s-choice>
-                          <s-choice value="category">
-                            Organising category
-                            <s-text slot="details" color="subdued">
-                              Only groups the types beneath it; no product is
-                              assigned to it directly.
-                            </s-text>
-                          </s-choice>
-                        </s-choice-list>
-                        <s-text-field
-                          label="Shopify category (optional)"
-                          details="The standard product category this matches; a note for now."
-                          value={details.shopifyCategory}
-                          onInput={(event) =>
-                            setDetails({
-                              ...details,
-                              shopifyCategory: event.currentTarget.value,
-                            })
-                          }
-                        />
-                        <Advanced
-                          summary={
-                            details.archetype.trim()
-                              ? `Archetype ${details.archetype.trim()}.`
-                              : "No archetype."
-                          }
-                        >
-                          <s-text-field
-                            label="Archetype"
-                            value={details.archetype}
-                            onInput={(event) =>
-                              setDetails({
-                                ...details,
-                                archetype: event.currentTarget.value,
-                              })
-                            }
-                          />
-                        </Advanced>
-                        <s-text color="subdued">
-                          Changes here are saved with the bar at the top of the
-                          page.
-                        </s-text>
-                      </s-stack>
-                    ) : null}
-
-                    {tab === "preview" ? (
-                      <s-stack direction="block" gap="base">
-                        <s-text color="subdued">
-                          {`The fields a product of ${selected.name} would carry, in the order they would be asked for.`}
-                        </s-text>
-                        {selected.preview.length === 0 ? (
-                          <s-text color="subdued">No fields yet.</s-text>
-                        ) : (
-                          <s-table variant="auto">
-                            <s-table-header-row>
-                              <s-table-header listSlot="primary">
-                                Field
-                              </s-table-header>
-                              <s-table-header listSlot="secondary">
-                                Format
-                              </s-table-header>
-                              <s-table-header listSlot="labeled">
-                                Shopify field
-                              </s-table-header>
-                              <s-table-header listSlot="inline">
-                                Requirement
-                              </s-table-header>
-                            </s-table-header-row>
-                            <s-table-body>
-                              {selected.preview.map((row) => (
-                                <s-table-row key={row.attributeId}>
-                                  <s-table-cell>{row.name}</s-table-cell>
-                                  <s-table-cell>{row.format}</s-table-cell>
-                                  <s-table-cell>
-                                    {row.key ? (
-                                      <s-text color="subdued">{row.key}</s-text>
-                                    ) : (
-                                      <s-badge tone="warning">
-                                        Not mapped
-                                      </s-badge>
-                                    )}
-                                  </s-table-cell>
-                                  <s-table-cell>
-                                    {row.required ? "Required" : "Optional"}
-                                  </s-table-cell>
-                                </s-table-row>
-                              ))}
-                            </s-table-body>
-                          </s-table>
-                        )}
-                      </s-stack>
-                    ) : null}
-                  </s-stack>
-                </s-section>
-              </s-stack>
-            ) : null}
-          </s-grid>
+                  </s-box>
+                  {dropTarget?.id === row.id &&
+                  dropTarget.position === "after" ? (
+                    <s-box
+                      blockSize="3px"
+                      background="strong"
+                      borderRadius="base"
+                    />
+                  ) : null}
+                </div>
+              ))}
+              {dragging !== null &&
+              (parentOf.get(dragging) ?? null) !== null ? (
+                <div
+                  onDragOver={(event) => {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = "move";
+                    if (dropTarget?.id !== "")
+                      setDropTarget({ id: "", position: "inside" });
+                  }}
+                  onDragLeave={() => {
+                    if (dropTarget?.id === "") setDropTarget(null);
+                  }}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    if (dragging) drop(dragging, null, "inside");
+                  }}
+                >
+                  <s-box
+                    padding="small-300"
+                    borderRadius="base"
+                    borderWidth="base"
+                    borderStyle="dashed"
+                    borderColor={dropTarget?.id === "" ? "strong" : "subdued"}
+                    background={
+                      dropTarget?.id === "" ? "strong" : "transparent"
+                    }
+                  >
+                    <s-text color="subdued">
+                      Drop here to make it a top-level type
+                    </s-text>
+                  </s-box>
+                </div>
+              ) : null}
+              <s-text color="subdued">
+                Open a type to decide what it needs. Drag a row onto another to
+                put it beneath, or to the edge of a row to place it beside.
+              </s-text>
+            </s-stack>
+          </s-section>
         )}
       </s-stack>
     </s-page>
+  );
+}
+
+/** The New attribute step inside the type dialog: the form and its footer. */
+function NewAttributeView({
+  revision,
+  sets,
+  types,
+  typeId,
+  onDone,
+  onBack,
+}: {
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  types: Array<{ value: string; label: string }>;
+  typeId: string;
+  onDone: () => void;
+  onBack: () => void;
+}) {
+  const state = useAttributeCreate({
+    revision,
+    preselectedTypeId: typeId,
+    onDone,
+  });
+  return (
+    <>
+      <AttributeCreatePanel state={state} sets={sets} types={types} />
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        onClick={state.submit}
+        {...(state.busy ? { loading: true, disabled: true } : {})}
+      >
+        Add attribute
+      </s-button>
+      <s-button slot="secondary-actions" onClick={onBack}>
+        Back
+      </s-button>
+    </>
+  );
+}
+
+/** One attribute's definition inside the type dialog. */
+function EditAttributeView({
+  revision,
+  sets,
+  attribute,
+  onDone,
+  onBack,
+}: {
+  revision: number;
+  sets: Array<{ value: string; label: string }>;
+  attribute: EditableAttribute;
+  onDone: () => void;
+  onBack: () => void;
+}) {
+  const state = useAttributeEdit({ attribute, revision, onDone });
+  return (
+    <>
+      <AttributeEditPanel state={state} attribute={attribute} sets={sets} />
+      <s-button
+        slot="primary-action"
+        variant="primary"
+        onClick={state.save}
+        {...(state.busy ? { loading: true, disabled: true } : {})}
+      >
+        Save
+      </s-button>
+      <s-button slot="secondary-actions" onClick={onBack}>
+        Back
+      </s-button>
+    </>
   );
 }
 

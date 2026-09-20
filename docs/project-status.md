@@ -227,9 +227,6 @@ a merchant-consent event (see T-07), so it is a decision rather than a task.
   in.
 - **One option list per select attribute from the UI.** Lists shared between
   attributes only arise through import and fork on first edit.
-- **No drag-and-drop in the tree.** Move to…, Under and Move up/down do the
-  job with the consequences stated; a drag handle needs markup Polaris web
-  components do not expose.
 - **The embedded pages were not driven in a browser by the agent that built
   them.** `shopify app dev` needs a linked dev app and a store login. Types,
   lint, the domain and route-table tests and the build pass; the merchant

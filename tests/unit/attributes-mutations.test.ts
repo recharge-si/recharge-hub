@@ -17,6 +17,7 @@ import {
   restoreAttribute,
   setRequirement,
   updateAttribute,
+  updateSet,
   updateType,
 } from "~/domain/attributes/mutations";
 import { activeAttributes, childrenOf } from "~/domain/attributes/resolve";
@@ -308,6 +309,44 @@ describe("sets and sources", () => {
       result.schema.attributeAssignments.every((r) => r.typeId === "sails"),
     ).toBe(true);
     expect(schemaProblems(result.schema)).toEqual([]);
+  });
+
+  it("edits a set's members, moving an attribute from another set", () => {
+    const schema = starterSchema();
+    const result = ok(
+      updateSet(schema, "board", {
+        name: "Board specs",
+        description: "",
+        memberIds: ["volume", "sailsize"],
+      }),
+    );
+    const setOf = (id: string) =>
+      result.schema.attributes.find((a) => a.id === id)?.setId;
+    expect(setOf("volume")).toBe("board");
+    expect(setOf("sailsize")).toBe("board");
+    expect(setOf("width")).toBeNull();
+    expect(
+      activeAttributes(result.schema, "waveboard").some(
+        (r) => r.attribute.id === "sailsize",
+      ),
+    ).toBe(true);
+    expect(
+      activeAttributes(result.schema, "wave").some(
+        (r) => r.attribute.id === "sailsize",
+      ),
+    ).toBe(false);
+    expect(
+      updateSet(schema, "board", {
+        name: "X",
+        description: "",
+        memberIds: ["nope"],
+      }),
+    ).toMatchObject({ ok: false });
+    // Without a membership, nothing about the attributes moves.
+    const renamed = ok(
+      updateSet(schema, "board", { name: "Boards", description: "" }),
+    );
+    expect(renamed.schema.attributes).toEqual(schema.attributes);
   });
 
   it("attaches a set once, lifting removals of its members on that type", () => {

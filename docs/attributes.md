@@ -122,10 +122,10 @@ person was.
 | Route                                        | What it is                                                                 |
 | -------------------------------------------- | -------------------------------------------------------------------------- |
 | `/app/product-setup`                         | Lands on product types.                                                    |
-| `/app/product-setup/types/:typeId?`          | The workspace: a searchable tree beside the selected type. The type's name, its parents as a breadcrumb, a one-line summary, an actions menu (add child, rename, move to, move up or down, delete) and three local tabs held in `?tab=`: **Attributes** (a table of name, format, requirement, source and a row menu; the picker adds several attributes and sets at once or opens the create dialog with the type preselected; removals and sources sit beneath), **Details** (name, parent with the move's consequences stated live, product type or organising category, Shopify category; saved through the save bar) and **Preview**. With no type chosen, a wide screen picks the remembered or first type; a narrow screen shows the list and the editor in turn, with a way back. A missing type id returns to the tree. |
-| `/app/product-setup/attributes`              | The catalogue: name, format, where used, Shopify field. Search is kept in `?q=`. New attribute is one dialog, complete with options, unit and where to add it. |
+| `/app/product-setup/types/:typeId?`          | The tree, full width: search, expand and collapse, a drag handle per row (drop on a row's middle to nest beneath it, on its top or bottom quarter to place beside it; a change of parent is confirmed with what it changes, a reorder just happens; a dashed zone takes a nested type to the top level). Opening a row — or its edit button — puts the type in the address and opens **the type dialog**: name, parents, a summary, an actions menu (add child, move to, move up or down, delete) and three tabs, **Attributes** (the table with requirement per row and a row menu; *Add attributes* becomes a step with a multi-select of attributes and sets; *New attribute* and an attribute's name become steps too, so nothing opens a second dialog), **Details** (name, parent with the move's consequences stated live, kind, Shopify category) and **Preview**. Closing the dialog returns to the bare tree. A missing type id returns to the tree. |
+| `/app/product-setup/attributes`              | The catalogue: name, format, where used, Shopify field. Search is kept in `?q=`. New attribute is one dialog, complete with options, unit and where to add it; a name opens the same form as a dialog to edit in place, with a two-step delete inside it. |
 | `/app/product-setup/attributes/:attributeId` | The focused editor with a breadcrumb back, the same form as creation plus the flags, the types it is on, and the one delete that reaches everywhere. |
-| `/app/product-setup/sets`                    | Sets with members and where each is attached; new, edit, delete, attach, detach. |
+| `/app/product-setup/sets`                    | Sets with members and where each is attached; new and edit (name, description and which attributes belong, ticking one that is in another set moves it), delete, attach, detach. |
 | `/app/product-setup/settings`                | The checks in their four states, export and import, exceptions single types have made, and starting again. |
 | `/app/product-setup/schema.json`             | The export, fetched by `DownloadButton` so the session token travels with it. |
 
@@ -155,12 +155,10 @@ described under *Document*.
 - No sharing of one option list between two attributes from the UI; each
   select attribute owns its list. Lists shared through import keep working and
   fork on first edit.
-- No drag-and-drop in the tree: Polaris web components own their internal
-  DOM, so a drag handle cannot be attached to a row without custom markup. A
-  type is moved with *Move to…* in its actions menu or *Under* in its
-  details, both stating the consequences, and ordered with *Move up* /
-  *Move down*.
-- The requirement per row saves as soon as it is changed; the details form
-  and the attribute editor save through the contextual save bar, which is
-  also what asks before a type or a route is left with edits unsaved.
+- Drag-and-drop in the tree rides on a plain wrapper element and a drag
+  ghost drawn outside Polaris, because the web components own their rows'
+  DOM. *Move to…* and *Move up* / *Move down* are the keyboard way.
+- The requirement per row saves as soon as it is changed; the type dialog's
+  details and the attribute forms save with their own button, and closing a
+  dialog discards what was not saved.
 - Nothing is created in Shopify from the plan yet.
