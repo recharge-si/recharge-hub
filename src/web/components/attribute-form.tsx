@@ -807,6 +807,11 @@ export function AttributeEditPanel({
  * lands on the element that exists at that moment — so the element must
  * stay and only its contents may change. The body is keyed by attribute so
  * its form state starts fresh for each one.
+ *
+ * A deleted attribute leaves the host's data before its body hears that
+ * the delete settled, so the dialog keeps the last attribute it showed
+ * until it has closed: the body stays mounted, reports the delete and hides
+ * the dialog itself.
  */
 export function AttributeEditModal({
   id,
@@ -822,27 +827,31 @@ export function AttributeEditModal({
 }) {
   const overlay = useRef<Overlay | null>(null);
   const [closedAt, setClosedAt] = useState(0);
+  const lastShown = useRef<EditableAttribute | null>(null);
+  if (attribute) lastShown.current = attribute;
+  const shown = attribute ?? lastShown.current;
 
   return (
     <s-modal
       id={id}
-      heading={attribute?.name ?? "Edit attribute"}
+      heading={shown?.name ?? "Edit attribute"}
       size="large"
       ref={(element) => {
         overlay.current = (element as Overlay) ?? null;
       }}
       onAfterHide={(event) => {
         if (event.target !== event.currentTarget) return;
+        lastShown.current = null;
         // Remounts the body, which is what resets an abandoned edit.
         setClosedAt(Date.now());
       }}
     >
-      {attribute ? (
+      {shown ? (
         <AttributeEditBody
-          key={`${attribute.id}:${closedAt}`}
+          key={`${shown.id}:${closedAt}`}
           revision={revision}
           sets={sets}
-          attribute={attribute}
+          attribute={shown}
           hide={() => overlay.current?.hideOverlay?.()}
           cancelId={id}
         />

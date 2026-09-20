@@ -908,11 +908,18 @@ export default function ProductTypes() {
     setView("add");
   };
 
-  const editingAttribute =
-    view.startsWith("attribute:") && selected
-      ? (selected.rows.find((row) => row.attributeId === view.slice(10))
-          ?.editable ?? null)
-      : null;
+  // A deleted attribute leaves the rows before its editor hears that the
+  // delete settled, so the view keeps the last attribute it showed until it
+  // moves on: the editor stays mounted, reports the delete and moves on.
+  const lastEdited = useRef<EditableAttribute | null>(null);
+  if (!view.startsWith("attribute:")) lastEdited.current = null;
+  const editingAttribute = view.startsWith("attribute:")
+    ? (selected?.rows.find((row) => row.attributeId === view.slice(10))
+        ?.editable ??
+      lastEdited.current ??
+      null)
+    : null;
+  if (editingAttribute) lastEdited.current = editingAttribute;
 
   const tabs: Array<{ key: View; label: string }> = [
     { key: "attributes", label: "Attributes" },
