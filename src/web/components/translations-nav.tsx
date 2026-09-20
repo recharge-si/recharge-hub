@@ -4,7 +4,7 @@ import {
 } from "~/web/lib/translations";
 
 /**
- * The Translations area's own navigation: five destinations, always visible,
+ * The Translations area's own navigation: six destinations, always visible,
  * the current one stated rather than linked (docs/translations.md § Screens).
  * The same shape as product setup's, because two areas with sections should
  * read the same way.

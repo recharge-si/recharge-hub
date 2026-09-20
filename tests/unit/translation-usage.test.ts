@@ -17,9 +17,9 @@ import {
   formatMicrosUsd,
   pricingFor,
 } from "~/domain/translations/pricing";
+import { parseDetectionReply } from "~/domain/translations/detection";
 import {
   buildTranslationMessages,
-  parseDetectionReply,
   parseTranslationReply,
 } from "~/domain/translations/prompt";
 import type { SourceField } from "~/domain/translations/types";
@@ -152,7 +152,7 @@ describe("coverage and estimate", () => {
       coverageAt: null,
     });
     expect(missing.fields).toBe(5);
-    expect(missing.inputTokens).toBe(1000 + 5 * 350);
+    expect(missing.inputTokens).toBe(1000 + 5 * 700);
     expect(missing.outputTokens).toBe(1150);
     expect(missing.costMicros).not.toBeNull();
     expect(missing.priced).toBe(true);
@@ -203,6 +203,7 @@ describe("prompt", () => {
       sourceLocale: "en",
       targetLocale: "de",
       resourceKind: "Product",
+      resourceTitle: "Boom",
       fields,
       glossary: [
         { kind: "protect", targetLocale: null, sourceTerm: "Patrik", targetTerm: null },
@@ -210,15 +211,20 @@ describe("prompt", () => {
         { kind: "translate", targetLocale: "it", sourceTerm: "Boom", targetTerm: "Boma" },
       ],
       storeName: "Recharge",
+      storeContext: null,
+      resourceContext: null,
+      terminology: [],
+      memoryHints: [],
     });
     const system = messages[0]?.content ?? "";
-    expect(system).toContain("English (en) to German (de)");
-    expect(system).toContain('"Patrik"');
-    expect(system).toContain('"Boom" → "Gabelbaum"');
-    expect(system).not.toContain("Boma");
+    const user = messages[1]?.content ?? "";
+    expect(system).toContain("from English (en) into German (de)");
     expect(system).toContain('"Recharge"');
-    expect(messages[1]?.content).toContain("Field 1 (title, text)");
-    expect(messages[1]?.content).toContain("Field 2 (body_html, HTML)");
+    expect(user).toContain('"Patrik"');
+    expect(user).toContain('"Boom" → "Gabelbaum"');
+    expect(user).not.toContain("Boma");
+    expect(user).toContain("Field 1 (title, text)");
+    expect(user).toContain("Field 2 (body_html, HTML)");
   });
 
   it("reads a complete reply back by number and refuses an incomplete or padded one", () => {
@@ -250,11 +256,19 @@ describe("prompt", () => {
     expect(parseTranslationReply("not json", fields).ok).toBe(false);
   });
 
-  it("reads a detection reply", () => {
-    expect(parseDetectionReply('{"locale":"SL","confidence":0.9}')).toEqual({
+  it("reads a detection reply and caps its confidence by the sample's length", () => {
+    const long = "Deska za jadranje na deski je pripravljena za novo sezono na obali.";
+    expect(parseDetectionReply('{"locale":"SL","confidence":0.9}', long)).toMatchObject({
       locale: "sl",
       confidence: 0.9,
+      shortSample: false,
     });
-    expect(parseDetectionReply("nope")).toBeNull();
+    expect(parseDetectionReply('{"locale":"en","confidence":0.99}', "Foil")).toMatchObject({
+      locale: "en",
+      confidence: 0.45,
+      reportedConfidence: 0.99,
+      shortSample: true,
+    });
+    expect(parseDetectionReply("nope", long)).toBeNull();
   });
 });

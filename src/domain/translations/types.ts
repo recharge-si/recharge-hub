@@ -274,3 +274,39 @@ export interface GlossaryTerm {
   sourceTerm: string;
   targetTerm: string | null;
 }
+
+/** One turn of a chat request to the provider. */
+export interface ChatMessage {
+  role: "system" | "user" | "assistant";
+  content: string;
+}
+
+/**
+ * Why a translation came out as it did (docs/translations.md
+ * § Explainability): stored with the sync item so a developer can see
+ * which prompt, profile, terms and memory produced it, without storing the
+ * prompt itself. Bounded: lists are capped, texts are not kept.
+ */
+export type TranslationTrace = {
+  promptVersion: string;
+  profileVersion: number | null;
+  sourceLocale: string;
+  /** How the source locale was decided: "override", "shopify_content" or "primary". */
+  sourceReason: string;
+  /** A detected locale that disagreed with the decision, if any. */
+  sourceDisputedBy: string | null;
+  targetLocale: string;
+  contextKind: string;
+  model: string | null;
+  /** Provider requests made for this item, including corrections. */
+  attempts: number;
+  /** Fields answered from translation memory with no provider request. */
+  reusedKeys: string[];
+  /** Ids of the memory entries shown or reused. */
+  memoryHitIds: string[];
+  glossaryHits: number;
+  /** Ids of the store terms shown. */
+  termIds: string[];
+  /** Per attempt, the violations validation found; empty when clean. */
+  validation: Array<{ attempt: number; violations: Array<{ key: string; code: string; severity: string }> }>;
+};

@@ -42,6 +42,7 @@ export const QUEUES = {
   translationSync: "translation-sync",
   translationCoverage: "translation-coverage",
   translationResourceEvent: "translation-resource-event",
+  translationProfile: "translation-profile",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -88,6 +89,11 @@ export function translationSyncKey(syncId: string): string {
 /** At most one coverage read waiting per shop. */
 export function translationCoverageKey(shopDomain: string): string {
   return `translation-coverage:${shopDomain}`;
+}
+
+/** At most one store profile build waiting per shop. */
+export function translationProfileKey(shopDomain: string): string {
+  return `translation-profile:${shopDomain}`;
 }
 
 type QueueOptions = Omit<Queue, "name">;
@@ -415,6 +421,16 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 60,
     retryBackoff: true,
     expireInSeconds: 600,
+  },
+  // A merchant asked for the store profile to be rebuilt: a few Shopify
+  // reads and one model request, guarded by a lease on the profile row. A
+  // dropped run only means the old profile serves a little longer.
+  [QUEUES.translationProfile]: {
+    policy: "short",
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 900,
   },
   // A retention promise, so it retries like the other compliance work rather
   // than being dropped after a couple of attempts.

@@ -20,6 +20,7 @@ import {
   type GlossaryTerm,
   type LanguageSettings,
   type OwnershipRecord,
+  type TranslationTrace,
 } from "~/domain/translations/types";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
@@ -375,7 +376,13 @@ export async function setSourceOverride(
 /** Records what detection suggested without changing what is decided. */
 export async function recordDetectedSource(
   principal: Principal,
-  input: { resourceId: string; resourceType: string; detectedLocale: string; primaryLocale: string },
+  input: {
+    resourceId: string;
+    resourceType: string;
+    detectedLocale: string;
+    detectedConfidence: number | null;
+    primaryLocale: string;
+  },
 ): Promise<void> {
   const shopId = await shopIdFor(principal);
   const existing = await prisma.translationSourceOverride.findUnique({
@@ -384,7 +391,10 @@ export async function recordDetectedSource(
   if (existing) {
     await prisma.translationSourceOverride.update({
       where: { id: existing.id },
-      data: { detectedLocale: input.detectedLocale },
+      data: {
+        detectedLocale: input.detectedLocale,
+        detectedConfidence: input.detectedConfidence,
+      },
     });
     return;
   }
@@ -397,6 +407,7 @@ export async function recordDetectedSource(
       resourceType: input.resourceType,
       sourceLocale: input.primaryLocale,
       detectedLocale: input.detectedLocale,
+      detectedConfidence: input.detectedConfidence,
     },
   });
 }
@@ -694,6 +705,8 @@ export interface SyncItemInput {
   fields: number;
   detail?: Prisma.InputJsonValue | null;
   error?: string | null;
+  /** Why the translation came out as it did; for developers (docs/translations.md § Explainability). */
+  trace?: TranslationTrace | null;
 }
 
 export async function recordSyncItems(
@@ -715,6 +728,7 @@ export async function recordSyncItems(
       fields: item.fields,
       detail: item.detail ?? Prisma.DbNull,
       error: item.error ?? null,
+      trace: item.trace ?? Prisma.DbNull,
     })),
   });
 }
@@ -779,7 +793,9 @@ export interface UsageWrite {
   resourceType: string | null;
   sourceLocale: string;
   targetLocale: string;
-  purpose: "translate" | "detect";
+  purpose: "translate" | "detect" | "profile";
+  /** The prompt version the request was built with; null for requests without one. */
+  promptVersion: string | null;
   model: string;
   inputTokens: number;
   cachedInputTokens: number;

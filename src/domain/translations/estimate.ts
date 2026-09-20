@@ -17,8 +17,14 @@ import type { SyncMode } from "~/domain/translations/types";
 
 /** Characters of source text per input token, conservatively. */
 const CHARS_PER_TOKEN = 3.5;
-/** Instructions, glossary and JSON scaffolding sent with every request. */
-const REQUEST_OVERHEAD_TOKENS = 350;
+/**
+ * Instructions, store context, resource context, terminology, glossary and
+ * JSON scaffolding sent with every request. The system message is the same
+ * for every request of a shop and is mostly served from the provider's
+ * prompt cache at a quarter of the price, so this is the effective figure,
+ * not the raw token count.
+ */
+const REQUEST_OVERHEAD_TOKENS = 700;
 /** A translation comes back about as long as it went in, plus JSON quoting. */
 const OUTPUT_RATIO = 1.15;
 /** Characters in a field nothing has been measured for: a short title or two. */

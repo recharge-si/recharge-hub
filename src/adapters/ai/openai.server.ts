@@ -3,15 +3,29 @@ import { z } from "zod";
 import { getEnv } from "~/adapters/config/env.server";
 import { recordUsage } from "~/adapters/db/repositories/translations.server";
 import { getLogger } from "~/adapters/observability/logger.server";
-import { estimateCostMicros, PRICING_VERSION } from "~/domain/translations/pricing";
 import {
   buildDetectionMessages,
-  buildTranslationMessages,
   parseDetectionReply,
+  type Detection,
+  type DetectionContext,
+} from "~/domain/translations/detection";
+import { estimateCostMicros, PRICING_VERSION } from "~/domain/translations/pricing";
+import {
+  PROFILE_PROMPT_VERSION,
+  buildProfileMessages,
+  parseProfileReply,
+  type StoreProfile,
+} from "~/domain/translations/profile";
+import {
+  TRANSLATION_PROMPT_VERSION,
+  buildCorrectionMessages,
+  buildTranslationMessages,
   parseTranslationReply,
   type ChatMessage,
   type TranslationRequest,
 } from "~/domain/translations/prompt";
+import type { StoreSample } from "~/domain/translations/snapshot";
+import type { Violation } from "~/domain/translations/validate";
 import type { Principal } from "~/domain/types";
 
 /**
@@ -21,7 +35,8 @@ import type { Principal } from "~/domain/types";
  * nowhere else, which is what makes the usage ledger complete: each attempt
  * that reaches the provider — a success, a failure that still reports usage,
  * a retry — is one `ai_usage` row, priced under the current table. A
- * translation the planner skipped never gets here and so never counts.
+ * translation the planner skipped, or one answered from translation memory,
+ * never gets here and so never counts.
  *
  * The key is read from the environment on each call and never leaves this
  * module: not returned, not stored, not logged. A deployment without one is
@@ -85,7 +100,8 @@ export interface UsageContext {
   resourceType: string | null;
   sourceLocale: string;
   targetLocale: string;
-  purpose: "translate" | "detect";
+  purpose: "translate" | "detect" | "profile";
+  promptVersion: string | null;
 }
 
 export class ProviderError extends Error {
@@ -118,7 +134,7 @@ async function callModel(
   principal: Principal,
   messages: ChatMessage[],
   context: UsageContext,
-  options: { maxOutputTokens: number },
+  options: { maxOutputTokens: number; temperature?: number },
 ): Promise<ModelAnswer> {
   const env = getEnv();
   const key = env.OPENAI_API_KEY;
@@ -143,7 +159,7 @@ async function callModel(
           model,
           messages,
           response_format: { type: "json_object" },
-          temperature: 0.2,
+          temperature: options.temperature ?? 0.2,
           max_completion_tokens: options.maxOutputTokens,
         }),
         signal: controller.signal,
@@ -236,80 +252,156 @@ function pause(attempt: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 1500 * attempt));
 }
 
+/** The provider's failure as a value, for the outcomes below. */
+function asFailure(error: unknown): { kind: "failed"; message: string; retryable: boolean } {
+  if (error instanceof ProviderNotConfiguredError)
+    return { kind: "failed", message: error.message, retryable: false };
+  if (error instanceof ProviderError)
+    return { kind: "failed", message: error.message, retryable: error.retryable };
+  throw error;
+}
+
 export type TranslateOutcome =
-  | { kind: "ok"; values: Map<string, string>; model: string }
+  | { kind: "ok"; values: Map<string, string>; model: string; text: string }
   | { kind: "failed"; message: string; retryable: boolean };
+
+export type TranslationUsageContext = Omit<
+  UsageContext,
+  "purpose" | "sourceLocale" | "targetLocale" | "promptVersion"
+>;
+
+function outputBudget(request: TranslationRequest): number {
+  const sourceChars = request.fields.reduce((sum, f) => sum + f.value.length, 0);
+  // Room for the translation to run longer than the source, plus the JSON.
+  return Math.min(32_000, Math.max(512, Math.ceil((sourceChars / 2.5) * 1.5) + 200));
+}
 
 /**
  * Translates every field of one resource into one language. A reply that
  * does not cover exactly the fields asked for is a failure, not a partial
- * success — see `parseTranslationReply`.
+ * success — see `parseTranslationReply`. The raw text is returned too, so a
+ * correction can show the model its own previous answer.
  */
 export async function translateFields(
   principal: Principal,
   request: TranslationRequest,
-  context: Omit<UsageContext, "purpose" | "sourceLocale" | "targetLocale">,
+  context: TranslationUsageContext,
 ): Promise<TranslateOutcome> {
-  const sourceChars = request.fields.reduce((sum, f) => sum + f.value.length, 0);
-  // Room for the translation to run longer than the source, plus the JSON.
-  const maxOutputTokens = Math.min(
-    32_000,
-    Math.max(512, Math.ceil((sourceChars / 2.5) * 1.5) + 200),
+  return answerTranslation(principal, buildTranslationMessages(request), request, context);
+}
+
+/**
+ * The second try after validation failed: the same request, the previous
+ * answer, and the invariants it broke, spelt out.
+ */
+export async function correctFields(
+  principal: Principal,
+  request: TranslationRequest,
+  previousAnswer: string,
+  violations: readonly Violation[],
+  context: TranslationUsageContext,
+): Promise<TranslateOutcome> {
+  return answerTranslation(
+    principal,
+    buildCorrectionMessages(request, previousAnswer, violations),
+    request,
+    context,
   );
+}
+
+async function answerTranslation(
+  principal: Principal,
+  messages: ChatMessage[],
+  request: TranslationRequest,
+  context: TranslationUsageContext,
+): Promise<TranslateOutcome> {
   try {
     const answer = await callModel(
       principal,
-      buildTranslationMessages(request),
+      messages,
       {
         ...context,
         purpose: "translate",
+        promptVersion: TRANSLATION_PROMPT_VERSION,
         sourceLocale: request.sourceLocale,
         targetLocale: request.targetLocale,
       },
-      { maxOutputTokens },
+      { maxOutputTokens: outputBudget(request) },
     );
     const parsed = parseTranslationReply(answer.text, request.fields);
     if (!parsed.ok) return { kind: "failed", message: parsed.reason, retryable: false };
-    return { kind: "ok", values: parsed.values, model: answer.model };
+    return { kind: "ok", values: parsed.values, model: answer.model, text: answer.text };
   } catch (error) {
-    if (error instanceof ProviderNotConfiguredError)
-      return { kind: "failed", message: error.message, retryable: false };
-    if (error instanceof ProviderError)
-      return { kind: "failed", message: error.message, retryable: error.retryable };
-    throw error;
+    return asFailure(error);
   }
 }
 
 export type DetectOutcome =
-  | { kind: "ok"; locale: string; confidence: number | null }
+  | ({ kind: "ok" } & Detection)
   | { kind: "failed"; message: string };
 
 /** Which language a sample is written in — a suggestion for a person to confirm. */
 export async function detectLanguage(
   principal: Principal,
   sample: string,
-  context: { resourceId: string; resourceType: string; primaryLocale: string },
+  context: { resourceId: string; resourceType: string } & DetectionContext,
 ): Promise<DetectOutcome> {
   try {
     const answer = await callModel(
       principal,
-      buildDetectionMessages(sample),
+      buildDetectionMessages(sample, context),
       {
         syncId: null,
         resourceId: context.resourceId,
         resourceType: context.resourceType,
-        sourceLocale: context.primaryLocale,
-        targetLocale: context.primaryLocale,
+        sourceLocale: context.storeLocale,
+        targetLocale: context.storeLocale,
         purpose: "detect",
+        promptVersion: null,
       },
       { maxOutputTokens: 60 },
     );
-    const parsed = parseDetectionReply(answer.text);
+    const parsed = parseDetectionReply(answer.text, sample);
     if (!parsed) return { kind: "failed", message: "The language could not be told." };
     return { kind: "ok", ...parsed };
   } catch (error) {
     if (error instanceof ProviderNotConfiguredError || error instanceof ProviderError)
       return { kind: "failed", message: error.message };
     throw error;
+  }
+}
+
+export type ProfileOutcome =
+  | { kind: "ok"; profile: StoreProfile; model: string }
+  | { kind: "failed"; message: string; retryable: boolean };
+
+/**
+ * What kind of store this is, from a sample of its content: one request
+ * per shop, repeated only when the store has changed or a person asks.
+ */
+export async function generateStoreProfile(
+  principal: Principal,
+  sample: StoreSample,
+): Promise<ProfileOutcome> {
+  try {
+    const answer = await callModel(
+      principal,
+      buildProfileMessages(sample),
+      {
+        syncId: null,
+        resourceId: null,
+        resourceType: null,
+        sourceLocale: sample.primaryLocale,
+        targetLocale: sample.primaryLocale,
+        purpose: "profile",
+        promptVersion: PROFILE_PROMPT_VERSION,
+      },
+      { maxOutputTokens: 6_000, temperature: 0.1 },
+    );
+    const parsed = parseProfileReply(answer.text);
+    if (!parsed.ok) return { kind: "failed", message: parsed.reason, retryable: false };
+    return { kind: "ok", profile: parsed.profile, model: answer.model };
+  } catch (error) {
+    return asFailure(error);
   }
 }

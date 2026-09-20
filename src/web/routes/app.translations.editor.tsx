@@ -14,6 +14,10 @@ import { z } from "zod";
 import { detectLanguage, isConfigured } from "~/adapters/ai/openai.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import {
+  forgetMemory,
+  rememberTranslations,
+} from "~/adapters/db/repositories/translation-intelligence.server";
+import {
   forgetOwnership,
   getSourceOverride,
   listOwnership,
@@ -34,8 +38,11 @@ import {
   searchResourceIds,
   type TranslatableResource,
 } from "~/adapters/shopify/translations";
+import { ContextSource } from "~/adapters/translations/context.server";
 import { hashValue } from "~/adapters/translations/engine.server";
 import { translateResourceNow } from "~/adapters/translations/inline.server";
+import { describeConfidence, detectionSample } from "~/domain/translations/detection";
+import { isMemorable, memoryKey } from "~/domain/translations/memory";
 import { classifyField, isTranslatableField } from "~/domain/translations/plan";
 import {
   ALL_RESOURCE_TYPES,
@@ -427,6 +434,22 @@ export const action = async ({
     const writes = fields.filter((field) => field.value.trim() !== "");
     const removals = fields.filter((field) => field.value.trim() === "");
 
+    // A person's translation is the strongest signal memory gets: it is
+    // reused for the same string and shown to the model for related ones.
+    const [locales, sourceRead, override] = await Promise.all([
+      listShopLocales(admin),
+      readTranslatableResourcesByIds(admin, { ids: [resource], locales: [] }),
+      getSourceOverride(principal, resource),
+    ]);
+    const primaryLocale =
+      locales.kind === "read"
+        ? (locales.locales.find((l) => l.primary)?.locale ?? null)
+        : null;
+    const sourceLocale = override?.sourceLocale ?? primaryLocale;
+    const sourceFields = new Map(
+      (sourceRead[0]?.fields ?? []).map((field) => [field.key, field]),
+    );
+
     if (writes.length > 0) {
       const written = await registerTranslations(
         admin,
@@ -458,6 +481,24 @@ export const action = async ({
         })),
         new Date(),
       );
+      if (sourceLocale && sourceLocale !== locale) {
+        const pairs = writes.flatMap((field) => {
+          const source = sourceFields.get(field.key);
+          if (!source || !isMemorable(source)) return [];
+          return [
+            {
+              sourceLocale,
+              targetLocale: locale,
+              sourceKey: memoryKey(source.value),
+              sourceText: source.value.trim(),
+              targetText: field.value.trim(),
+              resourceType: type,
+              resourceId: resource,
+            },
+          ];
+        });
+        await rememberTranslations(principal, pairs, "manual", new Date());
+      }
     }
     if (removals.length > 0) {
       const removed = await removeTranslations(
@@ -477,6 +518,15 @@ export const action = async ({
         locale,
         removals.map((field) => field.key),
       );
+      if (sourceLocale)
+        await forgetMemory(principal, {
+          sourceLocale,
+          targetLocale: locale,
+          sourceKeys: removals.flatMap((field) => {
+            const source = sourceFields.get(field.key);
+            return source ? [memoryKey(source.value)] : [];
+          }),
+        });
     }
     await appendEvent(principal, {
       entityType: "translation",
@@ -605,20 +655,28 @@ export const action = async ({
         ok: false,
         message: "The resource could not be read from Shopify.",
       };
-    const sample = found.fields
-      .filter(isTranslatableField)
-      .map((field) => field.value.replace(/<[^>]+>/g, " "))
-      .join("\n")
-      .slice(0, 2000);
+    const sample = detectionSample(found.fields.filter(isTranslatableField));
     if (sample.trim() === "")
       return {
         ok: false,
         message: "There is no text to detect a language from.",
       };
+    // What sits next to the resource helps with a short label; the store's
+    // own languages are what the answer is most likely among.
+    const contexts = new ContextSource(admin);
+    await contexts.prime([{ resourceId: resource, type: typeParam }]);
+    const neighbourText = await contexts.neighbourText(
+      resource,
+      typeParam,
+      resourceTitle(found.fields, resource),
+    );
     const detected = await detectLanguage(principal, sample, {
       resourceId: resource,
       resourceType: typeParam,
-      primaryLocale: primary.locale,
+      storeLocale: primary.locale,
+      candidateLocales:
+        locales.kind === "read" ? locales.locales.map((l) => l.locale) : [],
+      neighbourText,
     });
     if (detected.kind === "failed")
       return { ok: false, message: detected.message };
@@ -626,11 +684,15 @@ export const action = async ({
       resourceId: resource,
       resourceType: typeParam,
       detectedLocale: detected.locale,
+      detectedConfidence: detected.confidence,
       primaryLocale: primary.locale,
     });
+    const confidence = describeConfidence(detected.confidence);
     return {
       ok: true,
-      message: `This looks like ${localeLabel(detected.locale)}. Nothing changed; set it as the source if that is right.`,
+      message: detected.shortSample
+        ? `This may be ${localeLabel(detected.locale)} (${confidence}). Nothing changed; set it as the source only if you are sure.`
+        : `This looks like ${localeLabel(detected.locale)} (${confidence}). Nothing changed; set it as the source if that is right.`,
     };
   }
 

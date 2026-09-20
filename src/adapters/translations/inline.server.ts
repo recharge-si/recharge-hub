@@ -22,6 +22,7 @@ import {
   type EngineContext,
   type ResourceOutcome,
 } from "~/adapters/translations/engine.server";
+import { loadIntelligence } from "~/adapters/translations/intelligence.server";
 import type { ResourceType, SyncMode } from "~/domain/translations/types";
 import type { Principal } from "~/domain/types";
 
@@ -93,6 +94,13 @@ export async function translateResourceNow(
     };
   }
 
+  const intelligence = await loadIntelligence(principal, admin, {
+    primaryLocale: input.primaryLocale,
+    storeName,
+  });
+  await intelligence.contexts.prime([
+    { resourceId: input.resourceId, type: input.resourceType },
+  ]);
   const ctx: EngineContext = {
     principal,
     admin,
@@ -102,6 +110,7 @@ export async function translateResourceNow(
     mode: input.mode,
     requestedBy: input.requestedBy,
     settings: new Map(languages.map((language) => [language.locale, language])),
+    intelligence,
   };
   const outcome = await translateResource(ctx, {
     resource,

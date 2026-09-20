@@ -149,6 +149,9 @@ model Shop {
   translationOwnerships  TranslationOwnership[]
   translationSyncs       TranslationSync[]
   translationSyncItems   TranslationSyncItem[]
+  translationProfile     TranslationStoreProfile?
+  translationTerms       TranslationTerm[]
+  translationMemory      TranslationMemory[]
   aiUsage                AiUsage[]
 
   @@map("shop")
@@ -2379,9 +2382,11 @@ model TranslationSourceOverride {
   resourceId   String @map("resource_id")
   resourceType String @map("resource_type")
 
-  sourceLocale   String  @map("source_locale")
-  detectedLocale String? @map("detected_locale")
-  setBy          String? @map("set_by")
+  sourceLocale       String  @map("source_locale")
+  detectedLocale     String? @map("detected_locale")
+  /// Detection's calibrated confidence, 0..1; capped by how much text there was.
+  detectedConfidence Float?  @map("detected_confidence")
+  setBy              String? @map("set_by")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
@@ -2531,6 +2536,9 @@ model TranslationSyncItem {
   /// Why fields were skipped or what failed, for the sync page.
   detail Json?
   error  String?
+  /// `TranslationTrace` (domain/translations/types): which prompt, profile,
+  /// terms and memory produced the translation. For developers; bounded.
+  trace  Json?
 
   createdAt DateTime @default(now()) @map("created_at")
 
@@ -2540,6 +2548,127 @@ model TranslationSyncItem {
   @@index([syncId, createdAt])
   @@index([syncId, status])
   @@map("translation_sync_item")
+}
+
+/// What the AI knows about the store (docs/translations.md § Store profile):
+/// a compact, model-written description of the kind of store this is,
+/// inferred from a sample of its own content. One row per shop; the profile
+/// is rebuilt when the store's vocabulary has drifted or a person asks.
+/// `generating_at` is a lease so two workers never build it at once.
+model TranslationStoreProfile {
+  id     String @id @default(cuid())
+  shopId String @unique @map("shop_id")
+
+  /// `StoreProfile` (domain/translations/profile), or null before the first build.
+  profile       Json?
+  /// "Watersports · Windsurfing · SUP" — the profile in one line.
+  summary       String?
+  /// Incremented on every rebuild; recorded in each translation's trace.
+  version       Int     @default(0)
+  promptVersion String? @map("prompt_version")
+  model         String?
+
+  /// The normalised vocabulary the profile was built from, for drift detection.
+  vocabulary  String[]
+  /// `{ products, collections, menuItems }` at build time.
+  sampleStats Json?    @map("sample_stats")
+
+  useStoreContext  Boolean @default(true) @map("use_store_context")
+  learnTerminology Boolean @default(true) @map("learn_terminology")
+
+  generatedAt  DateTime? @map("generated_at")
+  /// When the store was last read to see whether the profile is still current.
+  checkedAt    DateTime? @map("checked_at")
+  generatingAt DateTime? @map("generating_at")
+  lastError    String?   @map("last_error")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@map("translation_store_profile")
+}
+
+enum TranslationTermOrigin {
+  /// Found in the store's own data or named by the profile.
+  auto_inferred
+  /// Learnt from translations that were written.
+  translation_history
+  /// Added by a person.
+  merchant
+  /// Built in.
+  system
+
+  @@map("translation_term_origin")
+}
+
+/// A word or phrase that carries weight in this store, and what it is here
+/// (docs/translations.md § Automatic terminology). Evidence for the
+/// translation model, never a rule: the glossary is where rules live.
+model TranslationTerm {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  sourceLocale   String                @map("source_locale")
+  /// Lower-case, whitespace-normalised form; the identity of the term.
+  normalised     String
+  term           String
+  /// `TermClassification` (domain/translations/profile).
+  classification String
+  confidence     Float
+  origin         TranslationTermOrigin @default(auto_inferred)
+  /// `{ vendor: 12, productTitle: 80, menu: 1 }`.
+  evidence       Json?
+  occurrences    Int                   @default(0)
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @map("last_seen_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, sourceLocale, normalised])
+  @@index([shopId, sourceLocale, confidence])
+  @@map("translation_term")
+}
+
+enum TranslationMemoryOrigin {
+  ai
+  manual
+
+  @@map("translation_memory_origin")
+}
+
+/// How this store has translated a short string into a locale
+/// (docs/translations.md § Translation memory). One row per (source,
+/// target, string); a person's answer is never replaced by the machine's.
+model TranslationMemory {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  sourceLocale String @map("source_locale")
+  targetLocale String @map("target_locale")
+  /// Lower-case, whitespace-normalised source; the identity of the entry.
+  sourceKey    String @map("source_key")
+  sourceText   String @map("source_text")
+  targetText   String @map("target_text")
+
+  origin     TranslationMemoryOrigin
+  usageCount Int                     @default(1) @map("usage_count")
+  /// Times a later translation of the same source disagreed and was not kept.
+  conflicts  Int                     @default(0)
+
+  resourceType   String? @map("resource_type")
+  lastResourceId String? @map("last_resource_id")
+
+  firstSeenAt DateTime @default(now()) @map("first_seen_at")
+  lastSeenAt  DateTime @map("last_seen_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@unique([shopId, sourceLocale, targetLocale, sourceKey])
+  @@index([shopId, targetLocale, lastSeenAt])
+  @@map("translation_memory")
 }
 
 enum AiUsageResult {
@@ -2557,12 +2686,14 @@ model AiUsage {
   shopId String  @map("shop_id")
   syncId String? @map("sync_id")
 
-  resourceId   String? @map("resource_id")
-  resourceType String? @map("resource_type")
-  sourceLocale String  @map("source_locale")
-  targetLocale String  @map("target_locale")
-  /// What the request was for: `translate` or `detect`.
-  purpose      String
+  resourceId    String? @map("resource_id")
+  resourceType  String? @map("resource_type")
+  sourceLocale  String  @map("source_locale")
+  targetLocale  String  @map("target_locale")
+  /// What the request was for: `translate`, `detect` or `profile`.
+  purpose       String
+  /// The prompt version the request was built with, for debugging.
+  promptVersion String? @map("prompt_version")
 
   model             String
   inputTokens       Int    @map("input_tokens")

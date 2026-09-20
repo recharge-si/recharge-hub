@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
-import { translateFields } from "~/adapters/ai/openai.server";
+import { correctFields, translateFields, type TranslateOutcome } from "~/adapters/ai/openai.server";
+import type { StoredMemory } from "~/adapters/db/repositories/translation-intelligence.server";
 import {
   glossaryFor,
   recordOwnership,
@@ -17,11 +18,31 @@ import {
   type TranslatableResource,
   type TranslationWrite,
 } from "~/adapters/shopify/translations";
+import type { Intelligence } from "~/adapters/translations/intelligence.server";
+import {
+  memorablePairs,
+  memoryKey,
+  reuseVerdict,
+  selectMemoryHints,
+  type MemoryHint,
+} from "~/domain/translations/memory";
 import {
   planResource,
   summarisePlan,
   type FieldDecision,
 } from "~/domain/translations/plan";
+import {
+  TRANSLATION_PROMPT_VERSION,
+  type TerminologyNote,
+  type TranslationRequest,
+} from "~/domain/translations/prompt";
+import { resolveSourceLocale, type SourceResolution } from "~/domain/translations/source";
+import {
+  FORM_STABLE_CLASSIFICATIONS,
+  relevantTerms,
+  type StoredTerm,
+} from "~/domain/translations/terminology";
+import { normaliseTerm } from "~/domain/translations/text";
 import {
   RESOURCE_TYPE_LABEL,
   defaultLanguageSettings,
@@ -29,8 +50,16 @@ import {
   type LanguageSettings,
   type OwnershipRecord,
   type ResourceType,
+  type SourceField,
   type SyncMode,
+  type TranslationTrace,
 } from "~/domain/translations/types";
+import {
+  describeViolations,
+  hardViolations,
+  validateTranslation,
+  type Violation,
+} from "~/domain/translations/validate";
 import type { Principal } from "~/domain/types";
 
 /**
@@ -38,11 +67,15 @@ import type { Principal } from "~/domain/types";
  * (docs/translations.md § The engine).
  *
  * The one path every sync takes, page by page, and the editor's "translate
- * this" takes for a single resource. Per target language: plan the fields
- * (`domain/translations/plan`), ask the provider for the ones that need it,
- * write the answers to Shopify with the source digests, and record what was
- * written so the next pass knows it was this app's. Nothing is kept from the
- * resource itself once the pass is over.
+ * this" takes for a single resource. Per target language: decide the
+ * source locale, plan the fields (`domain/translations/plan`), answer what
+ * translation memory can answer, ask the provider once for the rest with
+ * the store, the resource and the terminology in view, check the answer
+ * against the invariants a translation never breaks (and ask once more if
+ * it broke one), write to Shopify with the source digests, record what was
+ * written so the next pass knows it was this app's, and let memory learn
+ * what was said. Nothing is kept from the resource itself once the pass is
+ * over except the short strings memory keeps.
  *
  * Failures are per resource and language, never per sync: a description the
  * model mangles fails that one item and the pass continues.
@@ -63,6 +96,7 @@ export interface EngineContext {
   requestedBy: string | null;
   /** Per target locale. Missing means the defaults. */
   settings: ReadonlyMap<string, LanguageSettings>;
+  intelligence: Intelligence;
 }
 
 export interface ResourceOutcome {
@@ -100,7 +134,12 @@ export async function translateResource(
 ): Promise<ResourceOutcome> {
   const { resource, resourceType } = input;
   const title = resourceTitle(resource.fields, resource.resourceId);
-  const sourceLocale = input.override?.sourceLocale ?? ctx.primaryLocale;
+  const source = resolveSourceLocale({
+    primaryLocale: ctx.primaryLocale,
+    shopifyContentLocale: resource.sourceLocale,
+    override: input.override?.sourceLocale ?? null,
+    detected: input.override?.detectedLocale ?? null,
+  });
   const outcome: ResourceOutcome = {
     items: [],
     translated: 0,
@@ -120,7 +159,7 @@ export async function translateResource(
           resourceType,
           title,
           locale,
-          sourceLocale,
+          source,
           ownership: input.ownership,
           glossary: input.glossaries.get(locale) ?? [],
         }),
@@ -145,18 +184,17 @@ interface LocaleResult {
   failed: number;
 }
 
-async function translateIntoLocale(
-  ctx: EngineContext,
-  input: {
-    resource: TranslatableResource;
-    resourceType: ResourceType;
-    title: string;
-    locale: string;
-    sourceLocale: string;
-    ownership: readonly OwnershipRecord[];
-    glossary: readonly GlossaryTerm[];
-  },
-): Promise<LocaleResult> {
+interface LocaleInput {
+  resource: TranslatableResource;
+  resourceType: ResourceType;
+  title: string;
+  locale: string;
+  source: SourceResolution;
+  ownership: readonly OwnershipRecord[];
+  glossary: readonly GlossaryTerm[];
+}
+
+async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Promise<LocaleResult> {
   const settings =
     ctx.settings.get(input.locale) ?? defaultLanguageSettings(input.locale);
   const decisions = planResource({
@@ -166,7 +204,7 @@ async function translateIntoLocale(
     hash: hashValue,
     mode: ctx.mode,
     policy: settings.overwritePolicy,
-    sourceLocale: input.sourceLocale,
+    sourceLocale: input.source.locale,
     targetLocale: input.locale,
   });
   const summary = summarisePlan(decisions);
@@ -206,24 +244,12 @@ async function translateIntoLocale(
   const writes: TranslationWrite[] = [];
   const records: OwnershipWrite[] = [];
   let translatedCount = 0;
+  let trace: TranslationTrace | null = null;
+  let learned: Array<{ sourceText: string; targetText: string }> = [];
 
   if (toTranslate.length > 0) {
-    const answer = await translateFields(
-      ctx.principal,
-      {
-        sourceLocale: input.sourceLocale,
-        targetLocale: input.locale,
-        resourceKind: RESOURCE_TYPE_LABEL[input.resourceType],
-        fields: toTranslate.map((d) => d.field),
-        glossary: input.glossary,
-        storeName: ctx.storeName,
-      },
-      {
-        syncId: ctx.syncId,
-        resourceId: input.resource.resourceId,
-        resourceType: input.resourceType,
-      },
-    );
+    const answer = await answerFields(ctx, input, toTranslate.map((d) => d.field));
+    trace = answer.trace;
     if (answer.kind === "failed") {
       getLogger().warn(
         {
@@ -241,6 +267,7 @@ async function translateIntoLocale(
           fields: 0,
           error: answer.message,
           detail: { skipped: summary.skipped, attempted: toTranslate.length },
+          trace: answer.trace,
         },
         translated: 0,
         copied: 0,
@@ -260,6 +287,7 @@ async function translateIntoLocale(
       records.push(ownershipFor(ctx, input, decision.field.key, value, decision.field.digest));
       translatedCount += 1;
     }
+    learned = answer.learned;
   }
 
   for (const decision of toCopy) {
@@ -288,6 +316,7 @@ async function translateIntoLocale(
         fields: 0,
         error: `Shopify refused the translation: ${written.messages.join("; ")}`,
         detail: { skipped: summary.skipped, attempted: writes.length },
+        trace,
       },
       translated: 0,
       copied: 0,
@@ -296,6 +325,17 @@ async function translateIntoLocale(
     };
   }
   await recordOwnership(ctx.principal, records, new Date());
+  if (learned.length > 0)
+    await ctx.intelligence.remember(
+      {
+        sourceLocale: input.source.locale,
+        targetLocale: input.locale,
+        resourceType: input.resourceType,
+        resourceId: input.resource.resourceId,
+        pairs: learned,
+      },
+      "ai",
+    );
 
   const copiedCount = writes.length - translatedCount;
   return {
@@ -306,14 +346,213 @@ async function translateIntoLocale(
       detail: {
         translated: translatedCount,
         copied: copiedCount,
+        reused: trace?.reusedKeys.length ?? 0,
         skipped: summary.skipped,
       },
+      trace,
     },
     translated: translatedCount,
     copied: copiedCount,
     skipped: skippedCount,
     failed: 0,
   };
+}
+
+type FieldsAnswer =
+  | {
+      kind: "ok";
+      values: Map<string, string>;
+      trace: TranslationTrace;
+      /** Pairs the model produced (never the reused ones), for memory. */
+      learned: Array<{ sourceText: string; targetText: string }>;
+    }
+  | { kind: "failed"; message: string; trace: TranslationTrace };
+
+/** Provider requests per item: the translation and at most one correction. */
+const MAX_ATTEMPTS = 2;
+
+/**
+ * The fields of one resource in one language: memory first, then one
+ * provider request for the rest, validated, corrected once if it broke an
+ * invariant, and refused if it still does.
+ */
+async function answerFields(
+  ctx: EngineContext,
+  input: LocaleInput,
+  fields: readonly SourceField[],
+): Promise<FieldsAnswer> {
+  const intelligence = ctx.intelligence;
+  const [terms, memory, context] = await Promise.all([
+    intelligence.termsFor(input.source.locale),
+    intelligence.memoryFor(input.source.locale, input.locale, fields),
+    intelligence.contexts.contextFor(input.resource.resourceId, input.resourceType, input.title),
+  ]);
+  const relevant = relevantTerms(fields, terms);
+  const trace: TranslationTrace = {
+    promptVersion: TRANSLATION_PROMPT_VERSION,
+    profileVersion: intelligence.profileVersion,
+    sourceLocale: input.source.locale,
+    sourceReason: input.source.reason,
+    sourceDisputedBy: input.source.disputedBy,
+    targetLocale: input.locale,
+    contextKind: context.kind,
+    model: null,
+    attempts: 0,
+    reusedKeys: [],
+    memoryHitIds: [],
+    glossaryHits: input.glossary.filter((term) =>
+      fields.some((field) => normaliseTerm(field.value).includes(normaliseTerm(term.sourceTerm))),
+    ).length,
+    termIds: relevant.map((term) => term.id).slice(0, 40),
+    validation: [],
+  };
+
+  // What memory answers outright, and what it can only suggest.
+  const values = new Map<string, string>();
+  const exactHints: MemoryHint[] = [];
+  const usedIds = new Set<string>();
+  const byKey = new Map(memory.map((entry) => [entry.sourceKey, entry]));
+  const remaining: SourceField[] = [];
+  for (const field of fields) {
+    const entry = byKey.get(memoryKey(field.value));
+    if (!entry) {
+      remaining.push(field);
+      continue;
+    }
+    const verdict = reuseVerdict(field, entry, {
+      resourceType: input.resourceType,
+      glossary: input.glossary,
+      targetLocale: input.locale,
+    });
+    if (verdict === "reuse") {
+      values.set(field.key, entry.targetText);
+      trace.reusedKeys.push(field.key);
+      usedIds.add(entry.id);
+      continue;
+    }
+    if (verdict === "hint") {
+      exactHints.push({ id: entry.id, sourceText: entry.sourceText, targetText: entry.targetText, origin: entry.origin });
+      usedIds.add(entry.id);
+    }
+    remaining.push(field);
+  }
+
+  if (remaining.length === 0) {
+    trace.memoryHitIds = [...usedIds].slice(0, 40);
+    return { kind: "ok", values, trace, learned: [] };
+  }
+
+  const hints = [...exactHints, ...selectMemoryHints(remaining, memory, usedIds)];
+  for (const hint of hints) usedIds.add(hint.id);
+  trace.memoryHitIds = [...usedIds].slice(0, 40);
+
+  const request: TranslationRequest = {
+    sourceLocale: input.source.locale,
+    targetLocale: input.locale,
+    resourceKind: RESOURCE_TYPE_LABEL[input.resourceType],
+    resourceTitle: input.title,
+    fields: remaining,
+    glossary: input.glossary,
+    storeName: ctx.storeName,
+    storeContext: intelligence.storeContext,
+    resourceContext: context,
+    terminology: relevant.map(terminologyNote),
+    memoryHints: hints,
+  };
+  const rules = {
+    sourceLocale: input.source.locale,
+    targetLocale: input.locale,
+    glossary: input.glossary,
+    formStableTerms: formStableTerms(relevant, memory, ctx.storeName),
+  };
+  const usage = {
+    syncId: ctx.syncId,
+    resourceId: input.resource.resourceId,
+    resourceType: input.resourceType,
+  };
+
+  let answer: TranslateOutcome = await translateFields(ctx.principal, request, usage);
+  trace.attempts = 1;
+  let violations: Violation[] = [];
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
+    if (answer.kind === "failed") return { kind: "failed", message: answer.message, trace };
+    trace.model = answer.model;
+    violations = validateTranslation(remaining, answer.values, rules);
+    trace.validation.push({
+      attempt,
+      violations: violations.map((v) => ({ key: v.key, code: v.code, severity: v.severity })),
+    });
+    const hard = hardViolations(violations);
+    if (hard.length === 0) break;
+    if (attempt === MAX_ATTEMPTS)
+      return {
+        kind: "failed",
+        message: `The translation broke a rule and could not be corrected: ${describeViolations(hard)}.`,
+        trace,
+      };
+    answer = await correctFields(ctx.principal, request, answer.text, hard, usage);
+    trace.attempts += 1;
+  }
+  if (answer.kind === "failed") return { kind: "failed", message: answer.message, trace };
+
+  for (const [key, value] of answer.values) values.set(key, value);
+  return {
+    kind: "ok",
+    values,
+    trace,
+    learned: memorablePairs(remaining, answer.values).map((pair) => ({
+      sourceText: pair.sourceText,
+      targetText: pair.targetText,
+    })),
+  };
+}
+
+function terminologyNote(term: StoredTerm): TerminologyNote {
+  const sources: Record<string, string> = {
+    vendor: "vendor",
+    productType: "product type",
+    menu: "menu label",
+    collection: "collection title",
+    tag: "tag",
+    optionName: "option name",
+    optionValue: "option value",
+    productTitle: "product titles",
+    profile: "store profile",
+    shop: "store name",
+  };
+  const evidence = Object.entries(term.evidence)
+    .sort((a, b) => b[1] - a[1])
+    .slice(0, 3)
+    .map(([source, count]) =>
+      source === "productTitle" ? `${count} product titles` : sources[source] ?? source,
+    );
+  return {
+    term: term.term,
+    classification: term.classification,
+    evidence: evidence.length > 0 ? evidence.join(", ") : null,
+  };
+}
+
+/**
+ * What may legitimately come back unchanged: brands, codes and
+ * abbreviations among the relevant terms, strings memory has seen kept as
+ * they were by a person or more than once, and the store's name. A single
+ * machine answer is not enough to make a word stable, or one doubtful
+ * answer would license the next.
+ */
+function formStableTerms(
+  terms: readonly StoredTerm[],
+  memory: readonly StoredMemory[],
+  storeName: string | null,
+): string[] {
+  const stable = new Set<string>();
+  for (const term of terms) if (FORM_STABLE_CLASSIFICATIONS.has(term.classification)) stable.add(term.term);
+  for (const entry of memory) {
+    const kept = normaliseTerm(entry.sourceText) === normaliseTerm(entry.targetText);
+    if (kept && (entry.origin === "manual" || entry.usageCount >= 2)) stable.add(entry.sourceText);
+  }
+  if (storeName) stable.add(storeName);
+  return [...stable];
 }
 
 function ownershipFor(

@@ -2,6 +2,10 @@ import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
 import { isConfigured, translationModel } from "~/adapters/ai/openai.server";
 import {
+  countTerms,
+  getStoreProfile,
+} from "~/adapters/db/repositories/translation-intelligence.server";
+import {
   getCoverage,
   listActiveSyncs,
   listLanguageSettings,
@@ -50,6 +54,8 @@ export interface LanguagesOverview {
   coverageRows: CoverageRow[];
   ai: { configured: boolean; model: string };
   activeSyncs: number;
+  /** What the AI knows about the store, in a line (docs/translations.md § Store profile). */
+  intelligence: { summary: string | null; terms: number; building: boolean };
 }
 
 export type LanguagesOverviewResult =
@@ -65,14 +71,17 @@ export async function loadLanguagesOverview(
   admin: AdminApiContext,
 ): Promise<LanguagesOverviewResult> {
   const ai = { configured: isConfigured(), model: translationModel() };
-  const [locales, settings, coverage, active] = await Promise.all([
+  const [locales, settings, coverage, active, profile] = await Promise.all([
     listShopLocales(admin),
     listLanguageSettings(principal),
     getCoverage(principal),
     listActiveSyncs(principal),
+    getStoreProfile(principal),
   ]);
   if (locales.kind === "unavailable")
     return { kind: "unavailable", reason: locales.reason, ai };
+  const primaryLocale = locales.locales.find((locale) => locale.primary)?.locale;
+  const terms = primaryLocale ? await countTerms(principal, primaryLocale) : 0;
 
   const byLocale = new Map(settings.map((row) => [row.locale, row]));
   const syncingLocales = new Set(active.flatMap((sync) => sync.targetLocales));
@@ -115,5 +124,10 @@ export async function loadLanguagesOverview(
     coverageRows: coverage.rows,
     ai,
     activeSyncs: active.length,
+    intelligence: {
+      summary: profile?.profile ? profile.summary : null,
+      terms,
+      building: profile?.generatingAt !== null && profile?.generatingAt !== undefined,
+    },
   };
 }

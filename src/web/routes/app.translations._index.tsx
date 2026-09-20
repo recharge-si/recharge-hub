@@ -128,7 +128,8 @@ export default function Languages() {
             app manages them from here: add a language, publish it, translate
             the store with AI, edit a translation by hand, and see what the AI
             cost. Nothing is stored outside Shopify except the AI&apos;s
-            settings, your glossary and the record of what it wrote.
+            settings, your terminology overrides, what the AI learnt about the
+            store and the record of what it wrote.
           </s-paragraph>
           <s-paragraph>
             &quot;Shopify&quot; and &quot;AI translation&quot; are separate
@@ -332,6 +333,26 @@ export default function Languages() {
                 A page, product or article written in another language can name
                 its own source in the editor; it is then translated directly
                 from that language, never through the default.
+              </s-text>
+            </s-stack>
+          </s-section>
+        ) : null}
+
+        {data.kind === "read" ? (
+          <s-section heading="Store context">
+            <s-stack direction="block" gap="small-300">
+              <s-text>
+                {data.intelligence.summary
+                  ? data.intelligence.summary
+                  : data.intelligence.building
+                    ? "Reading the store to learn what it sells."
+                    : "The AI learns what the store sells before the first translation."}
+              </s-text>
+              <s-text color="subdued">
+                {data.intelligence.terms > 0
+                  ? `${data.intelligence.terms.toLocaleString("en")} ${data.intelligence.terms === 1 ? "term" : "terms"} learnt from the store's own navigation, collections and products. `
+                  : "Terminology is learnt from the store's own navigation, collections and products. "}
+                <s-link href={TRANSLATION_ROUTES.context}>Store context</s-link>
               </s-text>
             </s-stack>
           </s-section>

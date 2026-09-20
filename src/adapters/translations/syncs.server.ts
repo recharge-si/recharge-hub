@@ -10,6 +10,7 @@ import { enqueue, enqueueThrottled } from "~/adapters/queue/boss.server";
 import {
   QUEUES,
   translationCoverageKey,
+  translationProfileKey,
   translationSyncKey,
 } from "~/adapters/queue/queues";
 import type { ResourceType, SyncMode } from "~/domain/translations/types";
@@ -68,5 +69,19 @@ export async function requestCoverageRefresh(
     { shopDomain: principal.shopDomain },
     translationCoverageKey(principal.shopDomain),
     windowSeconds,
+  );
+}
+
+/**
+ * Asks for the store profile to be rebuilt from a fresh read of the store
+ * (docs/translations.md § Store profile); null when a rebuild is already
+ * waiting.
+ */
+export async function requestProfileRebuild(principal: Principal): Promise<string | null> {
+  return enqueueThrottled(
+    QUEUES.translationProfile,
+    { shopDomain: principal.shopDomain },
+    translationProfileKey(principal.shopDomain),
+    60,
   );
 }

@@ -35,6 +35,7 @@ import {
   translateResource,
   type EngineContext,
 } from "~/adapters/translations/engine.server";
+import { loadIntelligence } from "~/adapters/translations/intelligence.server";
 import { requestCoverageRefresh } from "~/adapters/translations/syncs.server";
 import { isResourceType, type ResourceType } from "~/domain/translations/types";
 import { serviceToken } from "~/domain/types";
@@ -123,6 +124,12 @@ export async function handleTranslationSync(job: Job<unknown>): Promise<void> {
     loadGlossaries(principal, targetLocales),
     readShopName(admin),
   ]);
+  // The store profile is checked (and, rarely, rebuilt) before the first
+  // page and read from the database on every page after.
+  const intelligence = await loadIntelligence(principal, admin, {
+    primaryLocale: primary.locale,
+    storeName,
+  });
   const ctx: EngineContext = {
     principal,
     admin,
@@ -132,6 +139,7 @@ export async function handleTranslationSync(job: Job<unknown>): Promise<void> {
     mode: sync.mode,
     requestedBy: sync.requestedBy,
     settings: new Map(settingsRows.map((row) => [row.locale, row])),
+    intelligence,
   };
 
   // A resource sync names its resources and has one page; a store or
@@ -162,6 +170,7 @@ export async function handleTranslationSync(job: Job<unknown>): Promise<void> {
   const [overrides, ownership] = await Promise.all([
     listSourceOverrides(principal, ids),
     listOwnership(principal, ids),
+    intelligence.contexts.prime(ids.map((resourceId) => ({ resourceId, type }))),
   ]);
 
   const counts: PassCounts = {

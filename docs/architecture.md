@@ -539,17 +539,25 @@ The store's languages and their translations, managed from inside the app
 with Shopify as the source of truth and OpenAI doing the translating —
 `docs/translations.md`. Pure rules in `src/domain/translations/` (which
 fields to translate and who owns a translation, the prompt and its strict
-parser, a versioned pricing table, estimates, coverage); Shopify locale and
-translation operations in `adapters/shopify/locales.ts` and
-`translations.ts`; **one provider path** in `adapters/ai/openai.server.ts`
-that records every request as an `ai_usage` row; the engine and the sync
-start in `adapters/translations/`; screens under `app.translations.*`.
+parser, a versioned pricing table, estimates, coverage, and the
+intelligence layer: the source-locale decision, the store sample and
+profile, terminology discovery, translation memory, resource context,
+validation and calibrated language detection); Shopify locale and
+translation operations in `adapters/shopify/locales.ts`, `translations.ts`
+and the store snapshot in `store-context.ts`; **one provider path** in
+`adapters/ai/openai.server.ts` that records every request as an `ai_usage`
+row; the engine, what a pass knows (`intelligence.server.ts`), the profile
+keeper and the sync start in `adapters/translations/`; screens under
+`app.translations.*`.
 
 ```text
 /app/translations … ── startSync ──▶ translation-sync (one page per pass, cursor over recorded work)
-  → engine: plan → OpenAI → translationsRegister → translation_ownership
+  → ensureStoreProfile (snapshot → profile once, terms every check) → engine per resource and language:
+    source → plan → memory → OpenAI (store + resource + terminology context) → validate (correct once)
+    → translationsRegister → translation_ownership → translation_memory
 products/create, products/update → translation-resource-event: one product, inline
 nightly tick → automatic sync per language with automatic translation on; translation-coverage per shop
+Store context page → translation-profile: rebuild on request
 ```
 
 The safety boundary is ownership: every value this app writes is hashed in
@@ -627,8 +635,12 @@ history under `prisma/migrations/`. Major groups are:
 - translations: `TranslationLanguage` (the engine's settings per locale),
   `TranslationCoverage` (a counted cache), `TranslationGlossaryTerm`,
   `TranslationSourceOverride`, `TranslationOwnership` (what this app wrote,
-  hashed), `TranslationSync` and `TranslationSyncItem`, `AiUsage` (one row
-  per provider request, with an estimated cost and the pricing version).
+  hashed), `TranslationSync` and `TranslationSyncItem` (with a per-item
+  trace), `AiUsage` (one row per provider request, with an estimated cost
+  and the pricing version); what the engine learnt: `TranslationStoreProfile`
+  (one per shop, leased while building), `TranslationTerm` (the store's
+  vocabulary, classified and weighted) and `TranslationMemory` (how short
+  strings were translated per locale, a person's answer over the machine's).
 
 Most tables are tenant-owned through `shopId`. The current repository-layer
 enforcement gap is tracked in `docs/project-status.md`.

@@ -21,11 +21,17 @@ export const TRANSLATION_ROUTES = {
   syncs: "/app/translations/syncs",
   sync: (id: string) => `/app/translations/syncs/${id}`,
   glossary: "/app/translations/glossary",
+  context: "/app/translations/context",
   usage: "/app/translations/usage",
 } as const;
 
 export type TranslationsSection =
-  "languages" | "editor" | "syncs" | "glossary" | "usage";
+  | "languages"
+  | "editor"
+  | "syncs"
+  | "context"
+  | "glossary"
+  | "usage";
 
 export const TRANSLATIONS_SECTIONS: ReadonlyArray<{
   key: TranslationsSection;
@@ -35,7 +41,8 @@ export const TRANSLATIONS_SECTIONS: ReadonlyArray<{
   { key: "languages", label: "Languages", href: TRANSLATION_ROUTES.languages },
   { key: "editor", label: "Editor", href: TRANSLATION_ROUTES.editor },
   { key: "syncs", label: "Syncs", href: TRANSLATION_ROUTES.syncs },
-  { key: "glossary", label: "Glossary", href: TRANSLATION_ROUTES.glossary },
+  { key: "context", label: "Store context", href: TRANSLATION_ROUTES.context },
+  { key: "glossary", label: "Overrides", href: TRANSLATION_ROUTES.glossary },
   { key: "usage", label: "AI usage", href: TRANSLATION_ROUTES.usage },
 ];
 
@@ -99,4 +106,37 @@ export function formatPercent(value: number | null): string {
 export function describeResourceId(resourceId: string): string {
   const match = /^gid:\/\/shopify\/([A-Za-z]+)\/(\d+)/.exec(resourceId);
   return match ? `${match[1]} ${match[2]}` : resourceId;
+}
+
+/** What a link into the overrides page may ask the dialog to start with. */
+export interface GlossaryPrefill {
+  sourceTerm: string;
+  targetTerm: string;
+  targetLocale: string;
+}
+
+/**
+ * The overrides page opened from a learnt term or an established
+ * translation: `?term=Foil&translation=Hidrokrilo&locale=sl` opens the
+ * dialog with those values so the merchant only confirms. Values are
+ * clipped; a locale that is not a locale code is dropped.
+ */
+export function glossaryPrefill(search: URLSearchParams): GlossaryPrefill | null {
+  const sourceTerm = (search.get("term") ?? "").trim().slice(0, 200);
+  if (sourceTerm === "") return null;
+  const locale = (search.get("locale") ?? "").trim();
+  return {
+    sourceTerm,
+    targetTerm: (search.get("translation") ?? "").trim().slice(0, 200),
+    targetLocale: /^[a-z]{2,3}(-[A-Za-z0-9]{2,8})*$/.test(locale) ? locale : "",
+  };
+}
+
+/** The address that opens the overrides dialog prefilled. */
+export function glossaryUrl(prefill: Partial<GlossaryPrefill> & { sourceTerm: string }): string {
+  const search = new URLSearchParams();
+  search.set("term", prefill.sourceTerm);
+  if (prefill.targetTerm) search.set("translation", prefill.targetTerm);
+  if (prefill.targetLocale) search.set("locale", prefill.targetLocale);
+  return `${TRANSLATION_ROUTES.glossary}?${search.toString()}`;
 }

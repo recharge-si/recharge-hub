@@ -118,6 +118,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
       fields: item.fields,
       error: item.error,
       detail: describeDetail(item.detail),
+      trace: describeTrace(item.trace),
       createdAt: item.createdAt.toISOString(),
     })),
     usage: {
@@ -166,6 +167,54 @@ function describeDetail(value: unknown): string | null {
     .filter(([, count]) => count > 0)
     .map(([reason, count]) => `${count} ${SKIP_LABEL[reason] ?? reason}`);
   return parts.length === 0 ? null : parts.join(", ");
+}
+
+const traceSchema = z
+  .object({
+    sourceLocale: z.string(),
+    sourceReason: z.string(),
+    sourceDisputedBy: z.string().nullable().optional(),
+    profileVersion: z.number().nullable().optional(),
+    attempts: z.number(),
+    reusedKeys: z.array(z.string()),
+    memoryHitIds: z.array(z.string()),
+    termIds: z.array(z.string()),
+    glossaryHits: z.number(),
+    contextKind: z.string(),
+    validation: z.array(
+      z.object({
+        attempt: z.number(),
+        violations: z.array(z.object({ key: z.string(), code: z.string(), severity: z.string() })),
+      }),
+    ),
+  })
+  .passthrough();
+
+/**
+ * Why the translation came out as it did, in one line for a developer
+ * (docs/translations.md § Explainability): the source and how it was
+ * decided, what informed the request, how many requests it took, and what
+ * validation objected to.
+ */
+function describeTrace(value: unknown): string | null {
+  const parsed = traceSchema.safeParse(value);
+  if (!parsed.success) return null;
+  const t = parsed.data;
+  const parts = [
+    `from ${t.sourceLocale} (${t.sourceReason.replace(/_/g, " ")}${t.sourceDisputedBy ? `, detection said ${t.sourceDisputedBy}` : ""})`,
+    t.profileVersion ? `profile v${t.profileVersion}` : "no profile",
+    t.contextKind !== "none" ? `${t.contextKind.replace(/_/g, " ")} context` : null,
+    `${t.attempts} ${t.attempts === 1 ? "request" : "requests"}`,
+    t.reusedKeys.length > 0 ? `${t.reusedKeys.length} from memory` : null,
+    t.memoryHitIds.length > t.reusedKeys.length ? `${t.memoryHitIds.length - t.reusedKeys.length} memory hints` : null,
+    t.termIds.length > 0 ? `${t.termIds.length} terms` : null,
+    t.glossaryHits > 0 ? `${t.glossaryHits} glossary` : null,
+  ];
+  const objections = t.validation.flatMap((round) =>
+    round.violations.map((v) => `${v.key} ${v.code.replace(/_/g, " ")}${v.severity === "soft" ? " (soft)" : ""}`),
+  );
+  if (objections.length > 0) parts.push(`validation: ${[...new Set(objections)].join(", ")}`);
+  return parts.filter((part): part is string => part !== null).join(" · ");
 }
 
 const SKIP_LABEL: Record<string, string> = {
@@ -427,9 +476,16 @@ export default function SyncPage() {
                         </s-badge>
                       </s-table-cell>
                       <s-table-cell>
-                        <s-text color="subdued">
-                          {item.error ?? item.detail ?? ""}
-                        </s-text>
+                        <s-stack direction="block" gap="small-500">
+                          <s-text color="subdued">
+                            {item.error ?? item.detail ?? ""}
+                          </s-text>
+                          {item.trace ? (
+                            <s-text color="subdued">
+                              {item.trace}
+                            </s-text>
+                          ) : null}
+                        </s-stack>
                       </s-table-cell>
                     </s-table-row>
                   ))}
