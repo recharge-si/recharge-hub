@@ -2115,7 +2115,11 @@ export default function ProductTypes() {
                     ))}
                     <div className="ps-row-body">
                       <s-grid
-                        gridTemplateColumns="auto auto 1fr auto"
+                        gridTemplateColumns={
+                          row.hasChildren
+                            ? "auto auto 1fr auto"
+                            : "auto 1fr auto"
+                        }
                         gap="none"
                         alignItems="center"
                       >
