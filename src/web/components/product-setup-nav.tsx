@@ -17,7 +17,7 @@ export function ProductSetupNav({ current }: { current: ProductSetupSection }) {
       borderStyle="none none solid none"
       borderColor="subdued"
       accessibilityRole="navigation"
-      accessibilityLabel="Product setup sections"
+      accessibilityLabel="Metafields sections"
     >
       <s-stack direction="inline" gap="large" alignItems="center">
         {PRODUCT_SETUP_SECTIONS.map((section) =>

@@ -31,7 +31,7 @@ export const APP_HOME = "/app";
 export const APP_NAV: readonly NavItem[] = [
   { href: APP_HOME, label: "Home", rel: "home" },
   { href: "/app/sales", label: "Sales" },
-  { href: "/app/product-setup", label: "Product setup" },
+  { href: "/app/product-setup", label: "Metafields" },
   { href: "/app/metakocka", label: "MetaKocka" },
   { href: "/app/exceptions", label: "Needs attention" },
   { href: "/app/settings", label: "Settings" },

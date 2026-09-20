@@ -52,7 +52,7 @@ is a database name:
 Home              /app                  operations dashboard
 Sales             /app/sales            sale campaigns; /app/sales/:id is the editor,
                                         /app/sales/:id/variants every variant it touches
-Product setup     /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
+Metafields        /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
                                         /attributes/:id one attribute), /sets and /settings
