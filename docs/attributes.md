@@ -1,7 +1,7 @@
 # Product setup
 
 The attribute schema: what information every product type needs, decided
-once and inherited down a tree of types. It is the **Product setup** entry in
+once and inherited down a tree of types. It is the **Metafields** entry in
 the primary navigation, named for the whole job — product types, their
 attributes, reusable sets and the Shopify mappings — rather than for one of
 its tables.
