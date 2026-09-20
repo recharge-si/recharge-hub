@@ -11,6 +11,8 @@ import {
 
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { requestCoverageRefresh } from "~/adapters/translations/syncs.server";
+import { describeLanguage } from "~/domain/translations/languages";
+import { LocaleFlag } from "~/web/components/locale-flag";
 import { TranslationsNav } from "~/web/components/translations-nav";
 import { formatDateTime } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -36,7 +38,15 @@ const HELP_MODAL_ID = "about-translations";
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session, admin } = await authenticate.admin(request);
   const principal = principalFromSession(session);
-  return loadLanguagesOverview(principal, admin);
+  const overview = await loadLanguagesOverview(principal, admin);
+  if (overview.kind === "unavailable") return overview;
+  return {
+    ...overview,
+    rows: overview.rows.map((row) => ({
+      ...row,
+      language: describeLanguage(row.locale, row.name),
+    })),
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -196,20 +206,38 @@ export default function Languages() {
                         clickDelegate={`open-${row.locale}`}
                       >
                         <s-table-cell>
-                          <s-stack direction="block" gap="small-500">
-                            <s-link
-                              id={`open-${row.locale}`}
-                              href={TRANSLATION_ROUTES.language(row.locale)}
-                            >
-                              {row.name}
-                            </s-link>
-                            <s-text color="subdued">
-                              {row.locale}
-                              {row.markets.length > 0
-                                ? ` · ${row.markets.join(", ")}`
-                                : ""}
-                            </s-text>
-                          </s-stack>
+                          <s-grid
+                            gridTemplateColumns="auto 1fr"
+                            gap="small-200"
+                            alignItems="center"
+                          >
+                            <LocaleFlag
+                              regionCode={row.language.regionCode}
+                              regionName={row.language.regionName}
+                            />
+                            <s-stack direction="block" gap="small-500">
+                              <s-link
+                                id={`open-${row.locale}`}
+                                href={TRANSLATION_ROUTES.language(row.locale)}
+                              >
+                                {row.name}
+                              </s-link>
+                              <s-text color="subdued">
+                                {[
+                                  row.language.nativeName &&
+                                  row.language.nativeName !== row.name
+                                    ? row.language.nativeName
+                                    : null,
+                                  row.locale,
+                                  row.markets.length > 0
+                                    ? row.markets.join(", ")
+                                    : null,
+                                ]
+                                  .filter(Boolean)
+                                  .join(" · ")}
+                              </s-text>
+                            </s-stack>
+                          </s-grid>
                         </s-table-cell>
                         <s-table-cell>
                           <s-badge

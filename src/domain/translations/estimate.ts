@@ -21,6 +21,8 @@ const CHARS_PER_TOKEN = 3.5;
 const REQUEST_OVERHEAD_TOKENS = 350;
 /** A translation comes back about as long as it went in, plus JSON quoting. */
 const OUTPUT_RATIO = 1.15;
+/** Characters in a field nothing has been measured for: a short title or two. */
+const DEFAULT_FIELD_CHARS = 120;
 
 export interface CoverageRow {
   locale: string;
@@ -129,16 +131,65 @@ function fieldsForMode(
         count: row.missing + row.outdated,
         chars: row.missingChars + row.outdatedChars,
       };
-    case "force": {
+    case "force":
       // Every field, at the average length of the ones we measured.
-      const measured = row.missing + row.outdated;
-      const avg =
-        measured > 0
-          ? (row.missingChars + row.outdatedChars) / measured
-          : 120;
-      return { count: row.fields, chars: Math.round(row.fields * avg) };
-    }
+      return {
+        count: row.fields,
+        chars: Math.round(row.fields * averageFieldChars(row)),
+      };
   }
+}
+
+/**
+ * What a language the store does not have yet would cover: every field of
+ * every resource, none of it translated.
+ *
+ * Coverage is counted per target locale, but the source side — how many
+ * resources of each type, how many translatable fields each has — is the
+ * same whichever locale is being counted. So the rows of any counted locale
+ * describe the new one, with every field missing. The characters behind
+ * those fields are only measured for fields the counted locale is missing
+ * or has outdated, so the new language's fields are given the average
+ * measured length, the way `force` mode prices a full run. The rows go
+ * through `estimateRun` in `missing` mode like any other.
+ */
+export function coverageForNewLocale(
+  rows: readonly CoverageRow[],
+  locale: string,
+): CoverageRow[] {
+  const byType = new Map<string, CoverageRow>();
+  for (const row of rows) {
+    if (row.locale === locale) continue;
+    const known = byType.get(row.resourceType);
+    // The locale that measured the most characters knows the source best.
+    if (
+      !known ||
+      row.fields > known.fields ||
+      (row.fields === known.fields &&
+        row.missingChars + row.outdatedChars >
+          known.missingChars + known.outdatedChars)
+    )
+      byType.set(row.resourceType, row);
+  }
+  return [...byType.values()]
+    .map((row) => ({
+      ...row,
+      locale,
+      translated: 0,
+      outdated: 0,
+      missing: row.fields,
+      missingChars: Math.round(row.fields * averageFieldChars(row)),
+      outdatedChars: 0,
+    }))
+    .sort((a, b) => (a.resourceType < b.resourceType ? -1 : 1));
+}
+
+/** The measured length of a field in this row, or a guess when none was. */
+function averageFieldChars(row: CoverageRow): number {
+  const measured = row.missing + row.outdated;
+  return measured > 0
+    ? (row.missingChars + row.outdatedChars) / measured
+    : DEFAULT_FIELD_CHARS;
 }
 
 /** Coverage as a whole-number percentage, or null with nothing to count. */

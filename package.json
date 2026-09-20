@@ -34,6 +34,7 @@
     "@shopify/shopify-app-react-router": "^1.1.0",
     "@shopify/shopify-app-session-storage": "^5.0.1",
     "@shopify/shopify-app-session-storage-prisma": "^9.0.0",
+    "country-flag-icons": "^1.6.20",
     "isbot": "^5.1.31",
     "pg-boss": "^12.28.0",
     "pino": "^10.3.1",

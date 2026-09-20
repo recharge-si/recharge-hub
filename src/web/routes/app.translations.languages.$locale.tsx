@@ -34,6 +34,7 @@ import {
 } from "~/adapters/translations/syncs.server";
 import { totalsFor } from "~/domain/translations/coverage";
 import { coveragePercent } from "~/domain/translations/estimate";
+import { describeLanguage } from "~/domain/translations/languages";
 import {
   ALL_CONTENT_GROUPS,
   CONTENT_GROUPS,
@@ -43,7 +44,9 @@ import {
   type ContentGroup,
   type OverwritePolicy,
 } from "~/domain/translations/types";
+import { AiTranslationSettings } from "~/web/components/ai-translation-settings";
 import { ConfirmModal } from "~/web/components/confirm-modal";
+import { LanguageLabel } from "~/web/components/language-label";
 import { SettingRow } from "~/web/components/setting-row";
 import { TranslationsNav } from "~/web/components/translations-nav";
 import { formatDateTime } from "~/web/lib/datetime";
@@ -79,7 +82,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const locale = String(params.locale ?? "");
   if (!isLocaleCode(locale))
     throw redirectWithin(request, TRANSLATION_ROUTES.languages);
-  const notice = new URL(request.url).searchParams.get("notice");
+  const search = new URL(request.url).searchParams;
+  const notice = search.get("notice");
+  const justAdded = search.get("added") === "1";
 
   const [locales, markets, settings, coverage, glossary, syncs] =
     await Promise.all([
@@ -132,8 +137,10 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   return {
     kind: "read" as const,
     notice,
+    justAdded,
     locale,
     name: shopLocale.name,
+    language: describeLanguage(locale, shopLocale.name),
     primary: shopLocale.primary,
     published: shopLocale.published,
     primaryLocale: primary?.locale ?? null,
@@ -408,6 +415,11 @@ function LanguagePage({
     savedKey,
     useCallback(() => setSettings(data.settings), [data.settings]),
   );
+  // Arriving from Add language: the one moment this page reports success.
+  useEffect(() => {
+    if (!data.justAdded || typeof shopify === "undefined") return;
+    shopify.toast.show(`${data.name} added.`);
+  }, [data.justAdded, data.name]);
   const dirty = JSON.stringify(settings) !== savedKey;
   useSaveBar(SAVE_BAR_ID, dirty);
 
@@ -495,7 +507,7 @@ function LanguagePage({
 
         <s-section heading="In Shopify">
           <s-stack direction="block" gap="base">
-            <SettingRow label="Locale" summary={data.locale} />
+            <LanguageLabel language={data.language} />
             <SettingRow
               label="Status"
               summary={
@@ -670,41 +682,15 @@ function LanguagePage({
         ) : (
           <s-section heading="AI translation">
             <s-stack direction="block" gap="base">
-              {!data.aiConfigured ? (
-                <s-text color="subdued">
-                  AI translation is not configured on this server. Settings can
-                  be saved and take effect once it is.
-                </s-text>
-              ) : null}
-              <s-checkbox
-                label="Enable AI translation"
-                checked={settings.aiEnabled}
-                onChange={(e) => set({ aiEnabled: e.currentTarget.checked })}
-                {...(busy ? { disabled: true } : {})}
+              <AiTranslationSettings
+                value={settings}
+                onChange={set}
+                configured={data.aiConfigured}
+                overwritePolicy={settings.overwritePolicy}
+                disabled={busy}
               />
               {settings.aiEnabled ? (
                 <>
-                  <s-stack direction="block" gap="small-300">
-                    <s-checkbox
-                      label="Translate new content automatically"
-                      details="A product created or changed in Shopify is translated within minutes. Collections, pages and articles are picked up nightly."
-                      checked={settings.autoTranslateNew}
-                      onChange={(e) =>
-                        set({ autoTranslateNew: e.currentTarget.checked })
-                      }
-                      {...(busy ? { disabled: true } : {})}
-                    />
-                    <s-checkbox
-                      label="Update outdated translations automatically"
-                      details="When the source text changes, translations the AI wrote are redone. What a person wrote or corrected is left alone."
-                      checked={settings.autoUpdateOutdated}
-                      onChange={(e) =>
-                        set({ autoUpdateOutdated: e.currentTarget.checked })
-                      }
-                      {...(busy ? { disabled: true } : {})}
-                    />
-                  </s-stack>
-
                   <s-stack direction="block" gap="small-300">
                     <s-text type="strong">Content</s-text>
                     {ALL_CONTENT_GROUPS.map((group) => (

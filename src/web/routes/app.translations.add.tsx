@@ -9,9 +9,12 @@ import {
 } from "react-router";
 import { z } from "zod";
 
-import { isConfigured } from "~/adapters/ai/openai.server";
+import { isConfigured, translationModel } from "~/adapters/ai/openai.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
-import { saveLanguageSettings } from "~/adapters/db/repositories/translations.server";
+import {
+  getCoverage,
+  saveLanguageSettings,
+} from "~/adapters/db/repositories/translations.server";
 import {
   enableShopLocale,
   listAvailableLocales,
@@ -25,42 +28,88 @@ import {
   requestCoverageRefresh,
   startSync,
 } from "~/adapters/translations/syncs.server";
+import { totalsFor } from "~/domain/translations/coverage";
+import {
+  coverageForNewLocale,
+  estimateRun,
+  formatCount,
+} from "~/domain/translations/estimate";
+import { describeLanguage } from "~/domain/translations/languages";
+import { formatMicrosUsd } from "~/domain/translations/pricing";
 import {
   ALL_CONTENT_GROUPS,
+  CONTENT_GROUPS,
   typesForGroups,
 } from "~/domain/translations/types";
+import {
+  AiTranslationSettings,
+  type AiTranslationValue,
+} from "~/web/components/ai-translation-settings";
+import { LanguageLabel } from "~/web/components/language-label";
+import {
+  LanguagePicker,
+  type ConfiguredLanguage,
+} from "~/web/components/language-picker";
+import { ToggleRow } from "~/web/components/toggle-row";
 import { TranslationsNav } from "~/web/components/translations-nav";
+import { formatDateTime } from "~/web/lib/datetime";
 import {
   actorFromSession,
   principalFromSession,
 } from "~/web/lib/principal.server";
 import { redirectWithin } from "~/web/lib/redirects";
-import { TRANSLATION_ROUTES } from "~/web/lib/translations";
+import {
+  TRANSLATION_ROUTES,
+  aiStateLabel,
+  shopifyStateLabel,
+} from "~/web/lib/translations";
 
 /**
  * Add language (docs/translations.md § Add language): choose one of the
  * locales Shopify supports, enable it in Shopify, say what the AI should do
  * for it, and optionally publish it and translate what exists.
  *
- * The locale is created by `shopLocaleEnable`; nothing is written here until
- * Shopify has answered. Our settings row follows, and an initial sync if
- * asked. Publishing is a separate Shopify call, so a language whose
+ * One card of settings and a sidebar that answers them: what was chosen,
+ * what Shopify and the AI will do, and — when existing content is to be
+ * translated — how much of it there is and roughly what it costs, from the
+ * coverage cache. The one button lives in the sidebar with the reason it
+ * is closed.
+ *
+ * The locale is created by `shopLocaleEnable`; nothing is written here
+ * until Shopify has answered. Our settings row follows, and an initial sync
+ * if asked. Publishing is a separate Shopify call, so a language whose
  * translation has not started is never visible to shoppers by accident.
+ *
+ * A language Shopify has just enabled holds no translations at all —
+ * Shopify deletes them when a locale is removed — so "missing" and
+ * "missing and outdated" would translate exactly the same fields here. The
+ * form offers the choice that exists: translate what the store has now, or
+ * not yet. The language's own page has the three modes once there is
+ * something to distinguish.
  */
 export const loader = async ({ request }: LoaderFunctionArgs) => {
-  const { admin } = await authenticate.admin(request);
-  const [available, enabled, markets] = await Promise.all([
+  const { session, admin } = await authenticate.admin(request);
+  const principal = principalFromSession(session);
+  const [available, enabled, markets, coverage] = await Promise.all([
     listAvailableLocales(admin),
     listShopLocales(admin),
     listMarkets(admin),
+    getCoverage(principal),
   ]);
-  const taken = new Set(
-    enabled.kind === "read"
-      ? enabled.locales.map((locale) => locale.locale)
-      : [],
-  );
+  const enabledLocales = enabled.kind === "read" ? enabled.locales : [];
+  const taken = new Set(enabledLocales.map((locale) => locale.locale));
+  const primary = enabledLocales.find((locale) => locale.primary) ?? null;
+
   return {
-    available: available.filter((locale) => !taken.has(locale.isoCode)),
+    available: available
+      .filter((locale) => !taken.has(locale.isoCode))
+      .map((locale) => describeLanguage(locale.isoCode, locale.name)),
+    configured: enabledLocales.map((locale): ConfiguredLanguage => ({
+      ...describeLanguage(locale.locale, locale.name),
+      href: TRANSLATION_ROUTES.language(locale.locale),
+      state: shopifyStateLabel(locale),
+    })),
+    primary: primary ? { locale: primary.locale, name: primary.name } : null,
     presences:
       markets.kind === "read"
         ? markets.markets.flatMap((market) =>
@@ -72,7 +121,9 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
             })),
           )
         : [],
-    aiConfigured: isConfigured(),
+    coverageRows: coverage.rows,
+    coverageAt: coverage.readAt?.toISOString() ?? null,
+    ai: { configured: isConfigured(), model: translationModel() },
   };
 };
 
@@ -172,51 +223,74 @@ export const action = async ({
       `${TRANSLATION_ROUTES.language(form.locale)}?notice=${encodeURIComponent(`Added, but not published: ${publishFailed}`)}`,
     );
   }
-  throw redirectWithin(request, TRANSLATION_ROUTES.language(form.locale));
+  throw redirectWithin(
+    request,
+    `${TRANSLATION_ROUTES.language(form.locale)}?added=1`,
+  );
 };
 
-const SHOWN = 12;
+type Initial = "none" | "missing";
+
+const INITIAL_LABEL: Record<Initial, string> = {
+  none: "Not translated now",
+  missing: "Translated now",
+};
 
 export default function AddLanguage() {
-  const { available, presences, aiConfigured } = useLoaderData<typeof loader>();
+  const data = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
-  const [search, setSearch] = useState("");
   const [locale, setLocale] = useState<string | null>(null);
   const [publish, setPublish] = useState(false);
   const [presenceIds, setPresenceIds] = useState<string[]>([]);
-  const [aiEnabled, setAiEnabled] = useState(aiConfigured);
-  const [autoNew, setAutoNew] = useState(true);
-  const [autoOutdated, setAutoOutdated] = useState(true);
-  const [initial, setInitial] = useState<
-    "none" | "missing" | "missing_outdated"
-  >("none");
+  const [ai, setAi] = useState<AiTranslationValue>({
+    aiEnabled: data.ai.configured,
+    autoTranslateNew: true,
+    autoUpdateOutdated: true,
+  });
+  const [initial, setInitial] = useState<Initial>("none");
 
-  const matches = useMemo(() => {
-    const needle = search.trim().toLowerCase();
-    const list = needle
-      ? available.filter(
-          (item) =>
-            item.name.toLowerCase().includes(needle) ||
-            item.isoCode.toLowerCase().includes(needle),
-        )
-      : available;
-    return list;
-  }, [available, search]);
-  const chosen = available.find((item) => item.isoCode === locale) ?? null;
+  const chosen = useMemo(
+    () => data.available.find((item) => item.locale === locale) ?? null,
+    [data.available, locale],
+  );
   const busy = fetcher.state !== "idle";
+  const translatesNow =
+    ai.aiEnabled && data.ai.configured && initial === "missing";
+
+  // Every field of every resource, none of it translated yet: the coverage
+  // of a language the store does not have, from the rows of one it does.
+  const scope = useMemo(() => {
+    if (!chosen || data.coverageAt === null) return null;
+    const rows = coverageForNewLocale(data.coverageRows, chosen.locale);
+    if (rows.length === 0) return null;
+    const groups = ALL_CONTENT_GROUPS.map((group) => ({
+      group,
+      label: CONTENT_GROUPS[group].label,
+      ...totalsFor(rows, chosen.locale, [...CONTENT_GROUPS[group].types]),
+    })).filter((row) => row.fields > 0);
+    const estimate = estimateRun({
+      rows,
+      locales: [chosen.locale],
+      resourceTypes: typesForGroups([...ALL_CONTENT_GROUPS]),
+      mode: "missing",
+      model: data.ai.model,
+      coverageAt: data.coverageAt,
+    });
+    return { groups, estimate, coverageAt: data.coverageAt };
+  }, [chosen, data.coverageAt, data.coverageRows, data.ai.model]);
 
   const submit = () => {
-    if (!locale) return;
+    if (!locale || busy) return;
     fetcher.submit(
       {
         form: JSON.stringify({
           locale,
           publish,
           presenceIds,
-          aiEnabled,
-          autoTranslateNew: autoNew,
-          autoUpdateOutdated: autoOutdated,
-          initial: aiEnabled ? initial : "none",
+          aiEnabled: ai.aiEnabled,
+          autoTranslateNew: ai.autoTranslateNew,
+          autoUpdateOutdated: ai.autoUpdateOutdated,
+          initial: translatesNow ? "missing" : "none",
         }),
       },
       { method: "post" },
@@ -228,16 +302,6 @@ export default function AddLanguage() {
       <s-link slot="breadcrumb-actions" href={TRANSLATION_ROUTES.languages}>
         Translations
       </s-link>
-      <s-button
-        slot="primary-action"
-        variant="primary"
-        type="button"
-        onClick={submit}
-        {...(!locale || busy ? { disabled: true } : {})}
-        {...(busy ? { loading: true } : {})}
-      >
-        Add language
-      </s-button>
 
       <s-stack direction="block" gap="large">
         <TranslationsNav current="languages" />
@@ -248,180 +312,247 @@ export default function AddLanguage() {
           </s-banner>
         ) : null}
 
-        <s-section heading="1. Language">
-          <s-stack direction="block" gap="base">
-            <s-text-field
-              label="Find a language"
-              labelAccessibilityVisibility="exclusive"
-              placeholder="German, de, Slovenian…"
-              value={search}
-              onInput={(event) => setSearch(event.currentTarget.value)}
-              onChange={(event) => setSearch(event.currentTarget.value)}
-              {...(busy ? { disabled: true } : {})}
-            />
-            {chosen ? (
-              <s-box padding="base" border="base" borderRadius="base">
-                <s-grid
-                  gridTemplateColumns="1fr auto"
-                  gap="base"
-                  alignItems="center"
-                >
-                  <s-stack direction="block" gap="small-500">
-                    <s-text type="strong">{chosen.name}</s-text>
-                    <s-text color="subdued">{chosen.isoCode}</s-text>
-                  </s-stack>
-                  <s-button type="button" onClick={() => setLocale(null)}>
-                    Change
-                  </s-button>
-                </s-grid>
-              </s-box>
-            ) : (
-              <s-stack direction="block" gap="small-300">
-                {matches.slice(0, SHOWN).map((item) => (
-                  <s-clickable
-                    key={item.isoCode}
-                    border="base"
-                    borderRadius="base"
-                    padding="small-200"
-                    onClick={() => setLocale(item.isoCode)}
-                  >
-                    <s-grid
-                      gridTemplateColumns="1fr auto"
-                      gap="base"
-                      alignItems="center"
-                    >
-                      <s-text>{item.name}</s-text>
-                      <s-text color="subdued">{item.isoCode}</s-text>
-                    </s-grid>
-                  </s-clickable>
-                ))}
-                {matches.length > SHOWN ? (
-                  <s-text color="subdued">
-                    {`${matches.length - SHOWN} more. Keep typing to narrow the list.`}
-                  </s-text>
-                ) : null}
-                {matches.length === 0 ? (
-                  <s-text color="subdued">
-                    No language matches that. Shopify lists the languages a
-                    store can have.
-                  </s-text>
-                ) : null}
-              </s-stack>
-            )}
-          </s-stack>
-        </s-section>
-
-        <s-section heading="2. In Shopify">
-          <s-stack direction="block" gap="base">
-            <s-stack direction="block" gap="small-400">
-              <s-checkbox
-                label="Publish now"
-                checked={publish}
-                onChange={(event) => setPublish(event.currentTarget.checked)}
-                {...(busy ? { disabled: true } : {})}
+        <s-section>
+          <s-stack direction="block" gap="large">
+            <s-stack direction="block" gap="small-300">
+              <LanguagePicker
+                label="Language"
+                languages={data.available}
+                configured={data.configured}
+                value={locale}
+                onChange={setLocale}
+                disabled={busy}
               />
               <s-text color="subdued">
-                A published language is visible to shoppers. Shopify adds a
-                language unpublished; leave this off to translate first and
-                publish from the language&apos;s page when it reads well.
+                {data.primary
+                  ? `Shopify's list of languages a store can have. The AI translates from ${data.primary.name} (${data.primary.locale}), the store's default language.`
+                  : "Shopify's list of languages a store can have."}
               </s-text>
             </s-stack>
-            {presences.length > 0 ? (
-              <s-stack direction="block" gap="small-400">
-                <s-text type="strong">Available in</s-text>
-                <s-text color="subdued">
-                  Which markets serve this language. A market not ticked here
-                  keeps its own languages; this can be changed later.
-                </s-text>
-                {presences.map((presence) => (
-                  <s-checkbox
-                    key={presence.id}
-                    label={`${presence.market} · ${presence.label}`}
-                    details={`Default language ${presence.defaultLocale}`}
-                    checked={presenceIds.includes(presence.id)}
-                    onChange={(event) =>
-                      setPresenceIds((now) =>
-                        event.currentTarget.checked
-                          ? [...now, presence.id]
-                          : now.filter((id) => id !== presence.id),
-                      )
-                    }
-                    {...(busy ? { disabled: true } : {})}
-                  />
-                ))}
-              </s-stack>
-            ) : null}
-          </s-stack>
-        </s-section>
 
-        <s-section heading="3. AI translation">
-          <s-stack direction="block" gap="base">
-            {!aiConfigured ? (
+            <s-divider />
+
+            <s-stack direction="block" gap="base">
+              <s-heading>Shopify visibility</s-heading>
+              <ToggleRow
+                label="Publish language"
+                description="Make this language available to shoppers as soon as it is added. Shopify adds a language unpublished; leave this off to translate first and publish from the language's page when it reads well."
+                checked={publish}
+                onChange={setPublish}
+                disabled={busy}
+              />
+              {data.presences.length > 0 ? (
+                <s-stack direction="block" gap="small-400">
+                  <s-text type="strong">Available in</s-text>
+                  <s-text color="subdued">
+                    Which markets serve this language. A market not ticked keeps
+                    its own languages; this can be changed later.
+                  </s-text>
+                  {data.presences.map((presence) => (
+                    <s-checkbox
+                      key={presence.id}
+                      label={`${presence.market} · ${presence.label}`}
+                      details={`Default language ${presence.defaultLocale}`}
+                      checked={presenceIds.includes(presence.id)}
+                      onChange={(event) =>
+                        setPresenceIds((now) =>
+                          event.currentTarget.checked
+                            ? [...now, presence.id]
+                            : now.filter((id) => id !== presence.id),
+                        )
+                      }
+                      {...(busy ? { disabled: true } : {})}
+                    />
+                  ))}
+                </s-stack>
+              ) : null}
+            </s-stack>
+
+            <s-divider />
+
+            <s-stack direction="block" gap="base">
+              <s-heading>AI translation</s-heading>
+              <AiTranslationSettings
+                value={ai}
+                onChange={(patch) => setAi((now) => ({ ...now, ...patch }))}
+                configured={data.ai.configured}
+                disabled={busy || !data.ai.configured}
+              />
+            </s-stack>
+
+            <s-divider />
+
+            <s-stack direction="block" gap="base">
+              <s-heading>Existing content</s-heading>
+              <s-choice-list
+                label="What happens to the content the store already has"
+                labelAccessibilityVisibility="exclusive"
+                name="initial"
+                values={[initial]}
+                onChange={(event) => {
+                  const value = event.currentTarget.values[0];
+                  if (value === "none" || value === "missing")
+                    setInitial(value);
+                }}
+                {...(busy || !ai.aiEnabled || !data.ai.configured
+                  ? { disabled: true }
+                  : {})}
+              >
+                <s-choice value="none">
+                  Don&apos;t translate existing content
+                  <s-text slot="details">
+                    Only content created or changed from now on is handled, as
+                    set under AI translation. Translate the rest whenever you
+                    like from the language&apos;s page.
+                  </s-text>
+                </s-choice>
+                <s-choice value="missing">
+                  Translate existing content now
+                  <s-text slot="details">
+                    Every product, collection, page, article, menu and metafield
+                    is translated as soon as the language is added. You can
+                    watch and stop the sync; its cost is recorded under AI
+                    usage.
+                  </s-text>
+                </s-choice>
+              </s-choice-list>
               <s-text color="subdued">
-                AI translation is not configured on this server. The language
-                can still be added and translated by hand.
+                {!data.ai.configured
+                  ? "Existing content can be translated once AI translation is configured on this server."
+                  : !ai.aiEnabled
+                    ? "Turn on AI translation to translate existing content."
+                    : "A translation you write or correct yourself is never replaced by the AI on a later run."}
               </s-text>
-            ) : null}
-            <s-checkbox
-              label="Enable AI translation"
-              checked={aiEnabled}
-              onChange={(event) => setAiEnabled(event.currentTarget.checked)}
-              {...(busy || !aiConfigured ? { disabled: true } : {})}
-            />
-            {aiEnabled ? (
-              <s-stack direction="block" gap="small-300">
-                <s-checkbox
-                  label="Translate new content automatically"
-                  checked={autoNew}
-                  onChange={(event) => setAutoNew(event.currentTarget.checked)}
-                  {...(busy ? { disabled: true } : {})}
-                />
-                <s-checkbox
-                  label="Update outdated translations automatically"
-                  details="Only translations the AI wrote itself. Anything a person wrote or corrected is left alone."
-                  checked={autoOutdated}
-                  onChange={(event) =>
-                    setAutoOutdated(event.currentTarget.checked)
-                  }
-                  {...(busy ? { disabled: true } : {})}
-                />
-              </s-stack>
-            ) : null}
+            </s-stack>
           </s-stack>
         </s-section>
-
-        {aiEnabled ? (
-          <s-section heading="4. Existing content">
-            <s-choice-list
-              label="Translate what the store already has"
-              labelAccessibilityVisibility="exclusive"
-              name="initial"
-              values={[initial]}
-              onChange={(event) => {
-                const value = event.currentTarget.values[0];
-                if (
-                  value === "none" ||
-                  value === "missing" ||
-                  value === "missing_outdated"
-                )
-                  setInitial(value);
-              }}
-              {...(busy ? { disabled: true } : {})}
-            >
-              <s-choice value="none">Not yet</s-choice>
-              <s-choice value="missing">Translate missing content</s-choice>
-              <s-choice value="missing_outdated">
-                Translate missing and outdated content
-              </s-choice>
-            </s-choice-list>
-            <s-text color="subdued">
-              Starts a sync you can watch and cancel. Its estimate and cost are
-              shown on the sync&apos;s page and on AI usage.
-            </s-text>
-          </s-section>
-        ) : null}
       </s-stack>
+
+      {/*
+       * Sidebar: what has been chosen and what it comes to, beside the form
+       * as it scrolls, with the one action that moves it on. Layout only —
+       * every colour and space is Polaris's.
+       */}
+      <div
+        slot="aside"
+        style={{
+          position: "sticky",
+          top: "1rem",
+          maxHeight: "calc(100vh - 2rem)",
+          overflowY: "auto",
+        }}
+      >
+        <s-stack direction="block" gap="base">
+          <s-section heading="Summary">
+            <s-stack direction="block" gap="base">
+              {chosen ? (
+                <LanguageLabel language={chosen} size="large" />
+              ) : (
+                <s-text color="subdued">No language chosen yet.</s-text>
+              )}
+
+              <s-stack direction="block" gap="small-300">
+                <SummaryLine
+                  label="Shopify"
+                  value={publish ? "Published" : "Unpublished"}
+                />
+                <SummaryLine
+                  label="AI translation"
+                  value={aiStateLabel({ primary: false }, ai)}
+                />
+                <SummaryLine
+                  label="Existing content"
+                  value={INITIAL_LABEL[translatesNow ? "missing" : "none"]}
+                />
+              </s-stack>
+
+              {translatesNow ? (
+                <>
+                  <s-divider />
+                  <s-stack direction="block" gap="small-300">
+                    <s-text type="strong">Estimated scope</s-text>
+                    {scope === null ? (
+                      <s-text color="subdued">
+                        {data.coverageAt === null
+                          ? "The store's content has not been counted yet, so there is no estimate. The sync's page shows what it covers and costs as it runs."
+                          : "Nothing to translate was counted. The sync's page shows what it covers as it runs."}
+                      </s-text>
+                    ) : (
+                      <>
+                        {scope.groups.map((row) => (
+                          <SummaryLine
+                            key={row.group}
+                            label={row.label}
+                            value={`${formatCount(row.resources)} · ${formatCount(row.fields)} fields`}
+                          />
+                        ))}
+                        <s-divider />
+                        <SummaryLine
+                          label="Estimated fields"
+                          value={`~${formatCount(scope.estimate.fields)}`}
+                        />
+                        <SummaryLine
+                          label="Estimated cost"
+                          value={
+                            scope.estimate.priced
+                              ? `~${formatMicrosUsd(scope.estimate.costMicros)}`
+                              : "Not priced"
+                          }
+                        />
+                        <s-text color="subdued">
+                          {`From content counted ${formatDateTime(scope.coverageAt)}, with ${scope.estimate.model}. ${
+                            scope.estimate.priced
+                              ? "Cost is estimated from the model's list price; the provider's own figures are recorded as the sync runs."
+                              : `${scope.estimate.model} is not in the pricing table; tokens are still recorded.`
+                          }`}
+                        </s-text>
+                      </>
+                    )}
+                  </s-stack>
+                </>
+              ) : null}
+
+              <s-divider />
+
+              <s-stack direction="block" gap="small-300">
+                <s-button
+                  type="button"
+                  variant="primary"
+                  inlineSize="fill"
+                  onClick={submit}
+                  {...(!locale || busy ? { disabled: true } : {})}
+                  {...(busy ? { loading: true } : {})}
+                >
+                  {translatesNow
+                    ? "Add language and translate"
+                    : "Add language"}
+                </s-button>
+                <s-button
+                  inlineSize="fill"
+                  href={TRANSLATION_ROUTES.languages}
+                  {...(busy ? { disabled: true } : {})}
+                >
+                  Cancel
+                </s-button>
+                {!locale ? (
+                  <s-text color="subdued">Choose a language to add it.</s-text>
+                ) : null}
+              </s-stack>
+            </s-stack>
+          </s-section>
+        </s-stack>
+      </div>
     </s-page>
+  );
+}
+
+/** "Shopify — Unpublished": a fact of the summary, label and answer. */
+function SummaryLine({ label, value }: { label: string; value: string }) {
+  return (
+    <s-grid gridTemplateColumns="1fr auto" gap="base" alignItems="baseline">
+      <s-text color="subdued">{label}</s-text>
+      <s-text>{value}</s-text>
+    </s-grid>
   );
 }
 

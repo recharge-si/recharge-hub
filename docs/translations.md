@@ -223,7 +223,7 @@ have a webhook here.
 
 ```text
 Translations        /app/translations                       Languages: Shopify state, AI state, coverage, needs work, last sync
-  Add language      /app/translations/add                   pick a Shopify-supported locale; publish; markets; AI; initial translation
+  Add language      /app/translations/add                   one card: language picker · Shopify visibility · AI translation · existing content; a sidebar with the summary, the scope estimate and the one button
   Language          /app/translations/languages/:locale     In Shopify (publish / unpublish, markets, remove) · AI translation · Coverage · Translate · Recent syncs
   Editor            /app/translations/editor                workspace: a rail of resources beside the one open; each field's source beside its translation; source language; translate now
   Translate store   /app/translations/translate             source · languages · content · mode · estimate · start
@@ -245,6 +245,37 @@ chosen and the pane with a way back after. The pane's columns are capped so
 prose is never stretched across a wide window; a longer window is for the
 rail beside them. Unsaved edits hold a change of resource behind the save
 bar's own leave confirmation.
+
+### Languages
+
+A locale is named the same way on every screen (`domain/translations/
+languages`, `LanguageLabel`): a flag, Shopify's English name, the
+language's own name for itself when it differs, and the locale. Nothing
+about a language is hand-typed: the native name comes from
+`Intl.DisplayNames` and the region from `Intl.Locale` — the locale's own
+region (`de-AT`) or, for a bare language, CLDR's likely subtag (`de` →
+Germany), and none where that is not a country (Esperanto). The flag
+(`LocaleFlag`) is one of about a hundred `country-flag-icons` SVGs compiled
+into the bundle, one chunk shared by the screens that show it; a region
+outside the set gets a globe rather than a wrong flag. Flags are decoration:
+the name is always written out.
+
+Add language is one card and a sidebar. The picker (`LanguagePicker`) is a
+field that opens a floating, scrolling list with a search box — Polaris has
+no combobox, so it is `s-clickable`, `s-popover` and `s-search-field` with
+a listbox's keyboard on top — searching English name, native name, code,
+locale and country, accents and case aside, best match first
+(`searchLanguages`). Languages the store already has are listed under
+"Already added" and open their own page instead of being chosen twice. The
+booleans are switches; the two automatic rows are disabled, not hidden,
+while AI translation is off. A language Shopify has just enabled holds no
+translations, so existing content is a two-way choice — translate it now or
+not — and "now" is a `missing` sync. When it is chosen, the sidebar shows
+the scope from the coverage cache: the source side of any counted locale
+with every field missing (`coverageForNewLocale`), priced like any other
+run; with nothing counted it says so rather than guessing. The one button is
+in the sidebar with the reason it is closed; success is the language's page
+with a toast (`?added=1`).
 
 Every Shopify mutation shows what Shopify answered, not what was asked.
 Removing a language explains that Shopify deletes its translations, and
