@@ -115,9 +115,8 @@ no query that anything needs yet.
 
 Every hub page opens with the workspace's own navigation — Product types |
 Attributes | Attribute sets | Settings — as links, the current one stated.
-The Product types link returns to the type last chosen in this browser
-(`localStorage`), so leaving for the catalogue and coming back lands where the
-person was.
+Product types goes to the bare tree; a type is a dialog over it, named in
+the address while it is open.
 
 | Route                                        | What it is                                                                 |
 | -------------------------------------------- | -------------------------------------------------------------------------- |

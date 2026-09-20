@@ -36,9 +36,6 @@ export const PRODUCT_SETUP_SECTIONS = [
 export type ProductSetupSection =
   (typeof PRODUCT_SETUP_SECTIONS)[number]["key"];
 
-/** Where the last chosen product type is remembered, per browser. */
-export const LAST_TYPE_KEY = "product-setup:last-type";
-
 export const DATA_TYPE_LABEL: Record<DataType, string> = {
   text: "Text",
   integer: "Whole number",

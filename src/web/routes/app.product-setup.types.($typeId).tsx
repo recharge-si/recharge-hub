@@ -53,10 +53,7 @@ import {
   type EditableAttribute,
 } from "~/web/components/attribute-form";
 import { Dropdown } from "~/web/components/dropdown";
-import {
-  ProductSetupNav,
-  rememberType,
-} from "~/web/components/product-setup-nav";
+import { ProductSetupNav } from "~/web/components/product-setup-nav";
 import {
   PRODUCT_SETUP_ROUTES,
   SCOPE_LABEL,
@@ -726,10 +723,6 @@ export default function ProductTypes() {
     if (!result?.ok) return;
     if (typeof shopify !== "undefined") shopify.toast.show(result.message);
   }, [result]);
-
-  useEffect(() => {
-    if (selected) rememberType(selected.id);
-  }, [selected]);
 
   // While a row is being dragged, the page accepts every dragover as a
   // move, so the cursor never turns into a "not allowed" sign over a gap or
