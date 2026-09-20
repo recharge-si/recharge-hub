@@ -2166,9 +2166,7 @@ export default function ProductTypes() {
                               color="subdued"
                             />
                           </button>
-                        ) : (
-                          <span className="ps-twisty" aria-hidden="true" />
-                        )}
+                        ) : null}
                         <s-clickable
                           onClick={() => open(row.id)}
                           borderRadius="base"
