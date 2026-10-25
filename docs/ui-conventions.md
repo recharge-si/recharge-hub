@@ -224,8 +224,9 @@ meaning a SKU.
 
 ## Maintenance notice
 `MaintenanceBanner` (in `routes/app.tsx`) sits above every page. It reads
-`https://maintenance.time-4-action.com/banner.json` in the browser every minute: a
-warning banner for planned maintenance, a critical one while it runs, nothing
-otherwise or when the file cannot be read. The text is set from Slack with
-`/maintenance` (time-4-action/t4a-infra, `servers/t4a/README.md`); the app never
-writes it and no loader waits on it.
+`https://maintenance.time-4-action.com/banner.json?app=hub` in the browser every
+minute and shows one banner per maintenance, most urgent first, at most three: a
+warning banner while one is planned, a critical one while it runs, nothing
+otherwise or when the file cannot be read. Maintenances are set from Slack with
+`/maintenance` or at maintenance.time-4-action.com/admin (time-4-action/t4a-maintenance);
+the app never writes them and no loader waits on them.
