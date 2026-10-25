@@ -221,3 +221,11 @@ differs it is given, because the code is not going to be renamed to match.
 Words that must not appear in merchant-facing copy: **article** (the build
 specification's word for a MetaKocka product), **token**, **template**, **code**
 meaning a SKU.
+
+## Maintenance notice
+`MaintenanceBanner` (in `routes/app.tsx`) sits above every page. It reads
+`https://maintenance.time-4-action.com/banner.json` in the browser every minute: a
+warning banner for planned maintenance, a critical one while it runs, nothing
+otherwise or when the file cannot be read. The text is set from Slack with
+`/maintenance` (time-4-action/t4a-infra, `servers/t4a/README.md`); the app never
+writes it and no loader waits on it.

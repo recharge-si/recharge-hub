@@ -11,6 +11,7 @@ import {
 import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { AppBridgeNavigation } from "~/web/components/app-bridge-navigation";
+import { MaintenanceBanner } from "~/web/components/maintenance-banner";
 import { navFor } from "~/web/lib/navigation";
 import { principalFromSession } from "~/web/lib/principal.server";
 import { describeStaleSessionError } from "~/web/lib/route-errors";
@@ -59,6 +60,7 @@ export default function AppLayout() {
           </s-link>
         ))}
       </s-app-nav>
+      <MaintenanceBanner />
       <Outlet />
     </>
   );
