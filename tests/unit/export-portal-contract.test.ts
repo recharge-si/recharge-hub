@@ -60,7 +60,9 @@ describe("sourceSchema.portalUrl", () => {
   it.each(["/shopify", "/", "portal.example/shopify", ""])(
     "still rejects %j: the portal is the one that is fixed",
     (portalUrl) => {
-      expect(sourceSchema.safeParse({ ...base, portalUrl }).success).toBe(false);
+      expect(sourceSchema.safeParse({ ...base, portalUrl }).success).toBe(
+        false,
+      );
     },
   );
 });

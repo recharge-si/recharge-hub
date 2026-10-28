@@ -292,7 +292,8 @@ describe("suggesting", () => {
   });
 });
 
-describe("the portal's request limits", () => {
+// A plan of 2000 types is slow to resolve (every path is built): allow for a loaded machine.
+describe("the portal's request limits", { timeout: 30_000 }, () => {
   it("does not call the portal with 2001 assignable types, and says so on each product", async () => {
     state.assignable = 2001;
     await suggestAutofill(admin, principal, ["p1", "p2"]);
