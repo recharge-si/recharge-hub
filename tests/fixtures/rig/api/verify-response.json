@@ -1,0 +1,82 @@
+{
+  "ok": true,
+  "checks": [
+    {
+      "id": "sail-fit",
+      "ok": true
+    },
+    {
+      "id": "board-fit",
+      "ok": true
+    },
+    {
+      "id": "board-sail-range",
+      "ok": true
+    },
+    {
+      "id": "sail-mast-rdm",
+      "ok": true
+    },
+    {
+      "id": "sail-mast-length",
+      "ok": true
+    },
+    {
+      "id": "sail-boom-range",
+      "ok": true
+    },
+    {
+      "id": "mast-base-type",
+      "ok": true
+    },
+    {
+      "id": "fin-box",
+      "ok": true
+    },
+    {
+      "id": "fin-length",
+      "ok": true
+    }
+  ],
+  "items": [
+    {
+      "variantId": 45500000005,
+      "role": "sail",
+      "price": "699.00",
+      "available": true
+    },
+    {
+      "variantId": 45500000015,
+      "role": "mast",
+      "price": "399.00",
+      "available": true
+    },
+    {
+      "variantId": 45500000019,
+      "role": "base",
+      "price": "19.90",
+      "available": true
+    },
+    {
+      "variantId": 45500000025,
+      "role": "boom",
+      "price": "299.00",
+      "available": true
+    },
+    {
+      "variantId": 45500000031,
+      "role": "board",
+      "price": "899.00",
+      "available": true
+    },
+    {
+      "variantId": 45500000037,
+      "role": "fin",
+      "price": "69.90",
+      "available": true
+    }
+  ],
+  "total": "2385.80",
+  "currency": "EUR",
+  "warnings": []
+}

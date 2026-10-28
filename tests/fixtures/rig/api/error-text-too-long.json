@@ -1,0 +1,5 @@
+{
+  "code": "text_too_long",
+  "field": "text",
+  "max": 1000
+}

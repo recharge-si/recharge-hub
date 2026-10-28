@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`prompts > lists only facts from the engine output 1`] = `
+"You explain a windsurfing rig to a customer, one short sentence per part.
+Use only the facts below. Do not name any product other than the one you are describing, do not give links or prices, do not make claims about safety.
+Write each sentence in English, at most 200 characters.
+Reply with one JSON object and nothing else: {"whys": {"<id>": "<sentence>"}} with one entry per id.
+Rider: 82 kg; skill intermediate; freeride; wind 15-25 knots.
+Parts:
+- id 45500000005: sail; title "Aero Ride 5.8"; variant 5.8; area m2 5.8, boom max cm 175, boom min cm 165, category freeride, mast length max cm 460, mast length min cm 430, mast RDM 30
+- id 45500000015: mast; title "Carbon Mast 430"; variant 430; base type tendon, length cm 430, mast RDM 30
+- id 45500000019: base; title "Tendon Base"; variant Default; base type tendon
+- id 45500000025: boom; title "Alu Boom 150-190"; variant 150-190; boom max cm 190, boom min cm 150
+- id 45500000031: board; title "Free Board 105"; variant 105 L; fin box tuttle, largest sail m2 7, smallest sail m2 5, volume L 105
+- id 45500000037: fin; title "Tuttle Fin 36"; variant 36 cm; fin box tuttle, fin length cm 36
+Checks that passed: sail-fit, board-fit, board-sail-range, sail-mast-rdm, sail-mast-length, sail-boom-range, mast-base-type, fin-box, fin-length."
+`;
