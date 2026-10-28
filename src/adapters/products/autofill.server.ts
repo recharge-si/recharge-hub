@@ -74,6 +74,13 @@ export interface AutofillOptions {
 const AI_TIMEOUT_MS = 90_000;
 /** Products per categorize call: well inside the portal's 100 kB request limit. */
 const CATEGORIZE_BATCH = 10;
+/**
+ * What the portal accepts in one request (its `LIMITS` in
+ * `productAutofill.service.js`, a 422 beyond them). Checked here first so a
+ * large plan gets one clear sentence per product, not a refusal per batch.
+ */
+export const PORTAL_MAX_CATEGORIES = 2000;
+export const PORTAL_MAX_ATTRIBUTES = 200;
 /** Shorter in a batch, where the name and supplier data decide the type. */
 const CATEGORIZE_DESCRIPTION = 1200;
 
@@ -189,6 +196,14 @@ export async function suggestAutofill(
     else toCategorize.push(product);
   }
 
+  if (toCategorize.length > 0 && types.length > PORTAL_MAX_CATEGORIES) {
+    await failAll(
+      toCategorize.map((p) => p.productId),
+      `The product type list has ${types.length} entries; the AI can read at most ${PORTAL_MAX_CATEGORIES}.`,
+    );
+    toCategorize.length = 0;
+  }
+
   const suggested = new Map<
     string,
     { typeId: string | null; confidence: number | null; reason: string | null }
@@ -231,6 +246,14 @@ export async function suggestAutofill(
         const read = await readAttributeValues(admin, schema, typeId, product);
         const variantIds = product.variants.map((v) => v.variantId);
         const ask = attributesToFill(read.fields, read.inputs, variantIds);
+        if (ask.length > PORTAL_MAX_ATTRIBUTES) {
+          await failAutofill(
+            principal,
+            product.productId,
+            `This product has ${ask.length} attributes to fill; the AI can read at most ${PORTAL_MAX_ATTRIBUTES}.`,
+          );
+          continue;
+        }
         if (ask.length > 0) {
           const answer = await portal.client.extractAttributes({
             product: aiProduct(product),
