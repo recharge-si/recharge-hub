@@ -1,0 +1,215 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Rig builder prototype (variant C)</title>
+<style>
+  :root {
+    --brand: #bd1218; --brand-dark: #a00f14; --info: #1257a3; --urgency: #b45309;
+    --bg: #fff; --fg: #121212; --muted: #5c5c5c; --line: #d9d9d9; --soft: #f5f5f5; --focus: #1257a3;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#161616; --fg:#f2f2f2; --muted:#a8a8a8; --line:#3a3a3a; --soft:#202020; --brand:#e0363c; --brand-dark:#c92b31; --info:#6aa7ec; --urgency:#e0a15a; --focus:#6aa7ec; }
+  }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.5 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .proto-bar { position:sticky; top:0; z-index:5; background:var(--soft); border-bottom:1px solid var(--line); padding:8px 16px; display:flex; flex-wrap:wrap; gap:8px 16px; align-items:center; font-size:14px; }
+  .proto-bar b { margin-right:4px; }
+  .proto-bar button, .proto-bar select { font:inherit; padding:6px 10px; border:1px solid var(--line); background:var(--bg); color:var(--fg); border-radius:4px; cursor:pointer; min-height:36px; }
+  .proto-bar button[aria-pressed="true"] { border-color:var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+  .proto-note { font-size:13px; color:var(--muted); padding:6px 16px; border-bottom:1px solid var(--line); }
+  main { max-width:1100px; margin:0 auto; padding:24px 16px 64px; }
+  h1 { font-size:clamp(1.6rem,4vw,2.2rem); line-height:1.15; margin:0 0 8px; letter-spacing:-.01em; }
+  h2 { font-size:1.15rem; margin:0 0 8px; }
+  p.lead { color:var(--muted); margin:0 0 20px; max-width:60ch; }
+  label, .label { display:block; font-weight:600; margin-bottom:6px; }
+  textarea, input[type=number], select.f { width:100%; font:inherit; padding:10px 12px; border:1px solid var(--line); border-radius:4px; background:var(--bg); color:var(--fg); min-height:44px; }
+  textarea { min-height:120px; resize:vertical; }
+  :focus-visible { outline:3px solid var(--focus); outline-offset:2px; }
+  .btn { font:inherit; font-weight:600; min-height:44px; padding:10px 20px; border-radius:4px; border:1px solid var(--brand); background:var(--brand); color:#fff; cursor:pointer; }
+  .btn:hover { background:var(--brand-dark); }
+  .btn[disabled] { opacity:.55; cursor:not-allowed; }
+  .btn.ghost { background:transparent; color:var(--fg); border-color:var(--line); }
+  .btn.ghost:hover { background:var(--soft); }
+  .chips { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0 16px; }
+  .chip { min-height:44px; padding:8px 14px; border:1px solid var(--line); border-radius:22px; background:var(--bg); color:var(--fg); font:inherit; cursor:pointer; }
+  .chip[aria-pressed="true"] { border-color:var(--brand); box-shadow: inset 0 0 0 1px var(--brand); }
+  .counter { font-size:13px; color:var(--muted); text-align:right; }
+  .privacy { font-size:13px; color:var(--muted); margin-top:8px; }
+  .row { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px 16px; margin-bottom:16px; }
+  .split { display:grid; grid-template-columns: minmax(0,360px) minmax(0,1fr); gap:32px; align-items:start; }
+  @media (max-width: 800px) { .split { grid-template-columns:1fr; } }
+  .steps { display:flex; gap:6px; margin:0 0 20px; padding:0; list-style:none; flex-wrap:wrap; }
+  .steps li { font-size:13px; padding:4px 10px; border-radius:14px; border:1px solid var(--line); color:var(--muted); }
+  .steps li[aria-current="step"] { color:var(--fg); border-color:var(--brand); font-weight:600; }
+  .reading { background:var(--soft); border:1px solid var(--line); border-radius:6px; padding:12px 14px; margin:20px 0 16px; }
+  .reading .label { margin-bottom:8px; font-size:14px; }
+  .reading .chips { margin:0 0 8px; }
+  .reading .chip { min-height:44px; display:inline-flex; gap:6px; align-items:center; }
+  .reading .chip small { color:var(--muted); }
+  .rig { border:1px solid var(--line); border-radius:6px; overflow:hidden; }
+  .part { display:grid; grid-template-columns:72px 1fr auto; gap:6px 14px; padding:14px; border-bottom:1px solid var(--line); align-items:start; }
+  .part:last-of-type { border-bottom:0; }
+  .img { width:72px; height:72px; border-radius:4px; background:repeating-linear-gradient(45deg,var(--soft),var(--soft) 8px,var(--bg) 8px,var(--bg) 16px); border:1px solid var(--line); }
+  .role { font-size:12px; letter-spacing:.06em; text-transform:uppercase; color:var(--muted); }
+  .name { font-weight:600; }
+  .spec { color:var(--muted); font-size:14px; }
+  .why { font-size:14px; margin-top:4px; }
+  .price { font-weight:600; text-align:right; white-space:nowrap; }
+  .stock { font-size:13px; }
+  .stock.order { color:var(--info); }
+  .stock.low { color:var(--urgency); }
+  .owned { background:var(--soft); }
+  .swap { font:inherit; font-size:14px; background:none; border:0; color:var(--fg); text-decoration:underline; cursor:pointer; padding:10px 0; min-height:44px; }
+  .total { display:flex; justify-content:space-between; align-items:center; gap:12px; padding:14px; background:var(--soft); border-top:1px solid var(--line); flex-wrap:wrap; }
+  .total .sum { font-size:1.25rem; font-weight:700; }
+  .checks { font-size:14px; color:var(--muted); margin:10px 0 0; }
+  .note { margin:12px 0; padding:10px 12px; border-left:3px solid var(--line); background:var(--soft); font-size:14px; }
+  .note.attn { border-left-color:var(--brand); }
+  .skeleton .img, .skeleton .bar { background:linear-gradient(90deg,var(--soft),var(--line),var(--soft)); background-size:200% 100%; animation:sh 1.2s infinite linear; }
+  .skeleton .bar { height:14px; border-radius:3px; margin:6px 0; }
+  @keyframes sh { from{background-position:200% 0} to{background-position:-200% 0} }
+  @media (prefers-reduced-motion: reduce) { .skeleton .img, .skeleton .bar { animation:none; } }
+  .status { color:var(--muted); font-size:14px; margin:8px 0; }
+  .hidden { display:none !important; }
+  .disclaimer { font-size:13px; color:var(--muted); margin-top:20px; max-width:70ch; }
+  .vlabel { font-size:13px; color:var(--muted); margin:0 0 16px; }
+</style>
+</head>
+<body>
+<div class="proto-bar" role="toolbar" aria-label="Prototype controls">
+  <b>Variant C · Live rig</b>
+  <b style="margin-left:12px">State</b>
+  <select id="state" aria-label="State">
+    <option value="empty">Empty</option>
+    <option value="loading">Loading</option>
+    <option value="result">Result</option>
+    <option value="partial">Partial rig (missing part)</option>
+    <option value="norig">Needs one more answer</option>
+    <option value="plain">Plain mode (AI off)</option>
+    <option value="notready">Not ready</option>
+    <option value="ratelimit">Rate limited</option>
+    <option value="error">Network error</option>
+    <option value="long">Long input</option>
+  </select>
+  <b style="margin-left:12px">Width</b>
+  <button data-w="full" aria-pressed="true">Full</button>
+  <button data-w="phone" aria-pressed="false">390 px</button>
+</div>
+<div class="proto-note">Sample data only. Products, prices and sizes below are invented for layout; the real rig comes from the store's catalogue and the signed-off rules table (PRD 4). Colours use the theme's brand variables; nothing is green.</div>
+
+<main id="stage"></main>
+
+<script>
+const SAMPLE_TEXT = "82 kg, third season, freeride at 15 to 25 knots. I already own a boom.";
+const LONG_TEXT = ("I'm 82 kg and about 182 cm, I have been windsurfing for three seasons mostly on the Adriatic in 15 to 25 knots with a thermal in the afternoon. ").repeat(7).slice(0,1000);
+
+const RIG = [
+  { role:"Board", name:"Freeride board 112 L", vendor:"Brand A", spec:"112 L · 74 cm · Tuttle box · sail range 5.0–7.0", price:1299, why:"112 litres is enough float for 82 kg while you are still improving your gybes.", stock:"In stock" },
+  { role:"Sail", name:"Freeride sail 5.8 m²", vendor:"Brand B", spec:"5.8 m² · 460 mast · boom 170–180 cm", price:699, why:"A 5.8 m² sail covers 15 to 25 knots at your weight.", stock:"In stock" },
+  { role:"Mast", name:"Carbon mast 460 / 75 %", vendor:"Brand B", spec:"460 cm · RDM 400 · 75 % carbon", price:489, why:"Matches the sail's mast length and stiffness.", stock:"2 left", low:true },
+  { role:"Boom", name:"Your boom", vendor:"", spec:"You said you own one. Check it opens to 170–180 cm.", price:0, why:"", owned:true },
+  { role:"Base", name:"Power joint base", vendor:"Brand C", spec:"Fits the mast above", price:79, why:"The mast has a power-joint foot.", stock:"In stock" },
+  { role:"Fin", name:"Freeride fin 38 cm", vendor:"Brand D", spec:"38 cm · Tuttle box", price:139, why:"Fits the board's Tuttle box and suits the sail size.", stock:"On order · ships in 7 days", order:true },
+];
+const fmt = n => n.toLocaleString("en-IE",{style:"currency",currency:"EUR"});
+
+let variant="C", state="empty";
+const $ = s => document.querySelector(s);
+
+function reading(editable){
+  return `<div class="reading" role="group" aria-label="How we understood you">
+    <div class="label">This is how we read your description. Change anything that is wrong.</div>
+    <div class="chips">
+      <button class="chip">82 kg <small>edit</small></button>
+      <button class="chip">Intermediate <small>edit</small></button>
+      <button class="chip">Freeride <small>edit</small></button>
+      <button class="chip">15–25 knots <small>edit</small></button>
+      <button class="chip">Owns a boom <small>edit</small></button>
+    </div>
+    <button class="btn ghost">Update rig</button>
+  </div>`;
+}
+
+function part(p, partial){
+  if (partial && p.role==="Base") {
+    return `<div class="part"><div class="img" aria-hidden="true"></div><div><div class="role">Base</div><div class="name">No matching base in stock</div><div class="spec">The mast needs a power-joint base and we have none today. Ask us, we can order one.</div></div><div class="price"></div></div>`;
+  }
+  return `<div class="part ${p.owned?'owned':''}">
+    <div class="img" aria-hidden="true"></div>
+    <div>
+      <div class="role">${p.role}</div>
+      <div class="name">${p.name}${p.vendor?` <span class="spec">· ${p.vendor}</span>`:''}</div>
+      <div class="spec">${p.spec}</div>
+      ${p.why && state!=="plain" ? `<div class="why">${p.why}</div>` : ''}
+      ${p.stock ? `<div class="stock ${p.low?'low':''} ${p.order?'order':''}">${p.stock}</div>` : ''}
+      ${!p.owned ? `<button class="swap">See 2 alternatives</button>` : ''}
+    </div>
+    <div class="price">${p.owned?'Yours':fmt(p.price)}</div>
+  </div>`;
+}
+
+function rigBlock(partial){
+  const items = RIG;
+  const buy = items.filter(p=>!p.owned && !(partial && p.role==="Base"));
+  const total = buy.reduce((a,p)=>a+p.price,0);
+  return `<section aria-live="polite" tabindex="-1" aria-label="Your rig">
+    ${state==="plain" ? `<p class="note">Short descriptions today. The rig is the same.</p>` : ''}
+    <div class="rig">${items.map(p=>part(p,partial)).join('')}
+      <div class="total"><div><div class="sum">${fmt(total)}</div><div class="spec">${buy.length} parts · you keep your boom</div></div>
+      <button class="btn">Add ${buy.length} parts to cart</button></div></div>
+    <p class="checks">Checked: sail and mast fit · boom range · board and sail range · fin box.${partial?' Not checked: base (none in stock).':''}</p>
+    <p class="disclaimer">A guide, not a promise. If you are unsure, visit us in Ljubljana and we will check the rig with you.</p>
+  </section>`;
+}
+
+function skeleton(){
+  const row = `<div class="part skeleton"><div class="img"></div><div><div class="bar" style="width:30%"></div><div class="bar" style="width:70%"></div><div class="bar" style="width:55%"></div></div><div class="bar" style="width:60px"></div></div>`;
+  return `<section aria-busy="true" aria-label="Your rig, loading"><p class="status" role="status">Reading your description…</p><div class="rig">${row.repeat(5)}</div><p><a href="#" onclick="return false">Cancel</a></p></section>`;
+}
+
+function stateBlock(){
+  switch(state){
+    case "loading": return skeleton();
+    case "result": case "plain": return reading() + rigBlock(false);
+    case "partial": return reading() + `<p class="note attn">We could build five of six parts. The base is the one we cannot offer today.</p>` + rigBlock(true);
+    case "norig": return `<div class="note attn" role="status"><label for="w">One thing we need: how much do you weigh?</label><div class="row" style="max-width:320px;margin:8px 0 0"><input id="w" type="number" inputmode="numeric" min="30" max="200" placeholder="kg"></div><p style="margin:8px 0 0"><button class="btn">Continue</button></p></div>`;
+    case "notready": return `<div class="note"><b>The rig builder is not open yet.</b><p style="margin:6px 0 0">We are still adding the details it needs. In the meantime, browse <a href="#" onclick="return false">windsurf</a> or <a href="#" onclick="return false">write to us</a> and we will build a rig with you.</p></div>`;
+    case "ratelimit": return `<div class="note" role="status">You have built a lot of rigs. Please try again in 12 minutes.</div>`;
+    case "error": return `<div class="note attn" role="alert">We could not reach the shop. <button class="btn ghost" style="margin-left:8px">Try again</button></div>`;
+    default: return "";
+  }
+}
+
+function formC(){
+  return `<div>
+    <h2>About you</h2>
+    <div class="row" style="grid-template-columns:1fr 1fr"><div><label for="kg">Weight (kg)</label><input id="kg" type="number" value="${state==='empty'?'':82}"></div><div><label for="lv">Level</label><select id="lv" class="f"><option>Improving</option><option>Just starting</option><option>Confident</option></select></div></div>
+    <div class="row" style="grid-template-columns:1fr 1fr"><div><label for="w1">Wind from (kn)</label><input id="w1" type="number" value="15"></div><div><label for="w2">to (kn)</label><input id="w2" type="number" value="25"></div></div>
+    <div class="label">Already own</div><div class="chips"><button class="chip" aria-pressed="false">Board</button><button class="chip" aria-pressed="false">Sail</button><button class="chip" aria-pressed="true">Boom</button><button class="chip" aria-pressed="false">Fin</button></div>
+    <label for="t">Or just tell us</label>
+    <textarea id="t" maxlength="1000" style="min-height:90px" placeholder="82 kg, third season, freeride…">${state==='long'?LONG_TEXT:''}</textarea>
+    <div class="counter">${state==='long'?LONG_TEXT.length:0} / 1000</div>
+    <p class="privacy">Text is read by an AI service. We do not keep it.</p>
+  </div>`;
+}
+
+function render(){
+  let html = `<h1>Build your rig</h1><p class="lead">Tell us how you ride. We put together a board, sail, mast, boom and fin that fit each other, and tell you why.</p>`;
+  html += `<p class="vlabel">Variant ${variant} · state: ${$("#state").selectedOptions[0].text}</p>`;
+  const showsResult = ["result","partial","plain","loading","norig"].includes(state);
+  const blocked = ["notready"].includes(state);
+  {
+    const right = blocked ? stateBlock() : (showsResult||["ratelimit","error"].includes(state)) ? (state==="result"||state==="plain"||state==="partial" ? `<div class="status" role="status">Updated as you change your answers. <button class="btn ghost" style="margin-left:6px">Explain my rig</button></div>` : '') + stateBlock() : `<div class="note">Enter your weight and wind range and the rig appears here.</div>`;
+    html += `<div class="split"><div>${formC()}</div><div>${right}</div></div>`;
+  }
+  $("#stage").innerHTML = html;
+    $("#stage").querySelectorAll(".chip").forEach(c=>{ if(c.hasAttribute("aria-pressed")) c.onclick=()=>c.setAttribute("aria-pressed", c.getAttribute("aria-pressed")==="true"?"false":"true"); });
+}
+document.querySelectorAll("[data-w]").forEach(b=>b.onclick=()=>{document.querySelectorAll("[data-w]").forEach(x=>x.setAttribute("aria-pressed",x===b));$("#stage").style.maxWidth=b.dataset.w==="phone"?"390px":"1100px";render();});
+$("#state").onchange=e=>{state=e.target.value;render();};
+render();
+</script>
+</body>
+</html>
