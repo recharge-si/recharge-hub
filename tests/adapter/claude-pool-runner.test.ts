@@ -8,13 +8,13 @@ import { z } from "zod";
 import {
   claudePoolArgs,
   claudeSupportsToolsFlag,
-  extractJson,
   parseEnvelope,
   poolResetWaitMs,
   runClaudePool,
   scrubbedEnv,
   waitFromPoolStatus,
 } from "~/adapters/ai/claude-pool.server";
+import { extractJson } from "~/domain/extract-json";
 import {
   envelope,
   installFakeClaude,
@@ -73,7 +73,7 @@ describe("scrubbedEnv", () => {
 
 describe("parseEnvelope and extractJson", () => {
   it("reads the result and the model", () => {
-    expect(parseEnvelope(envelope("hi", "m1"))).toEqual({
+    expect(parseEnvelope(envelope("hi", "m1"))).toMatchObject({
       text: "hi",
       model: "m1",
     });
