@@ -31,6 +31,8 @@ export function autofillView(
       variantId: value.variantId,
     })),
     error: state.error,
+    source: state.source,
+    model: state.model,
     requestedAt: state.requestedAt.toISOString(),
     decidedAt: state.decidedAt?.toISOString() ?? null,
   };

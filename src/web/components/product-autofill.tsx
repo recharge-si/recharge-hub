@@ -4,6 +4,7 @@ import { useFetcher, useNavigate } from "react-router";
 import { Dropdown } from "~/web/components/dropdown";
 import {
   confidenceLabel,
+  sourceLine,
   confidenceTone,
   isAutofillWorking,
   type AutofillView,
@@ -204,6 +205,9 @@ export function ProductAutofill({
                   {view.reason ??
                     "The AI found no product type that fits. Choose one yourself, or add one to the plan."}
                 </s-text>
+              ) : null}
+              {sourceLine(view) ? (
+                <s-text color="subdued">{sourceLine(view) ?? ""}</s-text>
               ) : null}
             </s-stack>
 

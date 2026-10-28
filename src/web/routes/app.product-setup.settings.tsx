@@ -14,6 +14,7 @@ import { schemaFromCsv } from "~/domain/attributes/csv";
 import { workspaceState } from "~/domain/attributes/impact";
 import { clearRule } from "~/domain/attributes/mutations";
 import { pathOf } from "~/domain/attributes/resolve";
+import { mergeRigPack } from "~/domain/attributes/rig-pack";
 import { parseAttributeSchema } from "~/domain/attributes/schema";
 import { starterSchema } from "~/domain/attributes/starter";
 import { emptySchema } from "~/domain/attributes/types";
@@ -169,6 +170,27 @@ export const action = async ({
         schema: starterSchema(),
         message: "Example loaded.",
       }));
+    case "rig-pack": {
+      const current = await getAttributeSchema(principal);
+      if (
+        current.revision === revision &&
+        !mergeRigPack(current.schema).changed
+      )
+        return {
+          ok: true,
+          message: "Already in the plan",
+          revision: current.revision,
+        };
+      return commit("attribute_schema.rig_pack.added", (schema) => {
+        const merged = mergeRigPack(schema);
+        const kept = merged.skipped.length;
+        return {
+          ok: true,
+          schema: merged.schema,
+          message: `Added ${countOf(merged.added.attributes, "rig attribute")} and ${countOf(merged.added.types, "product type")}${kept > 0 ? `; ${kept} already in the plan` : ""}.`,
+        };
+      });
+    }
     case "clear":
       return commit("attribute_schema.cleared", () => ({
         ok: true,
@@ -525,6 +547,20 @@ export default function ProductSetupSettings() {
                 </s-grid>
               ))}
             </s-stack>
+          </s-section>
+
+          <s-section>
+            <CardHeader
+              title="Rig attributes"
+              subtitle="Adds the product types and measurements the rig builder reads: sails, masts, boards, booms, bases, fins. Nothing in Shopify changes."
+            >
+              <s-button
+                onClick={() => submit({ intent: "rig-pack" })}
+                {...(busy ? { disabled: true } : {})}
+              >
+                Add rig attributes
+              </s-button>
+            </CardHeader>
           </s-section>
 
           <s-section>
