@@ -119,6 +119,7 @@ export interface RigAlternative {
   variantTitle: string | null;
   priceMinor: number;
   currency: string;
+  specs: Partial<Record<SpecField, number | string>>;
 }
 
 export interface Check {

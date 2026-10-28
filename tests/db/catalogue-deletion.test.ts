@@ -44,6 +44,7 @@ describeDatabase("catalogue deletion", () => {
     status: "ACTIVE",
     tags: [],
     imageUrl: null,
+    description: null,
     shopifyUpdatedAt: null,
     variants: [
       {
@@ -53,6 +54,9 @@ describeDatabase("catalogue deletion", () => {
         title: null,
         priceMinor: 1000,
         compareAtMinor: null,
+        options: [],
+        inventoryQuantity: null,
+        availableForSale: true,
       },
     ],
   };
@@ -62,6 +66,8 @@ describeDatabase("catalogue deletion", () => {
       productId: id,
       title: `Product ${id}`,
       handle: null,
+      onlineStoreUrl: null,
+      description: null,
       vendor: null,
       productType: null,
       status: "ACTIVE",
@@ -81,6 +87,9 @@ describeDatabase("catalogue deletion", () => {
           title: null,
           priceMinor: 500,
           compareAtMinor: null,
+          options: [],
+          inventoryQuantity: null,
+          availableForSale: true,
           metafields: {},
         },
       ],

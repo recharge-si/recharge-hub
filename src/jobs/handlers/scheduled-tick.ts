@@ -113,6 +113,7 @@ export async function handleScheduledTick(job: Job<unknown>): Promise<void> {
   );
 
   await fanOutCatalogueSnapshots(cadence);
+  await fanOutRigPurge(cadence);
   await fanOutTranslations(cadence);
 }
 
@@ -222,14 +223,20 @@ async function fanOutCatalogueSnapshots(cadence: Cadence): Promise<void> {
       installState: "installed",
       ...(cadence === "quarter_hourly"
         ? {
-            saleCampaigns: {
-              some: {
-                OR: [
-                  { status: "scheduled" },
-                  { status: "active", dynamicMembership: true },
-                ],
+            // A shop with the rig builder on also wants fresh stock.
+            OR: [
+              {
+                saleCampaigns: {
+                  some: {
+                    OR: [
+                      { status: "scheduled" },
+                      { status: "active", dynamicMembership: true },
+                    ],
+                  },
+                },
               },
-            },
+              { rigBuilderEnabled: true },
+            ],
           }
         : {}),
     },
@@ -248,6 +255,31 @@ async function fanOutCatalogueSnapshots(cadence: Cadence): Promise<void> {
       getLogger().error(
         { err: error, shop: shop.domain, cadence },
         "Could not queue the catalogue snapshot for one shop",
+      );
+      captureException(error, { shop: shop.domain, cadence });
+    }
+  }
+}
+
+/** The rig builder's 90-day retention, once a night for every installed shop. */
+async function fanOutRigPurge(cadence: Cadence): Promise<void> {
+  if (cadence !== "nightly") return;
+  const shops = await prisma.shop.findMany({
+    where: { uninstalledAt: null, installState: "installed" },
+    select: { domain: true },
+  });
+  for (const shop of shops) {
+    try {
+      await enqueueThrottled(
+        QUEUES.purgeRigRequests,
+        { shopDomain: shop.domain },
+        `rig-purge:${shop.domain}`,
+        20 * 60 * 60,
+      );
+    } catch (error) {
+      getLogger().error(
+        { err: error, shop: shop.domain },
+        "Could not queue the rig request purge for one shop",
       );
       captureException(error, { shop: shop.domain, cadence });
     }

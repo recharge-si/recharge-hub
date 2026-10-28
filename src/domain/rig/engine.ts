@@ -530,6 +530,7 @@ function toAlternative(candidate: RigCandidate): RigAlternative {
     variantTitle: candidate.variantTitle,
     priceMinor: candidate.priceMinor,
     currency: candidate.currency,
+    specs: candidate.specs,
   };
 }
 

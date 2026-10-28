@@ -73,14 +73,14 @@ export const profileReplySchema = z.record(z.string(), z.unknown());
 /* Template sentences                                                         */
 /* -------------------------------------------------------------------------- */
 
-function spec(item: RigItem, field: keyof RigItem["specs"]): string {
+function spec(item: Pick<RigItem, "specs">, field: keyof RigItem["specs"]): string {
   const value = item.specs[field];
   return value === undefined ? "?" : String(value);
 }
 
 /** The engine's own sentence for a part: always true, never fancy. */
 export function templateWhy(
-  item: RigItem,
+  item: Pick<RigItem, "role" | "specs">,
   rider: RiderFacts,
   locale: Locale,
 ): string {

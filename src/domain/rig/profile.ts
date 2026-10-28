@@ -282,13 +282,13 @@ export function mergeProfile(
   const source: Partial<Record<string, ProfileSource>> = {};
   const pick = <K extends keyof Answers & keyof ParsedModelProfile>(
     field: K,
-  ): Answers[K] | null => {
+  ): NonNullable<Answers[K]> | null => {
     const fromForm = answers?.[field];
     if (fromForm !== undefined) {
       source[field] = "form";
       return fromForm;
     }
-    const fromText = text?.[field] as Answers[K] | undefined;
+    const fromText = text?.[field] as NonNullable<Answers[K]> | undefined;
     if (fromText !== undefined) {
       source[field] = "text";
       return fromText;
