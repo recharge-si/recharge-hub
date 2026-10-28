@@ -26,7 +26,8 @@
     "env": "shopify app env",
     "deploy": "shopify app deploy",
     "shopify": "shopify",
-    "prisma": "prisma"
+    "prisma": "prisma",
+    "fill:attributes": "tsx scripts/fill-attributes.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.16.3",

@@ -87,3 +87,33 @@ export function coverage(
   }
   return out;
 }
+
+/**
+ * The full keys a product holds a value for, as `coverage` wants them: a
+ * product attribute counts when the product has the metafield, a variant
+ * attribute only when every variant has it (the same rule as
+ * `attributeCompleteness` on the product page).
+ */
+export function filledKeys(
+  schema: AttributeSchema,
+  product: {
+    metafields: readonly string[];
+    variants: ReadonlyArray<{ metafields: readonly string[] }>;
+  },
+): string[] {
+  const own = new Set(product.metafields);
+  const variantSets = product.variants.map(
+    (variant) => new Set(variant.metafields),
+  );
+  const filled: string[] = [];
+  for (const attribute of schema.attributes) {
+    const key = attribute.key.trim();
+    if (key === "") continue;
+    const has =
+      attribute.scope === "variant"
+        ? variantSets.length > 0 && variantSets.every((set) => set.has(key))
+        : own.has(key);
+    if (has) filled.push(key);
+  }
+  return filled;
+}
