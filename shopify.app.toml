@@ -102,6 +102,15 @@ api_version = "2026-07"
   topics = [ "products/create" ]
   uri = "/webhooks/products/create"
 
+# The storefront rig builder (docs/rig-builder.md). recharge.si/apps/rig/* is
+# forwarded here as /proxy/rig/*. Shopify signs every request; the routes
+# verify the signature. Run `npm run deploy` after merging, and enable the
+# proxy for the app in the Partner dashboard if the dashboard asks for it.
+[app_proxy]
+url = "https://recharge-hub.time-4-action.com/proxy/rig"
+prefix = "apps"
+subpath = "rig"
+
 [access_scopes]
 # Learn more at https://shopify.dev/docs/apps/tools/cli/configuration#access_scopes
 # `read_discounts` is for one warning only: a sale campaign's preview names

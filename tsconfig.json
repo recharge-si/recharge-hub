@@ -5,6 +5,7 @@
     "src/**/*.tsx",
     "tests/**/*.ts",
     "*.ts",
+    "scripts/**/*.ts",
     ".react-router/types/**/*"
   ],
   "compilerOptions": {
