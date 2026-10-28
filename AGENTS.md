@@ -26,6 +26,10 @@ documentation, or Git—not only in a conversation.
 - `docs/sources.md` owns the Sources module and the export portal contract:
   why two apps share one UI, what each side owns, the API this app calls,
   the schema-driven fields, failures, screens and known limits.
+- `docs/rig-builder.md` owns the storefront rig builder: the App Proxy
+  contract (build, explain, verify), the pure engine, the placeholder
+  rules table, readiness, the claude-pool provider, limits, storage and
+  the quality gate.
 - Code and tests define implemented behavior. Git records historical behavior.
 - `docs/agent/HANDOFF.md`, when present, is the concise state of substantial
   unfinished work. It is not a permanent backlog.

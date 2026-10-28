@@ -96,6 +96,26 @@ Completed work belongs in Git history, not in this file.
 
 ## Product and integration gaps
 
+### Rig builder (docs/rig-builder.md)
+
+- The rules table is a placeholder (`R1-placeholder`). Launch needs the
+  expert-signed table, 30/30 on `scripts/rig-eval.ts` and ten rigs reviewed by
+  hand; the sign-off name and date are not recorded yet.
+- The App Proxy is configured in `shopify.app.toml` but not yet enabled or
+  verified on a dev app (single-merchant distribution); `npm run deploy` follows
+  the merge.
+- The image change (python3, `claude`, vendored claude-pool, read-only pool
+  mount) has not been built or run; `claude` on Alpine/musl is unverified.
+- The pack has no per-board fin length range; the fin rule is part of the rules
+  table. No harness, no "on order" parts, no live stock read, no
+  Good/Better/Best.
+- Rate limits are per web process and reset on restart. Bulk read duration with
+  the new fields is not measured on the real store. Sentry breadcrumbs per build
+  are not added. The "Plain mode N of last 50" line is on the Rig builder card,
+  not on Home.
+- Slovenian sentences are drafts. Legal wording for AI processing of the
+  buyer's text is open (PRD 4 question 4).
+
 ### T-27 — Sources: built on both sides, not yet run against the real store
 
 Both sides of `docs/sources.md` § The contract exist as of 2026-09-22: this
