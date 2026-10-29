@@ -112,13 +112,13 @@ Recharge store on the portal's Shopify page under *API access*, paste it
 into `/app/sources/connection`, and watch the first real per-source run.
 Known limits stay as listed in `docs/sources.md` § Known limits.
 
-**Review before publish** (2026-09-27): this app's side is built — the queue
+**Review before publish** (2026-09-27): built on both sides — the queue
 at `/app/sources/review`, translate and approve from it, counts on the
-Sources pages (`docs/sources.md` § Review before publish). The portal's side
-is not: a per-source setting for new products (publish / wait for review),
-creating them as drafts tagged `awaiting-review` and `portal-source:<id>`,
-and never writing `status` on a later update. Not yet tried against the
-store.
+Sources pages (`docs/sources.md` § Review before publish), and the portal's
+per-source setting for new products (publish / wait for review), drafts
+tagged `awaiting-review` and `portal-source:<id>`, and no `status` write on
+a later update (`t4a-partner-portal-api/docs/sources-api.md`). Not yet tried
+against the store.
 
 **AI autofill** (2026-10-06): both sides built — the portal's
 `POST /api/v1/ai/categorize` and `/ai/extract-attributes`
@@ -129,6 +129,27 @@ portal API deployed with the two routes (it already has
 `ANTHROPIC_API_KEY`), then one product autofilled and its suggestion
 checked by hand before a batch. Prompt quality against the real catalogue
 is untested.
+
+**First live pass checklist** (PRD 1, US-108; not run — it writes to the
+live store and needs a person with credentials and explicit approval). Use a
+source whose scope is a single test product; delete the run's product changes
+afterwards. Record pass/fail, counts and screenshots here, and delete the
+"not yet run" text above when done.
+
+1. Portal deployed with `/api/v1` and the two `/ai/*` routes. `GET
+   <portal>/api/v1/connection` with the minted key and `X-Shop-Domain:
+   <store>.myshopify.com` returns 200 and the tenant name; a key for another
+   shop returns 403.
+2. `/app/sources/connection`, key pasted: the tenant name and "verified".
+3. `/app/sources` lists the real sources; the counts equal the portal's own
+   admin page (record both numbers).
+4. One source set to Run now: a run appears as `running`, then `completed`;
+   `itemCount` equals the portal's own count; the log lines are readable.
+5. One product autofilled: the suggested type is one of the plan's
+   assignable types, and three suggested values checked by hand against the
+   product page.
+6. Open question to settle from the real run history: does the portal's
+   `needs_attention` match what the Sources header counts?
 
 ### T-05/T-06 — Shipping and discounts: representable, not yet configured
 

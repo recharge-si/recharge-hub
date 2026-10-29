@@ -174,9 +174,11 @@ there is not active).
 
 ```ts
 SourceType    { kind, label, description?, fields: Field[] }
-Field         { key, label, type, help?, placeholder?, required?, options?, group? }
+Field         { key, label, type, help?, placeholder?, required?, options?, tokens?, sample?, group? }
               type ∈ text | textarea | number | boolean | select | secret | url | email
               options: [{ value, label }] — select only
+              tokens: [{ key, label, example? }] — text only: the {placeholders} the value may use
+              sample: { label, after } — with tokens: the real record the examples come from
               group: a heading the field is listed under
 SourceSummary { id, name, kind, kindLabel, enabled, destination?, schedule, health, lastRun? }
               schedule: { mode: manual | automatic, description?, nextRunAt? }
@@ -481,6 +483,18 @@ portal has already published the product to its channels.
 
 ## Known limits
 
+- `portalUrl` must be an absolute URL. The portal leaves the key out when
+  its `SHOPIFY_PORTAL_RETURN_URL` is unset or relative; this app's schema
+  stays strict and rejects a relative value (`tests/unit/export-portal-contract.test.ts`).
+  A run always names its source: the portal answers 404 for one that records
+  none, never `sourceId: ""`.
+- Harmless differences kept on purpose: the portal never sends the run
+  statuses `queued` or `cancelled` (this app accepts them); this app maps a
+  429 although the portal never sends one; `downloadUrl` and `createdAt` are
+  always null (both optional here).
+- Recorded replies of the real portal routes are in
+  `tests/fixtures/export-portal/` (checksums in its README) and parsed by
+  `tests/unit/export-portal-fixtures.test.ts`.
 - Not yet run against the real Recharge store: the portal side is verified
   by its smoke tests with Shopify and the model stubbed
   (`docs/project-status.md` T-27). The AI calls have never answered from

@@ -403,6 +403,15 @@ waiting rather than failed. The job carries the choice (`autoApply`,
 with the box ticked apply on their own; *Autofill with AI* on chosen
 products always waits for review.
 
+**The portal's request limits.** The portal refuses a request over 2000
+categories or 200 attributes (a 422). `suggestAutofill` checks first
+(`PORTAL_MAX_CATEGORIES`, `PORTAL_MAX_ATTRIBUTES`) and does not call: with
+more than 2000 assignable types every product that needs a type is recorded
+as failed with "The product type list has N entries; the AI can read at most
+2000." (a product that already has a type is unaffected), and a product with
+more than 200 empty attributes to ask for fails with a sentence naming the
+count and the limit.
+
 ## Known limits
 
 - No undo. Every destructive change is behind a confirmation instead, and the
