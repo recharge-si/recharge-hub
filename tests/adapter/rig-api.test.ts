@@ -64,6 +64,34 @@ describe("signature and tenant", () => {
   });
 });
 
+describe("an unreadable catalogue", () => {
+  it("answers 503 unavailable, logs the cause and never a raw 500, on every handler", async () => {
+    const logged: Array<{ fields: Record<string, unknown>; message: string }> = [];
+    const { api, store } = setup({
+      logError: (fields, message) => logged.push({ fields, message }),
+    });
+    store.loadSource.mockRejectedValue(
+      Object.assign(new Error("The column `catalog_variant.options` does not exist"), {
+        code: "P2022",
+      }),
+    );
+    for (const handler of [api.build, api.explain, api.verify]) {
+      const response = await handler(
+        post({ answers: REFERENCE, variantIds: [1] }),
+      );
+      expect(response.status).toBe(503);
+      expect(response.headers.get("Retry-After")).toBe("30");
+      expect(await response.json()).toEqual({ code: "unavailable" });
+    }
+    expect(logged).toHaveLength(3);
+    expect(logged[0]?.message).toBe("The rig catalogue could not be read");
+    expect(logged[0]?.fields).toMatchObject({
+      domain: "a.myshopify.com",
+      error: { code: "P2022" },
+    });
+  });
+});
+
 describe("validation", () => {
   it("413 for text over 1000 characters, 200 at exactly 1000", async () => {
     const { api } = setup();

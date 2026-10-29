@@ -114,6 +114,7 @@ export function setup(options: {
   explainLimiter?: RateLimiter;
   buildLimiter?: RateLimiter;
   dailyCalls?: number;
+  logError?: (fields: Record<string, unknown>, message: string) => void;
 } = {}) {
   const store = new FakeStore();
   const provider = new FakeProvider(options.script ?? goodModel());
@@ -138,6 +139,7 @@ export function setup(options: {
       cacheSeconds: 60,
     },
     now: () => new Date(clock.ms),
+    ...(options.logError ? { logError: options.logError } : {}),
   });
   return { api, store, provider, clock };
 }

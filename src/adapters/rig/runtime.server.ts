@@ -74,6 +74,7 @@ export function rigApi(): ReturnType<typeof createRigApi> {
       },
       now: () => new Date(),
       log: (fields, message) => getLogger().info(fields, message),
+      logError: (fields, message) => getLogger().error(fields, message),
     });
   }
   return api;
