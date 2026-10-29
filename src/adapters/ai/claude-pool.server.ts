@@ -3,6 +3,8 @@ import { tmpdir } from "node:os";
 
 import type { ZodType } from "zod";
 
+import { extractJson } from "~/domain/extract-json";
+
 /**
  * Asking Claude through claude-pool (docs/attributes.md § Bulk filling with
  * claude-pool). One module for every caller: the operator's attribute filler
@@ -31,8 +33,21 @@ export type ClaudePoolFailure =
   | { ok: false; reason: "busy" }
   | { ok: false; reason: "error"; message: string };
 
+/** Tokens as the envelope reports them; zero when it does not. */
+export interface ClaudePoolUsage {
+  inputTokens: number;
+  cachedInputTokens: number;
+  outputTokens: number;
+}
+
 export type ClaudePoolResult<T> =
-  | { ok: true; value: T; model: string | null; text: string }
+  | {
+      ok: true;
+      value: T;
+      model: string | null;
+      text: string;
+      usage: ClaudePoolUsage;
+    }
   | ClaudePoolFailure;
 
 export interface ClaudePoolOptions<T> {
@@ -203,10 +218,12 @@ function run(
   });
 }
 
-/** What `--output-format json` prints: the result text and the model used. */
-export function parseEnvelope(
-  stdout: string,
-): { text: string; model: string | null } | null {
+/** What `--output-format json` prints: the result text, the model and the tokens. */
+export function parseEnvelope(stdout: string): {
+  text: string;
+  model: string | null;
+  usage: ClaudePoolUsage;
+} | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(stdout);
@@ -219,46 +236,28 @@ export function parseEnvelope(
   if (record["is_error"] === true) return null;
   const text = record["result"];
   if (typeof text !== "string") return null;
-  const usage = record["modelUsage"];
+  const modelUsage = record["modelUsage"];
   const model =
-    usage && typeof usage === "object" ? (Object.keys(usage)[0] ?? null) : null;
-  return { text, model };
-}
-
-/** The first JSON value in a reply that may wrap it in prose or a fence. */
-export function extractJson(text: string): unknown {
-  const trimmed = text.trim();
-  try {
-    return JSON.parse(trimmed);
-  } catch {
-    // fall through to the scan
-  }
-  for (let start = 0; start < trimmed.length; start += 1) {
-    const open = trimmed[start];
-    if (open !== "{" && open !== "[") continue;
-    const close = open === "{" ? "}" : "]";
-    let depth = 0;
-    let inString = false;
-    for (let i = start; i < trimmed.length; i += 1) {
-      const char = trimmed[i];
-      if (inString) {
-        if (char === "\\") i += 1;
-        else if (char === '"') inString = false;
-      } else if (char === '"') inString = true;
-      else if (char === open) depth += 1;
-      else if (char === close) {
-        depth -= 1;
-        if (depth === 0) {
-          try {
-            return JSON.parse(trimmed.slice(start, i + 1));
-          } catch {
-            break;
-          }
-        }
-      }
-    }
-  }
-  return undefined;
+    modelUsage && typeof modelUsage === "object"
+      ? (Object.keys(modelUsage)[0] ?? null)
+      : null;
+  const raw = record["usage"];
+  const count = (name: string): number => {
+    const value =
+      raw && typeof raw === "object"
+        ? (raw as Record<string, unknown>)[name]
+        : undefined;
+    return typeof value === "number" && Number.isFinite(value) ? value : 0;
+  };
+  return {
+    text,
+    model,
+    usage: {
+      inputTokens: count("input_tokens"),
+      cachedInputTokens: count("cache_read_input_tokens"),
+      outputTokens: count("output_tokens"),
+    },
+  };
 }
 
 export async function runClaudePool(
@@ -315,6 +314,7 @@ export async function runClaudePool<T>(
         value: envelope.text,
         model: envelope.model,
         text: envelope.text,
+        usage: envelope.usage,
       };
     const json = extractJson(envelope.text);
     const checked = options.schema.safeParse(json);
@@ -329,6 +329,7 @@ export async function runClaudePool<T>(
       value: checked.data,
       model: envelope.model,
       text: envelope.text,
+      usage: envelope.usage,
     };
   } finally {
     release();

@@ -438,8 +438,9 @@ export function metafieldValue(
     const codes = typeof input === "string" ? [input] : input;
     const known = new Set(edit.options.map((option) => option.code));
     const chosen = [...new Set(codes.filter((code) => code.trim() !== ""))];
-    if (chosen.some((code) => !known.has(code)))
-      return { ok: false, error: "Choose from the options." };
+    const unknown = chosen.find((code) => !known.has(code));
+    if (unknown !== undefined)
+      return { ok: false, error: `"${unknown}" is not one of the options.` };
     return {
       ok: true,
       value: chosen.length > 0 ? JSON.stringify(chosen) : null,
@@ -490,7 +491,7 @@ export function metafieldValue(
     case "choice":
       return edit.options.some((option) => option.code === text)
         ? { ok: true, value: text }
-        : { ok: false, error: "Choose from the options." };
+        : { ok: false, error: `"${text}" is not one of the options.` };
   }
 }
 
@@ -574,4 +575,27 @@ export function attributeChanges(
     }
   }
   return result;
+}
+
+/**
+ * Shopify's objections to a save of attribute values, each naming the
+ * attribute it concerns instead of the raw field key: `Sail size: Value must
+ * be a decimal.` An objection that did not say which write it meant is kept
+ * as Shopify worded it.
+ */
+export function namedWriteErrors(
+  errors: ReadonlyArray<{ message: string; index?: number | null }>,
+  writes: ReadonlyArray<{ namespace: string; key: string }>,
+  fields: ReadonlyArray<{ name: string; namespace: string; key: string }>,
+): string[] {
+  const names = new Map(
+    fields.map((field) => [`${field.namespace}.${field.key}`, field.name]),
+  );
+  return errors.map((error) => {
+    const write = error.index == null ? undefined : writes[error.index];
+    const name = write
+      ? names.get(`${write.namespace}.${write.key}`)
+      : undefined;
+    return name ? `${name}: ${error.message}` : error.message;
+  });
 }

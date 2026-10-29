@@ -876,7 +876,7 @@ export interface UsageWrite {
   resourceType: string | null;
   sourceLocale: string;
   targetLocale: string;
-  purpose: "translate" | "detect" | "profile";
+  purpose: "translate" | "detect" | "profile" | "autofill";
   /** The prompt version the request was built with; null for requests without one. */
   promptVersion: string | null;
   model: string;

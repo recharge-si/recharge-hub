@@ -9,8 +9,22 @@ import { z } from "zod";
  * not have (AGENTS.md § Project constraints).
  */
 
+const metafieldsSchema = z
+  .record(z.string(), z.object({ type: z.string(), value: z.string() }))
+  .default({});
+
+/** A metafield definition in the fake store (docs/attributes.md, Metafield definitions). */
+export const definitionSchema = z.object({
+  ownerType: z.enum(["PRODUCT", "PRODUCTVARIANT"]),
+  namespace: z.string(),
+  key: z.string(),
+  name: z.string().default(""),
+  type: z.string(),
+});
+
 const variantSchema = z.object({
   id: z.string(),
+  metafields: metafieldsSchema,
   title: z.string(),
   sku: z.string().nullable(),
   price: z.string(),
@@ -27,6 +41,9 @@ const productSchema = z.object({
   vendor: z.string().default(""),
   productType: z.string().default(""),
   tags: z.array(z.string()).default([]),
+  descriptionHtml: z.string().default(""),
+  /** `namespace.key` to its type and value. */
+  metafields: metafieldsSchema,
   variants: z.array(variantSchema),
 });
 
@@ -55,6 +72,8 @@ export const shopifyStoreSchema = z.object({
     ]),
   locations: z.array(locationSchema).default([]),
   products: z.array(productSchema).default([]),
+  /** Definitions the store already has; creating one adds to this list. */
+  metafieldDefinitions: z.array(definitionSchema).default([]),
 });
 
 const warehouseSchema = z.object({
@@ -105,6 +124,7 @@ export type ShopifyStore = z.infer<typeof shopifyStoreSchema>;
 export type MetakockaCompany = z.infer<typeof metakockaCompanySchema>;
 export type FakeProduct = z.infer<typeof productSchema>;
 export type FakeVariant = z.infer<typeof variantSchema>;
+export type FakeDefinition = z.infer<typeof definitionSchema>;
 
 export interface RecordedCall {
   service: "shopify" | "metakocka";
