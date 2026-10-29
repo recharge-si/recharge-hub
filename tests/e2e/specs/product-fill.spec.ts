@@ -100,12 +100,19 @@ test("fills the sails through the pool, reviews them and applies them", async ({
 
     await page.getByText("Apply all (11)").click();
     await page.getByRole("button", { name: "Apply all", exact: true }).click();
+    // Applying is a background job queued by the click; wait for its writes
+    // rather than for jobs that may not have been queued yet.
+    const freeride = async () =>
+      (await shop.services()).shopify.products.filter(
+        (p) => p.metafields["recharge.sail_category"]?.value === "freeride",
+      );
+    await expect
+      .poll(async () => (await freeride()).length, { timeout: 45_000 })
+      .toBe(11);
     await shop.settleJobs();
 
     const { shopify } = await shop.services();
-    const written = shopify.products.filter(
-      (p) => p.metafields["recharge.sail_category"]?.value === "freeride",
-    );
+    const written = await freeride();
     expect(written).toHaveLength(11);
     expect(written.every((p) => p.productType === "Sails")).toBe(true);
     expect(

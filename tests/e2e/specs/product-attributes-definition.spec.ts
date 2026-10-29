@@ -100,10 +100,8 @@ test("a value is saved with the type of its definition", async ({
   await page.goto("/app/products/3001?tab=attributes");
   // Polaris hosts have no box of their own, so Playwright never calls them visible.
   await expect(field()).toBeAttached();
-  await field().evaluate((el) => {
-    (el as unknown as { value: string }).value = "5,3";
-    el.dispatchEvent(new Event("input", { bubbles: true }));
-  });
+  // Typed through the inner input like a merchant, so the host fires its own input event.
+  await page.getByLabel("Sail size").fill("5,3");
   await page.locator("ui-save-bar button", { hasText: "Save" }).click();
   await expect(page.locator("#e2e-toasts")).toContainText("Saved");
 
