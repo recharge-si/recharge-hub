@@ -28,6 +28,8 @@ const EN: Record<string, (detail: Detail) => string> = {
     "Your description mentions both beginner and several years of experience. Please check your level.",
   owned_boom_unchecked: () =>
     "We did not check that your boom fits the sail. Give its length range and we will.",
+  stock_not_read: () =>
+    "Stock has not been read for some parts yet, so they were left out.",
   owned_board_unchecked: () => "We did not check the gear you already own: board.",
   owned_sail_unchecked: () => "We did not check the gear you already own: sail.",
   owned_mast_unchecked: () => "We did not check the gear you already own: mast.",
@@ -50,6 +52,8 @@ const SL: Record<string, (detail: Detail) => string> = {
   unsupported_discipline: () => "Za zdaj sestavljamo samo opremo za windsurf.",
   skill_contradiction: () =>
     "Opis omenja začetnika in več let izkušenj. Preverite raven znanja.",
+  stock_not_read: () =>
+    "Zaloga za nekatere dele še ni prebrana, zato smo jih izpustili.",
   owned_boom_unchecked: () =>
     "Nismo preverili, ali vaš boom ustreza jadru. Navedite njegov razpon in bomo.",
 };
@@ -61,12 +65,25 @@ function formatEuro(minor: unknown): string {
   return `${euros}.${cents} EUR`;
 }
 
+/**
+ * "Not checked" sentences, one per missing key: the rule needed data the
+ * product does not have, so it neither passed nor failed.
+ */
+function uncheckedMessage(locale: Locale, detail: Detail): string {
+  const role = String(detail?.["role"] ?? "part");
+  const key = String(detail?.["key"] ?? "data");
+  return locale === "sl"
+    ? `Ni preverjeno: za ${role} manjka podatek ${key}.`
+    : `Not checked: the ${role} has no ${key}, so that fit is unknown.`;
+}
+
 /** The sentence for a warning code; an unknown code reads as its own name. */
 export function warningMessage(
   code: string,
   locale: Locale,
   detail?: Detail,
 ): string {
+  if (code.startsWith("unchecked_")) return uncheckedMessage(locale, detail);
   const table = locale === "sl" ? SL : EN;
   const make = table[code] ?? EN[code];
   return make ? make(detail) : code;

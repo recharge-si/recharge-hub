@@ -29,9 +29,13 @@ export interface RigSettings {
     gates: boolean;
     products: number;
     complete: number;
+    /** Complete products with a variant in stock. */
+    inStock: number;
     missing: Array<{ key: string; count: number }>;
   }>;
   minComplete: number;
+  /** No rig variant has a known stock level: the catalogue needs a refresh. */
+  stockNotRead: boolean;
   notReady: RigRole[];
   /** Plain-mode share of the last 50 explained requests. */
   plain: { plain: number; of: number };
@@ -43,6 +47,7 @@ function describe(readiness: RigReadiness): RigSettings["roles"] {
     gates: READINESS_ROLES.includes(role),
     products: readiness.roles[role].products,
     complete: readiness.roles[role].complete,
+    inStock: readiness.roles[role].inStock,
     missing: readiness.roles[role].missing.slice(0, 3),
   }));
 }
@@ -56,6 +61,7 @@ export async function rigSettingsFor(principal: Principal): Promise<RigSettings>
     placeholderRules: placeholderRules().placeholder,
     roles: describe(readiness),
     minComplete: readiness.minComplete,
+    stockNotRead: readiness.stockNotRead,
     notReady: readiness.notReady,
     plain: await recentPlainShare(source.shopId),
   };
@@ -78,7 +84,7 @@ export async function setRigEnabled(
     const names = readiness.notReady.map(roleWord).join(", ");
     return {
       ok: false,
-      message: `Not ready: each of boards, sails, masts, booms and fins needs at least ${readiness.minComplete} complete products in stock (short on ${names}).`,
+      message: `Not ready: each of boards, sails, masts, booms and fins needs at least ${readiness.minComplete} complete products in stock (short on ${names}).${readiness.stockNotRead ? " Stock is not read yet: refresh the catalogue." : ""}`,
     };
   }
   if (!(await getRigAiProvider().ready())) {

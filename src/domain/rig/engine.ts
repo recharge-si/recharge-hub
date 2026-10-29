@@ -1,4 +1,4 @@
-import type { RigRole } from "~/domain/rig/keys";
+import { keyOf, type RigRole, type SpecField } from "~/domain/rig/keys";
 import type {
   Band,
   BuildResult,
@@ -11,6 +11,8 @@ import type {
   RigItem,
   RigRules,
   Skill,
+  Tolerances,
+  Unchecked,
   Unmet,
 } from "~/domain/rig/types";
 
@@ -34,6 +36,9 @@ export interface FitContext {
   sailBand: Band | null;
   boardBand: Band | null;
   finRules: RigRules["fin"];
+  tolerances: Tolerances;
+  /** The rider's weight, for a board that states the riders it takes. */
+  weightKg: number | null;
   /** Roles the buyer already owns: left out of the rig and of its checks. */
   owned: ReadonlySet<RigRole>;
   ownedBoom: Band | null;
@@ -141,6 +146,8 @@ export function resolveFit(profile: Profile, rules: RigRules): Resolved {
       sailBand,
       boardBand,
       finRules: rules.fin,
+      tolerances: rules.tolerances,
+      weightKg: profile.weightKg,
       owned,
       ownedBoom,
     },
@@ -157,14 +164,19 @@ export function resolveFit(profile: Profile, rules: RigRules): Resolved {
 
 export type Selection = Partial<Record<RigRole, RigCandidate>>;
 
-function num(candidate: RigCandidate | undefined, field: keyof RigCandidate["specs"]): number | null {
+function num(candidate: RigCandidate | undefined, field: SpecField): number | null {
   const value = candidate?.specs[field];
   return typeof value === "number" ? value : null;
 }
 
-function code(candidate: RigCandidate | undefined, field: keyof RigCandidate["specs"]): string | null {
+function code(candidate: RigCandidate | undefined, field: SpecField): string | null {
   const value = candidate?.specs[field];
-  return value === undefined ? null : String(value);
+  return typeof value === "string" ? value : null;
+}
+
+function list(candidate: RigCandidate | undefined, field: SpecField): string[] | null {
+  const value = candidate?.specs[field];
+  return Array.isArray(value) ? value : null;
 }
 
 function finBandFor(context: FitContext, volumeL: number): Band | null {
@@ -172,133 +184,325 @@ function finBandFor(context: FitContext, volumeL: number): Band | null {
   return row?.lengthCm ?? null;
 }
 
+/** What one rule says: it ran and passed or failed, or it lacked data and did not run. */
+type Outcome =
+  | { kind: "ran"; ok: boolean }
+  | { kind: "unchecked"; missing: Unchecked["missing"] };
+
+interface RuleResult {
+  id: string;
+  outcome: Outcome;
+}
+
+const ran = (ok: boolean): Outcome => ({ kind: "ran", ok });
+
 /**
- * Every compatibility check that applies to the parts present. A check whose
- * parts include one the buyer owns is not computed (we do not know that
- * part), except the owned boom when its range was supplied. Order is fixed.
+ * The strict rule: a value that is absent is never assumed. Each `need` names
+ * the part, the field and the key it would be read from; if any is absent the
+ * outcome is `unchecked` and names every absent key, otherwise `decide` runs
+ * on the values.
  */
-export function checkRig(selection: Selection, context: FitContext): Check[] {
-  const checks: Check[] = [];
+function decide(
+  needs: ReadonlyArray<{ part: RigCandidate | undefined; field: SpecField }>,
+  run: () => boolean,
+): Outcome {
+  const missing: Unchecked["missing"] = [];
+  for (const { part, field } of needs) {
+    if (part && part.specs[field] === undefined) {
+      missing.push({ role: part.role, key: keyOf(part.role, field) });
+    }
+  }
+  return missing.length > 0 ? { kind: "unchecked", missing } : ran(run());
+}
+
+function rules(selection: Selection, context: FitContext): RuleResult[] {
+  const out: RuleResult[] = [];
+  const add = (id: string, outcome: Outcome) => out.push({ id, outcome });
   const has = (role: RigRole) => selection[role] !== undefined;
   const free = (...roles: RigRole[]) =>
     roles.every((role) => has(role) && !context.owned.has(role));
 
-  const sail = selection.sail;
-  const board = selection.board;
-  const mast = selection.mast;
-  const extension = selection.extension;
+  const { sail, board, mast, boom, fin } = selection;
+  const extension =
+    selection.extension && !context.owned.has("extension")
+      ? selection.extension
+      : undefined;
   const base = selection.base;
-  const boom = selection.boom;
-  const fin = selection.fin;
+  const tol = context.tolerances;
 
   if (free("sail") && context.sailBand) {
-    const area = num(sail, "areaM2");
-    checks.push({
-      id: "sail-fit",
-      ok: area !== null && inBand(area, context.sailBand),
-    });
+    const band = context.sailBand;
+    add(
+      "sail-fit",
+      decide([{ part: sail, field: "areaM2" }], () => inBand(num(sail, "areaM2") ?? 0, band)),
+    );
   }
   if (free("board") && context.boardBand) {
-    const volume = num(board, "volumeL");
-    checks.push({
-      id: "board-fit",
-      ok: volume !== null && inBand(volume, context.boardBand),
-    });
+    const band = context.boardBand;
+    add(
+      "board-fit",
+      decide([{ part: board, field: "volumeL" }], () => inBand(num(board, "volumeL") ?? 0, band)),
+    );
   }
   if (free("board", "sail")) {
-    const area = num(sail, "areaM2");
-    const low = num(board, "minSailM2");
-    const high = num(board, "maxSailM2");
-    checks.push({
-      id: "board-sail-range",
-      ok:
-        area !== null &&
-        low !== null &&
-        high !== null &&
-        low - EPS <= area &&
-        area <= high + EPS,
-    });
+    add(
+      "board-sail-range",
+      decide(
+        [
+          { part: sail, field: "areaM2" },
+          { part: board, field: "sailMinM2" },
+          { part: board, field: "sailMaxM2" },
+        ],
+        () => {
+          const area = num(sail, "areaM2") ?? 0;
+          return (
+            (num(board, "sailMinM2") ?? 0) - EPS <= area &&
+            area <= (num(board, "sailMaxM2") ?? 0) + EPS
+          );
+        },
+      ),
+    );
+  }
+  if (free("board") && context.weightKg !== null) {
+    const low = num(board, "riderMinKg");
+    const high = num(board, "riderMaxKg");
+    if (low !== null || high !== null) {
+      const weight = context.weightKg;
+      add(
+        "rider-fit",
+        ran(
+          (low === null || weight >= low - EPS) &&
+            (high === null || weight <= high + EPS),
+        ),
+      );
+    }
   }
   if (free("sail", "mast")) {
-    const sailRdm = code(sail, "mastRdm");
-    checks.push({
-      id: "sail-mast-rdm",
-      ok: sailRdm !== null && sailRdm === code(mast, "mastRdm"),
-    });
-    const length = num(mast, "lengthCm");
-    const extra =
-      extension && !context.owned.has("extension")
-        ? (num(extension, "extensionLengthCm") ?? Number.NaN)
-        : 0;
-    const low = num(sail, "mastLengthMinCm");
-    const high = num(sail, "mastLengthMaxCm");
-    checks.push({
-      id: "sail-mast-length",
-      ok:
-        length !== null &&
-        low !== null &&
-        high !== null &&
-        low - EPS <= length + extra &&
-        length + extra <= high + EPS,
-    });
+    // The mast diameter the sail takes: its recommended one and/or its list.
+    const accepted = [
+      ...(list(sail, "compatibleDiameters") ?? []),
+      ...(code(sail, "mastDiameter") ? [code(sail, "mastDiameter") as string] : []),
+    ];
+    if (accepted.length === 0 || mast?.specs.mastDiameter === undefined) {
+      const missing: Unchecked["missing"] = [];
+      if (accepted.length === 0) {
+        missing.push({ role: "sail", key: keyOf("sail", "mastDiameter") });
+      }
+      if (mast?.specs.mastDiameter === undefined) {
+        missing.push({ role: "mast", key: keyOf("mast", "mastDiameter") });
+      }
+      add("sail-mast-diameter", { kind: "unchecked", missing });
+    } else {
+      add("sail-mast-diameter", ran(accepted.includes(code(mast, "mastDiameter") ?? "")));
+    }
+
+    // Length: the mast, stretched by the extension when there is one, must
+    // reach the length the sail recommends, within the tolerance.
+    const needs: Array<{ part: RigCandidate | undefined; field: SpecField }> = [
+      { part: sail, field: "mastCm" },
+      { part: mast, field: "lengthCm" },
+    ];
+    if (extension) {
+      needs.push(
+        { part: extension, field: "extensionMinCm" },
+        { part: extension, field: "extensionMaxCm" },
+      );
+    }
+    add(
+      "sail-mast-length",
+      decide(needs, () => {
+        const wanted = num(sail, "mastCm") ?? 0;
+        const length = num(mast, "lengthCm") ?? 0;
+        const low = length + (extension ? (num(extension, "extensionMinCm") ?? 0) : 0);
+        const high = length + (extension ? (num(extension, "extensionMaxCm") ?? 0) : 0);
+        return high >= wanted - tol.mastLengthCm - EPS && low <= wanted + tol.mastLengthCm + EPS;
+      }),
+    );
+
+    // IMCS only when both sides state it.
+    const sailImcs = num(sail, "mastImcs");
+    const mastImcs = num(mast, "mastImcs");
+    if (sailImcs !== null && mastImcs !== null) {
+      add("sail-mast-imcs", ran(Math.abs(sailImcs - mastImcs) <= tol.imcs + EPS));
+    }
+  }
+  if (free("mast", "boom")) {
+    const diameters = list(boom, "compatibleDiameters");
+    const diameter = code(mast, "mastDiameter");
+    if (diameters !== null && diameter !== null) {
+      add("mast-boom-diameter", ran(diameters.includes(diameter)));
+    }
   }
   if (free("sail", "boom")) {
     // The boom must open over the whole range the sail asks for.
-    const sailLow = num(sail, "boomMinCm");
-    const sailHigh = num(sail, "boomMaxCm");
-    const low = num(boom, "boomMinCm");
-    const high = num(boom, "boomMaxCm");
-    checks.push({
-      id: "sail-boom-range",
-      ok:
-        sailLow !== null &&
-        sailHigh !== null &&
-        low !== null &&
-        high !== null &&
-        low <= sailLow + EPS &&
-        high >= sailHigh - EPS,
-    });
+    const rangeKnown =
+      sail?.specs.boomMinCm !== undefined && sail.specs.boomMaxCm !== undefined;
+    const point = num(sail, "recommendedBoomCm");
+    const sailLow = rangeKnown ? num(sail, "boomMinCm") : point;
+    const sailHigh = rangeKnown ? num(sail, "boomMaxCm") : point;
+    const missing: Unchecked["missing"] = [];
+    if (sailLow === null || sailHigh === null) {
+      if (sail?.specs.boomMinCm === undefined) {
+        missing.push({ role: "sail", key: keyOf("sail", "boomMinCm") });
+      }
+      if (sail?.specs.boomMaxCm === undefined) {
+        missing.push({ role: "sail", key: keyOf("sail", "boomMaxCm") });
+      }
+    }
+    for (const field of ["boomMinCm", "boomMaxCm"] as const) {
+      if (boom?.specs[field] === undefined) {
+        missing.push({ role: "boom", key: keyOf("boom", field) });
+      }
+    }
+    if (missing.length > 0) {
+      add("sail-boom-range", { kind: "unchecked", missing });
+    } else {
+      add(
+        "sail-boom-range",
+        ran(
+          (num(boom, "boomMinCm") ?? Number.POSITIVE_INFINITY) <= (sailLow ?? 0) + EPS &&
+            (num(boom, "boomMaxCm") ?? Number.NEGATIVE_INFINITY) >= (sailHigh ?? 0) - EPS,
+        ),
+      );
+    }
   }
-  if (free("mast", "base")) {
-    checks.push({
-      id: "mast-base-type",
-      ok:
-        code(mast, "baseType") !== null &&
-        code(mast, "baseType") === code(base, "baseType"),
-    });
+  if (free("mast") && extension) {
+    add(
+      "mast-extension-diameter",
+      decide(
+        [
+          { part: mast, field: "mastDiameter" },
+          { part: extension, field: "mastDiameter" },
+        ],
+        () => code(mast, "mastDiameter") === code(extension, "mastDiameter"),
+      ),
+    );
   }
-  if (free("mast", "extension") && code(extension, "baseType") !== null) {
-    checks.push({
-      id: "mast-extension-type",
-      ok: code(mast, "baseType") === code(extension, "baseType"),
-    });
+  if (extension && base && !context.owned.has("base")) {
+    add(
+      "extension-base-connection",
+      decide(
+        [
+          { part: extension, field: "baseConnection" },
+          { part: base, field: "baseConnection" },
+        ],
+        () => code(extension, "baseConnection") === code(base, "baseConnection"),
+      ),
+    );
   }
   if (free("board", "fin")) {
-    checks.push({
-      id: "fin-box",
-      ok: code(board, "finBox") !== null && code(board, "finBox") === code(fin, "finBox"),
-    });
+    add(
+      "fin-box",
+      decide(
+        [
+          { part: board, field: "finBoxTypes" },
+          { part: fin, field: "finBox" },
+        ],
+        () => (list(board, "finBoxTypes") ?? []).includes(code(fin, "finBox") ?? ""),
+      ),
+    );
+    // The board's own fin range when it states one; the (placeholder) rules
+    // table by volume otherwise; unchecked when it has neither.
+    const low = num(board, "finMinCm");
+    const high = num(board, "finMaxCm");
     const volume = num(board, "volumeL");
-    const length = num(fin, "finLengthCm");
-    const band = volume === null ? null : finBandFor(context, volume);
-    checks.push({
-      id: "fin-length",
-      ok: band !== null && length !== null && inBand(length, band),
-    });
+    const bandFromVolume = volume === null ? null : finBandFor(context, volume);
+    if (num(fin, "finLengthCm") === null) {
+      add("fin-length", {
+        kind: "unchecked",
+        missing: [{ role: "fin", key: keyOf("fin", "finLengthCm") }],
+      });
+    } else if (low !== null || high !== null) {
+      const length = num(fin, "finLengthCm") ?? 0;
+      add(
+        "fin-length",
+        ran(
+          (low === null || length >= low - EPS) && (high === null || length <= high + EPS),
+        ),
+      );
+    } else if (bandFromVolume) {
+      add("fin-length", ran(inBand(num(fin, "finLengthCm") ?? 0, bandFromVolume)));
+    } else {
+      add("fin-length", {
+        kind: "unchecked",
+        missing: [
+          { role: "board", key: keyOf("board", "finMinCm") },
+          { role: "board", key: keyOf("board", "finMaxCm") },
+        ],
+      });
+    }
   }
   if (context.owned.has("boom") && context.ownedBoom && free("sail")) {
-    const sailLow = num(sail, "boomMinCm");
-    const sailHigh = num(sail, "boomMaxCm");
-    checks.push({
-      id: "owned-boom",
-      ok:
-        sailLow !== null &&
-        sailHigh !== null &&
-        context.ownedBoom.min <= sailLow + EPS &&
-        context.ownedBoom.max >= sailHigh - EPS,
-    });
+    const owned = context.ownedBoom;
+    add(
+      "owned-boom",
+      decide(
+        [
+          { part: sail, field: "boomMinCm" },
+          { part: sail, field: "boomMaxCm" },
+        ],
+        () =>
+          owned.min <= (num(sail, "boomMinCm") ?? 0) + EPS &&
+          owned.max >= (num(sail, "boomMaxCm") ?? 0) - EPS,
+      ),
+    );
   }
-  return checks;
+  return out;
+}
+
+export interface CheckReport {
+  /** The rules that ran, with their answer. */
+  checks: Check[];
+  /** The rules that could not run, and the data each lacks. */
+  unchecked: Unchecked[];
+}
+
+/**
+ * Every compatibility check that applies to the parts present, and every rule
+ * that could not run for lack of data. A check whose parts include one the
+ * buyer owns is not computed (we do not know that part), except the owned
+ * boom when its range was supplied. Order is fixed.
+ */
+export function checkReport(selection: Selection, context: FitContext): CheckReport {
+  const checks: Check[] = [];
+  const unchecked: Unchecked[] = [];
+  for (const { id, outcome } of rules(selection, context)) {
+    if (outcome.kind === "ran") checks.push({ id, ok: outcome.ok });
+    else unchecked.push({ id, missing: outcome.missing });
+  }
+  return { checks, unchecked };
+}
+
+/** The checks that ran (see `checkReport` for the ones that could not). */
+export function checkRig(selection: Selection, context: FitContext): Check[] {
+  return checkReport(selection, context).checks;
+}
+
+/** The warnings that name what a rig was not checked for, one per missing key. */
+export function uncheckedWarnings(unchecked: readonly Unchecked[]): EngineWarning[] {
+  const seen = new Set<string>();
+  const out: EngineWarning[] = [];
+  for (const entry of unchecked) {
+    for (const { role, key } of entry.missing) {
+      const warningCode = `unchecked_${role}_${key}`;
+      if (seen.has(warningCode)) continue;
+      seen.add(warningCode);
+      out.push({ code: warningCode, detail: { check: entry.id, role, key } });
+    }
+  }
+  return out;
+}
+
+/** True when a part cannot go with the others: some rule that ran said no. */
+function conflicts(selection: Selection, context: FitContext): boolean {
+  return rules(selection, context).some(
+    ({ outcome }) => outcome.kind === "ran" && !outcome.ok,
+  );
+}
+
+function uncheckedCount(selection: Selection, context: FitContext): number {
+  return rules(selection, context).filter(({ outcome }) => outcome.kind === "unchecked")
+    .length;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -338,6 +542,29 @@ function choose(options: readonly RigCandidate[], strategy: Strategy): RigCandid
     : sorted[Math.floor((sorted.length - 1) / 2)];
 }
 
+/**
+ * The options that go with the parts already chosen: none a rule says no to,
+ * and of those only the ones with the fewest rules left unchecked, so a rig
+ * is verified wherever the data allows.
+ */
+function compatible(
+  options: readonly RigCandidate[],
+  role: RigRole,
+  chosen: Selection,
+  context: FitContext,
+): RigCandidate[] {
+  const scored: Array<{ candidate: RigCandidate; unchecked: number }> = [];
+  for (const candidate of options) {
+    const trial: Selection = { ...chosen, [role]: candidate };
+    if (conflicts(trial, context)) continue;
+    scored.push({ candidate, unchecked: uncheckedCount(trial, context) });
+  }
+  const best = Math.min(...scored.map((entry) => entry.unchecked));
+  return scored
+    .filter((entry) => entry.unchecked === best)
+    .map((entry) => entry.candidate);
+}
+
 function closestTo(
   options: readonly RigCandidate[],
   field: "areaM2" | "volumeL",
@@ -345,13 +572,17 @@ function closestTo(
   strategy: Strategy,
 ): RigCandidate[] {
   const mid = middle(band);
-  const ranked = [...options].sort((a, b) => {
+  const distance = (candidate: RigCandidate) => {
+    const value = num(candidate, field);
+    return value === null ? Number.POSITIVE_INFINITY : Math.abs(value - mid);
+  };
+  return [...options].sort((a, b) => {
     if (strategy === "cheapest") return byPrice(a, b);
-    const da = Math.abs((num(a, field) ?? 0) - mid);
-    const db = Math.abs((num(b, field) ?? 0) - mid);
+    const da = distance(a);
+    const db = distance(b);
+    if (da === db) return byPrice(a, b);
     return round(da) - round(db) || byPrice(a, b);
   });
-  return ranked;
 }
 
 interface Pool {
@@ -360,6 +591,18 @@ interface Pool {
 
 function poolOf(role: RigRole, pool: Pool): RigCandidate[] {
   return pool.byRole.get(role) ?? [];
+}
+
+/** Which categories (from the plan's types) serve a kind of rider; null category = unknown, allowed. */
+const KIND_CATEGORIES: Readonly<Record<string, readonly string[]>> = {
+  freeride: ["freeride", "beginner"],
+  wave: ["wave", "freewave"],
+};
+
+function categoryServes(candidate: RigCandidate, kind: string): boolean {
+  if (candidate.category === null) return true;
+  const served = KIND_CATEGORIES[kind];
+  return served ? served.includes(candidate.category) : candidate.category === kind;
 }
 
 /** One attempt at a rig around `sail`; the roles it cannot fill are `unmet`. */
@@ -375,60 +618,41 @@ function assemble(
   const noneFor = (role: RigRole) =>
     unmet.push({ role, reason: "no_compatible_in_stock" });
 
-  // Mast, extension and base together: a mast is only as good as the base it has.
-  const sailRdm = code(sail, "mastRdm");
-  const lengthLow = num(sail, "mastLengthMinCm") ?? 0;
-  const lengthHigh = num(sail, "mastLengthMaxCm") ?? 0;
-  const masts = poolOf("mast", pool).filter(
-    (mast) => code(mast, "mastRdm") === sailRdm,
-  );
-  const bases = poolOf("base", pool);
-  const extensions = poolOf("extension", pool);
-
+  // Mast, and an extension when the mast alone falls short of the sail.
   interface Option {
     mast: RigCandidate;
     extension?: RigCandidate;
-    base?: RigCandidate;
+    unchecked: number;
   }
   const options: Option[] = [];
-  for (const mast of masts) {
-    const length = num(mast, "lengthCm") ?? 0;
-    const type = code(mast, "baseType");
-    const base = choose(
-      bases.filter((candidate) => code(candidate, "baseType") === type),
-      strategy,
-    );
-    if (length >= lengthLow - EPS && length <= lengthHigh + EPS) {
-      options.push({ mast, ...(base ? { base } : {}) });
-      continue;
-    }
-    if (length < lengthLow) {
-      const extension = choose(
-        extensions.filter((candidate) => {
-          const extra = num(candidate, "extensionLengthCm") ?? 0;
-          const extType = code(candidate, "baseType");
-          return (
-            (extType === null || extType === type) &&
-            length + extra >= lengthLow - EPS &&
-            length + extra <= lengthHigh + EPS
-          );
-        }),
-        strategy,
-      );
-      if (extension) options.push({ mast, extension, ...(base ? { base } : {}) });
+  const extensions = poolOf("extension", pool);
+  for (const mast of poolOf("mast", pool)) {
+    const alone: Selection = { sail, mast };
+    const report = checkReport(alone, context);
+    const failed = report.checks.filter((check) => !check.ok).map((check) => check.id);
+    if (failed.length === 0) {
+      options.push({ mast, unchecked: report.unchecked.length });
+    } else if (failed.length === 1 && failed[0] === "sail-mast-length") {
+      const fits = compatible(extensions, "extension", alone, context);
+      const extension = choose(fits, strategy);
+      if (extension) {
+        options.push({
+          mast,
+          extension,
+          unchecked: uncheckedCount({ ...alone, extension }, context),
+        });
+      }
     }
   }
   const cost = (option: Option) =>
-    option.mast.priceMinor +
-    (option.extension?.priceMinor ?? 0) +
-    (option.base?.priceMinor ?? 0);
+    option.mast.priceMinor + (option.extension?.priceMinor ?? 0);
   const rank = (a: Option, b: Option) =>
     cost(a) - cost(b) || a.mast.variantId - b.mast.variantId;
-  const complete = options.filter((option) => option.base);
-  const usable = complete.length > 0 ? complete : options;
-  // Plain masts before ones that need an extension.
-  const plain = usable.filter((option) => !option.extension);
-  const group = (plain.length > 0 ? plain : usable).sort(rank);
+  // Plain masts before ones that need an extension, then the best verified.
+  const plain = options.filter((option) => !option.extension);
+  const tier = plain.length > 0 ? plain : options;
+  const fewest = Math.min(...tier.map((option) => option.unchecked));
+  const group = tier.filter((option) => option.unchecked === fewest).sort(rank);
   const picked =
     group.length === 0
       ? undefined
@@ -438,57 +662,41 @@ function assemble(
   if (picked) {
     selection.mast = picked.mast;
     if (picked.extension) selection.extension = picked.extension;
-    if (picked.base) selection.base = picked.base;
+    const base = choose(
+      compatible(poolOf("base", pool), "base", selection, context),
+      strategy,
+    );
+    if (base) selection.base = base;
     else noneFor("base");
   } else {
     noneFor("mast");
   }
 
-  const sailLow = num(sail, "boomMinCm") ?? 0;
-  const sailHigh = num(sail, "boomMaxCm") ?? 0;
   const boom = choose(
-    poolOf("boom", pool).filter(
-      (candidate) =>
-        (num(candidate, "boomMinCm") ?? Number.POSITIVE_INFINITY) <= sailLow + EPS &&
-        (num(candidate, "boomMaxCm") ?? Number.NEGATIVE_INFINITY) >= sailHigh - EPS,
-    ),
+    compatible(poolOf("boom", pool), "boom", selection, context),
     strategy,
   );
   if (boom) selection.boom = boom;
   else noneFor("boom");
 
   // Board, then a fin that fits its box and length.
-  const area = num(sail, "areaM2") ?? 0;
   const boardBand = context.boardBand;
   const boards =
     boardBand === null
       ? []
       : closestTo(
           poolOf("board", pool).filter((board) => {
+            if (!categoryServes(board, fit.kind)) return false;
             const volume = num(board, "volumeL");
-            return (
-              volume !== null &&
-              inBand(volume, boardBand) &&
-              (num(board, "minSailM2") ?? Number.POSITIVE_INFINITY) <=
-                area + EPS &&
-              (num(board, "maxSailM2") ?? Number.NEGATIVE_INFINITY) >=
-                area - EPS
-            );
+            if (volume !== null && !inBand(volume, boardBand)) return false;
+            return !conflicts({ sail, board }, context);
           }),
           "volumeL",
           boardBand,
           strategy,
         );
-  const finsFor = (board: RigCandidate) => {
-    const volume = num(board, "volumeL") ?? 0;
-    const band = finBandFor(context, volume);
-    return poolOf("fin", pool).filter(
-      (fin) =>
-        code(fin, "finBox") === code(board, "finBox") &&
-        band !== null &&
-        inBand(num(fin, "finLengthCm") ?? -1, band),
-    );
-  };
+  const finsFor = (board: RigCandidate) =>
+    compatible(poolOf("fin", pool), "fin", { board }, context);
   const board = boards.find((candidate) => finsFor(candidate).length > 0) ?? boards[0];
   if (board) {
     selection.board = board;
@@ -517,6 +725,7 @@ function toItem(candidate: RigCandidate): RigItem {
     available: candidate.inStock,
     quantity: 1,
     specs: candidate.specs,
+    derived: candidate.derived,
   };
 }
 
@@ -549,6 +758,7 @@ function alternativesFor(
   context: FitContext,
 ): RigAlternative[] {
   const out: RigAlternative[] = [];
+  const baseline = uncheckedCount(selection, context);
   for (const role of ASSEMBLY_ORDER) {
     const current = selection[role];
     if (!current || context.owned.has(role)) continue;
@@ -556,7 +766,10 @@ function alternativesFor(
     for (const candidate of poolOf(role, pool)) {
       if (candidate.variantId === current.variantId) continue;
       const trial: Selection = { ...selection, [role]: candidate };
-      if (checkRig(trial, context).every((check) => check.ok)) {
+      if (
+        !conflicts(trial, context) &&
+        uncheckedCount(trial, context) <= baseline
+      ) {
         swaps.push(candidate);
       }
     }
@@ -576,6 +789,7 @@ function emptyResult(
     needs: fit.needs,
     rigs: [],
     checks: [],
+    unchecked: [],
     unmet: fit.unmet,
     warnings: fit.warnings,
     missingAttributes: {},
@@ -626,6 +840,7 @@ export function buildRig(
     (a, b) => a.variantId - b.variantId || (a.variantGid < b.variantGid ? -1 : 1),
   );
   const seen = new Set<string>();
+  let stockUnknown = 0;
   for (const candidate of ordered) {
     if (candidate.shopId !== context.shopId) continue;
     if (candidate.status !== "ACTIVE") continue;
@@ -637,21 +852,32 @@ export function buildRig(
       }
       continue;
     }
-    if (!candidate.inStock) continue;
+    if (!candidate.inStock) {
+      // Unknown stock is not stock; say so rather than let the shelf look empty.
+      if (candidate.inventoryQuantity === null) stockUnknown += 1;
+      continue;
+    }
     considered[candidate.role] = (considered[candidate.role] ?? 0) + 1;
     const list = pool.byRole.get(candidate.role) ?? [];
     list.push(candidate);
     pool.byRole.set(candidate.role, list);
   }
 
-  const base = emptyResult(fit, { missingAttributes, considered });
+  const base = emptyResult(fit, {
+    missingAttributes,
+    considered,
+    warnings:
+      stockUnknown > 0
+        ? [...fit.warnings, { code: "stock_not_read", detail: { parts: stockUnknown } }]
+        : fit.warnings,
+  });
   const sailBand = fit.context.sailBand;
   if (!sailBand) return base;
 
   const fitting = poolOf("sail", pool).filter((sail) => {
     const area = num(sail, "areaM2");
     return (
-      code(sail, "category") === fit.kind &&
+      categoryServes(sail, fit.kind) &&
       area !== null &&
       inBand(area, sailBand)
     );
@@ -670,7 +896,7 @@ export function buildRig(
     fit,
     "recommended",
   );
-  const warnings = [...fit.warnings];
+  const warnings = [...base.warnings];
   const unmet: Unmet[] = [...fit.unmet];
   const owned = fit.context.owned;
 
@@ -704,19 +930,23 @@ export function buildRig(
     const part = result.selection[role];
     return part && !owned.has(role) ? [toItem(part)] : [];
   });
-  const checks = checkRig(result.selection, fit.context);
+  const report = checkReport(result.selection, fit.context);
+  const checks = report.checks;
+  warnings.push(...uncheckedWarnings(report.unchecked));
   const rig: Rig = {
     label: strategy === "cheapest" ? "Lowest price" : "Recommended",
     items,
     totalMinor: total,
     currency: items[0]?.currency ?? "",
     checks,
+    unchecked: report.unchecked,
     alternatives: alternativesFor(result.selection, pool, fit.context),
   };
   return {
     needs: [],
     rigs: [rig],
     checks,
+    unchecked: report.unchecked,
     unmet,
     warnings,
     missingAttributes,
