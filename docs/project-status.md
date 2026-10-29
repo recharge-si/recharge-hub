@@ -121,11 +121,17 @@ Completed work belongs in Git history, not in this file.
   engine does not read; the card is hidden when the plan holds the engine's
   keys. Remapping it is open. The catalogue cache is 300 s with stale while
   revalidate; the real time of the new two-step read is not measured.
+  Follow-ups on top of that (stacked PR): `excludeVariantIds` on build, explain
+  and verify, display fields (`productUrl`, `imageUrl`, `vendor`, `facts`,
+  `derived`) on items and alternatives, a Sentry breadcrumb per call, a Rig
+  builder tile on Home, and e2e specs for the proxy routes. The theme has not
+  been changed to use any of them yet.
   No harness, no "on order" parts, no live stock read, no Good/Better/Best.
 - Rate limits are per web process and reset on restart. Bulk read duration with
-  the new fields is not measured on the real store. Sentry breadcrumbs per build
-  are not added. The "Plain mode N of last 50" line is on the Rig builder card,
-  not on Home.
+  the new fields is not measured on the real store. The "Plain mode N of last 50"
+  line is on the Rig builder card and, with builds today and the last pool
+  exhaustion, on Home while the builder is on. The e2e proxy specs use a
+  stand-in signature check, so the real App Proxy HMAC is still unverified.
 - Slovenian sentences are drafts. Legal wording for AI processing of the
   buyer's text is open (PRD 4 question 4).
 
