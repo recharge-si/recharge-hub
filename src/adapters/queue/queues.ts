@@ -50,6 +50,8 @@ export const QUEUES = {
   typeMenuSync: "type-menu-sync",
   productAutofill: "product-autofill",
   sourceProductAutofill: "source-product-autofill",
+  // Bulk attribute values (docs/attributes.md § Bulk values).
+  bulkValuesApply: "bulk-values-apply",
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
@@ -99,6 +101,11 @@ export function translationCoverageKey(shopDomain: string): string {
 }
 
 /** One removal of a language's translations at a time, per shop and language. */
+/** One apply per stored preview: a second press folds into the first. */
+export function bulkValuesKey(importId: string): string {
+  return `bulk-values:${importId}`;
+}
+
 /** One store menu run waiting per shop; two presses make one menu. */
 export function typeMenuKey(shopDomain: string): string {
   return `type-menu:${shopDomain}`;
@@ -501,6 +508,16 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   [QUEUES.productAutofill]: {
     retryLimit: 0,
     expireInSeconds: 1800,
+    retentionSeconds: 60 * 60 * 24,
+  },
+  // A person applied a stored preview of attribute values: batches of 25,
+  // every outcome stored per value, so the job is not retried by the queue;
+  // a stopped import is continued by a person and revisits only what has no
+  // outcome yet.
+  [QUEUES.bulkValuesApply]: {
+    policy: "short",
+    retryLimit: 0,
+    expireInSeconds: 3600,
     retentionSeconds: 60 * 60 * 24,
   },
   // products/create for a source with AI categorization on: a lookup and,

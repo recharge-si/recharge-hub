@@ -38,6 +38,7 @@ import { handleSyncProducts } from "~/jobs/handlers/sync-products";
 import { handleTranslationCoverage } from "~/jobs/handlers/translation-coverage";
 import { handleTranslationProfile } from "~/jobs/handlers/translation-profile";
 import { handleTranslationRemove } from "~/jobs/handlers/translation-remove";
+import { handleBulkValuesApply } from "~/jobs/handlers/bulk-values-apply";
 import { handleProductAutofill } from "~/jobs/handlers/product-autofill";
 import { handleSourceProductAutofill } from "~/jobs/handlers/source-product-autofill";
 import { handleTypeMenuSync } from "~/jobs/handlers/type-menu-sync";
@@ -238,6 +239,11 @@ async function main(): Promise<void> {
   // products a pass, every outcome recorded on the product's row.
   await boss.work(QUEUES.productAutofill, async (jobs) => {
     for (const job of jobs) await handleProductAutofill(job);
+  });
+  // Bulk attribute values (docs/attributes.md § Bulk values): a stored
+  // preview applied in batches, every outcome stored per value.
+  await boss.work(QUEUES.bulkValuesApply, async (jobs) => {
+    for (const job of jobs) await handleBulkValuesApply(job);
   });
   // A source with AI categorization on: its new products are queued as
   // Shopify reports them created (docs/sources.md § AI categorization).

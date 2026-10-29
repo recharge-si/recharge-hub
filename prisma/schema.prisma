@@ -147,6 +147,7 @@ model Shop {
   productTypeAssignments  ProductTypeAssignment[]
   productTypeMenu         ProductTypeMenu?
   productAutofills        ProductAutofill[]
+  bulkValueImports        BulkValueImport[]
   sourceAutofills         SourceAutofill[]
   translationLanguages    TranslationLanguage[]
   translationCoverages    TranslationCoverage[]
@@ -2423,6 +2424,46 @@ model ProductAutofill {
   @@unique([shopId, productId])
   @@index([shopId, status])
   @@map("product_autofill")
+}
+
+/// A spreadsheet of attribute values, read and waiting to be applied, or
+/// being applied (docs/attributes.md § Bulk values). The preview is kept
+/// whole for a day so applying does not ask for the file again: the parsed,
+/// validated changes with the value each had when the file was read. The
+/// apply job compares that value with Shopify's before every write and
+/// leaves a value someone changed since. Outcomes are kept per change.
+model BulkValueImport {
+  id     String @id @default(cuid())
+  shopId String @map("shop_id")
+
+  fileName  String  @map("file_name")
+  createdBy String? @map("created_by")
+
+  /// `previewed`, `queued`, `running`, `done` or `failed`.
+  status    String
+  expiresAt DateTime @map("expires_at")
+
+  /// Counts by outcome, per attribute and the notes: the plan without its changes.
+  summary Json
+  /// `PlannedChange[]`: what applying does.
+  changes Json
+  /// One entry per change, in order: null while waiting, else what happened.
+  outcomes Json @default("[]")
+
+  total      Int       @default(0)
+  done       Int       @default(0)
+  lastError  String?   @map("last_error")
+  appliedBy  String?   @map("applied_by")
+  startedAt  DateTime? @map("started_at")
+  finishedAt DateTime? @map("finished_at")
+
+  createdAt DateTime @default(now()) @map("created_at")
+  updatedAt DateTime @updatedAt @map("updated_at")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@map("bulk_value_import")
 }
 
 /// The store menu made from the product type tree (docs/attributes.md
