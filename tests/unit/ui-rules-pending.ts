@@ -2,15 +2,6 @@ import type { Allowed } from "./ui-rules";
 
 /** Violations known at the start of PRD 3; each story removes its own. */
 export const PENDING: Record<string, Allowed[]> = {
-  lastRun: [
-    { file: "src/web/components/source-overview.tsx", includes: "label=\"Last run\"", reason: "pending US-303 ProcessHeader" },
-    { file: "src/web/components/source-overview.tsx", includes: "label=\"Next run\"", reason: "pending US-303 ProcessHeader" },
-    { file: "src/web/components/source-overview.tsx", includes: "label=\"Next run\"", reason: "pending US-303 ProcessHeader" },
-    { file: "src/web/components/sources-list.tsx", includes: "label: \"Last run\",", reason: "pending US-303 ProcessHeader" },
-    { file: "src/web/components/sources-list.tsx", includes: "label: \"Next run\",", reason: "pending US-303 ProcessHeader" },
-    { file: "src/web/components/sources-list.tsx", includes: "<s-table-header listSlot=\"labeled\">Last ", reason: "pending US-303 ProcessHeader" },
-    { file: "src/web/components/sources-list.tsx", includes: "<s-table-header listSlot=\"labeled\">Next ", reason: "pending US-303 ProcessHeader" },
-  ],
   article: [
     { file: "src/web/components/ai-translation-settings.tsx", includes: "description=\"Products are translated wit", reason: "pending US-308 reword" },
     { file: "src/web/lib/exceptions.ts", includes: "\"The goods were sent, but MetaKocka has ", reason: "pending US-308 reword" },

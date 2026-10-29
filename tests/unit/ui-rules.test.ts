@@ -95,7 +95,18 @@ describe("US-305 colour marks exceptions only", () => {
 });
 
 describe("US-303 one process header", () => {
-  const allow: Allowed[] = [...(PENDING.lastRun ?? [])];
+  const allow: Allowed[] = [
+    {
+      file: "src/web/components/sources-list.tsx",
+      includes: '>Last run</s-table-header>',
+      reason: "a column of per-source values in the table, not a page header",
+    },
+    {
+      file: "src/web/components/sources-list.tsx",
+      includes: '>Next run</s-table-header>',
+      reason: "a column of per-source values in the table, not a page header",
+    },
+  ];
   it("renders last and next run in the process header only", () => {
     expectClean(
       hit((l) => /["'>]\s*(Last|Next) run\b/.test(l.text)),

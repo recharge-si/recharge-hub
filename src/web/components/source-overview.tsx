@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import type { Run, Source } from "~/domain/export-portal/contract";
+import { ProcessHeader } from "~/web/components/process-header";
 import { formatDateTime, formatListDateTime } from "~/web/lib/datetime";
 import {
   RUN_STATUS_LABEL,
@@ -11,6 +12,7 @@ import {
   isRunStale,
   runStatusLabel,
   runStatusTone,
+  sourceProcess,
   sourceStatus,
 } from "~/web/lib/sources";
 
@@ -184,65 +186,30 @@ export function SourceSummaryStrip({
   source: Source;
   running: boolean;
 }) {
-  const status = sourceStatus(source);
   const last = source.lastRun;
-  const schedule = describeSchedule(source.schedule);
+  const process = sourceProcess(source);
 
   return (
     <Card label="Summary">
-      <s-grid
-        gridTemplateColumns="@container (inline-size <= 560px) 1fr 1fr, 1fr 1fr 1fr 1fr"
-        gap="base"
-      >
-        <Fact
-          label="Health"
-          value={
-            <s-stack direction="inline">
-              <s-badge {...(status.tone ? { tone: status.tone } : {})}>
-                {running ? "Running" : status.label}
-              </s-badge>
-            </s-stack>
-          }
-        />
-        <Fact
-          label="Last run"
-          value={
-            last
-              ? `${runStatusLabel(last)}${
-                  last.finishedAt
-                    ? ` · ${formatListDateTime(last.finishedAt)}`
-                    : last.startedAt
-                      ? ` · ${formatListDateTime(last.startedAt)}`
-                      : ""
-                }`
-              : "Never"
-          }
-          subdued={!last}
-          tone={last?.status === "failed" ? "critical" : "auto"}
+      <s-stack direction="block" gap="base">
+        <ProcessHeader
+          {...process}
+          running={running}
+          attention={{
+            href: SOURCE_ROUTES.runs(source.id),
+            label: "See what the last run reported",
+          }}
         />
         <Fact
           label="Items"
           value={
             last?.itemCount !== null && last?.itemCount !== undefined
               ? n(last.itemCount)
-              : "—"
+              : "\u2014"
           }
           subdued={last?.itemCount === null || last?.itemCount === undefined}
         />
-        <Fact
-          label="Next run"
-          value={
-            !source.enabled
-              ? "Off"
-              : source.schedule.nextRunAt
-                ? formatListDateTime(source.schedule.nextRunAt)
-                : schedule.mode === "automatic"
-                  ? schedule.summary
-                  : "When run by hand"
-          }
-          subdued={!source.enabled || !source.schedule.nextRunAt}
-        />
-      </s-grid>
+      </s-stack>
     </Card>
   );
 }
@@ -274,17 +241,14 @@ export function StatusCard({
   return (
     <Card label="Status">
       <s-stack direction="block" gap="base">
-        {/* Healthy is calm: "On" is a plain badge, never a green one. */}
-        <s-stack direction="inline" gap="small-300" alignItems="center">
-          <s-badge {...(source.enabled ? {} : { tone: "neutral" as const })}>
-            {source.enabled ? "On" : "Off"}
-          </s-badge>
-          {source.enabled ? (
+        <Fact label="Source" value={source.enabled ? "On" : "Off"} />
+        {source.enabled ? (
+          <s-stack direction="inline" gap="small-300" alignItems="center">
             <s-badge {...(status.tone ? { tone: status.tone } : {})}>
               {running ? "Running" : status.label}
             </s-badge>
-          ) : null}
-        </s-stack>
+          </s-stack>
+        ) : null}
         <Fact
           label="Schedule"
           value={
@@ -292,19 +256,6 @@ export function StatusCard({
               ? "Manual — runs when started by hand"
               : schedule.summary
           }
-        />
-        <Fact
-          label="Next run"
-          value={
-            !source.enabled
-              ? "Not while off"
-              : source.schedule.nextRunAt
-                ? formatDateTime(source.schedule.nextRunAt)
-                : schedule.mode === "automatic"
-                  ? "On the next refresh"
-                  : "When started by hand"
-          }
-          subdued={!source.enabled || !source.schedule.nextRunAt}
         />
         <Fact
           label="Last successful run"

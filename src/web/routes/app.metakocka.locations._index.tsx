@@ -31,6 +31,7 @@ import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { enqueueThrottled } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
+import { ProcessHeader } from "~/web/components/process-header";
 import { DistributionBars } from "~/web/components/distribution-bars";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent, describeSyncBriefly } from "~/web/lib/activity";
@@ -433,6 +434,12 @@ export default function Locations() {
 
   const rejected = profitCenters.filter((entry) => !entry.isValid);
 
+  // The stock sync runs per location; the page header answers for all of them.
+  const latestSync = locations
+    .map((row) => row.lastSync)
+    .filter((sync): sync is NonNullable<typeof sync> => sync !== null)
+    .sort((a, b) => (a.at < b.at ? 1 : -1))[0];
+
   const pageResult =
     pageFetcher.data?.scope === "page" ? pageFetcher.data : null;
 
@@ -570,6 +577,27 @@ export default function Locations() {
              * Each count appears once: the table states which locations, this
              * states how many, and neither repeats the other.
              */}
+            <ProcessHeader
+              health={
+                locations.some((row) => row.status === "error")
+                  ? "needs_attention"
+                  : !locations.some((row) => row.status === "syncing")
+                    ? "off"
+                    : latestSync
+                      ? "ok"
+                      : "never_run"
+              }
+              lastRun={
+                latestSync
+                  ? {
+                      at: latestSync.at,
+                      outcome: latestSync.ok ? "completed" : "failed",
+                    }
+                  : null
+              }
+              mode="automatic"
+            />
+
             <DistributionBars
               rows={statusBreakdown}
               unit="location"

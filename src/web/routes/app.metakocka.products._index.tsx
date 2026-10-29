@@ -24,9 +24,10 @@ import {
   usesMetafields,
 } from "~/domain/products/template";
 import { DistributionBars } from "~/web/components/distribution-bars";
+import { ProcessHeader } from "~/web/components/process-header";
 import { RecentActivity } from "~/web/components/recent-activity";
 import { describeEvent } from "~/web/lib/activity";
-import { formatDateTime, formatInterval } from "~/web/lib/datetime";
+import { formatInterval } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
 import { productPath } from "~/web/lib/product-workspace";
 
@@ -308,17 +309,31 @@ export default function Products() {
              * every quarter of an hour, and a time computed against the
              * reader's own clock is a hydration mismatch waiting to happen.
              */}
-            <s-text color="subdued">
-              {`${
+            <ProcessHeader
+              health={
+                status && !status.ok
+                  ? "needs_attention"
+                  : lastRunAt
+                    ? "ok"
+                    : "never_run"
+              }
+              lastRun={
                 lastRunAt
-                  ? `Last synced ${formatDateTime(lastRunAt)}.`
-                  : "Not synced yet."
-              } ${
-                productSync.scheduleEnabled
-                  ? `It also runs on its own every ${formatInterval(productSync.scheduleIntervalMinutes)}.`
-                  : "Syncing runs when you press the button."
-              }`}
-            </s-text>
+                  ? {
+                      at: lastRunAt,
+                      outcome: status ? (status.ok ? "completed" : "failed") : "",
+                    }
+                  : null
+              }
+              mode={productSync.scheduleEnabled ? "automatic" : "manual"}
+              running={busy}
+              detail={status && !status.ok ? status.text : null}
+            />
+            {productSync.scheduleEnabled ? (
+              <s-text color="subdued">
+                {`It also runs on its own every ${formatInterval(productSync.scheduleIntervalMinutes)}.`}
+              </s-text>
+            ) : null}
           </s-stack>
         </s-section>
 

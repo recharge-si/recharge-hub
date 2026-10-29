@@ -22,6 +22,8 @@ export interface ProcessHeaderProps {
   running?: boolean;
   /** Where the person deals with it; shown when the process needs attention. */
   attention?: { href: string; label: string };
+  /** What went wrong, in the process's own words; shown with the banner. */
+  detail?: string | null;
 }
 
 const HEALTH_WORD: Record<ProcessHealth, string> = {
@@ -72,6 +74,7 @@ export function ProcessHeader(props: ProcessHeaderProps & { now?: Date }) {
   if (normalizeHealth(props.health) === "needs_attention") {
     return (
       <s-banner tone="critical" heading={text}>
+        {props.detail ? <s-paragraph>{props.detail}</s-paragraph> : null}
         {props.attention ? (
           <s-link href={props.attention.href}>{props.attention.label}</s-link>
         ) : null}

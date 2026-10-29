@@ -8,6 +8,7 @@ import {
 import { listSyncs } from "~/adapters/db/repositories/translations.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { SYNC_MODE_LABEL, type SyncMode } from "~/domain/translations/types";
+import { ProcessHeader } from "~/web/components/process-header";
 import { TranslationsNav } from "~/web/components/translations-nav";
 import { formatDateTime } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -59,6 +60,14 @@ export default function Syncs() {
     (sync) => sync.status === "queued" || sync.status === "running",
   );
   useLiveRevalidation({ active: active, idleEveryMs: null });
+  const latestFinished = syncs.find((sync) => sync.finishedAt !== null);
+  // Syncs the app starts itself (changed products, automatic translation)
+  // make the process automatic; otherwise it runs when a person asks.
+  const automatic = syncs.some(
+    (sync) =>
+      sync.kind === "automatic" ||
+      (sync.kind === "resource" && sync.requestedBy === null),
+  );
 
   return (
     <s-page heading="Syncs" inlineSize="large">
@@ -75,6 +84,26 @@ export default function Syncs() {
 
       <s-stack direction="block" gap="large">
         <TranslationsNav current="syncs" />
+
+        {syncs.length > 0 ? (
+          <ProcessHeader
+            health={syncs[0]!.status === "failed" ? "needs_attention" : "ok"}
+            lastRun={
+              latestFinished
+                ? {
+                    at: latestFinished.finishedAt!,
+                    outcome: latestFinished.status,
+                  }
+                : null
+            }
+            mode={automatic ? "automatic" : "manual"}
+            running={active}
+            attention={{
+              href: TRANSLATION_ROUTES.sync(syncs[0]!.id),
+              label: "Open the sync",
+            }}
+          />
+        ) : null}
 
         <s-section>
           {syncs.length === 0 ? (
