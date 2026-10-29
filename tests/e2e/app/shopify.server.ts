@@ -116,7 +116,32 @@ function fakeAdmin(shop: string): AdminApiContext {
   return { graphql } as unknown as AdminApiContext;
 }
 
+/**
+ * The App Proxy query every e2e proxy request carries. Shopify signs the real
+ * one with the app secret; the stand-in accepts exactly this signature, so a
+ * spec can also send a request that does not carry it and see the 401.
+ */
+export const E2E_PROXY_SIGNATURE = "e2e-proxy-ok";
+
 export const authenticate = {
+  /**
+   * `authenticate.public.appProxy`, which the storefront's /apps/rig routes
+   * use. The real one verifies Shopify's HMAC of the query and throws a 400
+   * Response when it is wrong; this one checks the fixed signature above.
+   */
+  public: {
+    async appProxy(request: Request): Promise<Record<string, never>> {
+      const url = new URL(request.url);
+      const shop = url.searchParams.get("shop") ?? "";
+      if (
+        url.searchParams.get("signature") !== E2E_PROXY_SIGNATURE ||
+        !SHOP_PATTERN.test(shop)
+      ) {
+        throw new Response("e2e: invalid app proxy signature", { status: 400 });
+      }
+      return {};
+    },
+  },
   async admin(request: Request) {
     const shop = shopFromRequest(request);
     return { session: onlineSession(shop), admin: fakeAdmin(shop) };
