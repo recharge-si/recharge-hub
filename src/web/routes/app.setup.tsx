@@ -1082,7 +1082,12 @@ export default function Setup() {
           <StockStep stock={data.stock} busy={busy} />
         ) : null}
         {step === "orders" && data.orders ? (
-          <OrdersStep orders={data.orders} result={result} busy={busy} />
+          <OrdersStep
+            orders={data.orders}
+            result={result}
+            busy={busy}
+            settled={data.alreadyCompleted}
+          />
         ) : null}
         {step === "review" && data.review ? (
           <ReviewStep review={data.review} busy={busy} />
@@ -1523,10 +1528,13 @@ function OrdersStep({
   orders,
   result,
   busy,
+  settled,
 }: {
   orders: OrdersData;
   result: StepResult | undefined;
   busy: boolean;
+  /** Setup is finished: the order settings page owns what this step first asks. */
+  settled: boolean;
 }) {
   const [transfer, setTransfer] = useState(orders.transferOrders);
   const [backlog, setBacklog] = useState(false);
@@ -1617,18 +1625,36 @@ function OrdersStep({
               name="transferOrders"
               value={transfer ? "on" : ""}
             />
-            <s-stack direction="block" gap="small-400">
-              <s-checkbox
-                label="Transfer orders to MetaKocka"
-                checked={transfer}
-                onChange={(event) => setTransfer(event.currentTarget.checked)}
-              />
-              <s-text color="subdued">
-                {transfer
-                  ? "Each order is written to MetaKocka as a sales order and kept up to date."
-                  : "Nothing about any order is sent to MetaKocka. Orders are still received and listed here, and stock and the catalogue keep synchronizing. You can turn this on later on the order settings page."}
-              </s-text>
-            </s-stack>
+            {settled ? (
+              /*
+               * One editor per setting (docs/ui-conventions.md § Setup state):
+               * once setup is finished the order settings page owns the
+               * switch, so this is its current value and a link. The hidden
+               * input above still carries the value so the step saves what it
+               * saved before.
+               */
+              <s-stack direction="block" gap="small-400">
+                <s-text>
+                  {`Order transfer is ${orders.transferOrders ? "on" : "off"}.`}
+                </s-text>
+                <s-link href="/app/orders/settings">
+                  Change it on the order settings page
+                </s-link>
+              </s-stack>
+            ) : (
+              <s-stack direction="block" gap="small-400">
+                <s-checkbox
+                  label="Transfer orders to MetaKocka"
+                  checked={transfer}
+                  onChange={(event) => setTransfer(event.currentTarget.checked)}
+                />
+                <s-text color="subdued">
+                  {transfer
+                    ? "Each order is written to MetaKocka as a sales order and kept up to date."
+                    : "Nothing about any order is sent to MetaKocka. Orders are still received and listed here, and stock and the catalogue keep synchronizing. You can turn this on later on the order settings page."}
+                </s-text>
+              </s-stack>
+            )}
 
             {turningOn && orders.awaitingTransfer > 0 ? (
               /*
@@ -1747,7 +1773,14 @@ function OrdersStep({
                   </s-text>
                 </s-stack>
 
-                {customising ? (
+                {settled ? (
+                  <>
+                    <input type="hidden" name="template" value={template} />
+                    <s-link href="/app/orders/settings">
+                      Change the reference on the order settings page
+                    </s-link>
+                  </>
+                ) : customising ? (
                   /*
                    * The same control the product name pattern is edited in: fields
                    * as chips, offered as they are typed, each showing what it comes

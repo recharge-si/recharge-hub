@@ -411,6 +411,9 @@ export default function Products() {
 
   return (
     <s-page heading="Products" inlineSize="large">
+      <s-button slot="secondary-actions" href="/app/metakocka/products">
+        MetaKocka products
+      </s-button>
       {autofillAvailable ? (
         <s-button
           slot="secondary-actions"

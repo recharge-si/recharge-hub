@@ -95,3 +95,33 @@ test("Sources pages share one tab row and mark the current one", async ({
   for (const label of ["Sources", "AI categorization", "Connection"])
     await expect(tabs.getByText(label, { exact: true })).toBeVisible();
 });
+
+test("after setup, Order settings own the transfer switch and the reference", async ({
+  page,
+  shop,
+}) => {
+  await seed(shop);
+  await page.goto("/app/setup?step=orders");
+  await expect(page.getByText(/^Order transfer is (on|off)\.$/)).toBeVisible();
+  await expect(
+    page.locator('s-link[href="/app/orders/settings"]').first(),
+  ).toBeVisible();
+  await expect(
+    page.locator('s-checkbox[label="Transfer orders to MetaKocka"]'),
+  ).toHaveCount(0);
+  await expect(page.locator("s-text-field[label*='Reference pattern']")).toHaveCount(0);
+});
+
+test("the MetaKocka catalogue page is headed MetaKocka products", async ({
+  page,
+  shop,
+}) => {
+  await seed(shop);
+  await page.goto("/app/products");
+  await page.getByText("MetaKocka products").first().click();
+  await expect(page).toHaveURL(/\/app\/metakocka\/products/);
+  await expect(page.locator("s-page").first()).toHaveAttribute(
+    "heading",
+    "MetaKocka products",
+  );
+});

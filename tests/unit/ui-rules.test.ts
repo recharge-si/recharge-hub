@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 import { APP_NAV } from "~/web/lib/navigation";
 
 import { PENDING } from "./ui-rules-pending";
-import { judge, webLines, type Allowed, type Line } from "./ui-rules";
+import {
+  judge,
+  loaderLines,
+  webLines,
+  type Allowed,
+  type Line,
+} from "./ui-rules";
 
 /**
  * docs/ui-conventions.md as tests (tasks/prd-03-ui-coherence.md § 8).
@@ -21,6 +27,23 @@ function expectClean(hits: Line[], allow: readonly Allowed[]): void {
   expect(violations, "violations").toEqual([]);
   expect(stale, "allowlist entries that excuse nothing").toEqual([]);
 }
+
+describe("US-302 the navigation tree is pinned", () => {
+  it("lists the entries in this order", () => {
+    expect(APP_NAV.map((item) => item.label)).toEqual([
+      "Home",
+      "Needs attention",
+      "Orders",
+      "Sales",
+      "Products",
+      "Product setup",
+      "Translations",
+      "Sources",
+      "MetaKocka",
+      "Settings",
+    ]);
+  });
+});
 
 describe("US-301 one name for the area", () => {
   it("labels the navigation entry Product setup, never Metafields", () => {
@@ -162,4 +185,56 @@ describe("US-308 words", () => {
       );
     });
   }
+});
+
+describe("US-307 no page load waits for an integration", () => {
+  const portal =
+    "the export portal read is awaited in the loader on purpose (docs/sources.md: one call per page, 8 s timeout). PRD 3 Open question 2 proposes deferring it; not done blind, without a browser to check the live re-reads and the failure states";
+  const allow: Allowed[] = [
+    { file: "src/web/routes/app.sources._index.tsx", includes: "readPortal(", reason: portal },
+    { file: "src/web/routes/app.sources.$sourceId._index.tsx", includes: "readPortal(", reason: portal },
+    { file: "src/web/routes/app.sources.$sourceId.runs._index.tsx", includes: "readPortal(", reason: portal },
+    { file: "src/web/routes/app.sources.$sourceId.runs.$runId.tsx", includes: "readPortal(", reason: portal },
+    { file: "src/web/routes/app.sources.new.tsx", includes: "readPortal(", reason: portal },
+    { file: "src/web/routes/app.sources.categorization.tsx", includes: "readPortal(", reason: portal },
+    { file: "src/web/routes/app.sources.review.tsx", includes: "readPortal(", reason: portal },
+  ];
+  it("keeps MetaKocka and the export portal out of loaders, except the documented portal reads", () => {
+    expectClean(
+      loaderLines().filter((l) =>
+        /\bnew MetakockaClient\(|\breadPortal\(|\bportalFor\(/.test(l.text),
+      ),
+      allow,
+    );
+  });
+});
+
+describe("US-304 the nine polling routes use the hook", () => {
+  const ROUTES = [
+    "app.sales._index.tsx",
+    "app.sales.$campaignId._index.tsx",
+    "app.translations._index.tsx",
+    "app.translations.syncs._index.tsx",
+    "app.translations.syncs.$syncId.tsx",
+    "app.translations.context.tsx",
+    "app.translations.languages.$locale.tsx",
+    "app.metakocka.locations.settings.tsx",
+    "app.orders.settings.payments.tsx",
+  ];
+  for (const route of ROUTES)
+    it(`${route} calls useLiveRevalidation`, () => {
+      const file = `src/web/routes/${route}`;
+      expect(
+        lines.some((l) => l.file === file && /useLiveRevalidation\(/.test(l.text)),
+      ).toBe(true);
+    });
+  it("uses useWatchWindow in the payments page after a save", () => {
+    expect(
+      lines.some(
+        (l) =>
+          l.file === "src/web/routes/app.orders.settings.payments.tsx" &&
+          /useWatchWindow\(/.test(l.text),
+      ),
+    ).toBe(true);
+  });
 });

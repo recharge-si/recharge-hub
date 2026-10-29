@@ -192,7 +192,7 @@ export default function Products() {
   }, [result]);
 
   return (
-    <s-page heading="Products">
+    <s-page heading="MetaKocka products">
       <s-link slot="breadcrumb-actions" href="/app/metakocka">
         MetaKocka
       </s-link>

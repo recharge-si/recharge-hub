@@ -13,6 +13,7 @@ export interface Line {
   file: string; // repo-relative, forward slashes
   line: number; // 1-based
   text: string; // the source line, trimmed
+  indent: number; // leading spaces of the original line
 }
 
 function walk(dir: string, out: string[]): void {
@@ -54,7 +55,7 @@ export function webLines(): Line[] {
           text = (text.slice(0, start) + " " + text.slice(end + 2)).trim();
         }
         if (text === "") return;
-        lines.push({ file, line: index + 1, text });
+        lines.push({ file, line: index + 1, text, indent: raw.length - raw.trimStart().length });
       });
   }
   return lines;
@@ -90,4 +91,22 @@ export function judge(
     .filter((a) => !used.has(a))
     .map((a) => `${a.file}  "${a.includes}"  (${a.reason})`);
   return { violations, stale };
+}
+
+/** The lines of every route's `loader` function body (up to its closing brace at column 0). */
+export function loaderLines(): Line[] {
+  const out: Line[] = [];
+  let current: string | null = null;
+  for (const l of webLines()) {
+    if (!l.file.startsWith("src/web/routes/")) continue;
+    if (
+      l.indent === 0 &&
+      /^export (const|async function) loader\b/.test(l.text)
+    )
+      current = l.file;
+    if (current === l.file) out.push(l);
+    if (current === l.file && l.indent === 0 && /^(\};?|\))/.test(l.text))
+      current = null;
+  }
+  return out;
 }

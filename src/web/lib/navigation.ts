@@ -33,11 +33,11 @@ export const APP_HOME = "/app";
  *  3. **Products**, **Product setup** and **Translations**, the catalogue.
  *     Products opens each product's workspace, where it is edited here
  *     rather than in Shopify's product editor.
- *  4. **MetaKocka** and **Sources**, the two systems that feed the store.
+ *  4. **Sources** and **MetaKocka**, the two systems that feed the store.
+ *     Sources (docs/sources.md) is what the export portal pushes in.
  *     MetaKocka's page opens onto its products, locations and connection, and
  *     those live under `/app/metakocka/` so its entry is the one highlighted
  *     (the admin highlights the entry the current path starts with).
- *     Sources (docs/sources.md) is what the export portal pushes in.
  *  5. **Settings** last.
  */
 export const APP_NAV: readonly NavItem[] = [
@@ -48,8 +48,8 @@ export const APP_NAV: readonly NavItem[] = [
   { href: "/app/products", label: "Products" },
   { href: "/app/product-setup", label: "Product setup" },
   { href: "/app/translations", label: "Translations" },
-  { href: "/app/metakocka", label: "MetaKocka" },
   { href: "/app/sources", label: "Sources" },
+  { href: "/app/metakocka", label: "MetaKocka" },
   { href: "/app/settings", label: "Settings" },
 ];
 
