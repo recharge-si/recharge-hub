@@ -445,7 +445,7 @@ export default function MetakockaSettings() {
               <s-text>
                 {summary?.lastVerifiedAt
                   ? `Last successful call ${new Date(summary.lastVerifiedAt).toLocaleString()}`
-                  : "The credentials have not been used successfully yet."}
+                  : "The credentials have not been used yet."}
               </s-text>
             </s-stack>
 

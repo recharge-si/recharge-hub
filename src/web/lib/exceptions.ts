@@ -129,7 +129,7 @@ const COPY: Record<string, ExceptionCopy> = {
     label: "MetaKocka rejected the order",
     short: "MetaKocka would not accept",
     guidance:
-      "The exact reason is on the exception. Fix what it names, then retry — nothing was written.",
+      "The exact reason is on the item. Fix what it names, then retry — nothing was written.",
   },
   fulfillment_split_failed: {
     label: "Could not split the fulfilment order",
@@ -177,13 +177,13 @@ const COPY: Record<string, ExceptionCopy> = {
     label: "Shipping or discount has nowhere to go",
     short: "carrying shipping or a discount MetaKocka cannot show",
     guidance:
-      "The goods were sent, but MetaKocka has no article for the postage or no way to show the discount, so the sales order is short by that amount. Choose a shipping product and a discount representation in the order settings, then reconcile the order again. Nothing is guessed.",
+      "The goods were sent, but MetaKocka has no product for the postage or no way to show the discount, so the sales order is short by that amount. Choose a shipping product and a discount representation in the order settings, then reconcile the order again. Nothing is guessed.",
   },
   job_failed: {
     label: "Background work stopped",
     short: "whose background work stopped",
     guidance:
-      "A job ran out of retries and will not run again on its own. The recorded failure is on the exception. Fix what it names, then retry.",
+      "A job ran out of retries and will not run again on its own. The recorded failure is on the item. Fix what it names, then retry.",
   },
   sale_price_conflict: {
     label: "Price changed outside the sale",

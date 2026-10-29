@@ -116,14 +116,30 @@ describe("US-303 one process header", () => {
 });
 
 describe("US-308 words", () => {
+  const shopifyArticle = "Shopify's own blog article resource, named as Shopify names it";
+  const allowByWord: Record<string, Allowed[]> = {
+    article: [
+      { file: "src/web/components/ai-translation-settings.tsx", includes: "Collections, pages, articles", reason: shopifyArticle },
+      { file: "src/web/routes/app.translations._index.tsx", includes: "A page, product or article written", reason: shopifyArticle },
+      { file: "src/web/routes/app.translations.add.tsx", includes: "Every product, collection, page, article", reason: shopifyArticle },
+      { file: "src/web/routes/app.translations.languages.$locale.tsx", includes: "Shopify \u2014 products, collections, pages, articles", reason: shopifyArticle },
+    ],
+    exception: [
+      { file: "src/web/routes/app.product-setup.settings.tsx", includes: "every set and every exception", reason: "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue" },
+      { file: "src/web/routes/app.product-setup.types.($typeId).tsx", includes: "has no children, sources or exceptions", reason: "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue" },
+    ],
+    feed: [
+      { file: "src/web/routes/app.sources._index.tsx", includes: "Connect a catalogue export or a brand feed", reason: "the Sources area's own noun for a kind of source (docs/ui-conventions.md glossary)" },
+    ],
+  };
   /** Text a merchant reads: quoted strings with a space, and JSX text. */
   function copyOf(l: Line): string[] {
     if (/^(import|export \* from)\b/.test(l.text) || /\bfrom "/.test(l.text))
       return [];
     const out: string[] = [];
     for (const m of l.text.matchAll(/"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)) {
-      const s = m[1] ?? m[2] ?? "";
-      if (s.includes(" ")) out.push(s);
+      const s = (m[1] ?? m[2] ?? "").replace(/\$\{[^}]*\}/g, "");
+      if (s.includes(" ") && !s.startsWith("/")) out.push(s);
     }
     for (const m of l.text.matchAll(/>([^<>{}]+)</g)) out.push(m[1] ?? "");
     if (/^[A-Z][^{}<>=;()]*[.,:]?$/.test(l.text) && l.text.includes(" "))
@@ -142,7 +158,7 @@ describe("US-308 words", () => {
     it(`never says ${name} in merchant copy`, () => {
       expectClean(
         hit((l) => copyOf(l).some((s) => pattern.test(s))),
-        [...(PENDING[name] ?? [])],
+        [...(allowByWord[name] ?? []), ...(PENDING[name] ?? [])],
       );
     });
   }

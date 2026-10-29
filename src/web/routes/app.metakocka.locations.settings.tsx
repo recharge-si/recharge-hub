@@ -1056,7 +1056,7 @@ export default function LocationDefaults() {
          * been able to check.
          */}
         {defaultsResult && !defaultsResult.ok ? (
-          <s-banner tone="warning" heading="Saved, with an exception">
+          <s-banner tone="warning" heading="Saved, with something to check">
             <s-paragraph>{defaultsResult.message}</s-paragraph>
           </s-banner>
         ) : rejected.length > 0 ? (

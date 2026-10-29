@@ -772,7 +772,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
           return {
             ok: false,
             field: "shippingProductCode",
-            message: `MetaKocka has no product with the code "${shippingProductCode}". Create the article there first — this app never creates one from an order line.`,
+            message: `MetaKocka has no product with the code "${shippingProductCode}". Create the product there first — this app never creates one from an order line.`,
           } satisfies StepResult;
         }
       } catch (error) {
@@ -1881,7 +1881,7 @@ function OrdersStep({
                     onChange={(event) =>
                       setShippingProductCode(event.currentTarget.value)
                     }
-                    details="The code exactly as MetaKocka holds it. This app never creates the article for you."
+                    details="The code exactly as MetaKocka holds it. This app never creates the product for you."
                     error={errorFor("shippingProductCode")}
                   />
                 </s-box>

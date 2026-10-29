@@ -323,7 +323,7 @@ export default function SourcesConnection() {
                 {summary?.lastVerifiedAt
                   ? `Last successful call ${formatDateTime(summary.lastVerifiedAt)}`
                   : summary?.connected
-                    ? "The key has not been used successfully yet."
+                    ? "The key has not been used yet."
                     : "No key is saved."}
               </s-text>
             </s-stack>
