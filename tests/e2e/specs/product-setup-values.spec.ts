@@ -51,7 +51,12 @@ test.beforeEach(async ({ shop }) => {
 
 test("exports the masts with hints for the empty lengths", async ({ page }) => {
   await page.goto("/app/product-setup/values");
-  await expect(page.getByText("Upload filled file")).toBeVisible();
+  // A slotted primary action has no box of its own: attached, not visible.
+  await expect(
+    page.locator('s-button[slot="primary-action"]', {
+      hasText: "Upload filled file",
+    }),
+  ).toBeAttached();
   await expect(page.getByText("How to")).toBeVisible();
 
   const csv = await page.evaluate(async () => {
@@ -75,7 +80,7 @@ test("previews without writing, then applies in the background", async ({
     name: "masts.csv",
     mimeType: "text/csv",
     buffer: Buffer.from(
-      [HEADER, row(91001, "370", "RDM"), row(91002, "430,5", "rdm"), row(91003, "460", "")].join("\n"),
+      [HEADER, row(91001, "370", "RDM"), row(91002, '"430,5"', "rdm"), row(91003, "460", "")].join("\n"),
     ),
   });
   await expect(page.getByText("5 values would be written")).toBeVisible();
@@ -107,7 +112,7 @@ test("previews without writing, then applies in the background", async ({
   expect(variants[0]?.metafields["recharge.mast_diameter"]?.value).toBe("rdm");
 
   await page.reload();
-  await expect(page.getByText(/^Done/)).toBeVisible();
+  await expect(page.getByRole("heading", { name: /^Done/ })).toBeVisible();
 });
 
 test("lists the errors of a file and offers no apply", async ({ page, shop }) => {
@@ -117,8 +122,10 @@ test("lists the errors of a file and offers no apply", async ({ page, shop }) =>
     mimeType: "text/csv",
     buffer: Buffer.from([HEADER, row(91001, "430-460", "xdm")].join("\n")),
   });
-  await expect(page.getByText("2 errors to fix before anything can be applied")).toBeVisible();
-  await expect(page.getByText(/not one number/)).toBeVisible();
+  await expect(
+    page.getByText("2 errors to fix before anything can be applied").first(),
+  ).toBeVisible();
+  await expect(page.getByText(/not one number/).first()).toBeVisible();
   await expect(page.locator('s-button[slot="primary-action"]')).toHaveText(
     "Upload another file",
   );
