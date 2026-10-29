@@ -265,10 +265,60 @@ export async function recentPlainShare(
 }
 
 /* -------------------------------------------------------------------------- */
-/* ai_usage                                                                   */
+/* Home page                                                                  */
 /* -------------------------------------------------------------------------- */
 
 export const RIG_PROVIDER = "claude-pool";
+
+export interface RigHomeFacts {
+  /** Requests stored since 00:00 UTC (a build and its explain are one row). */
+  buildsToday: number;
+  plain: { plain: number; of: number };
+  /** The last time the pool answered "every account is full". */
+  lastExhaustedAt: Date | null;
+}
+
+/**
+ * What the Home page's Rig builder line states, or null when the builder is
+ * off (then there is no line). Reads only: `rig_request` and `ai_usage`.
+ */
+export async function getRigHomeFacts(
+  principal: Principal,
+  now: Date,
+): Promise<RigHomeFacts | null> {
+  const shop = await prisma.shop.findUnique({
+    where: { domain: shopDomainOf(principal) },
+    select: { id: true, rigBuilderEnabled: true },
+  });
+  if (!shop?.rigBuilderEnabled) return null;
+  const startOfDay = new Date(
+    Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()),
+  );
+  const [buildsToday, plain, exhausted] = await Promise.all([
+    prisma.rigRequest.count({
+      where: { shopId: shop.id, createdAt: { gte: startOfDay } },
+    }),
+    recentPlainShare(shop.id),
+    prisma.aiUsage.findFirst({
+      where: {
+        shopId: shop.id,
+        provider: RIG_PROVIDER,
+        errorMessage: "exhausted",
+      },
+      orderBy: { createdAt: "desc" },
+      select: { createdAt: true },
+    }),
+  ]);
+  return {
+    buildsToday,
+    plain,
+    lastExhaustedAt: exhausted?.createdAt ?? null,
+  };
+}
+
+/* -------------------------------------------------------------------------- */
+/* ai_usage                                                                   */
+/* -------------------------------------------------------------------------- */
 
 /** Calls to the pool today (UTC) for this shop: every spawn counts, successful or not. */
 export async function poolCallsSince(
