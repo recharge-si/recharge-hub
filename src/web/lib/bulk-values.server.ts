@@ -202,7 +202,7 @@ export async function previewValues(
 ): Promise<PreviewOutcome> {
   if (Buffer.byteLength(file.text, "utf8") > LIMITS.fileBytes)
     return { ok: false, message: TOO_LARGE };
-  const text = file.text.replace(/^﻿/, "");
+  const text = file.text.replace(/^\uFEFF/, "");
   const refused = refuseFile(file.name, text);
   if (refused) return { ok: false, message: refused };
 

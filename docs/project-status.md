@@ -396,6 +396,13 @@ current list. The ones a person may want to decide on:
   database tests (`tests/e2e/specs/product-*.spec.ts`,
   `tests/db/attribute-definitions.test.ts`, `tests/db/fill-resume.test.ts`)
   were written but not run where it was built (no PostgreSQL or browser).
+- **Bulk values** (docs/attributes.md § Bulk values) is covered by unit and
+  adapter tests against a fake Shopify; its e2e spec
+  (`tests/e2e/specs/product-setup-values.spec.ts`) and database test
+  (`tests/db/bulk-values.test.ts`) run in CI and were not run where it was
+  built. It has not been driven against a live store. Open: the preview reads
+  the catalogue snapshot, so a snapshot behind Shopify shows as *changed
+  meanwhile* at apply time; no merge of two files; no unit conversion.
 - **The rig attribute list is a draft** until a Recharge windsurf expert signs
   it off (keys, choices, which attributes are required and which are per
   variant).

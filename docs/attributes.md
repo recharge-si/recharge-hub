@@ -120,7 +120,7 @@ no query that anything needs yet.
 ## Screens
 
 Every hub page opens with the workspace's own navigation — Product types |
-Attributes | Attribute sets | Definitions | Store menu | Settings — as links,
+Attributes | Attribute sets | Definitions | Store menu | Values | Settings — as links,
 the current one stated.
 Product types goes to the bare tree; a type is a dialog over it, named in
 the address while it is open.
@@ -134,6 +134,8 @@ the address while it is open.
 | `/app/product-setup/sets`                    | Sets with members and where each is attached; new and edit (name, description and which attributes belong, ticking one that is in another set moves it), delete, attach, detach. |
 | `/app/product-setup/definitions`             | The Definitions tab (*Metafield definitions*): a table of what the plan needs against what the store holds, **Create N definitions**, and the rig readiness lines when the plan has rig types. |
 | `/app/product-setup/menu`                    | The store menu: a preview of the menu the tree makes, folded to its top level with a chevron per branch and *Expand all* / *Collapse all* (entries link their collections once made), **Make menu** / **Update menu**, the run's progress while it works (live), and the result with a link to the menu in Shopify. |
+| `/app/product-setup/values`                  | The Values tab (*Bulk values*, below): export the products of some types as a spreadsheet, upload it filled in, a preview, apply. |
+| `/app/product-setup/values.csv`              | The values export, `?types=<id>,<id>&attributes=rig` or `all`, fetched by `DownloadButton`. |
 | `/app/product-setup/settings`                | The checks in their four states, export and import (CSV and JSON), planning with an AI assistant (the steps and the prompt to copy or download), exceptions single types have made, and starting again. |
 | `/app/product-setup/schema.json`             | The JSON export, fetched by `DownloadButton` so the session token travels with it. |
 | `/app/product-setup/schema.csv`              | The CSV export, fetched the same way; an empty plan is the header row, the template. |
@@ -226,6 +228,129 @@ it is changed elsewhere. An emptied field deletes the metafield. The save
 re-reads the plan, the type and the live values, refuses when the type changed
 or a value it changes was changed in Shopify since the page loaded, and logs
 `product.details_edited` (and `product.type_chosen` for a choice).
+
+## Bulk values
+
+Values can be entered for many products at once from a spreadsheet, for the
+technical specs the rig builder needs and that only spec sheets hold. No AI is
+involved: a person fills in what they know, the app shows exactly what would
+change, and applies it only on a second press. Pure rules in
+`domain/values/` (`cells.ts`, `fields.ts`, `export.ts`, `import.ts`), the
+stored previews in `adapters/db/repositories/bulk-values.server.ts` (table
+`bulk_value_import`), the apply in `adapters/products/bulk-values.server.ts`
+run by the `bulk-values-apply` job, the page and the export under
+`app.product-setup.values*`, shared through `web/lib/bulk-values.server.ts`.
+
+**The three steps.**
+
+1. **Export.** Choose one or several product types and an attributes preset
+   (*Rig essentials*: the keys `domain/rig/keys.ts` says the engine reads for
+   the type's role; or *All attributes active for the type*, every attribute
+   the plan gives it that the product page can write). The file is
+   `attribute-values-YYYY-MM-DD.csv`, UTF-8 with a byte order mark, comma
+   separated, at most 10 000 rows (the page counts them before it offers the
+   download).
+2. **Fill in** the cells and save as CSV UTF-8.
+3. **Upload** it on the Values page, read the preview, press *Apply*.
+
+**The file.** One row per variant of each product of the chosen types. Columns:
+`product_id`, `variant_id`, `sku`, `type`, `vendor`, `product`, `variant`,
+`option` (they say which row it is; only the two ids are read back), then one
+column per attribute headed with the name, the key in brackets and the unit:
+`Luff [recharge.luff_cm] (cm)`. A product-scoped attribute appears on every
+variant row of its product and is applied once (two rows giving one product
+two values is an error on the later row). Cells hold the current value in
+plain form: the number without its unit (the unit is in the heading), a
+select as its option code, a multi-select as codes separated by commas, a
+boolean as yes or no. Where a value is empty, `hint_` columns hold what a
+rule can derive deterministically from the variant's options and the product
+title (`domain/rig/derive.ts`: a mast's length from its size option, a sail's
+area from `5.8 m2 / Orange`, a fin's length, a mast's diameter and carbon
+percentage from the title). Nothing about compatibility is ever hinted: a
+boom range, a mast requirement, a fin box and a rider mass are left to
+people. Hints are never imported unless the person copies one into the
+attribute's own column.
+
+**Reading a cell.** Each cell goes through the validator the product page's
+save uses (`metafieldValue`), after a small translation (`cells.ts`):
+
+| Format | Accepts |
+| --- | --- |
+| Number, measurement | a plain number, a dot or a comma for decimals (`4.2`, `4,2`); never a range (`4-5`), never a unit inside the cell |
+| Whole number | digits (a spreadsheet's `3.0` is read as 3) |
+| Yes or no | `yes`, `no`, `true`, `false` in any case |
+| Single choice | the option's code or its label, in any case (`power_box`, `Power Box`) |
+| Multiple choice | several of those separated by commas, semicolons or bars |
+| Date | `YYYY-MM-DD` |
+| Text | as is |
+
+A **blank cell keeps** the current value. The literal **`[clear]`** removes the
+metafield. A cell equal to the current value is *unchanged*. A cell for an
+attribute the product's type does not have, a product with no type, or a
+field the product page cannot write (a reference, rich text, a list with no
+options) is *skipped* and says why. Columns are matched by the bracketed key,
+then by name, then by the bare key; a column that matches no attribute is
+listed on the preview and not read. Two columns for one attribute refuse the
+file. A cell starting with `=`, `+`, `-`, `@` or a tab is written on export
+with a leading apostrophe (so a spreadsheet does not run it as a formula) and
+read back without it; an apostrophe not in front of one of those is kept.
+The delimiter (comma, semicolon or tab) and a byte order mark are detected,
+as in the plan's CSV. Row numbers in messages are the file's own, blank lines
+included.
+
+**Matching.** A row is matched by `variant_id` (variant-scoped attributes) or
+`product_id` (product-scoped ones) against this shop's catalogue snapshot.
+An id the shop does not have is a row error; a `variant_id` of another
+product than the row's `product_id` is a row error. Which type a product has
+is the product page's resolution (the chosen type, then category, then
+Shopify product type).
+
+**The preview** (`planImport`) writes nothing to Shopify and is a POST of the
+file, never a render. It states counts by outcome (to set, to change, to
+clear, unchanged, skipped, errors) overall and per attribute, the first 50
+errors with the row number, the column and the exact reason, the first 50
+skipped cells, a sample of before and after, the unknown and hint columns, and
+whether it is *safe to apply*: no error and at least one change. A file with
+any error is not applied; the errors are fixed in the file and it is uploaded
+again. Where an attribute has no metafield definition yet the preview says
+*Untyped until definitions are created*: the value is then written with the
+type of a value already stored, or the plan's format, as on the product page.
+The preview is stored (`bulk_value_import`: the parsed changes, each with the
+value it had when the file was read) for 24 hours so applying does not
+upload again, and is dropped when the next preview is made after that.
+
+**Applying** is the second, explicit press. It queues one `bulk-values-apply`
+job per preview (one apply at a time per shop). The job takes the changes
+25 at a time and, for each batch, re-reads the values from Shopify; a value
+that differs from the preview's *before* is left alone and reported as
+*changed meanwhile* (so a person's later edit is never overwritten), one that
+already holds the wanted value is *unchanged* (a run that stopped after
+writing), an owner Shopify no longer has is *no longer in Shopify*. The rest are
+written with `metafieldsSet` (and `metafieldsDelete` for `[clear]`). If
+Shopify refuses a batch, its values are written one at a time so one bad
+cell names itself and the others still go through. Every change gets an
+outcome stored on the import; progress is `done of total`, read live by the
+page (`useLiveRevalidation`, `ProcessHeader`). A change with an outcome is
+never visited again, so a stopped import (a deploy, a Shopify error) is
+continued with *Continue* and revisits only what is left. Each write is
+mirrored into the catalogue snapshot copy of the metafield. The audit event
+`product.values_imported` (entity `product_values_import`) records counts
+only, never a value.
+
+**Limits.** A file is at most 2 MB and 5 000 rows; it changes at most 25 000
+values; an export is at most 10 000 rows. A file that is not CSV (a
+spreadsheet, JSON, HTML, binary, or not UTF-8) is refused with a sentence
+telling the person to save as CSV UTF-8. Everything is scoped by shop,
+including the stored preview: another shop's preview id finds nothing.
+
+**Not done.** No undo (export first: the file is the backup). No merge of
+two people's files. No unit conversion: a measurement is written in the unit
+Shopify already holds for it (or the unit the plan names), and the heading
+states which. No AI. Nothing creates metafield definitions (the Definitions
+tab does). A preview is read from the catalogue snapshot, so a value
+changed in Shopify since the last snapshot read shows as *changed meanwhile*
+at apply time rather than in the preview. A file with errors is not applied
+in part.
 
 ## Store menu
 
@@ -635,8 +760,9 @@ count and the limit.
   options change, and `access.storefront` can be set only at creation (the
   `storefront` flag is in the JSON, not on a screen or in the CSV). The
   Definitions tab creates in the request (one call per definition), not in a
-  job. Values are entered one product at a time on the product page; bulk
-  filling is the operator run, not a grid.
+  job. Values are entered one product at a time on the product page, or in
+  bulk from a spreadsheet (§ Bulk values); the AI bulk filler is the operator
+  run.
 - The bulk filler reads titles, vendor, tags and variant titles from the
   catalogue snapshot, which has no description or variant options, and it
   asks no model for a type: a product with no plan type is passed over.

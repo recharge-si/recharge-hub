@@ -251,7 +251,7 @@ export function planImport(input: PlanInput): ImportPlan {
       `The file has more than ${LIMITS.importRows.toLocaleString("en")} rows. Split it and import the parts one after another.`,
     ]);
 
-  const names = header.map((cell) => fold(cell.replace(/^﻿/, "")));
+  const names = header.map((cell) => fold(cell.replace(/^\uFEFF/, "")));
   const productCol = names.indexOf("product_id");
   const variantCol = names.indexOf("variant_id");
   if (productCol < 0 && variantCol < 0)
@@ -266,7 +266,7 @@ export function planImport(input: PlanInput): ImportPlan {
   const fileErrors: string[] = [];
   const taken = new Map<string, string>();
   header.forEach((raw, i) => {
-    const text = raw.replace(/^﻿/, "").trim();
+    const text = raw.replace(/^\uFEFF/, "").trim();
     const name = names[i] ?? "";
     if (text === "") return;
     if (
