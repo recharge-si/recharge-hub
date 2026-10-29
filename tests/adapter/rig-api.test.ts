@@ -75,10 +75,13 @@ describe("an unreadable catalogue", () => {
         code: "P2022",
       }),
     );
-    for (const handler of [api.build, api.explain, api.verify]) {
-      const response = await handler(
-        post({ answers: REFERENCE, variantIds: [1] }),
-      );
+    const calls: Array<[(request: Request) => Promise<Response>, unknown]> = [
+      [api.build, { answers: REFERENCE }],
+      [api.explain, { answers: REFERENCE }],
+      [api.verify, { variantIds: [1], answers: REFERENCE }],
+    ];
+    for (const [handler, body] of calls) {
+      const response = await handler(post(body));
       expect(response.status).toBe(503);
       expect(response.headers.get("Retry-After")).toBe("30");
       expect(await response.json()).toEqual({ code: "unavailable" });
