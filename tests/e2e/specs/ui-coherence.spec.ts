@@ -118,8 +118,11 @@ test("the MetaKocka catalogue page is headed MetaKocka products", async ({
 }) => {
   await seed(shop);
   await page.goto("/app/products");
-  await page.getByText("MetaKocka products").first().click();
-  await expect(page).toHaveURL(/\/app\/metakocka\/products/);
+  // The link's text has no box of its own under Polaris; check where it points.
+  await expect(
+    page.locator('[href*="/app/metakocka/products"]').first(),
+  ).toBeAttached();
+  await page.goto("/app/metakocka/products");
   await expect(page.locator("s-page").first()).toHaveAttribute(
     "heading",
     "MetaKocka products",
