@@ -20,6 +20,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { activeAttributes } from "~/domain/attributes/resolve";
 import { assignableTypes } from "~/domain/products/attribute-values";
 import { Dropdown } from "~/web/components/dropdown";
+import { SourcesNav } from "~/web/components/sources-nav";
 import { LearnMore } from "~/web/components/learn-more";
 import { PRODUCT_SETUP_ROUTES, countOf } from "~/web/lib/attributes";
 import {
@@ -143,9 +144,8 @@ export default function SourceCategorization() {
       <s-link slot="breadcrumb-actions" href={SOURCE_ROUTES.index}>
         Sources
       </s-link>
-      <s-button slot="secondary-actions" href={SOURCE_ROUTES.review()}>
-        {waiting > 0 ? `Review (${waiting})` : "Review"}
-      </s-button>
+
+      <SourcesNav current="categorization" awaitingReview={waiting} />
 
       <s-query-container>
         <s-stack direction="block" gap="base">

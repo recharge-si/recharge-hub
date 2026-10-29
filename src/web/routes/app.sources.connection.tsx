@@ -23,6 +23,7 @@ import {
 } from "~/adapters/export-portal/service.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { ConfirmModal } from "~/web/components/confirm-modal";
+import { SourcesNav } from "~/web/components/sources-nav";
 import { formatDateTime } from "~/web/lib/datetime";
 import {
   actorFromSession,
@@ -226,6 +227,8 @@ export default function SourcesConnection() {
       <s-link slot="breadcrumb-actions" href={SOURCE_ROUTES.index}>
         Sources
       </s-link>
+
+      <SourcesNav current="connection" />
 
       <s-stack direction="block" gap="large">
         {!configured ? (

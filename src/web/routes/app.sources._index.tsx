@@ -19,6 +19,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { reviewQuery } from "~/domain/export-portal/review";
 import type { SourceSummary } from "~/domain/export-portal/contract";
 import { ConfirmModal } from "~/web/components/confirm-modal";
+import { SourcesNav } from "~/web/components/sources-nav";
 import { SourcesSummary, SourcesTable } from "~/web/components/sources-list";
 import {
   actorFromSession,
@@ -189,19 +190,6 @@ export default function Sources() {
        * settings there: this page is what is happening; the connection page is
        * what makes it possible.
        */}
-      <s-button slot="secondary-actions" href={SOURCE_ROUTES.review()}>
-        {awaitingReview > 0 ? `Review (${awaitingReview})` : "Review"}
-      </s-button>
-      <s-button slot="secondary-actions" href={SOURCE_ROUTES.categorization}>
-        AI categorization
-      </s-button>
-      <s-button
-        slot="secondary-actions"
-        icon="settings"
-        href={SOURCE_ROUTES.connection}
-      >
-        Connection
-      </s-button>
       <s-button
         slot="secondary-actions"
         icon="question-circle"
@@ -254,6 +242,8 @@ export default function Sources() {
           touched.
         </s-paragraph>
       </ConfirmModal>
+
+      <SourcesNav current="sources" awaitingReview={awaitingReview} />
 
       <s-stack direction="block" gap="base">
         {note && !(result && !result.ok) ? (
