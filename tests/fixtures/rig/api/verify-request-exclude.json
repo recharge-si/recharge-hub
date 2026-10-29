@@ -1,0 +1,21 @@
+{
+  "variantIds": [
+    45500000004,
+    45500000023,
+    45500000030,
+    45500000033,
+    45500000048,
+    45500000040
+  ],
+  "answers": {
+    "discipline": "windsurf",
+    "weightKg": 82,
+    "skill": "intermediate",
+    "windMinKn": 15,
+    "windMaxKn": 25,
+    "boardKind": "freeride"
+  },
+  "excludeVariantIds": [
+    45500000004
+  ]
+}

@@ -65,12 +65,17 @@ headers (same-origin through the proxy).
 
 ### `POST /apps/rig/build`
 
-Request: `{ text?, answers?, locale?, requestId? }`, unknown keys refused,
+Request: `{ text?, answers?, locale?, requestId?, excludeVariantIds? }`, unknown keys refused,
 `text` at most 1000 characters, at least one of `text` and a non-empty
 `answers`. `answers` keys: `discipline` (`windsurf`), `weightKg` 30-200,
 `heightCm` 120-230, `skill` (`beginner|intermediate|advanced`), `windMinKn`,
 `windMaxKn` 0-60, `budgetEur`, `owns` (any of `board sail mast boom base fin`),
 `boardKind` (`freeride|wave`), `ownedBoomMinCm`, `ownedBoomMaxCm`.
+`excludeVariantIds` (optional, at most 50 positive integers) names variants the
+rig must not contain, alternatives included: the theme sends the variant a cart
+refused with 422 (sold out) and rebuilds, instead of swapping client-side. An
+id the shop does not have is ignored, and an excluded variant is not counted as
+"missing data". `explain` takes the same key so its rig matches the build's.
 **`build` ignores `text`**: it never calls a model. Sending the `requestId` of an
 earlier build updates that row instead of adding one (the live rig calls `build`
 on every changed answer).
@@ -79,10 +84,26 @@ Response 200: `{ requestId?, profile, needs, rigs, unmet, warnings, mode,
 snapshotAgeMinutes }`. `mode` is always `plain` for `build`. `needs` lists what
 the engine still needs (`weightKg`); then there is no rig and no `requestId`.
 A rig is `{ label, items, total, currency, checks, alternatives }`; an item has
-`role productId variantId title variantTitle url image price currency available
-quantity why specs` (`variantId` is the number `/cart/add.js` takes, `why` is
-the template sentence, `url` is storefront-relative). `alternatives` are only
-parts that keep every check passing. `unmet` entries are `{role, reason}` with
+`role productId variantId title variantTitle price currency available quantity
+why` and the display fields below (`variantId` is the number `/cart/add.js`
+takes, `why` is the template sentence). `alternatives` are only parts that keep
+every check passing; each carries `role productId variantId title variantTitle
+price currency why` and the same display fields.
+
+Display fields, on items and alternatives alike (additive; nothing else about a
+part leaves the hub, never a cost, a shop id or a variant GID):
+
+| field | meaning |
+|---|---|
+| `productUrl` | `/products/<handle>`, storefront-relative; `null` without a handle. `url` is the same value under its first name |
+| `imageUrl` | the product image, **https only** (anything else is `null`). `image` is the same value under its first name |
+| `vendor` | the product's vendor, `null` when the snapshot has none |
+| `specs` | the numbers and codes the engine read, by field (`areaM2`, `mastCm`, `finBox`, ...), machine-readable |
+| `facts` | the same in words: `[{ field, label, value, derived? }]`, e.g. `{label:"Sail area", value:"5.8 m²"}`, in the request's `locale`; a pair of bounds is one range (`"Boom range", "170–190 cm"`); `derived: true` marks a value read off the variant's name |
+| `derived` | the fields (as in `specs`) that were derived, not stored; absent when none |
+
+`specs` stays the object it always was, so `facts` is the field to print. Before
+this change alternatives had none of these but `variantTitle`. `unmet` entries are `{role, reason}` with
 `reason` `no_compatible_in_stock` or `no_rule`, or `{role:"budget",
 reason:"over_budget", overMinor}`. `warnings` are `{code, message}`; switch on
 `code`. Codes: `kind_assumed skill_assumed wind_assumed over_budget
@@ -109,11 +130,12 @@ be read. The rig is identical in both modes.
 
 ### `POST /apps/rig/verify`
 
-`{ variantIds: number[1..12], answers?, locale? }` returns `{ ok, checks, items,
+`{ variantIds: number[1..12], excludeVariantIds?, answers?, locale? }` returns `{ ok, checks, items,
 total, currency, warnings }` using the same `checkRig` as `build`. Unknown
 (or other shops') variants, unavailable variants and two parts of one role show
 up as failed checks (`unknown-variant-<id>`, `unavailable-variant-<id>`,
-`duplicate-<role>`).
+`duplicate-<role>`), and so does a variant named in `excludeVariantIds`
+(`excluded-variant-<id>`, with `available: false` on its item).
 
 ### Checks
 
@@ -335,8 +357,18 @@ strings, pounds and inches and Beaufort converted in code, out-of-range values
   `ai_cost_micro_eur`. No raw text and no customer column; the privacy webhooks
   need no change. Job `purge-rig-requests` (nightly per shop) deletes rows older
   than 90 days.
-- Logs carry `requestId`, mode and latency, never text. Sentry breadcrumbs per
-  build are not added yet.
+- Logs carry `requestId`, mode and latency, never text. Every build, explain and
+  verify answer also adds one Sentry breadcrumb (category `rig`, level `warning`
+  from status 400 up) with `route`, `status`, `latencyMs`, `requestId`, `mode`,
+  `parts`, `warnings`, `failedChecks` (verify) and `code` (a refusal): read off
+  the JSON that was sent, never the buyer's text or address. It is attached to
+  the next error event; without `SENTRY_DSN` it does nothing.
+- Home shows a **Rig builder** tile only while the builder is on: requests since
+  00:00 UTC (`rig_request` rows; a build and its explain are one row), the share
+  of the last 50 explained requests answered in plain wording, and when
+  `ai_usage` last recorded `exhausted` for `claude-pool` (toned only within the
+  last day). Read-only queries in `getRigHomeFacts`; the wording is the pure
+  `rigTile` in `web/lib/home`.
 
 ## Image and configuration
 
@@ -371,5 +403,8 @@ any failure. `tests/fixtures/rig/eval-sample.csv` is a **placeholder** sample.
   Slovenian strings are drafts for review.
 - Single web process assumed for rate limits and the catalogue cache (300 s, stale while revalidate).
 - Stock is Shopify's `inventoryQuantity`, not the hub's `SupplyLevel`.
+- The e2e specs (`tests/e2e/specs/rig-proxy.spec.ts`) drive the three routes
+  through the real app build, with a stand-in for `authenticate.public.appProxy`
+  that accepts the signature `e2e-proxy-ok`; the real HMAC is not exercised there.
 - `/apps/rig/*` is not yet verified end to end against Shopify (no dev store
   was used); the signature check is `authenticate.public.appProxy`.
