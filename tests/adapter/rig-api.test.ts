@@ -52,7 +52,7 @@ describe("signature and tenant", () => {
     const b = setup({ authenticate: async () => "b.myshopify.com" });
     const responseB = await b.api.build(post({ answers: REFERENCE }));
     // Shop B holds two products: not ready, and certainly none of A's.
-    expect(responseB.status).toBe(503);
+    expect(responseB.status).toBe(409);
     expect(JSON.stringify(await responseB.json())).not.toContain("Aero Ride");
     expect(b.store.loadSource).toHaveBeenCalledWith("b.myshopify.com");
   });
@@ -65,7 +65,7 @@ describe("signature and tenant", () => {
 });
 
 describe("an unreadable catalogue", () => {
-  it("answers 503 unavailable, logs the cause and never a raw 500, on every handler", async () => {
+  it("answers 409 unavailable, logs the cause and never a 5xx, on every handler", async () => {
     const logged: Array<{ fields: Record<string, unknown>; message: string }> = [];
     const { api, store } = setup({
       logError: (fields, message) => logged.push({ fields, message }),
@@ -82,7 +82,7 @@ describe("an unreadable catalogue", () => {
     ];
     for (const [handler, body] of calls) {
       const response = await handler(post(body));
-      expect(response.status).toBe(503);
+      expect(response.status).toBe(409);
       expect(response.headers.get("Retry-After")).toBe("30");
       expect(await response.json()).toEqual({ code: "unavailable" });
     }
@@ -215,11 +215,11 @@ describe("build", () => {
     expect(store.saved[1]?.write.id).toBe(first["requestId"]);
   });
 
-  it("503 not_ready when the builder is off or the catalogue is not ready", async () => {
+  it("409 not_ready when the builder is off or the catalogue is not ready", async () => {
     const off = setup();
     off.store.enabled = false;
     const response = await off.api.build(post({ answers: REFERENCE }));
-    expect(response.status).toBe(503);
+    expect(response.status).toBe(409);
     expect(await read(response)).toMatchObject({ code: "not_ready", reason: "disabled" });
   });
 
