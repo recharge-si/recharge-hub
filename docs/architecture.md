@@ -67,7 +67,8 @@ Product setup     /app/product-setup    lands on /app/product-setup/types/:typeI
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
                                         /attributes/:id one attribute), /sets, /definitions
-                                        (Shopify metafield definitions), /menu and /settings
+                                        (Shopify metafield definitions), /menu, /values (bulk
+                                        attribute values; /values.csv is its export) and /settings
 Translations      /app/translations     the store's languages (docs/translations.md); its own
                                         navigation reaches /add, /languages/:locale, /editor,
                                         /translate, /syncs (/:syncId), /glossary and /usage
@@ -654,6 +655,9 @@ inherited down a tree of types — `docs/attributes.md`. Pure rules in
 as a function over the document); one row in `attribute_schema` with a
 revision every write is conditional on; screens under `app.product-setup.*`
 sharing `web/lib/attributes.server.ts` as the one path that changes it.
+Bulk values (a spreadsheet of attribute values, previewed then applied) are
+`domain/values/`, `adapters/db/repositories/bulk-values.server.ts`,
+`adapters/products/bulk-values.server.ts` and the `bulk-values-apply` job.
 The plan meets Shopify in the Definitions tab (`domain/attributes/definitions.ts`,
 `adapters/shopify/metafield-definitions.ts`, `web/lib/definitions.server.ts`),
 the product page's value writes, the store menu, and AI autofill, whose bulk

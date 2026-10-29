@@ -493,6 +493,54 @@ export async function readVariantMetafields(
   return result;
 }
 
+const OWNER_METAFIELDS_QUERY = `#graphql
+  query OrchestratorOwnerMetafields($ids: [ID!]!, $keys: [String!]!, $first: Int!) {
+    nodes(ids: $ids) {
+      ... on Product {
+        id
+        metafields(first: $first, keys: $keys) { nodes { namespace key type value } }
+      }
+      ... on ProductVariant {
+        id
+        metafields(first: $first, keys: $keys) { nodes { namespace key type value } }
+      }
+    }
+  }
+`;
+
+/**
+ * The named metafields of products and variants together, as they are in
+ * Shopify now (bulk values re-read what it is about to change). An owner
+ * Shopify no longer has is missing from the result, which is how the caller
+ * tells a deleted product from one with no value.
+ */
+export async function readOwnerMetafields(
+  admin: AdminApiContext,
+  ownerIds: readonly string[],
+  keys: readonly string[],
+): Promise<Map<string, MetafieldMap>> {
+  const result = new Map<string, MetafieldMap>();
+  const wanted = [...new Set(keys)].slice(0, 25);
+  const ids = [...new Set(ownerIds)];
+  if (ids.length === 0 || wanted.length === 0) return result;
+  for (let start = 0; start < ids.length; start += 50) {
+    const response = await admin.graphql(OWNER_METAFIELDS_QUERY, {
+      variables: {
+        ids: ids.slice(start, start + 50),
+        keys: wanted,
+        first: wanted.length,
+      },
+      tries: 2,
+    });
+    const parsed = variantMetafieldsSchema.parse(await response.json());
+    graphqlErrors(parsed.errors);
+    for (const node of parsed.data?.nodes ?? [])
+      if (node?.id && node.metafields)
+        result.set(node.id, metafieldMap(node.metafields));
+  }
+  return result;
+}
+
 /* -------------------------------------------------------------------------- */
 /* Writing the product                                                        */
 /* -------------------------------------------------------------------------- */
