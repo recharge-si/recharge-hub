@@ -28,6 +28,7 @@ import {
 import { useLiveRevalidation, useWatchWindow } from "~/web/lib/live";
 import { SOURCE_ROUTES, summarizeSources } from "~/web/lib/sources";
 import { loadSourcesShell, readPortal } from "~/web/lib/sources.server";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Sources (docs/sources.md § Screens): every export the store has in the
@@ -346,11 +347,11 @@ export default function Sources() {
             <s-box paddingBlock="large-100">
               <s-stack direction="block" gap="base" alignItems="center">
                 <s-stack direction="block" gap="small-300" alignItems="center">
-                  <s-heading>No sources yet</s-heading>
+                  <s-heading>{EMPTY.sourcesNone.heading}</s-heading>
                   <s-text color="subdued">
                     {shell.connection.tenantName
-                      ? `Connect a catalogue export or a brand feed to start pushing products into the store. The export portal has none for ${shell.connection.tenantName} yet.`
-                      : "Connect a catalogue export or a brand feed to start pushing products into the store."}
+                      ? `${EMPTY.sourcesNone.body} The export portal has none for ${shell.connection.tenantName} yet.`
+                      : EMPTY.sourcesNone.body}
                   </s-text>
                 </s-stack>
                 <s-button variant="primary" href={SOURCE_ROUTES.new}>

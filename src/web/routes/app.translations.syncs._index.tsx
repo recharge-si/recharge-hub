@@ -18,6 +18,7 @@ import {
   TRANSLATION_ROUTES,
 } from "~/web/lib/translations";
 import { useLiveRevalidation } from "~/web/lib/live";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Syncs (docs/translations.md § Syncs): every translation run, newest first,
@@ -107,10 +108,7 @@ export default function Syncs() {
 
         <s-section>
           {syncs.length === 0 ? (
-            <s-text color="subdued">
-              No syncs yet. Translate the store, a language or a single resource
-              and it appears here.
-            </s-text>
+            <s-text color="subdued">{EMPTY.syncsNone}</s-text>
           ) : (
             <s-table variant="auto">
               <s-table-header-row>

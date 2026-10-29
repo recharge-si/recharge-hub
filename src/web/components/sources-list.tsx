@@ -15,6 +15,7 @@ import {
   type SourcesHeadline,
   type StatusFilter,
 } from "~/web/lib/sources";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * The Sources page below its header (docs/sources.md § Screens): the
@@ -193,7 +194,7 @@ export function SourcesTable({
       {shown.length === 0 && filtered ? (
         <s-box paddingBlock="large-100">
           <s-stack direction="block" gap="base" alignItems="center">
-            <s-text color="subdued">No sources match these filters.</s-text>
+            <s-text color="subdued">{EMPTY.sourcesNoMatch}</s-text>
             <s-button
               variant="secondary"
               onClick={() => {

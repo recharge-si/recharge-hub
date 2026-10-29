@@ -30,6 +30,7 @@ import { describeEvent } from "~/web/lib/activity";
 import { formatInterval } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
 import { productPath } from "~/web/lib/product-workspace";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Products: which Shopify SKUs have a MetaKocka product behind them.
@@ -282,7 +283,7 @@ export default function Products() {
             <DistributionBars
               rows={breakdown}
               unit="SKU"
-              empty="No SKUs have been read yet."
+              empty={EMPTY.metakockaNoSkus}
             />
 
             <s-stack direction="inline" gap="base" alignItems="center">
@@ -461,7 +462,7 @@ export default function Products() {
         <s-section heading="Recent activity">
           <RecentActivity
             items={recent}
-            empty="The catalogue has not been read yet."
+            empty={EMPTY.metakockaNotRead}
           />
         </s-section>
       </s-stack>

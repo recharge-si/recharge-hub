@@ -64,6 +64,7 @@ import {
   principalFromSession,
 } from "~/web/lib/principal.server";
 import { STATUS_LABEL, productPath } from "~/web/lib/product-workspace";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Products: the way into each product's workspace (docs/architecture.md
@@ -561,14 +562,14 @@ export default function Products() {
             <s-box padding="base">
               <s-text color="subdued">
                 {review
-                  ? "No AI suggestions are waiting. Autofill products from this list, from a product's Attributes tab, or from Sources › Review."
+                  ? EMPTY.productsNoSuggestions
                   : total === 0 &&
                       q === "" &&
                       status === "all" &&
                       !hideArchived &&
                       !hasProductFilters(filters)
-                    ? "The catalogue has not been read yet. It is read every night, and after a sale campaign asks for it."
-                    : "No products match."}
+                    ? EMPTY.productsNotRead
+                    : EMPTY.productsNoMatch}
               </s-text>
             </s-box>
           ) : (

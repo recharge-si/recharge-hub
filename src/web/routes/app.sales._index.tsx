@@ -36,6 +36,7 @@ import {
   formatInZone,
 } from "~/web/lib/sales";
 import { useLiveRevalidation } from "~/web/lib/live";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Sale campaigns (docs/sale-campaigns.md § UI): what is on sale, what is
@@ -292,11 +293,8 @@ export default function Sales() {
             <s-section>
               <s-box paddingBlock="large-100">
                 <s-stack direction="block" gap="base" alignItems="center">
-                  <s-heading>No campaigns yet</s-heading>
-                  <s-text color="subdued">
-                    Put part of the catalogue on sale for a while. The original
-                    prices are put back when it ends.
-                  </s-text>
+                  <s-heading>{EMPTY.salesNone.heading}</s-heading>
+                  <s-text color="subdued">{EMPTY.salesNone.body}</s-text>
                   <s-button
                     variant="primary"
                     type="button"

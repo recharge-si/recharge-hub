@@ -152,7 +152,7 @@ describe("US-308 words", () => {
       { file: "src/web/routes/app.product-setup.types.($typeId).tsx", includes: "has no children, sources or exceptions", reason: "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue" },
     ],
     feed: [
-      { file: "src/web/routes/app.sources._index.tsx", includes: "Connect a catalogue export or a brand feed", reason: "the Sources area's own noun for a kind of source (docs/ui-conventions.md glossary)" },
+      { file: "src/web/lib/empty-states.ts", includes: "a brand feed", reason: "the Sources area's own noun for a kind of source (docs/ui-conventions.md glossary)" },
     ],
   };
   /** Text a merchant reads: quoted strings with a space, and JSX text. */
@@ -236,5 +236,21 @@ describe("US-304 the nine polling routes use the hook", () => {
           /useWatchWindow\(/.test(l.text),
       ),
     ).toBe(true);
+  });
+});
+
+describe("US-311 empty states live in one file", () => {
+  it("does not repeat an empty-state sentence anywhere else", async () => {
+    const { EMPTY } = await import("~/web/lib/empty-states");
+    const sentences: string[] = [];
+    for (const value of Object.values(EMPTY))
+      sentences.push(...(typeof value === "string" ? [value] : Object.values(value)));
+    const repeats = hit(
+      (l) =>
+        l.file !== "src/web/lib/empty-states.ts" &&
+        // Only the long ones: "No products match." is a fair answer elsewhere.
+        sentences.some((s) => s.length > 40 && l.text.includes(s)),
+    ).map((l) => `${l.file}:${l.line}  ${l.text.slice(0, 100)}`);
+    expect(repeats).toEqual([]);
   });
 });
