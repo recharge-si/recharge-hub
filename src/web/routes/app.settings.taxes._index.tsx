@@ -99,7 +99,7 @@ const LINKS: ConfigureLink[] = [
   {
     title: "Overrides",
     description:
-      "Deliberate exceptions by country or SKU, each with a reason, visible on every order they touch.",
+      "Deliberate overrides by country or SKU, each with a reason, visible on every order they touch.",
     href: TAX_ROUTES.overrides,
   },
 ];

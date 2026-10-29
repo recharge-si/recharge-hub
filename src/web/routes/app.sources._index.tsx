@@ -19,6 +19,7 @@ import { authenticate } from "~/adapters/shopify/shopify.server";
 import { reviewQuery } from "~/domain/export-portal/review";
 import type { SourceSummary } from "~/domain/export-portal/contract";
 import { ConfirmModal } from "~/web/components/confirm-modal";
+import { SourcesNav } from "~/web/components/sources-nav";
 import { SourcesSummary, SourcesTable } from "~/web/components/sources-list";
 import {
   actorFromSession,
@@ -27,6 +28,7 @@ import {
 import { useLiveRevalidation, useWatchWindow } from "~/web/lib/live";
 import { SOURCE_ROUTES, summarizeSources } from "~/web/lib/sources";
 import { loadSourcesShell, readPortal } from "~/web/lib/sources.server";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Sources (docs/sources.md § Screens): every export the store has in the
@@ -162,6 +164,11 @@ export default function Sources() {
     if (result.started) watch();
   }, [result]);
 
+  // The note a redirect carries (a deleted source) is a toast, not a banner.
+  useEffect(() => {
+    if (note && typeof shopify !== "undefined") shopify.toast.show(note);
+  }, [note]);
+
   const submit = (body: Record<string, string>) =>
     void fetcher.submit(body, { method: "post" });
   const busy = fetcher.state !== "idle";
@@ -189,19 +196,6 @@ export default function Sources() {
        * settings there: this page is what is happening; the connection page is
        * what makes it possible.
        */}
-      <s-button slot="secondary-actions" href={SOURCE_ROUTES.review()}>
-        {awaitingReview > 0 ? `Review (${awaitingReview})` : "Review"}
-      </s-button>
-      <s-button slot="secondary-actions" href={SOURCE_ROUTES.categorization}>
-        AI categorization
-      </s-button>
-      <s-button
-        slot="secondary-actions"
-        icon="settings"
-        href={SOURCE_ROUTES.connection}
-      >
-        Connection
-      </s-button>
       <s-button
         slot="secondary-actions"
         icon="question-circle"
@@ -255,13 +249,9 @@ export default function Sources() {
         </s-paragraph>
       </ConfirmModal>
 
-      <s-stack direction="block" gap="base">
-        {note && !(result && !result.ok) ? (
-          <s-banner tone="success">
-            <s-paragraph>{note}</s-paragraph>
-          </s-banner>
-        ) : null}
+      <SourcesNav current="sources" awaitingReview={awaitingReview} />
 
+      <s-stack direction="block" gap="base">
         {awaitingReview > 0 ? (
           <s-banner
             tone="info"
@@ -357,11 +347,11 @@ export default function Sources() {
             <s-box paddingBlock="large-100">
               <s-stack direction="block" gap="base" alignItems="center">
                 <s-stack direction="block" gap="small-300" alignItems="center">
-                  <s-heading>No sources yet</s-heading>
+                  <s-heading>{EMPTY.sourcesNone.heading}</s-heading>
                   <s-text color="subdued">
                     {shell.connection.tenantName
-                      ? `Connect a catalogue export or a brand feed to start pushing products into the store. The export portal has none for ${shell.connection.tenantName} yet.`
-                      : "Connect a catalogue export or a brand feed to start pushing products into the store."}
+                      ? `${EMPTY.sourcesNone.body} The export portal has none for ${shell.connection.tenantName} yet.`
+                      : EMPTY.sourcesNone.body}
                   </s-text>
                 </s-stack>
                 <s-button variant="primary" href={SOURCE_ROUTES.new}>

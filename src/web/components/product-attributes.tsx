@@ -279,7 +279,7 @@ function TypePicker({
                           <s-text color="subdued">{parents.join(" › ")}</s-text>
                         ) : null}
                       </s-stack>
-                      {selected ? <s-icon type="check" tone="success" /> : null}
+                      {selected ? <s-icon type="check" /> : null}
                     </s-grid>
                   </s-clickable>
                 </s-box>
@@ -711,7 +711,7 @@ function Completeness({
             </s-text>
             {required.length > 0 ? (
               missing.length === 0 ? (
-                <s-badge tone="success">Complete</s-badge>
+                <s-badge>Complete</s-badge>
               ) : (
                 <s-badge tone="warning">{`${missing.length} missing`}</s-badge>
               )

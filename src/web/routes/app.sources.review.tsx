@@ -34,6 +34,7 @@ import {
 } from "~/domain/export-portal/review";
 import { keptKeys } from "~/domain/translations/types";
 import { BulkBar, useSelection } from "~/web/components/bulk-selection";
+import { SourcesNav } from "~/web/components/sources-nav";
 import { ConfirmModal } from "~/web/components/confirm-modal";
 import { Dropdown } from "~/web/components/dropdown";
 import {
@@ -526,6 +527,8 @@ export default function Review() {
         </s-unordered-list>
       </ConfirmModal>
 
+      <SourcesNav current="review" />
+
       <s-stack direction="block" gap="base">
         {result && !result.ok ? (
           <s-banner tone="critical" heading="That did not work">
@@ -838,7 +841,7 @@ function ReviewRow({
             </s-link>
           </s-stack>
         ) : (
-          <s-badge tone="success">Translated</s-badge>
+          <s-badge>Translated</s-badge>
         )}
       </s-table-cell>
       <s-table-cell>

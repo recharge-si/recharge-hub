@@ -1,8 +1,6 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect } from "react";
 import {
   useLoaderData,
-  useRevalidator,
   type HeadersFunction,
   type LoaderFunctionArgs,
 } from "react-router";
@@ -10,6 +8,7 @@ import {
 import { listSyncs } from "~/adapters/db/repositories/translations.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { SYNC_MODE_LABEL, type SyncMode } from "~/domain/translations/types";
+import { ProcessHeader } from "~/web/components/process-header";
 import { TranslationsNav } from "~/web/components/translations-nav";
 import { formatDateTime } from "~/web/lib/datetime";
 import { principalFromSession } from "~/web/lib/principal.server";
@@ -18,6 +17,8 @@ import {
   SYNC_STATUS_LABEL,
   TRANSLATION_ROUTES,
 } from "~/web/lib/translations";
+import { useLiveRevalidation } from "~/web/lib/live";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Syncs (docs/translations.md § Syncs): every translation run, newest first,
@@ -59,14 +60,15 @@ export default function Syncs() {
   const active = syncs.some(
     (sync) => sync.status === "queued" || sync.status === "running",
   );
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
+  useLiveRevalidation({ active: active, idleEveryMs: null });
+  const latestFinished = syncs.find((sync) => sync.finishedAt !== null);
+  // Syncs the app starts itself (changed products, automatic translation)
+  // make the process automatic; otherwise it runs when a person asks.
+  const automatic = syncs.some(
+    (sync) =>
+      sync.kind === "automatic" ||
+      (sync.kind === "resource" && sync.requestedBy === null),
+  );
 
   return (
     <s-page heading="Syncs" inlineSize="large">
@@ -84,12 +86,29 @@ export default function Syncs() {
       <s-stack direction="block" gap="large">
         <TranslationsNav current="syncs" />
 
+        {syncs.length > 0 ? (
+          <ProcessHeader
+            health={syncs[0]!.status === "failed" ? "needs_attention" : "ok"}
+            lastRun={
+              latestFinished
+                ? {
+                    at: latestFinished.finishedAt!,
+                    outcome: latestFinished.status,
+                  }
+                : null
+            }
+            mode={automatic ? "automatic" : "manual"}
+            running={active}
+            attention={{
+              href: TRANSLATION_ROUTES.sync(syncs[0]!.id),
+              label: "Open the sync",
+            }}
+          />
+        ) : null}
+
         <s-section>
           {syncs.length === 0 ? (
-            <s-text color="subdued">
-              No syncs yet. Translate the store, a language or a single resource
-              and it appears here.
-            </s-text>
+            <s-text color="subdued">{EMPTY.syncsNone}</s-text>
           ) : (
             <s-table variant="auto">
               <s-table-header-row>

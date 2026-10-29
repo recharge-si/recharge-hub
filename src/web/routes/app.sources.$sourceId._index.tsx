@@ -316,6 +316,11 @@ function SourceOverview({
     busy && fetcher.formData?.get("intent") === intent;
   const running = isRunActive(source.lastRun) || runs.some(isRunActive);
 
+  // The note a redirect carries is a toast, not a banner.
+  useEffect(() => {
+    if (note && typeof shopify !== "undefined") shopify.toast.show(note);
+  }, [note]);
+
   const submit = (body: Record<string, string>) =>
     void fetcher.submit(body, { method: "post" });
 
@@ -418,12 +423,6 @@ function SourceOverview({
       </ConfirmModal>
 
       <s-stack direction="block" gap="base">
-        {note && !(result && !result.ok) ? (
-          <s-banner tone="success">
-            <s-paragraph>{note}</s-paragraph>
-          </s-banner>
-        ) : null}
-
         {result && !result.ok && result.intent !== "save" ? (
           <s-banner tone="critical" heading="That did not work">
             <s-paragraph>{result.message}</s-paragraph>

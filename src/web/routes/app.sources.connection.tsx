@@ -23,6 +23,7 @@ import {
 } from "~/adapters/export-portal/service.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { ConfirmModal } from "~/web/components/confirm-modal";
+import { SourcesNav } from "~/web/components/sources-nav";
 import { formatDateTime } from "~/web/lib/datetime";
 import {
   actorFromSession,
@@ -200,6 +201,9 @@ export default function SourcesConnection() {
   // A saved key is not kept in the field: the mask below says it is there.
   useEffect(() => {
     if (result?.ok && result.intent === "save") setApiKey("");
+    // A result that went well is a toast; only a failure keeps a banner.
+    if (result?.ok && result.message && typeof shopify !== "undefined")
+      shopify.toast.show(result.message);
   }, [result]);
 
   if (!allowed) {
@@ -227,6 +231,8 @@ export default function SourcesConnection() {
         Sources
       </s-link>
 
+      <SourcesNav current="connection" />
+
       <s-stack direction="block" gap="large">
         {!configured ? (
           <s-banner
@@ -241,8 +247,8 @@ export default function SourcesConnection() {
           </s-banner>
         ) : null}
 
-        {result?.message ? (
-          <s-banner tone={result.ok ? "success" : "critical"}>
+        {result?.message && !result.ok ? (
+          <s-banner tone="critical">
             <s-paragraph>{result.message}</s-paragraph>
           </s-banner>
         ) : null}
@@ -317,7 +323,7 @@ export default function SourcesConnection() {
                 {summary?.lastVerifiedAt
                   ? `Last successful call ${formatDateTime(summary.lastVerifiedAt)}`
                   : summary?.connected
-                    ? "The key has not been used successfully yet."
+                    ? "The key has not been used yet."
                     : "No key is saved."}
               </s-text>
             </s-stack>

@@ -83,3 +83,40 @@ function startOfDay(date: Date): Date {
   copy.setHours(0, 0, 0, 0);
   return copy;
 }
+
+/**
+ * A moment as the person reads it next to a process: `just now`, `2 min ago`,
+ * `3 h ago`, `yesterday 14:05`, and for the future `in 12 min`, `in 3 h`,
+ * `tomorrow 06:00`. Never a raw ISO string. Anything further away than a day
+ * either side falls back to the short date, which is what a column of runs
+ * would show anyway. `now` is injected so the boundaries can be tested.
+ */
+export function formatRelativeTime(iso: string, now: Date = new Date()): string {
+  const at = new Date(iso);
+  if (Number.isNaN(at.getTime())) return "unknown";
+  const ms = at.getTime() - now.getTime();
+  const minutes = Math.round(Math.abs(ms) / 60_000);
+  const clock = at.toLocaleTimeString(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+  const days = Math.round(
+    (startOfDay(at).getTime() - startOfDay(now).getTime()) / 86_400_000,
+  );
+
+  if (ms <= 0) {
+    if (minutes < 1) return "just now";
+    if (minutes < 60) return `${minutes} min ago`;
+    if (minutes < 360) return `${Math.floor(minutes / 60)} h ago`;
+    if (days === 0) return `today ${clock}`;
+    if (days === -1) return `yesterday ${clock}`;
+  } else {
+    if (minutes < 1) return "now";
+    if (minutes < 60) return `in ${minutes} min`;
+    if (minutes < 360) return `in ${Math.floor(minutes / 60)} h`;
+    if (days === 0) return `today ${clock}`;
+    if (days === 1) return `tomorrow ${clock}`;
+  }
+  return formatListDateTime(iso, now);
+}

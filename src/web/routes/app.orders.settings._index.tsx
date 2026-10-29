@@ -316,7 +316,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       if (lookup.status === "absent") {
         return {
           ok: false,
-          message: `Nothing was saved: MetaKocka has no product with the code "${shippingProductCode}". Create the article there first — this app never creates one from an order line.`,
+          message: `Nothing was saved: MetaKocka has no product with the code "${shippingProductCode}". Create the product there first — this app never creates one from an order line.`,
         };
       }
 
@@ -1335,7 +1335,7 @@ export default function OrderSyncSettings() {
                     charged.
                   </s-paragraph>
                   <s-paragraph>
-                    The shipping product code is the MetaKocka article a
+                    The shipping product code is the MetaKocka product a
                     shipping charge is written against. It has to exist in
                     MetaKocka already — this app never creates one from an order
                     line.
@@ -1759,7 +1759,7 @@ export default function OrderSyncSettings() {
                       is never treated as money received.
                     </s-list-item>
                     <s-list-item>
-                      A shipping or discount article is never invented in
+                      A shipping or discount product is never invented in
                       MetaKocka. If one is not configured, the order is reported
                       rather than sent with money missing and no mention of it.
                     </s-list-item>

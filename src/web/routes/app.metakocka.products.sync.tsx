@@ -368,7 +368,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ok: false,
       field: "taxPercent",
       message:
-        "Enter the VAT rate for products this app creates in MetaKocka, for example 22. An article created without one is refused on every order that names it.",
+        "Enter the VAT rate for products this app creates in MetaKocka, for example 22. A product created without one is refused on every order that names it.",
     };
   }
 
@@ -393,7 +393,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
       ok: false,
       field: "productType",
       message:
-        "Choose at least one product type. An article marked none of these cannot be put on a MetaKocka document.",
+        "Choose at least one product type. A product marked none of these cannot be put on a MetaKocka document.",
     };
   }
 
@@ -1661,7 +1661,7 @@ export default function ProductSyncSettings() {
               <s-stack direction="block" gap="small-400">
                 <s-heading>Product type in MetaKocka</s-heading>
                 <s-text color="subdued">
-                  MetaKocka files an article as a sales item, a purchase item, a
+                  MetaKocka files a product as a sales item, a purchase item, a
                   service, or a combination of them.
                 </s-text>
               </s-stack>

@@ -327,6 +327,8 @@ export function isRunActive(
 /** What the header of the Sources page says about all of them at once. */
 export interface SourcesHeadline {
   tone: "healthy" | "needs_attention" | "empty";
+  /** Some enabled source runs on a schedule rather than by hand. */
+  automatic: boolean;
   summary: string;
   total: number;
   attention: number;
@@ -344,6 +346,7 @@ export function summarizeSources(
     return {
       tone: "empty",
       summary: "No sources yet.",
+      automatic: false,
       total: 0,
       attention: 0,
       enabled: 0,
@@ -356,6 +359,7 @@ export function summarizeSources(
   const attention = sources.filter((s) => s.health === "needs_attention");
   const enabled = sources.filter((s) => s.enabled);
   const active = sources.filter((s) => isRunActive(s.lastRun)).length;
+  const automatic = enabled.some((s) => s.schedule.mode === "automatic");
 
   let lastRunAt: string | null = null;
   let nextRunAt: string | null = null;
@@ -370,6 +374,7 @@ export function summarizeSources(
     return {
       tone: "needs_attention",
       summary: `${attention.length} of ${sources.length} ${sources.length === 1 ? "source needs" : "sources need"} attention.`,
+      automatic,
       total: sources.length,
       attention: attention.length,
       enabled: enabled.length,
@@ -382,6 +387,7 @@ export function summarizeSources(
   return {
     tone: "healthy",
     summary: `${enabled.length} of ${sources.length} ${sources.length === 1 ? "source is" : "sources are"} on.`,
+    automatic,
     total: sources.length,
     attention: 0,
     enabled: enabled.length,
@@ -419,4 +425,38 @@ export function leadingSwitch(fields: readonly Field[]): Field | null {
   if (!first || first.type !== "boolean") return null;
   const rest = fields.slice(1);
   return rest.some((field) => field.type !== "boolean") ? first : null;
+}
+
+/**
+ * The four answers every process header gives, for one source: healthy or
+ * not, how its last run went, whether it runs by itself, and when next.
+ * Structurally a `ProcessHeaderProps` (components/process-header).
+ */
+export function sourceProcess(source: SourceSummary): {
+  health: "ok" | "needs_attention" | "never_run" | "off";
+  lastRun: { at: string; outcome: string } | null;
+  mode: "automatic" | "manual";
+  nextRunAt: string | null;
+  running: boolean;
+} {
+  const run = source.lastRun;
+  const at = run?.finishedAt ?? run?.startedAt ?? run?.queuedAt ?? null;
+  const health = isRunStale(run)
+    ? "needs_attention"
+    : !source.enabled
+      ? "off"
+      : source.health === "needs_attention"
+        ? "needs_attention"
+        : source.health === "never_ran"
+          ? "never_run"
+          : source.health === "off"
+            ? "off"
+            : "ok";
+  return {
+    health,
+    lastRun: run && at ? { at, outcome: runStatusLabel(run).toLowerCase() } : null,
+    mode: describeSchedule(source.schedule).mode,
+    nextRunAt: source.schedule.nextRunAt ?? null,
+    running: isRunActive(run),
+  };
 }

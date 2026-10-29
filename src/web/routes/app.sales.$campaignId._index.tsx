@@ -3,7 +3,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -78,6 +77,7 @@ import {
   type Preview,
 } from "~/web/lib/sales.server";
 import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
+import { useLiveRevalidation } from "~/web/lib/live";
 
 /**
  * The campaign editor (docs/sale-campaigns.md § UI).
@@ -392,17 +392,6 @@ export const action = async ({
   }
 };
 
-function usePolling(active: boolean) {
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 3000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
-}
-
 /** The fields whose change alters what the preview would count. */
 const PREVIEW_FIELDS = [
   "includeRules",
@@ -510,7 +499,10 @@ export default function CampaignEditor() {
   const result = fetcher.data;
   const busy = fetcher.state !== "idle";
   const running = run?.status === "queued" || run?.status === "running";
-  usePolling(running || catalogue.reading);
+  useLiveRevalidation({
+    active: running || catalogue.reading,
+    idleEveryMs: null,
+  });
 
   const [form, setForm] = useState<CampaignForm>(data.form);
   const savedKey = JSON.stringify(data.form);

@@ -187,7 +187,7 @@ export default function AttributeCatalogue() {
     : attributes;
 
   return (
-    <s-page heading="Metafields" inlineSize="large">
+    <s-page heading="Product setup" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app">
         Home
       </s-link>

@@ -4,7 +4,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -41,6 +40,7 @@ import { formatDateTime } from "~/web/lib/datetime";
 import { METAKOCKA_REGISTERS_URL } from "~/web/lib/metakocka-links";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
 import { principalFromSession } from "~/web/lib/principal.server";
+import { useLiveRevalidation, useWatchWindow } from "~/web/lib/live";
 
 /**
  * Shopify payment gateway to MetaKocka payment type (CLAUDE.md §8.7).
@@ -305,7 +305,6 @@ export default function PaymentTypes() {
    */
   const saver = useFetcher<typeof action>();
   const refresher = useFetcher<typeof action>();
-  const revalidator = useRevalidator();
   const saving = saver.state !== "idle";
 
   // Whichever spoke last is what the merchant is waiting to hear about.
@@ -389,29 +388,11 @@ export default function PaymentTypes() {
    * that has not landed by then has failed, the nightly run will try again, and
    * a page that polls forever is worse than a slightly old list.
    */
-  // Through a ref, because the revalidator is a fresh object on every one of
-  // its own state changes. As a dependency it would tear down and rebuild the
-  // interval every five seconds, resetting the attempt count, and the page
-  // would poll for as long as it stayed open.
-  const revalidatorRef = useRef(revalidator);
-  revalidatorRef.current = revalidator;
-
+  const [watching, watch] = useWatchWindow(60_000, !refreshing);
   useEffect(() => {
-    if (!refreshing) return;
-
-    let checks = 0;
-    const timer = setInterval(() => {
-      checks += 1;
-      if (checks > 12) {
-        clearInterval(timer);
-        return;
-      }
-      const current = revalidatorRef.current;
-      if (current.state === "idle") current.revalidate();
-    }, 5000);
-
-    return () => clearInterval(timer);
+    if (refreshing) watch();
   }, [refreshing, typesLoadedAt]);
+  useLiveRevalidation({ active: refreshing && watching, idleEveryMs: null });
 
   useEffect(() => {
     if (!result?.ok) return;
@@ -618,7 +599,7 @@ export default function PaymentTypes() {
 
                       <s-table-cell>
                         {type ? (
-                          <s-badge tone="success">Mapped</s-badge>
+                          <s-badge>Mapped</s-badge>
                         ) : (
                           <s-text color="subdued">Fallback</s-text>
                         )}

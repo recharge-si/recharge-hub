@@ -106,16 +106,62 @@ while. What an action removed leaves the page at once rather than on the next re
 (approved products on the review page). A re-read keeps what the person is doing: ticks
 on rows that are still there, an open editor's typing. A page whose content cannot change
 once nothing is running (a finished run) passes `idleEveryMs: null`. Never a hand-rolled
-`setInterval` per route.
+`setInterval` per route: a test fails on `setInterval(` or `useLivePolling` anywhere
+under `src/web` except `web/lib/live.ts` (the maintenance banner reads a file on
+another origin and is the one allowlisted exception, with a reason). A page that
+only needs to watch for a while after an action passes `idleEveryMs: null` and
+uses `useWatchWindow`; the pages that used to poll while a run was going keep that
+behaviour that way.
 
 ## Page header
-Every page that owns a background process opens with the same component:
-healthy / needs attention · when it last ran and the outcome · automatic or manual ·
-when it next runs. Same component on every such page. If two pages answer this
-differently, that's a bug.
+Every page that owns a background process opens with the same component,
+`ProcessHeader` (`web/components/process-header`): healthy / needs attention /
+never run / off · when it last ran and the outcome · automatic or manual · when it
+next runs. Healthy is neutral text with no badge and no colour; a process that
+needs a person is a critical banner with the detail and a link. A manual process
+says `Manual` and has no next run; it does not invent one. Times come from
+`formatRelativeTime` (`2 min ago`, `yesterday 14:05`, `in 3 h`), never a raw date
+string. No other file renders "Last run" or "Next run" as a heading or label
+(`tests/unit/ui-rules.test.ts`). A table column of per-row values is not a header.
+
+Pages that use it: Sources (list and source), MetaKocka products (catalogue sync),
+Translations syncs, MetaKocka locations (stock sync), Product setup → Store menu.
+Sales campaigns and the other Translations processes do not yet; add it there when
+the page is next touched.
+
+## Saving
+Which pattern a new form uses:
+- **Persistent settings** (they change how the app behaves from now on) use the
+  contextual save bar (`useSaveBar`, `data-save-bar` on the form): edits show the
+  bar, Discard restores the saved values, and leaving with unsaved edits asks.
+- **One-off actions** (run now, apply, create, delete) are a button that does the
+  thing and answers with a toast.
+- **A card that edits in place** with Edit and Save uses `SettingRows`
+  (`web/components/source-editor`): read and edit show the same rows.
+A result that went well is a toast; only a failure keeps a banner.
+Known split, not yet moved onto one pattern: Sources and the Translations context
+and glossary editors save inline from a dialog or card; product setup's sets and
+menu are one-off actions. They follow the three shapes above, but a reviewer has
+not confirmed that none of them should have the save bar.
+
+## Area navigation
+An area with sub-pages (Translations, Product setup, Sources) shows the same tab
+row, `AreaNav` (`web/components/area-nav`), built from `{items, current}`: the
+current tab is the pressed button with `aria-current="page"`, the others are quiet
+buttons with an address. `TranslationsNav`, `ProductSetupNav` and `SourcesNav` are
+thin wrappers. A new area uses `AreaNav` and does not draw its own.
+
+## Lists
+An empty list says what to do next, in one sentence, from `web/lib/empty-states.ts`
+so copy review is one diff. A table that is reloading sets `loading`; a list that
+failed shows an error with a way to try again (Sources: `PortalRead`).
 
 ## Copy
 - Sentence case, active voice, verb-first buttons. No exclamation marks, no "successfully".
+  `tests/unit/ui-rules.test.ts` fails on `article`, `exception`, `blocked`, `feed`,
+  `successfully` and exclamation marks in merchant strings; an allowlist entry
+  carries its reason (Shopify's own blog article, product setup's rule exceptions,
+  the Sources area's brand feed).
 - One term per concept. Fix the glossary in the doc when you write it, from what the code
   actually calls things, and use it everywhere. The current pages drift between variant,
   SKU, product and article inside a single card.
@@ -214,13 +260,15 @@ differs it is given, because the code is not going to be renamed to match.
 | **Edited by a person** | A translation a person wrote or corrected, which the AI protects. Never "manual" in copy. | `owner = manual` |
 | **Outdated** | Shopify's own word for a translation whose source has changed since. | `Translation.outdated` |
 | **Estimated cost** | Every money figure on the AI usage pages; the provider reports tokens, not money. Never "cost" alone. | `estimated_cost_micros`, `PRICING_VERSION` |
+| **Product setup** | The plan for the catalogue: product types, their attributes, reusable sets, and the store menu. The area's name in the menu, its headings and its address (`/app/product-setup`). The old name was Metafields; it managed a plan, not Shopify metafields. | `/app/product-setup`, `domain/attributes` |
+| **Metafield** | Shopify's stored value on a product or variant. Used only where Shopify's own concept is meant (a pattern field, a campaign rule), never as the name of the area. | `Metafield`, `writeMetafields` |
 | **Source** | One product source the export portal pushes into the store: a catalogue export or a brand feed, at one location, with its own settings. The portal's own word. Never "feed" or "export" alone in copy. Distinct from a *supply source* (a warehouse) and a *source language*, which keep their qualifiers. | `Source`, `/app/sources` |
 | **Run** (sources) | One execution of a source. Never "job" in copy. | `Run`, `/app/sources/:id/runs/:runId` |
 | **Export portal** | The other product, named in full every time. Never "the portal" alone on a page that has not said which. | `EXPORT_PORTAL_URL`, `ExportPortalClient` |
 
 Words that must not appear in merchant-facing copy: **article** (the build
-specification's word for a MetaKocka product), **token**, **template**, **code**
-meaning a SKU.
+specification's word for a MetaKocka product; Shopify's own blog article is the
+one allowed use), **token**, **template**, **code** meaning a SKU.
 
 ## Maintenance notice
 `MaintenanceBanner` (in `routes/app.tsx`) sits above every page. It reads

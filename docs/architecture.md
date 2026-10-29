@@ -63,7 +63,7 @@ Sales             /app/sales            sale campaigns; /app/sales/:id is the ed
                                         /app/sales/:id/variants every variant it touches
 Products          /app/products         the catalogue snapshot as a list; /app/products/:id is
                                         the product workspace (§ Product workspace below)
-Metafields        /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
+Product setup     /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
                                         /attributes/:id one attribute), /sets, /definitions
@@ -71,15 +71,17 @@ Metafields        /app/product-setup    lands on /app/product-setup/types/:typeI
 Translations      /app/translations     the store's languages (docs/translations.md); its own
                                         navigation reaches /add, /languages/:locale, /editor,
                                         /translate, /syncs (/:syncId), /glossary and /usage
+Sources           /app/sources          what the export portal pushes into the store, a view onto
+                                        the portal (docs/sources.md); /new, /:sourceId,
+                                        /:sourceId/runs/:runId; its tab row (`SourcesNav`) is
+                                        Sources | Review | AI categorization | Connection
 MetaKocka         /app/metakocka        the integration's front door: how each side is
                                         doing, opening onto Orders and
-  Products        /app/metakocka/products    matching status and /sync for settings; /:id
+  Products        /app/metakocka/products    the page is headed "MetaKocka products"; matching
+                                             status and /sync for settings; /:id
                                              redirects to the product workspace
   Locations       /app/metakocka/locations   how stock is going, and /settings for the
                                              mappings, the defaults and the profit centres
-Sources           /app/sources          what the export portal pushes into the store, a view onto
-                                        the portal (docs/sources.md); /new, /:sourceId,
-                                        /:sourceId/runs/:runId and /connection (the API key)
 Settings          /app/settings         hub; /app/settings/metakocka is the connection,
                                         /app/settings/taxes is Taxes & VAT (an overview,
                                         then registrations, rates, mappings, overrides)
@@ -822,6 +824,7 @@ enforcement gap is tracked in `docs/project-status.md`.
 | Export portal contract or a Sources screen | `src/domain/export-portal/contract.ts` (and `docs/sources.md` § The contract, which the portal implements); the client `src/adapters/export-portal/client.server.ts`; screens under `app.sources.*` |
 | Background workflow            | Queue definition, `src/jobs/handlers/`, then worker registration             |
 | Embedded screen or form        | `src/web/routes/` with shared UI in `src/web/components/` and `src/web/lib/` |
+| UI rule (name, polling, colour, copy) | `docs/ui-conventions.md`, enforced by `tests/unit/ui-rules.test.ts` (reads `src/web`, names `file:line`; allowlist entries carry a reason). Shared parts: `ProcessHeader`, `AreaNav`, `useLiveRevalidation`, `web/lib/empty-states.ts` |
 | What counts as configured      | `src/domain/readiness/`, then `readiness.server.ts` for the facts          |
 | Guided setup step              | `src/web/routes/app.setup.tsx`; the settings it writes stay where they are |
 | Webhook                        | Thin route in `src/web/routes/`, shared verification helper, queue handler   |

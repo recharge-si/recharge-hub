@@ -640,6 +640,34 @@ without compatibility testing. Adopt a compatible upstream fix, or validate an
 upgrade/override separately against generation, all migrations, the test suite,
 and both runtime images.
 
+### UI coherence pass (PRD 3): what was not done, and what no browser has seen
+
+Done in code and held by `tests/unit/ui-rules.test.ts`: one name for the area
+(Product setup), `AreaNav` on Translations, Product setup and Sources,
+`ProcessHeader` on Sources, MetaKocka products, Translations syncs, MetaKocka
+locations and the store menu, `useLiveRevalidation` on every polling route, no
+success tone, copy rules, empty states in one file, one editor for the order
+transfer switch and reference pattern after setup.
+
+Not done, and why:
+- **Deferred Sources loaders (US-307).** Seven Sources loaders still await the
+  export portal (the allowlist in the test names each). Deferring them changes
+  the documented design ("one call per page, 8 s timeout"), interacts with the
+  live re-reads and the `PortalRead` failure states, and could not be tried
+  without a browser. PRD 3 Open question 2 is still open.
+- **Target navigation (US-302), beyond the order.** Sources now precedes
+  MetaKocka. The Products tabs, the Name sync entry and the reduced Settings hub
+  are not built; the Settings hub's Locations, Product sync and Export portal
+  cards are already links to the owning pages, not second editors.
+- **ProcessHeader on Sales** and the other Translations processes.
+- **Loading and error states for every list (US-311).** Sentences are central;
+  Products and Sources already set `loading`; the rest were not changed.
+- **Every e2e spec in `tests/e2e/specs/ui-coherence.spec.ts`** is written, not run.
+- The Definitions tab from the metafields PR is not on `AreaNav` yet; move it after
+  both merge.
+- The Paid badge on the orders list stays green on the merchant's request, as an
+  allowlisted exception.
+
 ### UI, accessibility, and performance need measured passes
 
 The Built for Shopify checklist has not been walked requirement by requirement.

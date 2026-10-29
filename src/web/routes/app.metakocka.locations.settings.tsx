@@ -3,7 +3,6 @@ import { useEffect, useRef, useState } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   useSearchParams,
   type ActionFunctionArgs,
   type HeadersFunction,
@@ -41,6 +40,7 @@ import {
 } from "~/web/lib/locations.server";
 import { METAKOCKA_REGISTERS_URL } from "~/web/lib/metakocka-links";
 import { principalFromSession } from "~/web/lib/principal.server";
+import { useLiveRevalidation, useWatchWindow } from "~/web/lib/live";
 
 /**
  * What every location follows unless it says otherwise.
@@ -393,7 +393,6 @@ export default function LocationDefaults() {
   const defaultsFetcher = useFetcher<typeof action>();
   const registerFetcher = useFetcher<typeof action>();
   const locationFetcher = useFetcher<typeof action>();
-  const revalidator = useRevalidator();
   const [params, setParams] = useSearchParams();
 
   const savingDefaults = defaultsFetcher.state !== "idle";
@@ -492,25 +491,11 @@ export default function LocationDefaults() {
    * then has failed, the nightly run will try again, and a page that polls for
    * as long as it stays open is worse than a slightly old list.
    */
-  const revalidatorRef = useRef(revalidator);
-  revalidatorRef.current = revalidator;
-
+  const [watching, watch] = useWatchWindow(60_000, !checking);
   useEffect(() => {
-    if (!checking) return;
-
-    let checks = 0;
-    const timer = setInterval(() => {
-      checks += 1;
-      if (checks > 12) {
-        clearInterval(timer);
-        return;
-      }
-      const current = revalidatorRef.current;
-      if (current.state === "idle") current.revalidate();
-    }, 5000);
-
-    return () => clearInterval(timer);
+    if (checking) watch();
   }, [checking]);
+  useLiveRevalidation({ active: checking && watching, idleEveryMs: null });
 
   /*
    * Arriving from the Locations page, which sends `?location=` or `?connect=`.
@@ -1006,7 +991,7 @@ export default function LocationDefaults() {
                       {!entry.isValid ? (
                         <s-badge tone="critical">Not in MetaKocka</s-badge>
                       ) : entry.checked ? (
-                        <s-badge tone="success">Checked</s-badge>
+                        <s-badge>Checked</s-badge>
                       ) : (
                         <s-badge tone="neutral">Not checked</s-badge>
                       )}
@@ -1071,7 +1056,7 @@ export default function LocationDefaults() {
          * been able to check.
          */}
         {defaultsResult && !defaultsResult.ok ? (
-          <s-banner tone="warning" heading="Saved, with an exception">
+          <s-banner tone="warning" heading="Saved, with something to check">
             <s-paragraph>{defaultsResult.message}</s-paragraph>
           </s-banner>
         ) : rejected.length > 0 ? (

@@ -26,6 +26,7 @@ import {
   menuTypeIds,
   type MenuNode,
 } from "~/domain/attributes/menu";
+import { ProcessHeader } from "~/web/components/process-header";
 import { ProductSetupNav } from "~/web/components/product-setup-nav";
 import { LearnMore } from "~/web/components/learn-more";
 import { PRODUCT_SETUP_ROUTES, countOf } from "~/web/lib/attributes";
@@ -260,7 +261,7 @@ export default function StoreMenu() {
   const folded = types - inMenu;
 
   return (
-    <s-page heading="Metafields" inlineSize="large">
+    <s-page heading="Product setup" inlineSize="large">
       <s-link slot="breadcrumb-actions" href="/app">
         Home
       </s-link>
@@ -283,6 +284,31 @@ export default function StoreMenu() {
           </s-banner>
         ) : null}
 
+        <ProcessHeader
+          health={
+            !state
+              ? "never_run"
+              : state.status === "failed"
+                ? "needs_attention"
+                : "ok"
+          }
+          lastRun={
+            state?.finishedAt
+              ? {
+                  at: state.finishedAt,
+                  outcome: state.status === "failed" ? "failed" : "completed",
+                }
+              : null
+          }
+          mode="automatic"
+          running={running}
+          detail={
+            state?.status === "failed"
+              ? (state.lastError ?? "Something went wrong.")
+              : null
+          }
+        />
+
         {state?.status === "running" ? (
           <s-banner tone="info" heading="Making the menu">
             <s-paragraph>
@@ -293,21 +319,12 @@ export default function StoreMenu() {
               }. You can leave this page; it carries on.`}
             </s-paragraph>
           </s-banner>
-        ) : state?.status === "failed" ? (
-          <s-banner tone="critical" heading="The menu was not finished">
-            <s-paragraph>
-              {state.lastError ?? "Something went wrong."}
-            </s-paragraph>
-          </s-banner>
-        ) : state?.status === "done" ? (
+        ) : state?.status === "done" && state.lastError ? (
           <s-banner
-            tone={state.lastError ? "warning" : "success"}
+            tone="warning"
             heading={`Menu ready${state.finishedAt ? ` · ${formatDateTime(state.finishedAt)}` : ""}`}
           >
-            <s-paragraph>
-              {state.lastError ??
-                `“${TYPE_MENU_TITLE}” links ${countOf(state.collections, "collection")}. Add it to your theme's header in Online Store › Themes › Customize.`}
-            </s-paragraph>
+            <s-paragraph>{state.lastError}</s-paragraph>
             {state.menuId ? (
               <s-link
                 slot="secondary-actions"
@@ -317,6 +334,24 @@ export default function StoreMenu() {
               </s-link>
             ) : null}
           </s-banner>
+        ) : state?.status === "done" ? (
+          /* Healthy is calm: a finished menu is a sentence, not a green banner. */
+          <s-section
+            heading={`Menu ready${state.finishedAt ? ` · ${formatDateTime(state.finishedAt)}` : ""}`}
+          >
+            <s-stack direction="block" gap="small-300">
+              <s-text color="subdued">
+                {`“${TYPE_MENU_TITLE}” links ${countOf(state.collections, "collection")}. Add it to your theme's header in Online Store › Themes › Customize.`}
+              </s-text>
+              {state.menuId ? (
+                <s-link
+                  href={`shopify://admin/menus/${numericId(state.menuId)}`}
+                >
+                  Open the menu in Shopify
+                </s-link>
+              ) : null}
+            </s-stack>
+          </s-section>
         ) : null}
 
         <s-section heading="Store menu from product types">

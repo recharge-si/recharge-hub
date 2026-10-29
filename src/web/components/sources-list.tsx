@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 
 import type { SourceSummary } from "~/domain/export-portal/contract";
 import { Dropdown } from "~/web/components/dropdown";
+import { ProcessHeader } from "~/web/components/process-header";
 import { formatListDateTime } from "~/web/lib/datetime";
 import {
   SOURCE_ROUTES,
@@ -14,6 +15,7 @@ import {
   type SourcesHeadline,
   type StatusFilter,
 } from "~/web/lib/sources";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * The Sources page below its header (docs/sources.md § Screens): the
@@ -40,35 +42,44 @@ export function SourcesSummary({ headline }: { headline: SourcesHeadline }) {
           label: "On",
           value: `${n(headline.enabled)} of ${n(headline.total)}`,
         },
-    {
-      label: "Last run",
-      value: headline.lastRunAt
-        ? formatListDateTime(headline.lastRunAt)
-        : "Never",
-    },
-    {
-      label: "Next run",
-      value: headline.nextRunAt
-        ? formatListDateTime(headline.nextRunAt)
-        : "Not scheduled",
-    },
   ];
 
   return (
     <s-section accessibilityLabel="Summary">
-      <s-grid
-        gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr 1fr 1fr"
-        gap="base"
-      >
-        {cells.map((cell) => (
-          <s-stack key={cell.label} direction="block" gap="small-500">
-            <s-text color="subdued">{cell.label}</s-text>
-            <s-text type="strong" tone={cell.warning ? "caution" : "auto"}>
-              {cell.value}
-            </s-text>
-          </s-stack>
-        ))}
-      </s-grid>
+      <s-stack direction="block" gap="base">
+        {headline.total > 0 ? (
+          <ProcessHeader
+            health={
+              headline.attention > 0
+                ? "needs_attention"
+                : headline.enabled === 0
+                  ? "off"
+                  : headline.lastRunAt
+                    ? "ok"
+                    : "never_run"
+            }
+            lastRun={
+              headline.lastRunAt ? { at: headline.lastRunAt, outcome: "" } : null
+            }
+            mode={headline.automatic ? "automatic" : "manual"}
+            nextRunAt={headline.nextRunAt}
+            running={headline.active > 0}
+          />
+        ) : null}
+        <s-grid
+          gridTemplateColumns="@container (inline-size <= 640px) 1fr 1fr, 1fr 1fr 1fr"
+          gap="base"
+        >
+          {cells.map((cell) => (
+            <s-stack key={cell.label} direction="block" gap="small-500">
+              <s-text color="subdued">{cell.label}</s-text>
+              <s-text type="strong" tone={cell.warning ? "caution" : "auto"}>
+                {cell.value}
+              </s-text>
+            </s-stack>
+          ))}
+        </s-grid>
+      </s-stack>
     </s-section>
   );
 }
@@ -183,7 +194,7 @@ export function SourcesTable({
       {shown.length === 0 && filtered ? (
         <s-box paddingBlock="large-100">
           <s-stack direction="block" gap="base" alignItems="center">
-            <s-text color="subdued">No sources match these filters.</s-text>
+            <s-text color="subdued">{EMPTY.sourcesNoMatch}</s-text>
             <s-button
               variant="secondary"
               onClick={() => {

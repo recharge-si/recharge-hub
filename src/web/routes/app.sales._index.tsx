@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -36,6 +35,8 @@ import {
   describeDiscount,
   formatInZone,
 } from "~/web/lib/sales";
+import { useLiveRevalidation } from "~/web/lib/live";
+import { EMPTY } from "~/web/lib/empty-states";
 
 /**
  * Sale campaigns (docs/sale-campaigns.md § UI): what is on sale, what is
@@ -186,23 +187,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { ok: false, message: "Unknown action." };
 };
 
-/** Polls while a run is in progress, so the counts move. */
-function useLivePolling(active: boolean) {
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
-}
-
 export default function Sales() {
   const { cards, timeZone, catalogue, busy } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const result = fetcher.data;
-  useLivePolling(busy || catalogue.reading);
+  useLiveRevalidation({ active: busy || catalogue.reading, idleEveryMs: null });
 
   useEffect(() => {
     if (!result?.ok) return;
@@ -304,11 +293,8 @@ export default function Sales() {
             <s-section>
               <s-box paddingBlock="large-100">
                 <s-stack direction="block" gap="base" alignItems="center">
-                  <s-heading>No campaigns yet</s-heading>
-                  <s-text color="subdued">
-                    Put part of the catalogue on sale for a while. The original
-                    prices are put back when it ends.
-                  </s-text>
+                  <s-heading>{EMPTY.salesNone.heading}</s-heading>
+                  <s-text color="subdued">{EMPTY.salesNone.body}</s-text>
                   <s-button
                     variant="primary"
                     type="button"
@@ -394,11 +380,9 @@ export default function Sales() {
                             <s-table-cell>
                               <s-stack direction="inline" gap="small-300">
                                 <s-badge
-                                  {...(card.status === "active"
-                                    ? { tone: "success" as const }
-                                    : card.status === "scheduled"
-                                      ? { tone: "info" as const }
-                                      : {})}
+                                  {...(card.status === "scheduled"
+                                    ? { tone: "info" as const }
+                                    : {})}
                                 >
                                   {STATUS_LABEL[card.status]}
                                 </s-badge>
