@@ -63,7 +63,7 @@ Sales             /app/sales            sale campaigns; /app/sales/:id is the ed
                                         /app/sales/:id/variants every variant it touches
 Products          /app/products         the catalogue snapshot as a list; /app/products/:id is
                                         the product workspace (§ Product workspace below)
-Metafields        /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
+Product setup     /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
                                         /attributes/:id one attribute), /sets and /settings

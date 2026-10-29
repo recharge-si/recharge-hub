@@ -152,7 +152,7 @@ export async function suggestAutofill(
   if (types.length === 0) {
     await failAll(
       productIds,
-      "There are no product types to choose from. Add product types under Metafields first.",
+      "There are no product types to choose from. Add product types under Product setup first.",
     );
     return;
   }

@@ -179,7 +179,7 @@ export default function SourceCategorization() {
                   detail={
                     types > 0
                       ? `${countOf(typesWithAttributes, "type")} with attributes to fill.`
-                      : "Plan the product types and their attributes under Metafields first."
+                      : "Plan the product types and their attributes under Product setup first."
                   }
                   href={PRODUCT_SETUP_ROUTES.types}
                   linkLabel={types > 0 ? "Product types" : "Plan product types"}

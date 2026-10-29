@@ -30,7 +30,7 @@ export const APP_HOME = "/app";
  *  2. **Orders** and **Sales**, the daily work. Orders sat behind the MetaKocka
  *     page for a while, which put the most-used page two clicks away and left
  *     no entry highlighted while it was open.
- *  3. **Products**, **Metafields** and **Translations**, the catalogue.
+ *  3. **Products**, **Product setup** and **Translations**, the catalogue.
  *     Products opens each product's workspace, where it is edited here
  *     rather than in Shopify's product editor.
  *  4. **MetaKocka** and **Sources**, the two systems that feed the store.
@@ -46,7 +46,7 @@ export const APP_NAV: readonly NavItem[] = [
   { href: "/app/orders", label: "Orders" },
   { href: "/app/sales", label: "Sales" },
   { href: "/app/products", label: "Products" },
-  { href: "/app/product-setup", label: "Metafields" },
+  { href: "/app/product-setup", label: "Product setup" },
   { href: "/app/translations", label: "Translations" },
   { href: "/app/metakocka", label: "MetaKocka" },
   { href: "/app/sources", label: "Sources" },
