@@ -49,7 +49,7 @@ import {
  * tests run it without Shopify, a database or a model.
  *
  * Order of work for every request: method, signature (401, and nothing else
- * runs), rate limit (429), body (400 / 413), readiness (503). Only `explain`
+ * runs), rate limit (429), body (400 / 413), readiness (409). Only `explain`
  * ever waits on a model, and only after the engine has produced the rig.
  */
 
@@ -86,9 +86,17 @@ export interface RigApiDeps {
   config: RigApiConfig;
   now(): Date;
   log?: (fields: Record<string, unknown>, message: string) => void;
-  /** Where a failure the API turns into a 503 is recorded, with its cause. */
+  /** Where a failure the API turns into a 409 is recorded, with its cause. */
   logError?: (fields: Record<string, unknown>, message: string) => void;
 }
+
+/**
+ * The status of "not ready" and "unavailable". Shopify's App Proxy replaces a
+ * 5xx answer with the store's own error page, so the buyer's page would never
+ * see the JSON; a 409 is passed through like the 400 and 429 are. The code in
+ * the body is what the page reads.
+ */
+export const NOT_SERVED = 409;
 
 /** A snapshot older than this is called stale (PRD 4 US-402). */
 export const STALE_MINUTES = 30;
@@ -311,7 +319,7 @@ export function createRigApi(deps: RigApiDeps): {
   }
 
   /**
-   * The catalogue, or a 503 when it cannot be read. A failed read (a database
+   * The catalogue, or a 409 when it cannot be read. A failed read (a database
    * error, a column a migration has not added yet) is logged with its cause and
    * answered as "unavailable", never as a raw 500 a buyer's page cannot read.
    */
@@ -323,7 +331,7 @@ export function createRigApi(deps: RigApiDeps): {
         { domain, error: errorFields(error) },
         "The rig catalogue could not be read",
       );
-      return json(503, { code: "unavailable" }, { "Retry-After": "30" });
+      return json(NOT_SERVED, { code: "unavailable" }, { "Retry-After": "30" });
     }
   }
 
@@ -412,7 +420,7 @@ export function createRigApi(deps: RigApiDeps): {
     prepared: Prepared,
   ): Response | null {
     if (context.enabled && prepared.readiness.ready) return null;
-    return json(503, {
+    return json(NOT_SERVED, {
       code: "not_ready",
       reason: context.enabled ? "catalogue" : "disabled",
     });

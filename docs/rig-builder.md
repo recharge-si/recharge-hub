@@ -36,7 +36,7 @@ recharge.si  POST /apps/rig/{build,explain,verify}
 hub  /proxy/rig/*   src/web/routes/proxy.rig.*.tsx   (thin resource routes)
         v
 src/adapters/rig/api.server.ts   method -> signature (401) -> rate limit (429)
-                                 -> body (400/413) -> readiness (503) -> work
+                                 -> body (400/413) -> readiness (409) -> work
         v                                      v
 src/domain/rig/   pure engine, checks,   src/adapters/ai/rig-provider.server.ts
 profile, words                           RigAiProvider -> ClaudePoolProvider
@@ -90,7 +90,7 @@ unsupported_discipline skill_contradiction`.
 Errors: 400 `{code:"invalid_body", field, message}` (`field` is e.g.
 `answers.weightKg`), 400 `invalid_json`, 401 `unauthorized`, 405, 413
 `text_too_long` or `body_too_large`, 429 `rate_limited` with `Retry-After`,
-503 `{code:"not_ready", reason:"disabled"|"catalogue"}`. An AI failure is never a
+409 `{code:"not_ready", reason:"disabled"|"catalogue"}` (409 and not 503: Shopify App Proxy replaces a 5xx answer with the store error page, so the page could not read the JSON). A catalogue that cannot be read is 409 `{code:"unavailable"}` with `Retry-After: 30`, and is logged. An AI failure is never a
 500.
 
 ### `POST /apps/rig/explain`
@@ -162,7 +162,7 @@ with an in-stock variant that has every required attribute (the base is reported
 not gating). The **Rig builder** card on Product setup > Settings shows it per
 role, and the switch (`shop.rig_builder_enabled`) cannot be turned on while it
 is not ready, nor while the installed `claude` lacks the `--tools` flag. The
-proxy answers 503 `not_ready` while the switch is off. The card also shows
+proxy answers 409 `not_ready` while the switch is off. The card also shows
 `Plain mode N of last 50`.
 
 Gap to raise with PRD 2: the pack has no per-board fin length range. The fin
