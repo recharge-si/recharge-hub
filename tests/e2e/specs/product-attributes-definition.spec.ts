@@ -98,7 +98,8 @@ test("a value is saved with the type of its definition", async ({
 
   const field = () => page.locator('s-number-field[label="Sail size"]');
   await page.goto("/app/products/3001?tab=attributes");
-  await expect(field()).toBeVisible();
+  // Polaris hosts have no box of their own, so Playwright never calls them visible.
+  await expect(field()).toBeAttached();
   await field().evaluate((el) => {
     (el as unknown as { value: string }).value = "5,3";
     el.dispatchEvent(new Event("input", { bubbles: true }));

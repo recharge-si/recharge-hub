@@ -95,7 +95,7 @@ test("fills the sails through the pool, reviews them and applies them", async ({
 
     await page.goto("/app/products?view=review");
     await expect(page.getByText("Apply all (11)")).toBeVisible();
-    await expect(page.getByText(/AI suggestion/)).toHaveCount(11);
+    await expect(page.getByText(/^AI suggestion:/)).toHaveCount(11);
     await expect(page.getByText(/Mystery gear/)).toHaveCount(0);
 
     await page.getByText("Apply all (11)").click();

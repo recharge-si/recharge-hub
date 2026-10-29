@@ -99,7 +99,8 @@ test("previews 4 to create, 1 existing and 1 conflict without writing, then crea
   const preview = await shop.calls();
   expect(preview.filter((call) => MUTATIONS.test(call.operation))).toEqual([]);
 
-  await page.locator('s-button[slot="primary-action"]').click();
+  // A slotted primary action has no box of its own; fire the click as sales.spec does.
+  await page.locator('s-button[slot="primary-action"]').dispatchEvent("click");
   await expect(page.getByText("0 to create").first()).toBeVisible();
   await expect(page.getByText("Created", { exact: true })).toHaveCount(4);
 

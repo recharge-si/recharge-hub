@@ -237,6 +237,12 @@ const handlers: Record<string, Handler> = {
 
   OrchestratorAvailableLocales: () => ({ availableLocales: AVAILABLE_LOCALES }),
 
+  // The product page reads stock levels and translations; the fake store has neither.
+  OrchestratorVariantInventory: () => ({ nodes: [] }),
+  OrchestratorTranslatableResourcesByIds: () => ({
+    translatableResourcesByIds: { nodes: [] },
+  }),
+
   OrchestratorVariantCount: (store) => ({
     productVariantsCount: {
       count: variantsOf(store).length,
