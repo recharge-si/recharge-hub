@@ -37,6 +37,8 @@ export interface FitContext {
   boardBand: Band | null;
   finRules: RigRules["fin"];
   tolerances: Tolerances;
+  /** Board kind the rules were read with (freeride or wave). */
+  kind: string;
   /** The rider's weight, for a board that states the riders it takes. */
   weightKg: number | null;
   /** Roles the buyer already owns: left out of the rig and of its checks. */
@@ -149,6 +151,7 @@ export function resolveFit(profile: Profile, rules: RigRules): Resolved {
       tolerances: rules.tolerances,
       weightKg: profile.weightKg,
       owned,
+      kind,
       ownedBoom,
     },
     kind,
@@ -494,9 +497,17 @@ export function uncheckedWarnings(unchecked: readonly Unchecked[]): EngineWarnin
 }
 
 /** True when a part cannot go with the others: some rule that ran said no. */
-function conflicts(selection: Selection, context: FitContext): boolean {
+function conflicts(
+  selection: Selection,
+  context: FitContext,
+  selecting = false,
+): boolean {
+  // While choosing parts, the buyer own boom is reported afterwards (a rig
+  // that does not fit it is still shown, with the failing check), not used to
+  // drop a sail for which nothing is known.
   return rules(selection, context).some(
-    ({ outcome }) => outcome.kind === "ran" && !outcome.ok,
+    ({ id, outcome }) =>
+      outcome.kind === "ran" && !outcome.ok && !(selecting && id === "owned-boom"),
   );
 }
 
@@ -556,13 +567,18 @@ function compatible(
   const scored: Array<{ candidate: RigCandidate; unchecked: number }> = [];
   for (const candidate of options) {
     const trial: Selection = { ...chosen, [role]: candidate };
-    if (conflicts(trial, context)) continue;
+    if (conflicts(trial, context, true)) continue;
     scored.push({ candidate, unchecked: uncheckedCount(trial, context) });
   }
   const best = Math.min(...scored.map((entry) => entry.unchecked));
   return scored
     .filter((entry) => entry.unchecked === best)
     .map((entry) => entry.candidate);
+}
+
+/** How many facts a candidate states in its own metafields (derived ones do not count). */
+function storedFacts(candidate: RigCandidate): number {
+  return Object.keys(candidate.specs).length - candidate.derived.length;
 }
 
 function closestTo(
@@ -580,8 +596,12 @@ function closestTo(
     if (strategy === "cheapest") return byPrice(a, b);
     const da = distance(a);
     const db = distance(b);
-    if (da === db) return byPrice(a, b);
-    return round(da) - round(db) || byPrice(a, b);
+    // Equally close: the one with more stored data, so more of its fit is checked.
+    return (
+      round(da) - round(db) ||
+      storedFacts(b) - storedFacts(a) ||
+      byPrice(a, b)
+    );
   });
 }
 
@@ -629,7 +649,9 @@ function assemble(
   for (const mast of poolOf("mast", pool)) {
     const alone: Selection = { sail, mast };
     const report = checkReport(alone, context);
-    const failed = report.checks.filter((check) => !check.ok).map((check) => check.id);
+    const failed = report.checks
+      .filter((check) => !check.ok && check.id !== "owned-boom")
+      .map((check) => check.id);
     if (failed.length === 0) {
       options.push({ mast, unchecked: report.unchecked.length });
     } else if (failed.length === 1 && failed[0] === "sail-mast-length") {
@@ -689,7 +711,7 @@ function assemble(
             if (!categoryServes(board, fit.kind)) return false;
             const volume = num(board, "volumeL");
             if (volume !== null && !inBand(volume, boardBand)) return false;
-            return !conflicts({ sail, board }, context);
+            return !conflicts({ sail, board }, context, true);
           }),
           "volumeL",
           boardBand,
@@ -765,6 +787,12 @@ function alternativesFor(
     const swaps: RigCandidate[] = [];
     for (const candidate of poolOf(role, pool)) {
       if (candidate.variantId === current.variantId) continue;
+      if (
+        (role === "sail" || role === "board") &&
+        !categoryServes(candidate, context.kind)
+      ) {
+        continue;
+      }
       const trial: Selection = { ...selection, [role]: candidate };
       if (
         !conflicts(trial, context) &&

@@ -23,9 +23,11 @@ model writes is filtered against the rig the engine produced.
 - **Launch criterion (open):** all 30 evaluation rows pass, and a Recharge
   windsurf expert has reviewed 10 full rigs by hand and signed the table.
   Sign-off: name _not yet recorded_, date _not yet recorded_.
-- The attribute keys the engine reads are those of the rig attribute pack
-  (PRD 2 US-204); they are defined in `src/domain/rig/keys.ts` and must match
-  the pack. No metafield, no rig.
+- The attribute keys the engine reads are the **store's own** (its product
+  plan, namespace `recharge`), defined once in `src/domain/rig/keys.ts`; see
+  "Attributes the engine reads". The old invented rig pack keys (`sail_area_m2`,
+  `mast_rdm`, ...) are no longer read. No data, no check: a rule whose data is
+  absent is reported `unchecked`, never passed or failed by guess.
 
 ## Architecture
 
@@ -115,11 +117,35 @@ up as failed checks (`unknown-variant-<id>`, `unavailable-variant-<id>`,
 
 ### Checks
 
-`sail-fit`, `board-fit`, `board-sail-range`, `sail-mast-rdm`, `sail-mast-length`
-(mast plus extension), `sail-boom-range`, `mast-base-type`,
-`mast-extension-type`, `fin-box`, `fin-length`, `owned-boom`. A check involving
-gear the buyer owns is not computed; only an owned boom with its range given
-produces `owned-boom`, otherwise the warning `owned_boom_unchecked`.
+A rule has three outcomes: it ran and passed, it ran and failed, or it could
+not run because a part lacks the data (`unchecked`). Only the first two are in
+`checks` (`{ id, ok }`). The third is in `unchecked` (`{ id, missing: [{ role,
+key }] }`, on each rig and on `verify`), and there is one warning per missing
+key, `unchecked_<role>_<key>` (for example `unchecked_sail_recommended_mast_cm`),
+with a sentence the theme can show as it is. A rig is verified only for the
+checks that ran.
+
+| id | needs | passes when |
+|---|---|---|
+| `sail-fit` | sail `canopy_area` | area in the rules table band for the rider |
+| `board-fit` | board `volume_l` | volume in the band (unchecked for a board with only a sail range) |
+| `board-sail-range` | sail area, board `board_sail_min_m2`/`max_m2` | area within the board's range |
+| `rider-fit` | board `rider_mass_min_kg`/`max_kg` (either) | rider weight within; **only runs when the board states it** |
+| `sail-mast-diameter` | sail `recommended_mast_diameter` and/or `compatible_mast_diameters`, mast `mast_diameter` | mast diameter is in the union of the sail's |
+| `sail-mast-length` | sail `recommended_mast_cm`, mast `length_cm` (+ extension `extension_min_cm`/`max_cm` when one is in the rig) | the mast, stretched by the extension range, reaches the recommended length within the tolerance (PLACEHOLDER 10 cm) |
+| `sail-mast-imcs` | sail `recommended_mast_imcs`, mast `mast_imcs` | within the tolerance (PLACEHOLDER 1); **only runs when both exist** |
+| `mast-boom-diameter` | boom `compatible_mast_diameters`, mast diameter | listed; **only runs when the boom lists some** |
+| `sail-boom-range` | sail `boom_min_cm`/`boom_max_cm` (else `recommended_boom_cm`), boom `boom_min_cm`/`boom_max_cm` | the boom covers the sail's whole range (the recommended length as a point) |
+| `mast-extension-diameter` | mast and extension `mast_diameter` | equal |
+| `extension-base-connection` | extension and base `base_connection` | equal |
+| `fin-box` | board `fin_box_types`, fin `fin_box` | the fin's box is one the board lists |
+| `fin-length` | fin `length_cm`; board `board_fin_min_cm`/`max_cm`, else board `volume_l` with the placeholder table | fin length within the range or band |
+| `owned-boom` | sail boom range, the range the buyer gave | the owned boom covers the sail's range |
+
+A check involving gear the buyer owns is not computed; only an owned boom with
+its range given produces `owned-boom`, otherwise the warning
+`owned_boom_unchecked`. There is no rule between a mast and a base alone: the
+store has no key that joins them; the base is checked against an extension.
 
 Boom rule: the boom must open over the **whole** range the sail asks for
 (`boom.min <= sail.min` and `boom.max >= sail.max`). The PRD prose states the
@@ -131,11 +157,19 @@ inequalities the other way round, but its examples (150-190 passes 165-175,
 1. Sail: the category (`boardKind`, default freeride) and the rules row for the
    rider's weight and the middle of the wind range give an area band; sails in
    band, in stock and complete are tried closest to the middle first (up to 8).
-2. Mast, extension, base together: RDM equal, length in the sail's range, plain
-   masts before masts that need an extension, only combinations with a base of
-   the mast's type. If none has a base the mast is kept and `base` is unmet.
-3. Boom covering the sail's range. 4. Board in the volume band that takes the
-   sail's size and has a fin that fits; then a fin of its box and length band.
+2. Mast, then an extension when the mast alone falls short, then a base: no rule
+   that ran may say no (diameter, length, IMCS), plain masts before masts that
+   need an extension, and of the compatible ones the ones with the fewest rules
+   left unchecked. If no base is stocked the mast is kept and `base` is unmet.
+3. Boom covering the sail's range (and listing the mast's diameter if it lists
+   any). 4. Board of the sail's kind whose volume is in the band (a board with
+   no volume is kept if its sail range takes the sail) and that has a fin that
+   fits; then a fin of its box and length.
+
+Kind: a freeride rider gets sails and boards whose plan type is Freeride or
+Beginner, a wave rider Wave or Freewave (the leaf type name, "Freeride sails"
+gives `freeride`). Foil, race, slalom and WindSUP parts are not offered. A part
+on the role's own type (no discipline) is allowed.
 5. The first sail that gives a complete rig wins; otherwise the best partial rig
    is returned with `unmet`.
 
@@ -143,30 +177,108 @@ Parts other than the sail are the lower median by price ("recommended"). With a
 budget, an over-budget rig is replaced by the cheapest compatible one; if that is
 still over, it is returned with `unmet` budget and the amount over.
 
-Left out, with the count under `missingAttributes` (keys): a variant without a
-required attribute. Only parts with `availableForSale` and more than zero units
-are offered (open question 6: no "on order" parts). Owned gear is dropped from
+Left out, with the count under `missingAttributes` (keys): a variant that lacks
+what the rules need to place it (below). Only parts with `availableForSale` and
+more than zero units are offered (open question 6: no "on order" parts). A
+**null quantity is unknown, not stock**: such a part is left out and the
+warning `stock_not_read` says how many. Owned gear is dropped from
 the rig and its checks; the engine still picks a reference part to size the rest.
 Not implemented: harness (optional in the PRD), Good/Better/Best.
+
+## Attributes the engine reads
+
+All in namespace `recharge`, variant scope with a fall back to the product's
+(and the other way round). One map: `src/domain/rig/keys.ts`.
+
+| role | keys |
+|---|---|
+| sail | `canopy_area` (m2), `recommended_mast_cm`, `recommended_mast_diameter` (rdm\|sdm), `recommended_mast_imcs`, `compatible_mast_diameters` (list), `boom_min_cm`, `boom_max_cm`, `recommended_boom_cm` |
+| mast | `length_cm`, `mast_diameter` (rdm\|sdm), `mast_imcs`, `carbon_percent` |
+| boom | `boom_min_cm`, `boom_max_cm`, `compatible_mast_diameters` |
+| mast extension | `extension_min_cm`, `extension_max_cm`, `base_connection`, `mast_diameter` |
+| mast base | `base_connection` |
+| fin | `fin_box` (tuttle, power_box, deep_tuttle, slot_box, us_box, mini_tuttle), `length_cm` |
+| board | `volume_l`, `board_sail_min_m2`, `board_sail_max_m2`, `board_fin_min_cm`, `board_fin_max_cm`, `fin_box_types` (list), `rider_mass_min_kg`, `rider_mass_max_kg` |
+
+### Stored formats (`src/domain/rig/values.ts`)
+
+Read from the production store; the parsers are unit-tested with these exact
+shapes.
+
+- `number_decimal`: `{"type":"number_decimal","value":"5.0"}` (a string).
+- `dimension` / `weight` / `volume`:
+  `{"type":"dimension","value":"{\"value\":37.0,\"unit\":\"CENTIMETERS\"}"}`
+  (a JSON string). Unit-aware: converted to the unit the key names (cm, kg,
+  m2, L); a unit it does not know gives no value, never a guess. A plain number
+  is taken in the unit the key names.
+- `single_line_text_field`: a bare code, lower-cased.
+- `list.single_line_text_field`: a JSON array string, `"[\"rdm\",\"sdm\"]"`;
+  sorted and de-duplicated; empty or unreadable means no data.
+
+### Derived facts (`src/domain/rig/derive.ts`)
+
+Only when the metafield is missing, only these, and each is flagged: the item
+carries `derived: [field, ...]` and readiness counts them.
+
+- mast length: the variant option Size ("490", "460 cm"), 370-520 cm.
+- sail area: option text like "5.8 m2 / Orange" (or m²), 1-14 m2.
+- fin length: option Size in millimetres ("440" is 44 cm, divided by 10 over
+  100), or "36 cm Power Box" in cm; 15-70 cm.
+- mast RDM / SDM from the product title ("HD RDM C75"; both or neither gives
+  nothing) and carbon percent from "C75" (10-100).
+
+No compatibility fact (boom range, mast requirement, fin box, rider mass) is
+ever derived.
 
 ## Candidates and readiness
 
 A product is a candidate for a role when the plan's type for it (the existing
 `typeForProduct`: chosen type, category, then product type) or an ancestor is
-named **Boards, Sails, Masts, Booms, Bases and extensions** or **Fins**. Bases
-and extensions share a type; a variant with `extension_length_cm` is an
-extension. Variant metafields win over product ones.
+named **Boards, Sails, Masts, Booms, Mast extensions, Mast bases** or **Fins**
+and the path runs through **Windsurf** (the plan also has Wing and SUP boards).
+The old pack's single "Bases and extensions" type still works: a variant with
+`extension_min_cm`/`max_cm` is an extension. Variant metafields win over product
+ones.
 
-`rigReadiness`: each of board, sail, mast, boom and fin needs at least 3 products
-with an in-stock variant that has every required attribute (the base is reported,
-not gating). The **Rig builder** card on Product setup > Settings shows it per
-role, and the switch (`shop.rig_builder_enabled`) cannot be turned on while it
-is not ready, nor while the installed `claude` lacks the `--tools` flag. The
-proxy answers 409 `not_ready` while the switch is off. The card also shows
-`Plain mode N of last 50`.
+What a candidate needs to be **placed** (it is "complete"; anything else is
+counted under its key and left out): sail `canopy_area`; mast `length_cm` and
+`mast_diameter`; boom `boom_min_cm` and `boom_max_cm`; fin `fin_box`; board
+`volume_l` or both `board_sail_min_m2`/`max_m2`, and `fin_box_types`; extension
+its min and max; base nothing. Derivations count toward this.
 
-Gap to raise with PRD 2: the pack has no per-board fin length range. The fin
-length rule is therefore part of the rules table (by board volume).
+`rigReadiness` (domain) counts per role: active products, **complete**
+products, complete products **in stock**, variants whose stock is unknown, the
+keys variants lack with counts (most common first), the products to fix, and how
+many values were derived. The builder is **ready** when each of board, sail,
+mast, boom and fin has at least 3 complete in-stock products (the base and the
+extension are reported, not gating). The merchant lines
+(`src/web/lib/rig-readiness.ts`, Product setup types and definitions pages)
+read "7 of 8 ready - missing canopy_area (1)" and add "stock not read yet:
+refresh the catalogue" when no variant of the role has a quantity (a snapshot
+older than the stock columns). The **Rig builder** card on Product setup >
+Settings shows complete and in-stock per role, and the switch
+(`shop.rig_builder_enabled`) cannot be turned on while it is not ready, nor
+while the installed `claude` lacks the `--tools` flag. The proxy answers 409
+`not_ready` while the switch is off (with `detail: "stock_not_read"` when that is
+why). The card also shows `Plain mode N of last 50`.
+
+The **Add rig attributes** card (Settings) adds the old example pack, whose
+keys the engine does not read. It is hidden once the plan already has the keys
+that place the five gating roles (`src/domain/rig/plan.ts`), so a store with
+its own plan is not given a second, unread set. Remapping the pack to the
+store's keys is a follow-up.
+
+## Cache
+
+`loadRigSource` reads the catalogue in two steps: a light read to find the
+products the plan makes rig parts (about 250 of 1,300), then the heavy columns
+(metafields, variants, options) for those only. The prepared candidates are
+cached per shop (`src/adapters/rig/snapshot-cache.ts`): **fresh for 300 s**, then
+**served stale while one background refresh runs** (single flight, a failed
+refresh keeps the stale snapshot and is logged), and a caller waits only when
+there is no snapshot or it is older than 30 minutes. Shopify's App Proxy gives
+up near 5 s, and a full read took about 3 s. `snapshotAgeMinutes` is computed
+at answer time.
 
 ## Snapshot
 
@@ -257,7 +369,7 @@ any failure. `tests/fixtures/rig/eval-sample.csv` is a **placeholder** sample.
 
 - Windsurf only; wing, foil and SUP later. English and Slovenian sentences; the
   Slovenian strings are drafts for review.
-- Single web process assumed for rate limits and the 60 s catalogue cache.
+- Single web process assumed for rate limits and the catalogue cache (300 s, stale while revalidate).
 - Stock is Shopify's `inventoryQuantity`, not the hub's `SupplyLevel`.
 - `/apps/rig/*` is not yet verified end to end against Shopify (no dev store
   was used); the signature check is `authenticate.public.appProxy`.

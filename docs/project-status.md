@@ -106,9 +106,22 @@ Completed work belongs in Git history, not in this file.
   the merge.
 - The image change (python3, `claude`, vendored claude-pool, read-only pool
   mount) has not been built or run; `claude` on Alpine/musl is unverified.
-- The pack has no per-board fin length range; the fin rule is part of the rules
-  table. No harness, no "on order" parts, no live stock read, no
-  Good/Better/Best.
+- The engine reads the store's real plan keys (`canopy_area`, `mast_diameter`,
+  `fin_box`, `boom_min_cm`, ...) with derivations from option text and titles;
+  a rule without its data is `unchecked`, never guessed. On the production
+  data of 2026-10-29 most rule data is still missing: `recommended_mast_cm`,
+  `luff_cm`, sail `boom_min_cm`/`boom_max_cm`, board `volume_l`,
+  `board_sail_min_m2`/`max_m2`, `board_fin_min_cm`/`max_cm`, `rider_mass_*`
+  and `extension_min_cm`/`max_cm` are empty, so rigs would be mostly
+  unchecked; and `inventory_quantity` is null everywhere until the catalogue
+  snapshot is refreshed (null is not stock). See "Readiness" in the doc for
+  what counts as complete. The fin length rule falls back to the placeholder
+  table by volume when a board states no fin range.
+- The "Add rig attributes" example pack still has its own keys, which the
+  engine does not read; the card is hidden when the plan holds the engine's
+  keys. Remapping it is open. The catalogue cache is 300 s with stale while
+  revalidate; the real time of the new two-step read is not measured.
+  No harness, no "on order" parts, no live stock read, no Good/Better/Best.
 - Rate limits are per web process and reset on restart. Bulk read duration with
   the new fields is not measured on the real store. Sentry breadcrumbs per build
   are not added. The "Plain mode N of last 50" line is on the Rig builder card,
