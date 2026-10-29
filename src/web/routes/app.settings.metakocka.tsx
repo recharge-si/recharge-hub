@@ -286,6 +286,12 @@ export default function MetakockaSettings() {
     return () => form.removeEventListener("reset", handleReset);
   }, [summary?.companyId, summary?.apiUserEmail]);
 
+  // A result that went well is a toast; only a failure keeps a banner.
+  useEffect(() => {
+    if (!result?.ok || !result.message) return;
+    if (typeof shopify !== "undefined") shopify.toast.show(result.message);
+  }, [result]);
+
   if (!allowed) {
     return (
       <s-page heading="MetaKocka connection">
@@ -318,8 +324,8 @@ export default function MetakockaSettings() {
         spacing tokens, no custom styling).
       */}
       <s-stack direction="block" gap="large">
-        {banner ? (
-          <s-banner tone={banner.ok ? "success" : "critical"}>
+        {banner && !banner.ok ? (
+          <s-banner tone="critical">
             <s-paragraph>{banner.message}</s-paragraph>
           </s-banner>
         ) : null}
@@ -433,7 +439,7 @@ export default function MetakockaSettings() {
         <s-section heading="Connection status">
           <s-stack direction="block" gap="base">
             <s-stack direction="inline" gap="base" alignItems="center">
-              <s-badge tone={summary?.lastVerifiedAt ? "success" : "caution"}>
+              <s-badge {...(summary?.lastVerifiedAt ? {} : { tone: "caution" as const })}>
                 {summary?.lastVerifiedAt ? "Verified" : "Not verified"}
               </s-badge>
               <s-text>

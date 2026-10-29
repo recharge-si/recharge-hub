@@ -359,10 +359,10 @@ const STATUS_LABEL: Record<LocationStatus, string> = {
  */
 const STATUS_TONE: Record<
   LocationStatus,
-  "caution" | "success" | "neutral" | "critical"
+  "caution" | "neutral" | "critical"
 > = {
   not_connected: "caution",
-  syncing: "success",
+  syncing: "neutral",
   paused: "neutral",
   error: "critical",
 };

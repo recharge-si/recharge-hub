@@ -599,7 +599,7 @@ export default function PaymentTypes() {
 
                       <s-table-cell>
                         {type ? (
-                          <s-badge tone="success">Mapped</s-badge>
+                          <s-badge>Mapped</s-badge>
                         ) : (
                           <s-text color="subdued">Fallback</s-text>
                         )}

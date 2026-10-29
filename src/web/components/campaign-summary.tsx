@@ -101,7 +101,7 @@ export function CampaignStatus({
       <s-stack direction="block" gap="base">
         <s-stack direction="block" gap="small-300">
           <s-stack direction="inline" gap="small-300" alignItems="center">
-            <s-badge tone={status === "active" ? "success" : "neutral"}>
+            <s-badge tone="neutral">
               {STATUS_LABEL[status]}
             </s-badge>
             {phase !== "idle" ? (

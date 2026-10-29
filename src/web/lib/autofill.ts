@@ -44,9 +44,9 @@ export function confidenceLabel(confidence: number | null): string | null {
 
 export function confidenceTone(
   confidence: number | null,
-): "success" | "warning" | "critical" | "neutral" {
+): "warning" | "critical" | "neutral" {
   if (confidence === null) return "neutral";
-  if (confidence >= 0.9) return "success";
+  if (confidence >= 0.9) return "neutral";
   if (confidence >= 0.6) return "warning";
   return "critical";
 }

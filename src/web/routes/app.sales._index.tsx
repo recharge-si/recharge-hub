@@ -382,11 +382,9 @@ export default function Sales() {
                             <s-table-cell>
                               <s-stack direction="inline" gap="small-300">
                                 <s-badge
-                                  {...(card.status === "active"
-                                    ? { tone: "success" as const }
-                                    : card.status === "scheduled"
-                                      ? { tone: "info" as const }
-                                      : {})}
+                                  {...(card.status === "scheduled"
+                                    ? { tone: "info" as const }
+                                    : {})}
                                 >
                                   {STATUS_LABEL[card.status]}
                                 </s-badge>

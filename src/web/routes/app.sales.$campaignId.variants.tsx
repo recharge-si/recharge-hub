@@ -420,9 +420,7 @@ export default function CampaignVariants() {
                               row.state === "restore_failed" ||
                               row.state === "review"
                                 ? "critical"
-                                : row.state === "applied"
-                                  ? "success"
-                                  : "neutral"
+                                : "neutral"
                             }
                           >
                             {STATE_LABEL[row.state]}

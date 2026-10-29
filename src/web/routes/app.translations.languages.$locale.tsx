@@ -1156,7 +1156,7 @@ function LanguageSummary({
               {data.primary ? (
                 <s-badge>Default language</s-badge>
               ) : data.published ? (
-                <s-badge tone="success">Published</s-badge>
+                <s-badge>Published</s-badge>
               ) : (
                 <s-badge>Unpublished</s-badge>
               )}

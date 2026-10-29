@@ -201,6 +201,9 @@ export default function SourcesConnection() {
   // A saved key is not kept in the field: the mask below says it is there.
   useEffect(() => {
     if (result?.ok && result.intent === "save") setApiKey("");
+    // A result that went well is a toast; only a failure keeps a banner.
+    if (result?.ok && result.message && typeof shopify !== "undefined")
+      shopify.toast.show(result.message);
   }, [result]);
 
   if (!allowed) {
@@ -244,8 +247,8 @@ export default function SourcesConnection() {
           </s-banner>
         ) : null}
 
-        {result?.message ? (
-          <s-banner tone={result.ok ? "success" : "critical"}>
+        {result?.message && !result.ok ? (
+          <s-banner tone="critical">
             <s-paragraph>{result.message}</s-paragraph>
           </s-banner>
         ) : null}

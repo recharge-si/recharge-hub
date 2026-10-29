@@ -991,7 +991,7 @@ export default function LocationDefaults() {
                       {!entry.isValid ? (
                         <s-badge tone="critical">Not in MetaKocka</s-badge>
                       ) : entry.checked ? (
-                        <s-badge tone="success">Checked</s-badge>
+                        <s-badge>Checked</s-badge>
                       ) : (
                         <s-badge tone="neutral">Not checked</s-badge>
                       )}

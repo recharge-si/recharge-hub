@@ -163,6 +163,11 @@ export default function Sources() {
     if (result.started) watch();
   }, [result]);
 
+  // The note a redirect carries (a deleted source) is a toast, not a banner.
+  useEffect(() => {
+    if (note && typeof shopify !== "undefined") shopify.toast.show(note);
+  }, [note]);
+
   const submit = (body: Record<string, string>) =>
     void fetcher.submit(body, { method: "post" });
   const busy = fetcher.state !== "idle";
@@ -246,12 +251,6 @@ export default function Sources() {
       <SourcesNav current="sources" awaitingReview={awaitingReview} />
 
       <s-stack direction="block" gap="base">
-        {note && !(result && !result.ok) ? (
-          <s-banner tone="success">
-            <s-paragraph>{note}</s-paragraph>
-          </s-banner>
-        ) : null}
-
         {awaitingReview > 0 ? (
           <s-banner
             tone="info"

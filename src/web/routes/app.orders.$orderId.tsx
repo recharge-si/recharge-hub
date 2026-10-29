@@ -1102,7 +1102,7 @@ export default function OrderDetail() {
                               <s-badge
                                 key={allocation.id}
                                 tone={
-                                  allocation.sourceName ? "success" : "critical"
+                                  allocation.sourceName ? "neutral" : "critical"
                                 }
                               >
                                 {allocation.sourceName
@@ -1411,7 +1411,7 @@ export default function OrderDetail() {
                           "Not numbered yet"}
                       </s-text>
                       {document.isPrimary ? (
-                        <s-badge tone="info">Primary</s-badge>
+                        <s-text color="subdued">Primary</s-text>
                       ) : null}
                     </s-stack>
                     <s-text color="subdued">
@@ -1456,11 +1456,7 @@ export default function OrderDetail() {
                   <s-stack direction="block" gap="small-500">
                     <s-badge
                       tone={
-                        document.status === "written"
-                          ? "success"
-                          : document.status === "failed"
-                            ? "critical"
-                            : "neutral"
+                        document.status === "failed" ? "critical" : "neutral"
                       }
                     >
                       {document.status === "written"

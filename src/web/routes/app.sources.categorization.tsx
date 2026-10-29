@@ -294,7 +294,7 @@ function Check({
     >
       <s-icon
         type={ok ? "check-circle" : "alert-circle"}
-        tone={ok ? "success" : "warning"}
+        tone={ok ? "neutral" : "warning"}
       />
       <s-stack direction="block" gap="none">
         <s-text type="strong">{label}</s-text>

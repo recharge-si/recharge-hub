@@ -1006,9 +1006,9 @@ function Terminology({
                   </s-table-cell>
                   <s-table-cell>
                     {row.origin === "manual" ? (
-                      <s-badge tone="success">Person</s-badge>
+                      <s-text color="subdued">Edited by a person</s-text>
                     ) : (
-                      <s-badge>AI</s-badge>
+                      <s-text color="subdued">AI</s-text>
                     )}
                   </s-table-cell>
                   <s-table-cell>

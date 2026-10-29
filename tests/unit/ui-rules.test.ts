@@ -68,15 +68,27 @@ describe("US-304 one polling hook", () => {
 });
 
 describe("US-305 colour marks exceptions only", () => {
-  const allow: Allowed[] = [...(PENDING.colour ?? [])];
-  it("has no success tone on a badge, banner or icon", () => {
+  const allow: Allowed[] = [
+    {
+      file: "src/web/lib/orders.ts",
+      includes: 'tone: "success"',
+      reason:
+        "Paid is green on the merchant's own request (documented in lib/orders.ts): the one fact they scan the orders list for",
+    },
+    {
+      file: "src/web/lib/orders.ts",
+      includes: "export type Tone",
+      reason: "the tone type the Paid entry is typed with",
+    },
+    {
+      file: "src/web/routes/app.orders.$orderId.tsx",
+      includes: 'payment.status === "success"',
+      reason: "compares MetaKocka's payment status value; not a colour",
+    },
+  ];
+  it("has no success or positive tone where a badge, banner or icon takes one", () => {
     expectClean(
-      hit(
-        (l) =>
-          /tone=("success"|"positive"|\{[^}]*["'](success|positive)["'])/.test(
-            l.text,
-          ) || /tone:\s*["'](success|positive)["']/.test(l.text),
-      ),
+      hit((l) => /["'](success|positive)["']/.test(l.text)),
       allow,
     );
   });

@@ -2,27 +2,6 @@ import type { Allowed } from "./ui-rules";
 
 /** Violations known at the start of PRD 3; each story removes its own. */
 export const PENDING: Record<string, Allowed[]> = {
-  colour: [
-    { file: "src/web/components/campaign-summary.tsx", includes: "<s-badge tone={status === \"active\" ? \"su", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/components/product-attributes.tsx", includes: "{selected ? <s-icon type=\"check\" tone=\"s", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/components/product-attributes.tsx", includes: "<s-badge tone=\"success\">Complete</s-badg", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/components/source-editor.tsx", includes: "tone={on ? \"success\" : \"neutral\"}", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/lib/orders.ts", includes: "paid: { label: \"Paid\", tone: \"success\" }", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.metakocka.locations.settings.tsx", includes: "<s-badge tone=\"success\">Checked</s-badge", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.orders.settings.payments.tsx", includes: "<s-badge tone=\"success\">Mapped</s-badge>", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.product-setup.menu.tsx", includes: "tone={state.lastError ? \"warning\" : \"suc", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.sales._index.tsx", includes: "? { tone: \"success\" as const }", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.settings.metakocka.tsx", includes: "<s-banner tone={banner.ok ? \"success\" : ", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.settings.metakocka.tsx", includes: "<s-badge tone={summary?.lastVerifiedAt ?", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.sources.$sourceId._index.tsx", includes: "<s-banner tone=\"success\">", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.sources._index.tsx", includes: "<s-banner tone=\"success\">", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.sources.categorization.tsx", includes: "tone={ok ? \"success\" : \"warning\"}", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.sources.connection.tsx", includes: "<s-banner tone={result.ok ? \"success\" : ", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.sources.review.tsx", includes: "<s-badge tone=\"success\">Translated</s-ba", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.translations.context.tsx", includes: "<s-badge tone=\"success\">Person</s-badge>", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.translations.languages.$locale.tsx", includes: "<s-badge tone=\"success\">Published</s-bad", reason: "pending US-305 neutral text or toast" },
-    { file: "src/web/routes/app.translations.syncs.$syncId.tsx", includes: ": { tone: \"success\" as const })}", reason: "pending US-305 neutral text or toast" },
-  ],
   lastRun: [
     { file: "src/web/components/source-overview.tsx", includes: "label=\"Last run\"", reason: "pending US-303 ProcessHeader" },
     { file: "src/web/components/source-overview.tsx", includes: "label=\"Next run\"", reason: "pending US-303 ProcessHeader" },

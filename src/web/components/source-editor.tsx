@@ -141,7 +141,7 @@ function SwitchRow({
         >
           <s-icon
             type={on ? "check-circle-filled" : "circle"}
-            tone={on ? "success" : "neutral"}
+            tone="neutral"
           />
           <s-stack direction="block" gap="small-500">
             <s-text>

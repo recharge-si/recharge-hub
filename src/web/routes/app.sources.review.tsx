@@ -841,7 +841,7 @@ function ReviewRow({
             </s-link>
           </s-stack>
         ) : (
-          <s-badge tone="success">Translated</s-badge>
+          <s-badge>Translated</s-badge>
         )}
       </s-table-cell>
       <s-table-cell>

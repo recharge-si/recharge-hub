@@ -473,9 +473,7 @@ export default function SyncPage() {
                         <s-badge
                           {...(item.status === "failed"
                             ? { tone: "critical" as const }
-                            : item.status === "skipped"
-                              ? {}
-                              : { tone: "success" as const })}
+                            : {})}
                         >
                           {`${ITEM_STATUS_LABEL[item.status] ?? item.status}${item.fields > 0 ? ` · ${item.fields}` : ""}`}
                         </s-badge>
