@@ -6,6 +6,7 @@
     "tests/**/*.ts",
     "scripts/**/*.ts",
     "*.ts",
+    "scripts/**/*.ts",
     ".react-router/types/**/*"
   ],
   "compilerOptions": {

@@ -1,0 +1,230 @@
+{
+  "requestId": "rb_0123456789abcdef01234567",
+  "profile": {
+    "discipline": "windsurf",
+    "weightKg": 82,
+    "skill": "intermediate",
+    "windMinKn": 15,
+    "windMaxKn": 25,
+    "boardKind": "freeride",
+    "ownedBoomMinCm": 150,
+    "ownedBoomMaxCm": 190,
+    "owns": [
+      "boom"
+    ],
+    "source": {
+      "discipline": "form",
+      "windMinKn": "form",
+      "windMaxKn": "form",
+      "owns": "form",
+      "weightKg": "form",
+      "skill": "form",
+      "boardKind": "form"
+    }
+  },
+  "needs": [],
+  "rigs": [
+    {
+      "label": "Recommended",
+      "items": [
+        {
+          "role": "sail",
+          "productId": "gid://shopify/Product/105",
+          "variantId": 45500000005,
+          "title": "Aero Ride 5.8",
+          "variantTitle": "5.8",
+          "url": "/products/aero-ride-5-8",
+          "image": "https://cdn.example.test/105.jpg",
+          "price": "699.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 5.8 m² sail suits 82 kg riders in 15–25 knots.",
+          "specs": {
+            "areaM2": 5.8,
+            "mastRdm": "30",
+            "mastLengthMinCm": 430,
+            "mastLengthMaxCm": 460,
+            "boomMinCm": 165,
+            "boomMaxCm": 175,
+            "category": "freeride"
+          }
+        },
+        {
+          "role": "mast",
+          "productId": "gid://shopify/Product/115",
+          "variantId": 45500000015,
+          "title": "Carbon Mast 430",
+          "variantTitle": "430",
+          "url": "/products/carbon-mast-430",
+          "image": "https://cdn.example.test/115.jpg",
+          "price": "399.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "This 430 cm RDM 30 mast matches the sail.",
+          "specs": {
+            "lengthCm": 430,
+            "mastRdm": "30",
+            "baseType": "tendon"
+          }
+        },
+        {
+          "role": "base",
+          "productId": "gid://shopify/Product/119",
+          "variantId": 45500000019,
+          "title": "Tendon Base",
+          "variantTitle": "Default",
+          "url": "/products/tendon-base",
+          "image": "https://cdn.example.test/119.jpg",
+          "price": "19.90",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "This tendon base fits the mast.",
+          "specs": {
+            "baseType": "tendon"
+          }
+        },
+        {
+          "role": "board",
+          "productId": "gid://shopify/Product/131",
+          "variantId": 45500000031,
+          "title": "Free Board 105",
+          "variantTitle": "105 L",
+          "url": "/products/free-board-105",
+          "image": "https://cdn.example.test/131.jpg",
+          "price": "899.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 105 L board suits 82 kg riders and takes this sail size.",
+          "specs": {
+            "volumeL": 105,
+            "finBox": "tuttle",
+            "minSailM2": 5,
+            "maxSailM2": 7
+          }
+        },
+        {
+          "role": "fin",
+          "productId": "gid://shopify/Product/137",
+          "variantId": 45500000037,
+          "title": "Tuttle Fin 36",
+          "variantTitle": "36 cm",
+          "url": "/products/tuttle-fin-36",
+          "image": "https://cdn.example.test/137.jpg",
+          "price": "69.90",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 36 cm tuttle fin fits the board's fin box.",
+          "specs": {
+            "finBox": "tuttle",
+            "finLengthCm": 36
+          }
+        }
+      ],
+      "total": "2086.80",
+      "currency": "EUR",
+      "checks": [
+        {
+          "id": "sail-fit",
+          "ok": true
+        },
+        {
+          "id": "board-fit",
+          "ok": true
+        },
+        {
+          "id": "board-sail-range",
+          "ok": true
+        },
+        {
+          "id": "sail-mast-rdm",
+          "ok": true
+        },
+        {
+          "id": "sail-mast-length",
+          "ok": true
+        },
+        {
+          "id": "mast-base-type",
+          "ok": true
+        },
+        {
+          "id": "fin-box",
+          "ok": true
+        },
+        {
+          "id": "fin-length",
+          "ok": true
+        },
+        {
+          "id": "owned-boom",
+          "ok": true
+        }
+      ],
+      "alternatives": [
+        {
+          "role": "sail",
+          "variantId": 45500000010,
+          "title": "Swell Wave 5.8",
+          "variantTitle": "5.8",
+          "price": "619.00",
+          "currency": "EUR",
+          "why": "A 5.8 m² sail suits 82 kg riders in 15–25 knots."
+        },
+        {
+          "role": "sail",
+          "variantId": 45500000003,
+          "title": "Aero Ride 5.3",
+          "variantTitle": "5.3",
+          "price": "629.00",
+          "currency": "EUR",
+          "why": "A 5.3 m² sail suits 82 kg riders in 15–25 knots."
+        },
+        {
+          "role": "sail",
+          "variantId": 45500000004,
+          "title": "Aero Ride 5.5",
+          "variantTitle": "5.5",
+          "price": "669.00",
+          "currency": "EUR",
+          "why": "A 5.5 m² sail suits 82 kg riders in 15–25 knots."
+        },
+        {
+          "role": "board",
+          "variantId": 45500000030,
+          "title": "Free Board 95",
+          "variantTitle": "95 L",
+          "price": "849.00",
+          "currency": "EUR",
+          "why": "A 95 L board suits 82 kg riders and takes this sail size."
+        },
+        {
+          "role": "board",
+          "variantId": 45500000032,
+          "title": "Free Board 115",
+          "variantTitle": "115 L",
+          "price": "999.00",
+          "currency": "EUR",
+          "why": "A 115 L board suits 82 kg riders and takes this sail size."
+        },
+        {
+          "role": "fin",
+          "variantId": 45500000038,
+          "title": "Tuttle Fin 40",
+          "variantTitle": "40 cm",
+          "price": "79.90",
+          "currency": "EUR",
+          "why": "A 40 cm tuttle fin fits the board's fin box."
+        }
+      ]
+    }
+  ],
+  "unmet": [],
+  "warnings": [],
+  "mode": "plain",
+  "snapshotAgeMinutes": 10
+}

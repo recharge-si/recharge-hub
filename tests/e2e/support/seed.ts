@@ -116,6 +116,8 @@ export async function seedCatalogueSnapshot(shop: TestShop): Promise<void> {
       productId: product.id,
       title: product.title,
       handle: product.handle,
+      onlineStoreUrl: null,
+      description: null,
       vendor: product.vendor,
       productType: product.productType,
       status: product.status,
@@ -137,6 +139,9 @@ export async function seedCatalogueSnapshot(shop: TestShop): Promise<void> {
           variant.compareAtPrice === null
             ? null
             : minor(variant.compareAtPrice),
+        options: [],
+        inventoryQuantity: null,
+        availableForSale: true,
         metafields: variant.metafields,
       })),
     })),

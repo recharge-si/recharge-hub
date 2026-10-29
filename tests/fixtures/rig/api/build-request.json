@@ -1,0 +1,17 @@
+{
+  "text": "82 kg, third season, freeride at 15 to 25 knots, I already own a boom",
+  "answers": {
+    "discipline": "windsurf",
+    "weightKg": 82,
+    "skill": "intermediate",
+    "windMinKn": 15,
+    "windMaxKn": 25,
+    "boardKind": "freeride",
+    "owns": [
+      "boom"
+    ],
+    "ownedBoomMinCm": 150,
+    "ownedBoomMaxCm": 190
+  },
+  "locale": "en"
+}

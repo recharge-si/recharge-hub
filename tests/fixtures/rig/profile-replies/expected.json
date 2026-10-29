@@ -1,0 +1,93 @@
+{
+ "01-valid": {
+  "discipline": "windsurf",
+  "weightKg": 82,
+  "skill": "intermediate",
+  "windMinKn": 15,
+  "windMaxKn": 25,
+  "owns": [
+   "boom"
+  ],
+  "invalid": [],
+  "warnings": []
+ },
+ "02-wrapped-in-prose": {
+  "discipline": "windsurf",
+  "weightKg": 82,
+  "skill": "intermediate",
+  "windMinKn": 15,
+  "windMaxKn": 25,
+  "owns": [
+   "boom"
+  ],
+  "invalid": [],
+  "warnings": []
+ },
+ "03-markdown-fence": {
+  "discipline": "windsurf",
+  "weightKg": 82,
+  "skill": "intermediate",
+  "windMinKn": 15,
+  "windMaxKn": 25,
+  "owns": [
+   "boom"
+  ],
+  "invalid": [],
+  "warnings": []
+ },
+ "04-pounds-and-inches": {
+  "weightKg": 81.6,
+  "heightCm": 182.9,
+  "skill": "advanced",
+  "invalid": [],
+  "warnings": []
+ },
+ "05-beaufort": {
+  "weightKg": 75,
+  "windMinKn": 11,
+  "windMaxKn": 21,
+  "invalid": [],
+  "warnings": []
+ },
+ "06-not-windsurf": {
+  "weightKg": 70,
+  "invalid": [
+   "discipline"
+  ],
+  "warnings": [
+   "unsupported_discipline"
+  ]
+ },
+ "07-instruction": {
+  "weightKg": 82,
+  "owns": [
+   "sail"
+  ],
+  "invalid": [],
+  "warnings": []
+ },
+ "08-empty": null,
+ "09-gibberish": null,
+ "10-slovenian": {
+  "weightKg": 85,
+  "windMinKn": 12,
+  "windMaxKn": 20,
+  "invalid": [
+   "skill"
+  ],
+  "warnings": []
+ },
+ "11-very-long": {
+  "weightKg": 95,
+  "invalid": [],
+  "warnings": []
+ },
+ "12-contradictory": {
+  "weightKg": 70,
+  "skill": "beginner",
+  "invalid": [],
+  "warnings": [
+   "skill_contradiction"
+  ]
+ }
+}

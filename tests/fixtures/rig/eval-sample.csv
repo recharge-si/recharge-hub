@@ -1,0 +1,4 @@
+text,weightKg,skill,windMinKn,windMaxKn,boardKind,budgetEur,owns,expectedSailMinM2,expectedSailMaxM2,expectedBoardMinL,expectedBoardMaxL,notes
+"PLACEHOLDER ROW, NOT EXPERT ADVICE: 82 kg, third season, freeride 15 to 25 knots",82,intermediate,15,25,freeride,,,5.3,6.2,95,115,"Replace this file with the 30 rows Recharge staff write"
+"PLACEHOLDER ROW, NOT EXPERT ADVICE: 82 kg, owns a boom",82,intermediate,15,25,freeride,,boom,5.3,6.2,95,115,"Same rig minus the boom"
+"PLACEHOLDER ROW, NOT EXPERT ADVICE: 70 kg beginner light wind",70,beginner,10,18,freeride,,,4.6,6.5,110,135,"Expected ranges are made up for the fixture"

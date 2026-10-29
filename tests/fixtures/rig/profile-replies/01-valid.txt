@@ -1,0 +1,1 @@
+{"discipline":"windsurf","weightKg":82,"skill":"intermediate","windMinKn":15,"windMaxKn":25,"owns":["boom"]}

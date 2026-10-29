@@ -1,0 +1,61 @@
+{
+  "id": 9001,
+  "admin_graphql_api_id": "gid://shopify/Product/9001",
+  "title": "Aero Ride Sail",
+  "handle": "aero-ride-sail",
+  "body_html": "<p>Fast &amp; stable.</p>",
+  "vendor": "Aero",
+  "product_type": "Sails",
+  "status": "active",
+  "tags": "sail, freeride",
+  "updated_at": "2026-10-28T11:00:00Z",
+  "image": { "src": "https://cdn.example.test/9001.jpg" },
+  "options": [
+    { "name": "Size", "position": 1 },
+    { "name": "Colour", "position": 2 }
+  ],
+  "variants": [
+    {
+      "id": 9101,
+      "admin_graphql_api_id": "gid://shopify/ProductVariant/9101",
+      "sku": "AR-58",
+      "title": "5.8 / Red",
+      "price": "699.00",
+      "compare_at_price": null,
+      "option1": "5.8",
+      "option2": "Red",
+      "option3": null,
+      "inventory_quantity": 3,
+      "inventory_management": "shopify",
+      "inventory_policy": "deny"
+    },
+    {
+      "id": 9102,
+      "admin_graphql_api_id": "gid://shopify/ProductVariant/9102",
+      "sku": "AR-62",
+      "title": "6.2 / Red",
+      "price": "749.00",
+      "compare_at_price": null,
+      "option1": "6.2",
+      "option2": "Red",
+      "option3": null,
+      "inventory_quantity": 0,
+      "inventory_management": "shopify",
+      "inventory_policy": "deny"
+    },
+    {
+      "id": 9103,
+      "admin_graphql_api_id": "gid://shopify/ProductVariant/9103",
+      "sku": "AR-66",
+      "title": "6.6 / Red",
+      "price": "779.00",
+      "compare_at_price": null,
+      "option1": "6.6",
+      "option2": "Red",
+      "option3": null,
+      "inventory_quantity": 0,
+      "inventory_management": null,
+      "inventory_policy": "deny"
+    }
+  ]
+}

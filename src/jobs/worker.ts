@@ -25,6 +25,7 @@ import { handleReloadPricelists } from "~/jobs/handlers/reload-pricelists";
 import { handleReloadProfitCenters } from "~/jobs/handlers/reload-profit-centers";
 import { handleReloadWarehouses } from "~/jobs/handlers/reload-warehouses";
 import { handleRedactOldOrders } from "~/jobs/handlers/redact-old-orders";
+import { handlePurgeRigRequests } from "~/jobs/handlers/purge-rig-requests";
 import { handleSaleCampaignRun } from "~/jobs/handlers/sale-campaign-run";
 import { handleSaleCampaignScheduler } from "~/jobs/handlers/sale-campaign-scheduler";
 import { handleSaleProductEvent } from "~/jobs/handlers/sale-product-event";
@@ -174,6 +175,9 @@ async function main(): Promise<void> {
   });
   await boss.work(QUEUES.redactOldOrders, async (jobs) => {
     for (const job of jobs) await handleRedactOldOrders(job);
+  });
+  await boss.work(QUEUES.purgeRigRequests, async (jobs) => {
+    for (const job of jobs) await handlePurgeRigRequests(job);
   });
 
   /*

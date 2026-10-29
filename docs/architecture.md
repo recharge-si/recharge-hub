@@ -763,6 +763,11 @@ history under `prisma/migrations/`. Major groups are:
 - tenancy and auth: `Shop` (including `setup_completed_at`, the activation
   boundary, and `setup_step`, guided setup's own place-keeping), encrypted
   `Session`, `MetakockaCredential`;
+- rig builder: `RigRequest` (`rig_request`, no buyer text, purged after 90
+  days), `Shop.rigBuilderEnabled`, and the snapshot columns that carry
+  options and stock on `CatalogVariant` (docs/rig-builder.md); `AiUsage`
+  has a `provider` (`openai` for translation, `claude-pool` for the rig
+  builder) and the translation usage pages read only `openai`;
 - audit and delivery: `EventLog`, `IdempotencyKey`, pg-boss queues;
 - supply and inventory: `SupplySource`, `SupplySetting`, `SupplyLevel`, cached
   warehouse/profit-centre registers;

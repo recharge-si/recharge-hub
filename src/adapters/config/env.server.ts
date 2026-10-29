@@ -5,6 +5,23 @@ import { z } from "zod";
  * environment is a boundary. Reading `process.env` directly anywhere else is a bug:
  * import `env` from here instead.
  */
+/** A positive integer, or the default when the variable is unset or blank. */
+function blankToDefault(fallback: number) {
+  return z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      const text = value?.trim();
+      if (!text) return fallback;
+      const number = Number(text);
+      if (!Number.isInteger(number) || number <= 0) {
+        ctx.addIssue({ code: "custom", message: "must be a positive integer" });
+        return z.NEVER;
+      }
+      return number;
+    });
+}
+
 const envSchema = z.object({
   NODE_ENV: z
     .enum(["development", "test", "production"])
@@ -62,6 +79,23 @@ const envSchema = z.object({
         .transform((value) => value.replace(/\/+$/, ""))
         .optional(),
     ),
+
+  /**
+   * The AI rig builder (docs/rig-builder.md § Configuration). The model reads
+   * a buyer's text and phrases the reasons through claude-pool; every value
+   * is optional and a blank means the default, so a deployment without the
+   * pool still builds rigs, in plain mode.
+   */
+  RIG_AI_MODEL: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.trim() !== "" ? value.trim() : "sonnet")),
+  RIG_AI_MAX_CONCURRENT: blankToDefault(3),
+  RIG_AI_DAILY_CALLS: blankToDefault(500),
+  RIG_AI_TIMEOUT_MS: blankToDefault(20_000),
+  /** Per IP hash. The live rig calls build on every answer, so these are generous; explain has its own, tighter limits. */
+  RIG_BUILD_PER_MINUTE: blankToDefault(60),
+  RIG_BUILD_PER_HOUR: blankToDefault(600),
 
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().default("development"),

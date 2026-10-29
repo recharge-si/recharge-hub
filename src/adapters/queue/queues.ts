@@ -32,6 +32,8 @@ export const QUEUES = {
   recheckExceptions: "recheck-exceptions",
   pollMetakockaDocuments: "poll-metakocka-documents",
   redactOldOrders: "redact-old-orders",
+  // The rig builder's 90-day retention (docs/rig-builder.md).
+  purgeRigRequests: "purge-rig-requests",
   scheduledTick: "scheduled-tick",
   // Sale campaigns (docs/sale-campaigns.md § Scheduler and jobs).
   saleCampaignScheduler: "sale-campaign-scheduler",
@@ -514,6 +516,7 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
   // A retention promise, so it retries like the other compliance work rather
   // than being dropped after a couple of attempts.
   [QUEUES.redactOldOrders]: COMPLIANCE_POLICY,
+  [QUEUES.purgeRigRequests]: COMPLIANCE_POLICY,
   [QUEUES.customersDataRequest]: COMPLIANCE_POLICY,
   [QUEUES.customersRedact]: COMPLIANCE_POLICY,
   [QUEUES.shopRedact]: COMPLIANCE_POLICY,

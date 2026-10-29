@@ -19,6 +19,23 @@ RUN npm run build
 
 FROM node:22-alpine AS runtime
 RUN apk add --no-cache openssl
+
+# The rig builder asks a model through claude-pool (docs/rig-builder.md §
+# Image). claude-pool is a single Python script, vendored in ops/claude-pool and
+# pinned by hash; the `claude` CLI is pinned by version. The native `claude`
+# binary needs libgcc, libstdc++ and ripgrep on Alpine (musl). UNVERIFIED: this
+# stage has not been built or run; if `claude` does not start on musl, switch
+# this stage to node:22-bookworm-slim (apt-get install python3 ripgrep) and keep
+# the rest as it is.
+ARG CLAUDE_CODE_VERSION=2.1.312
+ARG CLAUDE_POOL_SHA256=2bf027531d540cf010c915e0130cf49ddeaadfb36a3cdcfd0ed0429633598eb8
+RUN apk add --no-cache python3 libgcc libstdc++ ripgrep \
+ && npm install -g --no-audit --no-fund @anthropic-ai/claude-code@${CLAUDE_CODE_VERSION} \
+ && npm cache clean --force
+ENV USE_BUILTIN_RIPGREP=0
+COPY ops/claude-pool/claude-pool /usr/local/bin/claude-pool
+RUN echo "${CLAUDE_POOL_SHA256}  /usr/local/bin/claude-pool" | sha256sum -c - \
+ && chmod 755 /usr/local/bin/claude-pool
 WORKDIR /app
 
 ENV NODE_ENV=production
