@@ -1,8 +1,6 @@
 import { boundary } from "@shopify/shopify-app-react-router/server";
-import { useEffect } from "react";
 import {
   useLoaderData,
-  useRevalidator,
   type HeadersFunction,
   type LoaderFunctionArgs,
 } from "react-router";
@@ -18,6 +16,7 @@ import {
   SYNC_STATUS_LABEL,
   TRANSLATION_ROUTES,
 } from "~/web/lib/translations";
+import { useLiveRevalidation } from "~/web/lib/live";
 
 /**
  * Syncs (docs/translations.md § Syncs): every translation run, newest first,
@@ -59,14 +58,7 @@ export default function Syncs() {
   const active = syncs.some(
     (sync) => sync.status === "queued" || sync.status === "running",
   );
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
+  useLiveRevalidation({ active: active, idleEveryMs: null });
 
   return (
     <s-page heading="Syncs" inlineSize="large">

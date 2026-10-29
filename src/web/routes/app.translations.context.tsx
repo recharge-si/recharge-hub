@@ -4,7 +4,6 @@ import {
   useFetcher,
   useLoaderData,
   useNavigate,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -42,6 +41,7 @@ import {
   glossaryUrl,
   localeLabel,
 } from "~/web/lib/translations";
+import { useLiveRevalidation } from "~/web/lib/live";
 
 /**
  * Store context (docs/translations.md § Translation intelligence): what
@@ -414,17 +414,6 @@ function pageUrl(
     : TRANSLATION_ROUTES.context;
 }
 
-function useLivePolling(active: boolean) {
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
-}
-
 const n = (value: number) => value.toLocaleString("en");
 
 export default function StoreContext() {
@@ -432,7 +421,10 @@ export default function StoreContext() {
   const fetcher = useFetcher<typeof action>();
   const navigate = useNavigate();
   const busy = fetcher.state !== "idle";
-  useLivePolling(data.profile?.building ?? false);
+  useLiveRevalidation({
+    active: data.profile?.building ?? false,
+    idleEveryMs: null,
+  });
 
   useEffect(() => {
     if (!fetcher.data?.ok) return;

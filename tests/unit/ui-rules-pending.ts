@@ -2,26 +2,6 @@ import type { Allowed } from "./ui-rules";
 
 /** Violations known at the start of PRD 3; each story removes its own. */
 export const PENDING: Record<string, Allowed[]> = {
-  polling: [
-    { file: "src/web/routes/app.metakocka.locations.settings.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.metakocka.locations.settings.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.orders.settings.payments.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.sales.$campaignId._index.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.sales._index.tsx", includes: "function useLivePolling(active: boolean)", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.sales._index.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.sales._index.tsx", includes: "useLivePolling(busy || catalogue.reading", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations._index.tsx", includes: "function useLivePolling(active: boolean)", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations._index.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations._index.tsx", includes: "useLivePolling(data.kind === \"read\" && (", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.context.tsx", includes: "function useLivePolling(active: boolean)", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.context.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.context.tsx", includes: "useLivePolling(data.profile?.building ??", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.languages.$locale.tsx", includes: "function useLivePolling(active: boolean)", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.languages.$locale.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.languages.$locale.tsx", includes: "useLivePolling(", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.syncs.$syncId.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-    { file: "src/web/routes/app.translations.syncs._index.tsx", includes: "const timer = setInterval(() => {", reason: "pending US-304 migrate to useLiveRevalidation" },
-  ],
   colour: [
     { file: "src/web/components/campaign-summary.tsx", includes: "<s-badge tone={status === \"active\" ? \"su", reason: "pending US-305 neutral text or toast" },
     { file: "src/web/components/product-attributes.tsx", includes: "{selected ? <s-icon type=\"check\" tone=\"s", reason: "pending US-305 neutral text or toast" },

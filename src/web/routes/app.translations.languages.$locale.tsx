@@ -3,7 +3,6 @@ import { useCallback, useEffect, useState, type ReactNode } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -76,6 +75,7 @@ import {
   formatPercent,
 } from "~/web/lib/translations";
 import { useResetWhenSaved, useSaveBar } from "~/web/lib/use-save-bar";
+import { useLiveRevalidation } from "~/web/lib/live";
 
 /**
  * One language (docs/translations.md § Edit language).
@@ -101,20 +101,28 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   const notice = search.get("notice");
   const justAdded = search.get("added") === "1";
 
-  const [locales, markets, settings, coverage, glossary, syncs, removal, count] =
-    await Promise.all([
-      listShopLocales(admin),
-      listMarkets(admin),
-      getLanguageSettings(principal, locale),
-      getCoverage(principal),
-      listGlossary(principal),
-      listSyncs(principal, 30),
-      latestJobForKey(
-        QUEUES.translationRemove,
-        translationRemoveKey(principal.shopDomain, locale),
-      ),
-      coverageProgress(principal),
-    ]);
+  const [
+    locales,
+    markets,
+    settings,
+    coverage,
+    glossary,
+    syncs,
+    removal,
+    count,
+  ] = await Promise.all([
+    listShopLocales(admin),
+    listMarkets(admin),
+    getLanguageSettings(principal, locale),
+    getCoverage(principal),
+    listGlossary(principal),
+    listSyncs(principal, 30),
+    latestJobForKey(
+      QUEUES.translationRemove,
+      translationRemoveKey(principal.shopDomain, locale),
+    ),
+    coverageProgress(principal),
+  ]);
   if (locales.kind === "unavailable")
     return {
       kind: "unavailable" as const,
@@ -192,7 +200,8 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     coverageCount: count,
     coverage: {
       readAt: coverage.readAt?.toISOString() ?? null,
-      scoped: scoped && settings.contentScope.length < ALL_CONTENT_GROUPS.length,
+      scoped:
+        scoped && settings.contentScope.length < ALL_CONTENT_GROUPS.length,
       percent: coveragePercent([totals]),
       ...totals,
       byGroup,
@@ -463,17 +472,6 @@ export const action = async ({
   return { ok: false, message: "Unknown action." };
 };
 
-function useLivePolling(active: boolean) {
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
-}
-
 export default function Language() {
   const data = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
@@ -524,9 +522,11 @@ function LanguagePage({
   busy: boolean;
   result: ActionResult | null;
 }) {
-  useLivePolling(
-    data.syncing || data.removing || data.coverageCount.state === "counting",
-  );
+  useLiveRevalidation({
+    active:
+      data.syncing || data.removing || data.coverageCount.state === "counting",
+    idleEveryMs: null,
+  });
   const [settings, setSettings] = useState<Settings>(data.settings);
   const savedKey = JSON.stringify(data.settings);
   useResetWhenSaved(
@@ -632,8 +632,8 @@ function LanguagePage({
         {data.removing ? (
           <s-banner tone="info" heading="Deleting translations">
             <s-paragraph>
-              Every translation in this language is being deleted from
-              Shopify. Coverage is counted again when it is done.
+              Every translation in this language is being deleted from Shopify.
+              Coverage is counted again when it is done.
             </s-paragraph>
           </s-banner>
         ) : null}
@@ -1098,8 +1098,15 @@ function CoverageBar({
         background: BAR_COLOR.missing,
       }}
     >
-      <div style={{ width: `${share(translated)}%`, background: BAR_COLOR.translated }} />
-      <div style={{ width: `${share(outdated)}%`, background: BAR_COLOR.outdated }} />
+      <div
+        style={{
+          width: `${share(translated)}%`,
+          background: BAR_COLOR.translated,
+        }}
+      />
+      <div
+        style={{ width: `${share(outdated)}%`, background: BAR_COLOR.outdated }}
+      />
     </div>
   );
 }
@@ -1239,7 +1246,11 @@ function LanguageSummary({
                 {coverage.byGroup.length > 0 ? (
                   <s-stack direction="block" gap="small-300">
                     {coverage.byGroup.map((row) => (
-                      <s-stack key={row.group} direction="block" gap="small-500">
+                      <s-stack
+                        key={row.group}
+                        direction="block"
+                        gap="small-500"
+                      >
                         <s-grid gridTemplateColumns="1fr auto" gap="small-300">
                           <s-link
                             href={`${TRANSLATION_ROUTES.editor}?locale=${encodeURIComponent(data.locale)}&type=${CONTENT_GROUPS[row.group].types[0]}`}
@@ -1250,8 +1261,8 @@ function LanguageSummary({
                             {!row.inScope
                               ? `Not translated · ${formatPercent(row.coverage)}`
                               : row.missing + row.outdated === 0
-                              ? formatPercent(row.coverage)
-                              : `${(row.missing + row.outdated).toLocaleString("en")} to do · ${formatPercent(row.coverage)}`}
+                                ? formatPercent(row.coverage)
+                                : `${(row.missing + row.outdated).toLocaleString("en")} to do · ${formatPercent(row.coverage)}`}
                           </s-text>
                         </s-grid>
                         <CoverageBar

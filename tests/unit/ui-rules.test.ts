@@ -52,7 +52,12 @@ describe("US-304 one polling hook", () => {
       reason:
         "reads a static file on another origin; there is no loader to revalidate",
     },
-    ...(PENDING.polling ?? []),
+    {
+      file: "src/web/routes/app.metakocka.locations.settings.tsx",
+      includes: "const timer = setInterval(() => {",
+      reason:
+        "waits up to a second for a web component to upgrade so its dialog can open; reads no data",
+    },
   ];
   it("keeps setInterval and hand-rolled polling hooks out of routes and components", () => {
     expectClean(

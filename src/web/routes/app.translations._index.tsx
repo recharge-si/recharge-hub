@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -25,6 +24,7 @@ import {
   shopifyStateLabel,
 } from "~/web/lib/translations";
 import { loadLanguagesOverview } from "~/web/lib/translations.server";
+import { useLiveRevalidation } from "~/web/lib/live";
 
 /**
  * Languages (docs/translations.md § Screens): every locale the store has,
@@ -69,24 +69,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   return { ok: false, message: "Unknown action." };
 };
 
-function useLivePolling(active: boolean) {
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!active) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [active, revalidator]);
-}
-
 export default function Languages() {
   const data = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const result = fetcher.data;
   const counting =
     data.kind === "read" && data.coverageCount.state === "counting";
-  useLivePolling(data.kind === "read" && (data.activeSyncs > 0 || counting));
+  useLiveRevalidation({
+    active: data.kind === "read" && (data.activeSyncs > 0 || counting),
+    idleEveryMs: null,
+  });
 
   useEffect(() => {
     if (!result?.ok) return;

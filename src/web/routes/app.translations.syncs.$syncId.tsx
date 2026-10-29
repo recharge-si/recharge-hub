@@ -3,7 +3,6 @@ import { useEffect } from "react";
 import {
   useFetcher,
   useLoaderData,
-  useRevalidator,
   type ActionFunctionArgs,
   type HeadersFunction,
   type LoaderFunctionArgs,
@@ -43,6 +42,7 @@ import {
   describeResourceId,
   localeLabel,
 } from "~/web/lib/translations";
+import { useLiveRevalidation } from "~/web/lib/live";
 
 /**
  * One sync (docs/translations.md § Syncs): what it was asked to do, how far
@@ -184,7 +184,9 @@ const traceSchema = z
     validation: z.array(
       z.object({
         attempt: z.number(),
-        violations: z.array(z.object({ key: z.string(), code: z.string(), severity: z.string() })),
+        violations: z.array(
+          z.object({ key: z.string(), code: z.string(), severity: z.string() }),
+        ),
       }),
     ),
   })
@@ -203,17 +205,25 @@ function describeTrace(value: unknown): string | null {
   const parts = [
     `from ${t.sourceLocale} (${t.sourceReason.replace(/_/g, " ")}${t.sourceDisputedBy ? `, detection said ${t.sourceDisputedBy}` : ""})`,
     t.profileVersion ? `profile v${t.profileVersion}` : "no profile",
-    t.contextKind !== "none" ? `${t.contextKind.replace(/_/g, " ")} context` : null,
+    t.contextKind !== "none"
+      ? `${t.contextKind.replace(/_/g, " ")} context`
+      : null,
     `${t.attempts} ${t.attempts === 1 ? "request" : "requests"}`,
     t.reusedKeys.length > 0 ? `${t.reusedKeys.length} from memory` : null,
-    t.memoryHitIds.length > t.reusedKeys.length ? `${t.memoryHitIds.length - t.reusedKeys.length} memory hints` : null,
+    t.memoryHitIds.length > t.reusedKeys.length
+      ? `${t.memoryHitIds.length - t.reusedKeys.length} memory hints`
+      : null,
     t.termIds.length > 0 ? `${t.termIds.length} terms` : null,
     t.glossaryHits > 0 ? `${t.glossaryHits} glossary` : null,
   ];
   const objections = t.validation.flatMap((round) =>
-    round.violations.map((v) => `${v.key} ${v.code.replace(/_/g, " ")}${v.severity === "soft" ? " (soft)" : ""}`),
+    round.violations.map(
+      (v) =>
+        `${v.key} ${v.code.replace(/_/g, " ")}${v.severity === "soft" ? " (soft)" : ""}`,
+    ),
   );
-  if (objections.length > 0) parts.push(`validation: ${[...new Set(objections)].join(", ")}`);
+  if (objections.length > 0)
+    parts.push(`validation: ${[...new Set(objections)].join(", ")}`);
   return parts.filter((part): part is string => part !== null).join(" · ");
 }
 
@@ -255,14 +265,7 @@ export default function SyncPage() {
   const { sync, filter, counts, items, usage } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const running = sync.status === "queued" || sync.status === "running";
-  const revalidator = useRevalidator();
-  useEffect(() => {
-    if (!running) return;
-    const timer = setInterval(() => {
-      if (revalidator.state === "idle") void revalidator.revalidate();
-    }, 4000);
-    return () => clearInterval(timer);
-  }, [running, revalidator]);
+  useLiveRevalidation({ active: running, idleEveryMs: null });
   useEffect(() => {
     if (!fetcher.data?.ok) return;
     if (typeof shopify !== "undefined")
@@ -483,9 +486,7 @@ export default function SyncPage() {
                             {item.error ?? item.detail ?? ""}
                           </s-text>
                           {item.trace ? (
-                            <s-text color="subdued">
-                              {item.trace}
-                            </s-text>
+                            <s-text color="subdued">{item.trace}</s-text>
                           ) : null}
                         </s-stack>
                       </s-table-cell>
