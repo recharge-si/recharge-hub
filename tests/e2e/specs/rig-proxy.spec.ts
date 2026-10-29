@@ -115,7 +115,8 @@ test("not ready is a 409 the page can read: disabled, then an empty catalogue", 
 
   await enable(shop);
   for (const route of ROUTES) {
-    const empty = await call(shop, route, { answers: REFERENCE, variantIds: [1] });
+    const body = route === "verify" ? { variantIds: [1] } : { answers: REFERENCE };
+    const empty = await call(shop, route, body);
     expect(empty.status, route).toBe(409);
     expect(empty.body, route).toMatchObject({ code: "not_ready", reason: "catalogue" });
   }
