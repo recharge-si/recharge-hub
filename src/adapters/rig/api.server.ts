@@ -86,6 +86,8 @@ export interface RigApiDeps {
   config: RigApiConfig;
   now(): Date;
   log?: (fields: Record<string, unknown>, message: string) => void;
+  /** Where a failure the API turns into a 503 is recorded, with its cause. */
+  logError?: (fields: Record<string, unknown>, message: string) => void;
 }
 
 /** A snapshot older than this is called stale (PRD 4 US-402). */
@@ -275,6 +277,19 @@ function prepare(source: RigSource, now: Date): Prepared {
 
 type Handler = (request: Request) => Promise<Response>;
 
+/** What is worth logging about a thrown value: its kind, message and Prisma code. */
+function errorFields(error: unknown): Record<string, unknown> {
+  if (error instanceof Error) {
+    const code = (error as { code?: unknown }).code;
+    return {
+      name: error.name,
+      message: error.message.slice(0, 500),
+      ...(typeof code === "string" ? { code } : {}),
+    };
+  }
+  return { message: String(error).slice(0, 500) };
+}
+
 export function createRigApi(deps: RigApiDeps): {
   build: Handler;
   explain: Handler;
@@ -293,6 +308,23 @@ export function createRigApi(deps: RigApiDeps): {
     const prepared = prepare(await store.loadSource(domain), now);
     cache.set(domain, prepared);
     return prepared;
+  }
+
+  /**
+   * The catalogue, or a 503 when it cannot be read. A failed read (a database
+   * error, a column a migration has not added yet) is logged with its cause and
+   * answered as "unavailable", never as a raw 500 a buyer's page cannot read.
+   */
+  async function loadOrRefuse(domain: string): Promise<Prepared | Response> {
+    try {
+      return await load(domain);
+    } catch (error) {
+      deps.logError?.(
+        { domain, error: errorFields(error) },
+        "The rig catalogue could not be read",
+      );
+      return json(503, { code: "unavailable" }, { "Retry-After": "30" });
+    }
   }
 
   interface Context {
@@ -435,7 +467,8 @@ export function createRigApi(deps: RigApiDeps): {
     if (!hasContent(body.text, body.answers)) return emptyBody();
     const locale: Locale = body.locale ?? "en";
 
-    const prepared = await load(admitted.domain);
+    const prepared = await loadOrRefuse(admitted.domain);
+    if (prepared instanceof Response) return prepared;
     const refused = notReady(admitted, prepared);
     if (refused) return refused;
 
@@ -546,7 +579,8 @@ export function createRigApi(deps: RigApiDeps): {
     const locale: Locale = body.locale ?? "en";
     const context = { shopId: admitted.shopId, locale };
 
-    const prepared = await load(admitted.domain);
+    const prepared = await loadOrRefuse(admitted.domain);
+    if (prepared instanceof Response) return prepared;
     const refused = notReady(admitted, prepared);
     if (refused) return refused;
 
@@ -660,7 +694,8 @@ export function createRigApi(deps: RigApiDeps): {
     if (!parsed.success) return invalid(parsed.error);
     const body = parsed.data;
 
-    const prepared = await load(admitted.domain);
+    const prepared = await loadOrRefuse(admitted.domain);
+    if (prepared instanceof Response) return prepared;
     const refused = notReady(admitted, prepared);
     if (refused) return refused;
 
