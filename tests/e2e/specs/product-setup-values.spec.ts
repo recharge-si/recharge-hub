@@ -123,7 +123,9 @@ test("lists the errors of a file and offers no apply", async ({ page, shop }) =>
     buffer: Buffer.from([HEADER, row(91001, "430-460", "xdm")].join("\n")),
   });
   await expect(
-    page.getByText("2 errors to fix before anything can be applied").first(),
+    page.getByRole("heading", {
+      name: "2 errors to fix before anything can be applied",
+    }),
   ).toBeVisible();
   await expect(page.getByText(/not one number/).first()).toBeVisible();
   await expect(page.locator('s-button[slot="primary-action"]')).toHaveText(
