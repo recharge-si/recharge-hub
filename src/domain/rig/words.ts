@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import type { Band, Check, Rig, RigItem, Skill } from "~/domain/rig/types";
+import type { SpecField } from "~/domain/rig/keys";
 
 /**
  * Words (docs/rig-builder.md § Words). The engine owns the rig; a model may
@@ -73,12 +74,32 @@ export const profileReplySchema = z.record(z.string(), z.unknown());
 /* Template sentences                                                         */
 /* -------------------------------------------------------------------------- */
 
-function spec(item: Pick<RigItem, "specs">, field: keyof RigItem["specs"]): string {
+function spec(item: Pick<RigItem, "specs">, field: SpecField): string | null {
   const value = item.specs[field];
-  return value === undefined ? "?" : String(value);
+  if (value === undefined) return null;
+  return Array.isArray(value) ? value.join(", ") : String(value);
 }
 
-/** The engine's own sentence for a part: always true, never fancy. */
+/** `text` with the facts filled in, or `fallback` when one of them is not known. */
+function line(
+  item: Pick<RigItem, "specs">,
+  fields: readonly SpecField[],
+  text: (values: string[]) => string,
+  fallback: string,
+): string {
+  const values: string[] = [];
+  for (const field of fields) {
+    const value = spec(item, field);
+    if (value === null) return fallback;
+    values.push(value);
+  }
+  return text(values);
+}
+
+/**
+ * The engine's own sentence for a part: always true, never fancy. A fact the
+ * product does not state is left out of the sentence, never filled in.
+ */
 export function templateWhy(
   item: Pick<RigItem, "role" | "specs">,
   rider: RiderFacts,
@@ -86,39 +107,40 @@ export function templateWhy(
 ): string {
   const weight = rider.weightKg === null ? "" : String(rider.weightKg);
   const wind = `${rider.wind.min}–${rider.wind.max}`;
+  const diameter = (spec(item, "mastDiameter") ?? "").toUpperCase();
   if (locale === "sl") {
     switch (item.role) {
       case "sail":
-        return `Jadro velikosti ${spec(item, "areaM2")} m² ustreza jahačem s ${weight} kg pri ${wind} vozlih.`;
+        return line(item, ["areaM2"], ([a]) => `Jadro velikosti ${a} m² ustreza jahačem s ${weight} kg pri ${wind} vozlih.`, "Jadro ustreza jahačem te teže in vetra.");
       case "board":
-        return `Deska s prostornino ${spec(item, "volumeL")} L ustreza jahačem s ${weight} kg in tej velikosti jadra.`;
+        return line(item, ["volumeL"], ([v]) => `Deska s prostornino ${v} L ustreza jahačem s ${weight} kg in tej velikosti jadra.`, "Deska je primerna za to velikost jadra.");
       case "mast":
-        return `Jambor RDM ${spec(item, "mastRdm")}, dolg ${spec(item, "lengthCm")} cm, ustreza jadru.`;
+        return line(item, ["lengthCm"], ([l]) => `Jambor ${diameter} dolžine ${l} cm je izbran za to jadro.`.replace("  ", " "), "Jambor je izbran za to jadro.");
       case "extension":
-        return `Podaljšek ${spec(item, "extensionLengthCm")} cm podaljša jambor na dolžino, ki jo jadro potrebuje.`;
+        return line(item, ["extensionMinCm", "extensionMaxCm"], ([a, b]) => `Podaljšek ${a}–${b} cm podaljša jambor na dolžino, ki jo jadro potrebuje.`, "Podaljšek podaljša jambor na dolžino, ki jo jadro potrebuje.");
       case "base":
-        return `Podnožje tipa ${spec(item, "baseType")} ustreza jamboru.`;
+        return "Podnožje je izbrano za ta jambor.";
       case "boom":
-        return `Boom se odpira od ${spec(item, "boomMinCm")} do ${spec(item, "boomMaxCm")} cm in pokrije jadro.`;
+        return line(item, ["boomMinCm", "boomMaxCm"], ([a, b]) => `Boom se odpira od ${a} do ${b} cm.`, "Boom je izbran za to jadro.");
       case "fin":
-        return `Plavut ${spec(item, "finLengthCm")} cm za ${spec(item, "finBox")} ustreza deski.`;
+        return line(item, ["finLengthCm", "finBox"], ([l, box]) => `Plavut ${l} cm za ${box} ustreza deski.`, "Plavut je izbrana za to desko.");
     }
   }
   switch (item.role) {
     case "sail":
-      return `A ${spec(item, "areaM2")} m² sail suits ${weight} kg riders in ${wind} knots.`;
+      return line(item, ["areaM2"], ([a]) => `A ${a} m² sail suits ${weight} kg riders in ${wind} knots.`, "A sail for this rider and wind.");
     case "board":
-      return `A ${spec(item, "volumeL")} L board suits ${weight} kg riders and takes this sail size.`;
+      return line(item, ["volumeL"], ([v]) => `A ${v} L board suits ${weight} kg riders and takes this sail size.`, "A board that takes this sail size.");
     case "mast":
-      return `This ${spec(item, "lengthCm")} cm RDM ${spec(item, "mastRdm")} mast matches the sail.`;
+      return line(item, ["lengthCm"], ([l]) => `A ${l} cm ${diameter} mast, chosen to go with the sail.`.replace("  ", " "), "A mast chosen to go with the sail.");
     case "extension":
-      return `A ${spec(item, "extensionLengthCm")} cm extension brings the mast to the length the sail needs.`;
+      return line(item, ["extensionMinCm", "extensionMaxCm"], ([a, b]) => `A ${a}–${b} cm extension brings the mast to the length the sail needs.`, "An extension that brings the mast to the length the sail needs.");
     case "base":
-      return `This ${spec(item, "baseType")} base fits the mast.`;
+      return "A mast base chosen for this mast.";
     case "boom":
-      return `This boom opens from ${spec(item, "boomMinCm")} to ${spec(item, "boomMaxCm")} cm, which covers the sail.`;
+      return line(item, ["boomMinCm", "boomMaxCm"], ([a, b]) => `This boom opens from ${a} to ${b} cm.`, "A boom chosen for this sail.");
     case "fin":
-      return `A ${spec(item, "finLengthCm")} cm ${spec(item, "finBox")} fin fits the board's fin box.`;
+      return line(item, ["finLengthCm", "finBox"], ([l, box]) => `A ${l} cm ${box} fin for the board's fin box.`, "A fin chosen for this board.");
   }
 }
 
@@ -128,27 +150,35 @@ export function templateWhy(
 
 const FACT_LABELS: Readonly<Record<string, string>> = {
   areaM2: "area m2",
-  mastRdm: "mast RDM",
-  mastLengthMinCm: "mast length min cm",
-  mastLengthMaxCm: "mast length max cm",
+  mastCm: "recommended mast cm",
+  mastDiameter: "mast diameter",
+  mastImcs: "IMCS",
+  compatibleDiameters: "compatible mast diameters",
+  recommendedBoomCm: "recommended boom cm",
+  lengthCm: "length cm",
+  carbonPercent: "carbon percent",
   boomMinCm: "boom min cm",
   boomMaxCm: "boom max cm",
-  category: "category",
-  lengthCm: "length cm",
-  baseType: "base type",
-  volumeL: "volume L",
+  extensionMinCm: "extension min cm",
+  extensionMaxCm: "extension max cm",
+  baseConnection: "base connection",
   finBox: "fin box",
-  minSailM2: "smallest sail m2",
-  maxSailM2: "largest sail m2",
-  extensionLengthCm: "extension cm",
   finLengthCm: "fin length cm",
+  finBoxTypes: "fin boxes",
+  volumeL: "volume L",
+  sailMinM2: "smallest sail m2",
+  sailMaxM2: "largest sail m2",
+  finMinCm: "smallest fin cm",
+  finMaxCm: "largest fin cm",
+  riderMinKg: "rider min kg",
+  riderMaxKg: "rider max kg",
 };
 
 function itemFacts(item: RigItem): string {
   const specs = Object.entries(item.specs)
     .filter(([, value]) => value !== undefined)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([field, value]) => `${FACT_LABELS[field] ?? field} ${String(value)}`);
+    .map(([field, value]) => `${FACT_LABELS[field] ?? field} ${Array.isArray(value) ? value.join("/") : String(value)}`);
   const variant = item.variantTitle ? `; variant ${item.variantTitle}` : "";
   return `- id ${item.variantId}: ${item.role}; title ${JSON.stringify(item.title)}${variant}; ${specs.join(", ")}`;
 }

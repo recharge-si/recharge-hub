@@ -2,51 +2,245 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/101",
-  "title": "Aero Ride 4.5",
-  "handle": "aero-ride-4-5",
+  "title": "Aero Ride",
+  "handle": "aero-ride",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Freeride sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/101.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.recommended_mast_diameter": {
     "type": "single_line_text_field",
-    "value": "freeride"
+    "value": "rdm"
    },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
+   "recharge.compatible_mast_diameters": {
+    "type": "list.single_line_text_field",
+    "value": "[\"rdm\"]"
    }
   },
   "variants": [
    {
     "variantId": "gid://shopify/ProductVariant/45500000001",
-    "title": "4.5",
+    "title": "4.5 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "4.5 m2 / Orange"
+     }
+    ],
     "priceMinor": 55900,
     "currency": "EUR",
     "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
       "value": "4.5"
      },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "370"
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":400.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "400"
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":150.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "150"
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":160.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000002",
+    "title": "5.0 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.0 m2 / Orange"
+     }
+    ],
+    "priceMinor": 57900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "5.0"
      },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "160"
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":430.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":150.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000003",
+    "title": "5.5 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.5 m2 / Orange"
+     }
+    ],
+    "priceMinor": 59900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "5.5"
+     },
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":430.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":160.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":180.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000004",
+    "title": "5.8 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.8 m2 / Orange"
+     }
+    ],
+    "priceMinor": 61900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "5.8"
+     },
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":460.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000005",
+    "title": "6.2 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "6.2 m2 / Orange"
+     }
+    ],
+    "priceMinor": 63900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "6.2"
+     },
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":460.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":180.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":200.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000006",
+    "title": "6.6 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "6.6 m2 / Orange"
+     }
+    ],
+    "priceMinor": 65900,
+    "currency": "EUR",
+    "inventoryQuantity": 0,
+    "availableForSale": false,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "6.6"
+     },
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":490.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":180.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":210.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000007",
+    "title": "7.3 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "7.3 m2 / Orange"
+     }
+    ],
+    "priceMinor": 68900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "7.3"
+     },
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":490.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":220.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -55,51 +249,49 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/102",
-  "title": "Aero Ride 5.0",
-  "handle": "aero-ride-5-0",
+  "title": "Aero Ride Outlet",
+  "handle": "aero-ride-outlet",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Freeride sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/102.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.recommended_mast_diameter": {
     "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
+    "value": "rdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000002",
-    "title": "5",
-    "priceMinor": 58900,
+    "variantId": "gid://shopify/ProductVariant/45500000008",
+    "title": "5.8 m2 / Pink",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.8 m2 / Pink"
+     }
+    ],
+    "priceMinor": 45900,
     "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
+    "inventoryQuantity": 0,
+    "availableForSale": false,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
-      "value": "5"
+      "value": "5.8"
      },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "400"
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":460.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "430"
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "160"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "170"
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -108,51 +300,53 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/103",
-  "title": "Aero Ride 5.3",
-  "handle": "aero-ride-5-3",
+  "title": "Delta Cruiser SDM",
+  "handle": "delta-cruiser-sdm",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Freeride sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/103.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.recommended_mast_diameter": {
     "type": "single_line_text_field",
-    "value": "freeride"
+    "value": "sdm"
    },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
+   "recharge.compatible_mast_diameters": {
+    "type": "list.single_line_text_field",
+    "value": "[\"sdm\"]"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000003",
-    "title": "5.3",
-    "priceMinor": 62900,
+    "variantId": "gid://shopify/ProductVariant/45500000009",
+    "title": "5.6 m2 / Blue",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.6 m2 / Blue"
+     }
+    ],
+    "priceMinor": 64900,
     "currency": "EUR",
-    "inventoryQuantity": 5,
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
-      "value": "5.3"
+      "value": "5.6"
      },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "400"
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":460.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "430"
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "160"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "170"
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -161,157 +355,125 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/104",
-  "title": "Aero Ride 5.5",
-  "handle": "aero-ride-5-5",
+  "title": "XO Sails - Experience TR Dacron Sail Only",
+  "handle": "xo-sails---experience-tr-dacron-sail-only",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Beginner sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/104.jpg",
-  "metafields": {
-   "recharge.sail_category": {
-    "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
-   }
-  },
+  "metafields": {},
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000004",
-    "title": "5.5",
-    "priceMinor": 66900,
-    "currency": "EUR",
-    "inventoryQuantity": 4,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.sail_area_m2": {
-      "type": "number_decimal",
-      "value": "5.5"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
+    "variantId": "gid://shopify/ProductVariant/45500000010",
+    "title": "4.0 m2 / Light Blue",
+    "options": [
+     {
+      "name": "Size",
+      "value": "4.0 m2 / Light Blue"
      }
-    }
+    ],
+    "priceMinor": 22900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000011",
+    "title": "5.0 m2 / Orange",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.0 m2 / Orange"
+     }
+    ],
+    "priceMinor": 25900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000012",
+    "title": "5.7 m2 / Fluo Yellow",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.7 m2 / Fluo Yellow"
+     }
+    ],
+    "priceMinor": 28900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
    }
   ]
  },
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/105",
-  "title": "Aero Ride 5.8",
-  "handle": "aero-ride-5-8",
+  "title": "Mystery Sail",
+  "handle": "mystery-sail",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Freeride sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/105.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.recommended_mast_diameter": {
     "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
+    "value": "rdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000005",
-    "title": "5.8",
-    "priceMinor": 69900,
-    "currency": "EUR",
-    "inventoryQuantity": 6,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.sail_area_m2": {
-      "type": "number_decimal",
-      "value": "5.8"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
+    "variantId": "gid://shopify/ProductVariant/45500000013",
+    "title": "One size",
+    "options": [
+     {
+      "name": "Size",
+      "value": "One size"
      }
-    }
+    ],
+    "priceMinor": 41900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
    }
   ]
  },
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/106",
-  "title": "Aero Ride 5.8 Outlet",
-  "handle": "aero-ride-5-8-outlet",
+  "title": "Stockless Sail",
+  "handle": "stockless-sail",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Freeride sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/106.jpg",
-  "metafields": {
-   "recharge.sail_category": {
-    "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
-   }
-  },
+  "metafields": {},
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000006",
-    "title": "5.8",
-    "priceMinor": 64900,
+    "variantId": "gid://shopify/ProductVariant/45500000014",
+    "title": "5.9 m2 / Red",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.9 m2 / Red"
+     }
+    ],
+    "priceMinor": 59900,
     "currency": "EUR",
-    "inventoryQuantity": 0,
-    "availableForSale": false,
+    "inventoryQuantity": null,
+    "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
-      "value": "5.8"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
+      "value": "5.9"
      }
     }
    }
@@ -320,51 +482,32 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/107",
-  "title": "Aero Ride 6.0",
-  "handle": "aero-ride-6-0",
-  "status": "ACTIVE",
-  "productType": "Sails",
+  "title": "Draft Sail",
+  "handle": "draft-sail",
+  "status": "DRAFT",
+  "productType": "Freeride sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/107.jpg",
-  "metafields": {
-   "recharge.sail_category": {
-    "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
-   }
-  },
+  "metafields": {},
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000007",
-    "title": "6",
-    "priceMinor": 71900,
+    "variantId": "gid://shopify/ProductVariant/45500000015",
+    "title": "5.8 m2 / Red",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.8 m2 / Red"
+     }
+    ],
+    "priceMinor": 39900,
     "currency": "EUR",
     "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
-      "value": "6"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "170"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "180"
+      "value": "5.8"
      }
     }
    }
@@ -373,51 +516,81 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/108",
-  "title": "Aero Ride 6.2",
-  "handle": "aero-ride-6-2",
+  "title": "Wave Blade",
+  "handle": "wave-blade",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Wave sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/108.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.recommended_mast_diameter": {
     "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "35"
+    "value": "rdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000008",
-    "title": "6.2",
-    "priceMinor": 74900,
+    "variantId": "gid://shopify/ProductVariant/45500000016",
+    "title": "4.7 m2 / Black",
+    "options": [
+     {
+      "name": "Size",
+      "value": "4.7 m2 / Black"
+     }
+    ],
+    "priceMinor": 58900,
     "currency": "EUR",
-    "inventoryQuantity": 2,
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
-      "value": "6.2"
+      "value": "4.7"
      },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "460"
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":430.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "490"
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":150.0,\"unit\":\"CENTIMETERS\"}"
      },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "175"
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000017",
+    "title": "5.3 m2 / Black",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.3 m2 / Black"
+     }
+    ],
+    "priceMinor": 60900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "5.3"
      },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "185"
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":430.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":160.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":180.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -426,47 +599,32 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/109",
-  "title": "Aero Ride 6.6",
-  "handle": "aero-ride-6-6",
+  "title": "Foil Wing Sail",
+  "handle": "foil-wing-sail",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Foil sails",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/109.jpg",
-  "metafields": {
-   "recharge.sail_category": {
-    "type": "single_line_text_field",
-    "value": "freeride"
-   }
-  },
+  "metafields": {},
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000009",
-    "title": "6.6",
-    "priceMinor": 77900,
+    "variantId": "gid://shopify/ProductVariant/45500000018",
+    "title": "5.8 m2 / Green",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.8 m2 / Green"
+     }
+    ],
+    "priceMinor": 69900,
     "currency": "EUR",
-    "inventoryQuantity": 2,
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
+     "recharge.canopy_area": {
       "type": "number_decimal",
-      "value": "6.6"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "490"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "180"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "190"
+      "value": "5.8"
      }
     }
    }
@@ -475,51 +633,61 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/110",
-  "title": "Swell Wave 5.8",
-  "handle": "swell-wave-5-8",
+  "title": "Unifiber - Elite SDM C100 Constant FL Curve Incl. Mastbag",
+  "handle": "unifiber---elite-sdm-c100-constant-fl-curve-incl--mastbag",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Masts",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/110.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.mast_diameter": {
     "type": "single_line_text_field",
-    "value": "wave"
+    "value": "sdm"
    },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
+   "recharge.carbon_percent": {
+    "type": "number_decimal",
+    "value": "100.0"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000010",
-    "title": "5.8",
-    "priceMinor": 61900,
+    "variantId": "gid://shopify/ProductVariant/45500000019",
+    "title": "460",
+    "options": [
+     {
+      "name": "Size",
+      "value": "460"
+     }
+    ],
+    "priceMinor": 84900,
     "currency": "EUR",
-    "inventoryQuantity": 3,
+    "inventoryQuantity": 2,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
-      "type": "number_decimal",
-      "value": "5.8"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":460.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000020",
+    "title": "490",
+    "options": [
+     {
+      "name": "Size",
+      "value": "490"
+     }
+    ],
+    "priceMinor": 87900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":490.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -528,133 +696,134 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/111",
-  "title": "Aero Ride 5.6",
-  "handle": "aero-ride-5-6",
+  "title": "Unifiber - HD RDM C75 Constant FL Curve Incl. Mastbag",
+  "handle": "unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Masts",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/111.jpg",
-  "metafields": {
-   "recharge.sail_category": {
-    "type": "single_line_text_field",
-    "value": "freeride"
-   }
-  },
+  "metafields": {},
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000011",
-    "title": "5.6",
-    "priceMinor": 67900,
+    "variantId": "gid://shopify/ProductVariant/45500000021",
+    "title": "400",
+    "options": [
+     {
+      "name": "Size",
+      "value": "400"
+     }
+    ],
+    "priceMinor": 52900,
     "currency": "EUR",
     "inventoryQuantity": 2,
     "availableForSale": true,
-    "metafields": {
-     "recharge.sail_area_m2": {
-      "type": "number_decimal",
-      "value": "5.6"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
+    "metafields": {}
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000022",
+    "title": "430",
+    "options": [
+     {
+      "name": "Size",
       "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
      }
-    }
+    ],
+    "priceMinor": 53900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {}
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000023",
+    "title": "460",
+    "options": [
+     {
+      "name": "Size",
+      "value": "460"
+     }
+    ],
+    "priceMinor": 54900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {}
    }
   ]
  },
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/112",
-  "title": "Aero Ride 5.9",
-  "handle": "aero-ride-5-9",
+  "title": "Unifiber - Mast Epoxy SDM",
+  "handle": "unifiber---mast-epoxy-sdm",
   "status": "ACTIVE",
-  "productType": "Sails",
+  "productType": "Masts",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/112.jpg",
   "metafields": {
-   "recharge.sail_category": {
+   "recharge.mast_diameter": {
     "type": "single_line_text_field",
-    "value": "freeride"
+    "value": "sdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000012",
-    "title": "5.9",
-    "priceMinor": 70900,
+    "variantId": "gid://shopify/ProductVariant/45500000024",
+    "title": "472",
+    "options": [
+     {
+      "name": "Size",
+      "value": "472"
+     }
+    ],
+    "priceMinor": 31900,
     "currency": "EUR",
     "inventoryQuantity": 2,
     "availableForSale": true,
-    "metafields": {
-     "recharge.sail_area_m2": {
-      "type": "number_decimal",
-      "value": "5.9"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
-     }
-    }
+    "metafields": {}
    }
   ]
  },
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/113",
-  "title": "Carbon Mast 370",
-  "handle": "carbon-mast-370",
+  "title": "Carbon Mast RDM 370",
+  "handle": "carbon-mast-rdm-370",
   "status": "ACTIVE",
   "productType": "Masts",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/113.jpg",
   "metafields": {
-   "recharge.mast_rdm": {
+   "recharge.mast_diameter": {
     "type": "single_line_text_field",
-    "value": "30"
+    "value": "rdm"
    },
-   "recharge.mast_base_type": {
-    "type": "single_line_text_field",
-    "value": "tendon"
+   "recharge.mast_imcs": {
+    "type": "number_decimal",
+    "value": "19.0"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000013",
+    "variantId": "gid://shopify/ProductVariant/45500000025",
     "title": "370",
-    "priceMinor": 29900,
+    "options": [
+     {
+      "name": "Size",
+      "value": "370"
+     }
+    ],
+    "priceMinor": 49900,
     "currency": "EUR",
-    "inventoryQuantity": 3,
+    "inventoryQuantity": 2,
     "availableForSale": true,
     "metafields": {
-     "recharge.mast_length_cm": {
-      "type": "number_integer",
-      "value": "370"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":370.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -663,72 +832,74 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/114",
-  "title": "Carbon Mast 400",
-  "handle": "carbon-mast-400",
+  "title": "Universal Mast",
+  "handle": "universal-mast",
   "status": "ACTIVE",
   "productType": "Masts",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/114.jpg",
-  "metafields": {
-   "recharge.mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
-   },
-   "recharge.mast_base_type": {
-    "type": "single_line_text_field",
-    "value": "tendon"
-   }
-  },
+  "metafields": {},
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000014",
-    "title": "400",
-    "priceMinor": 34900,
-    "currency": "EUR",
-    "inventoryQuantity": 4,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.mast_length_cm": {
-      "type": "number_integer",
-      "value": "400"
+    "variantId": "gid://shopify/ProductVariant/45500000026",
+    "title": "Standard",
+    "options": [
+     {
+      "name": "Size",
+      "value": "Standard"
      }
-    }
+    ],
+    "priceMinor": 29900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {}
    }
   ]
  },
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/115",
-  "title": "Carbon Mast 430",
-  "handle": "carbon-mast-430",
+  "title": "Unifiber Extension RDM 25",
+  "handle": "unifiber-extension-rdm-25",
   "status": "ACTIVE",
-  "productType": "Masts",
+  "productType": "Mast extensions",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/115.jpg",
   "metafields": {
-   "recharge.mast_rdm": {
+   "recharge.base_connection": {
     "type": "single_line_text_field",
-    "value": "30"
+    "value": "euro_pin"
    },
-   "recharge.mast_base_type": {
+   "recharge.mast_diameter": {
     "type": "single_line_text_field",
-    "value": "tendon"
+    "value": "rdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000015",
-    "title": "430",
-    "priceMinor": 39900,
+    "variantId": "gid://shopify/ProductVariant/45500000027",
+    "title": "25 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "25 cm"
+     }
+    ],
+    "priceMinor": 8900,
     "currency": "EUR",
     "inventoryQuantity": 5,
     "availableForSale": true,
     "metafields": {
-     "recharge.mast_length_cm": {
-      "type": "number_integer",
-      "value": "430"
+     "recharge.extension_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":20.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.extension_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":30.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -737,35 +908,45 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/116",
-  "title": "Carbon Mast 460 Pin",
-  "handle": "carbon-mast-460-pin",
+  "title": "Unifiber Extension SDM 25",
+  "handle": "unifiber-extension-sdm-25",
   "status": "ACTIVE",
-  "productType": "Masts",
+  "productType": "Mast extensions",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/116.jpg",
   "metafields": {
-   "recharge.mast_rdm": {
+   "recharge.base_connection": {
     "type": "single_line_text_field",
-    "value": "30"
+    "value": "euro_pin"
    },
-   "recharge.mast_base_type": {
+   "recharge.mast_diameter": {
     "type": "single_line_text_field",
-    "value": "pin"
+    "value": "sdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000016",
-    "title": "460",
-    "priceMinor": 44900,
+    "variantId": "gid://shopify/ProductVariant/45500000028",
+    "title": "25 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "25 cm"
+     }
+    ],
+    "priceMinor": 8900,
     "currency": "EUR",
-    "inventoryQuantity": 2,
+    "inventoryQuantity": 5,
     "availableForSale": true,
     "metafields": {
-     "recharge.mast_length_cm": {
-      "type": "number_integer",
-      "value": "460"
+     "recharge.extension_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":20.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.extension_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":30.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -774,74 +955,63 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/117",
-  "title": "Elite Mast 460",
-  "handle": "elite-mast-460",
+  "title": "Extension no range",
+  "handle": "extension-no-range",
   "status": "ACTIVE",
-  "productType": "Masts",
+  "productType": "Mast extensions",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/117.jpg",
   "metafields": {
-   "recharge.mast_rdm": {
+   "recharge.mast_diameter": {
     "type": "single_line_text_field",
-    "value": "35"
-   },
-   "recharge.mast_base_type": {
-    "type": "single_line_text_field",
-    "value": "tendon"
+    "value": "rdm"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000017",
-    "title": "460",
-    "priceMinor": 49900,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.mast_length_cm": {
-      "type": "number_integer",
-      "value": "460"
+    "variantId": "gid://shopify/ProductVariant/45500000029",
+    "title": "Default Title",
+    "options": [
+     {
+      "name": "Size",
+      "value": "Default Title"
      }
-    }
+    ],
+    "priceMinor": 7900,
+    "currency": "EUR",
+    "inventoryQuantity": 5,
+    "availableForSale": true,
+    "metafields": {}
    }
   ]
  },
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/118",
-  "title": "Elite Mast 490",
-  "handle": "elite-mast-490",
+  "title": "Euro Pin Base",
+  "handle": "euro-pin-base",
   "status": "ACTIVE",
-  "productType": "Masts",
+  "productType": "Mast bases",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/118.jpg",
   "metafields": {
-   "recharge.mast_rdm": {
+   "recharge.base_connection": {
     "type": "single_line_text_field",
-    "value": "35"
-   },
-   "recharge.mast_base_type": {
-    "type": "single_line_text_field",
-    "value": "tendon"
+    "value": "euro_pin"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000018",
-    "title": "490",
-    "priceMinor": 54900,
+    "variantId": "gid://shopify/ProductVariant/45500000030",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 3900,
     "currency": "EUR",
-    "inventoryQuantity": 1,
+    "inventoryQuantity": 6,
     "availableForSale": true,
-    "metafields": {
-     "recharge.mast_length_cm": {
-      "type": "number_integer",
-      "value": "490"
-     }
-    }
+    "metafields": {}
    }
   ]
  },
@@ -851,23 +1021,24 @@
   "title": "Tendon Base",
   "handle": "tendon-base",
   "status": "ACTIVE",
-  "productType": "Bases and extensions",
+  "productType": "Mast bases",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/119.jpg",
   "metafields": {
-   "recharge.base_type": {
+   "recharge.base_connection": {
     "type": "single_line_text_field",
     "value": "tendon"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000019",
-    "title": "Default",
-    "priceMinor": 1990,
+    "variantId": "gid://shopify/ProductVariant/45500000031",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 4900,
     "currency": "EUR",
-    "inventoryQuantity": 5,
+    "inventoryQuantity": 6,
     "availableForSale": true,
     "metafields": {}
    }
@@ -876,24 +1047,224 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/120",
-  "title": "Pin Base",
-  "handle": "pin-base",
+  "title": "Base no data",
+  "handle": "base-no-data",
   "status": "ACTIVE",
-  "productType": "Bases and extensions",
+  "productType": "Mast bases",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/120.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000032",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 2900,
+    "currency": "EUR",
+    "inventoryQuantity": 6,
+    "availableForSale": true,
+    "metafields": {}
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/121",
+  "title": "Boom 150-190",
+  "handle": "boom-150-190",
+  "status": "ACTIVE",
+  "productType": "Booms",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/121.jpg",
   "metafields": {
-   "recharge.base_type": {
-    "type": "single_line_text_field",
-    "value": "pin"
+   "recharge.compatible_mast_diameters": {
+    "type": "list.single_line_text_field",
+    "value": "[\"rdm\",\"sdm\"]"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000020",
-    "title": "Default",
-    "priceMinor": 2490,
+    "variantId": "gid://shopify/ProductVariant/45500000033",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 21900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":150.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/122",
+  "title": "Boom 140-190",
+  "handle": "boom-140-190",
+  "status": "ACTIVE",
+  "productType": "Booms",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/122.jpg",
+  "metafields": {
+   "recharge.compatible_mast_diameters": {
+    "type": "list.single_line_text_field",
+    "value": "[\"rdm\"]"
+   }
+  },
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000034",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 19900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":140.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/123",
+  "title": "Boom 160-210",
+  "handle": "boom-160-210",
+  "status": "ACTIVE",
+  "productType": "Booms",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/123.jpg",
+  "metafields": {
+   "recharge.compatible_mast_diameters": {
+    "type": "list.single_line_text_field",
+    "value": "[\"rdm\",\"sdm\"]"
+   }
+  },
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000035",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 25900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":160.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":210.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/124",
+  "title": "Boom 100-130 Kids",
+  "handle": "boom-100-130-kids",
+  "status": "ACTIVE",
+  "productType": "Booms",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/124.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000036",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 12900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":100.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":130.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/125",
+  "title": "Boom 170-220 Race",
+  "handle": "boom-170-220-race",
+  "status": "ACTIVE",
+  "productType": "Booms",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/125.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000037",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 39900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":220.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/126",
+  "title": "Boom no range",
+  "handle": "boom-no-range",
+  "status": "ACTIVE",
+  "productType": "Booms",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/126.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000038",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 15900,
     "currency": "EUR",
     "inventoryQuantity": 2,
     "availableForSale": true,
@@ -903,225 +1274,38 @@
  },
  {
   "shopId": "shop-a",
-  "productId": "gid://shopify/Product/121",
-  "title": "Extension 30",
-  "handle": "extension-30",
-  "status": "ACTIVE",
-  "productType": "Bases and extensions",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/121.jpg",
-  "metafields": {
-   "recharge.base_type": {
-    "type": "single_line_text_field",
-    "value": "tendon"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000021",
-    "title": "30 cm",
-    "priceMinor": 5990,
-    "currency": "EUR",
-    "inventoryQuantity": 4,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.extension_length_cm": {
-      "type": "number_integer",
-      "value": "30"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/122",
-  "title": "Extension 60",
-  "handle": "extension-60",
-  "status": "ACTIVE",
-  "productType": "Bases and extensions",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/122.jpg",
-  "metafields": {
-   "recharge.base_type": {
-    "type": "single_line_text_field",
-    "value": "tendon"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000022",
-    "title": "60 cm",
-    "priceMinor": 8990,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.extension_length_cm": {
-      "type": "number_integer",
-      "value": "60"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/123",
-  "title": "Alu Boom 100-140",
-  "handle": "alu-boom-100-140",
-  "status": "ACTIVE",
-  "productType": "Booms",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/123.jpg",
-  "metafields": {},
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000023",
-    "title": "100-140",
-    "priceMinor": 19900,
-    "currency": "EUR",
-    "inventoryQuantity": 3,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.boom_min_cm": {
-      "type": "number_integer",
-      "value": "100"
-     },
-     "recharge.boom_max_cm": {
-      "type": "number_integer",
-      "value": "140"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/124",
-  "title": "Alu Boom 130-170",
-  "handle": "alu-boom-130-170",
-  "status": "ACTIVE",
-  "productType": "Booms",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/124.jpg",
-  "metafields": {},
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000024",
-    "title": "130-170",
-    "priceMinor": 24900,
-    "currency": "EUR",
-    "inventoryQuantity": 3,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.boom_min_cm": {
-      "type": "number_integer",
-      "value": "130"
-     },
-     "recharge.boom_max_cm": {
-      "type": "number_integer",
-      "value": "170"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/125",
-  "title": "Alu Boom 150-190",
-  "handle": "alu-boom-150-190",
-  "status": "ACTIVE",
-  "productType": "Booms",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/125.jpg",
-  "metafields": {},
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000025",
-    "title": "150-190",
-    "priceMinor": 29900,
-    "currency": "EUR",
-    "inventoryQuantity": 4,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.boom_min_cm": {
-      "type": "number_integer",
-      "value": "150"
-     },
-     "recharge.boom_max_cm": {
-      "type": "number_integer",
-      "value": "190"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/126",
-  "title": "Alu Boom 170-210",
-  "handle": "alu-boom-170-210",
-  "status": "ACTIVE",
-  "productType": "Booms",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/126.jpg",
-  "metafields": {},
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000026",
-    "title": "170-210",
-    "priceMinor": 34900,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.boom_min_cm": {
-      "type": "number_integer",
-      "value": "170"
-     },
-     "recharge.boom_max_cm": {
-      "type": "number_integer",
-      "value": "210"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
   "productId": "gid://shopify/Product/127",
-  "title": "Alu Boom 190-230",
-  "handle": "alu-boom-190-230",
+  "title": "Tuttle Fin 36",
+  "handle": "tuttle-fin-36",
   "status": "ACTIVE",
-  "productType": "Booms",
+  "productType": "Fins",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/127.jpg",
-  "metafields": {},
+  "metafields": {
+   "recharge.fin_box": {
+    "type": "single_line_text_field",
+    "value": "tuttle"
+   }
+  },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000027",
-    "title": "190-230",
-    "priceMinor": 39900,
+    "variantId": "gid://shopify/ProductVariant/45500000039",
+    "title": "36 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "36 cm"
+     }
+    ],
+    "priceMinor": 9900,
     "currency": "EUR",
-    "inventoryQuantity": 2,
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.boom_min_cm": {
-      "type": "number_integer",
-      "value": "190"
-     },
-     "recharge.boom_max_cm": {
-      "type": "number_integer",
-      "value": "230"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":36.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -1130,39 +1314,37 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/128",
-  "title": "Wave Board 75",
-  "handle": "wave-board-75",
+  "title": "Tuttle Fin 40",
+  "handle": "tuttle-fin-40",
   "status": "ACTIVE",
-  "productType": "Boards",
+  "productType": "Fins",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/128.jpg",
   "metafields": {
-   "recharge.board_fin_box": {
+   "recharge.fin_box": {
     "type": "single_line_text_field",
     "value": "tuttle"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000028",
-    "title": "75 L",
-    "priceMinor": 69900,
+    "variantId": "gid://shopify/ProductVariant/45500000040",
+    "title": "40 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "40 cm"
+     }
+    ],
+    "priceMinor": 10900,
     "currency": "EUR",
-    "inventoryQuantity": 2,
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "75"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "3.5"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "5"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":40.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -1171,39 +1353,37 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/129",
-  "title": "Free Board 85",
-  "handle": "free-board-85",
+  "title": "Power Fin 36",
+  "handle": "power-fin-36",
   "status": "ACTIVE",
-  "productType": "Boards",
+  "productType": "Fins",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/129.jpg",
   "metafields": {
-   "recharge.board_fin_box": {
+   "recharge.fin_box": {
     "type": "single_line_text_field",
-    "value": "tuttle"
+    "value": "power_box"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000029",
-    "title": "85 L",
-    "priceMinor": 79900,
+    "variantId": "gid://shopify/ProductVariant/45500000041",
+    "title": "36 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "36 cm"
+     }
+    ],
+    "priceMinor": 9500,
     "currency": "EUR",
     "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "85"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "4"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "5.5"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":36.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -1212,39 +1392,37 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/130",
-  "title": "Free Board 95",
-  "handle": "free-board-95",
+  "title": "Deep Tuttle Fin 38",
+  "handle": "deep-tuttle-fin-38",
   "status": "ACTIVE",
-  "productType": "Boards",
+  "productType": "Fins",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/130.jpg",
   "metafields": {
-   "recharge.board_fin_box": {
+   "recharge.fin_box": {
     "type": "single_line_text_field",
-    "value": "tuttle"
+    "value": "deep_tuttle"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000030",
-    "title": "95 L",
-    "priceMinor": 84900,
+    "variantId": "gid://shopify/ProductVariant/45500000042",
+    "title": "38 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "38 cm"
+     }
+    ],
+    "priceMinor": 11900,
     "currency": "EUR",
     "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "95"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "4.5"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "6.2"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":38.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
@@ -1253,449 +1431,13 @@
  {
   "shopId": "shop-a",
   "productId": "gid://shopify/Product/131",
-  "title": "Free Board 105",
-  "handle": "free-board-105",
+  "title": "US Box Fin 34",
+  "handle": "us-box-fin-34",
   "status": "ACTIVE",
-  "productType": "Boards",
+  "productType": "Fins",
   "categoryName": null,
   "chosenTypeId": null,
   "imageUrl": "https://cdn.example.test/131.jpg",
-  "metafields": {
-   "recharge.board_fin_box": {
-    "type": "single_line_text_field",
-    "value": "tuttle"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000031",
-    "title": "105 L",
-    "priceMinor": 89900,
-    "currency": "EUR",
-    "inventoryQuantity": 4,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "105"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "5"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "7"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/132",
-  "title": "Free Board 115",
-  "handle": "free-board-115",
-  "status": "ACTIVE",
-  "productType": "Boards",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/132.jpg",
-  "metafields": {
-   "recharge.board_fin_box": {
-    "type": "single_line_text_field",
-    "value": "tuttle"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000032",
-    "title": "115 L",
-    "priceMinor": 99900,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "115"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "5.5"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "7.5"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/133",
-  "title": "Power Board 125",
-  "handle": "power-board-125",
-  "status": "ACTIVE",
-  "productType": "Boards",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/133.jpg",
-  "metafields": {
-   "recharge.board_fin_box": {
-    "type": "single_line_text_field",
-    "value": "powerbox"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000033",
-    "title": "125 L",
-    "priceMinor": 109900,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "125"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "5.5"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "7.8"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/134",
-  "title": "Power Board 145",
-  "handle": "power-board-145",
-  "status": "ACTIVE",
-  "productType": "Boards",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/134.jpg",
-  "metafields": {
-   "recharge.board_fin_box": {
-    "type": "single_line_text_field",
-    "value": "powerbox"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000034",
-    "title": "145 L",
-    "priceMinor": 119900,
-    "currency": "EUR",
-    "inventoryQuantity": 1,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "145"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "6"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "8.5"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/135",
-  "title": "Draft Board 105",
-  "handle": "draft-board-105",
-  "status": "DRAFT",
-  "productType": "Boards",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/135.jpg",
-  "metafields": {
-   "recharge.board_fin_box": {
-    "type": "single_line_text_field",
-    "value": "us_box"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000035",
-    "title": "105 L",
-    "priceMinor": 59900,
-    "currency": "EUR",
-    "inventoryQuantity": 5,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "105"
-     },
-     "recharge.board_min_sail_m2": {
-      "type": "number_decimal",
-      "value": "5"
-     },
-     "recharge.board_max_sail_m2": {
-      "type": "number_decimal",
-      "value": "7"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/136",
-  "title": "Tuttle Fin 32",
-  "handle": "tuttle-fin-32",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/136.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "tuttle"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000036",
-    "title": "32 cm",
-    "priceMinor": 4990,
-    "currency": "EUR",
-    "inventoryQuantity": 3,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "32"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/137",
-  "title": "Tuttle Fin 36",
-  "handle": "tuttle-fin-36",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/137.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "tuttle"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000037",
-    "title": "36 cm",
-    "priceMinor": 6990,
-    "currency": "EUR",
-    "inventoryQuantity": 4,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "36"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/138",
-  "title": "Tuttle Fin 40",
-  "handle": "tuttle-fin-40",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/138.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "tuttle"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000038",
-    "title": "40 cm",
-    "priceMinor": 7990,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "40"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/139",
-  "title": "Power Fin 30",
-  "handle": "power-fin-30",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/139.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "powerbox"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000039",
-    "title": "30 cm",
-    "priceMinor": 5490,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "30"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/140",
-  "title": "Power Fin 36",
-  "handle": "power-fin-36",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/140.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "powerbox"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000040",
-    "title": "36 cm",
-    "priceMinor": 7490,
-    "currency": "EUR",
-    "inventoryQuantity": 3,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "36"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/141",
-  "title": "Power Fin 42",
-  "handle": "power-fin-42",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/141.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "powerbox"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000041",
-    "title": "42 cm",
-    "priceMinor": 8490,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "42"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/142",
-  "title": "US Fin 34",
-  "handle": "us-fin-34",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/142.jpg",
-  "metafields": {
-   "recharge.fin_box": {
-    "type": "single_line_text_field",
-    "value": "us_box"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000042",
-    "title": "34 cm",
-    "priceMinor": 6490,
-    "currency": "EUR",
-    "inventoryQuantity": 2,
-    "availableForSale": true,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "34"
-     }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-a",
-  "productId": "gid://shopify/Product/143",
-  "title": "US Fin 38",
-  "handle": "us-fin-38",
-  "status": "ACTIVE",
-  "productType": "Fins",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/143.jpg",
   "metafields": {
    "recharge.fin_box": {
     "type": "single_line_text_field",
@@ -1705,109 +1447,711 @@
   "variants": [
    {
     "variantId": "gid://shopify/ProductVariant/45500000043",
-    "title": "38 cm",
-    "priceMinor": 7290,
-    "currency": "EUR",
-    "inventoryQuantity": 0,
-    "availableForSale": false,
-    "metafields": {
-     "recharge.fin_length_cm": {
-      "type": "number_integer",
-      "value": "38"
+    "title": "34 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "34 cm"
      }
-    }
-   }
-  ]
- },
- {
-  "shopId": "shop-b",
-  "productId": "gid://shopify/Product/144",
-  "title": "Other Shop Sail 5.8",
-  "handle": "other-shop-sail-5-8",
-  "status": "ACTIVE",
-  "productType": "Sails",
-  "categoryName": null,
-  "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/144.jpg",
-  "metafields": {
-   "recharge.sail_category": {
-    "type": "single_line_text_field",
-    "value": "freeride"
-   },
-   "recharge.sail_mast_rdm": {
-    "type": "single_line_text_field",
-    "value": "30"
-   }
-  },
-  "variants": [
-   {
-    "variantId": "gid://shopify/ProductVariant/45500000044",
-    "title": "5.8",
-    "priceMinor": 19900,
+    ],
+    "priceMinor": 8900,
     "currency": "EUR",
-    "inventoryQuantity": 9,
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.sail_area_m2": {
-      "type": "number_decimal",
-      "value": "5.8"
-     },
-     "recharge.sail_mast_length_min_cm": {
-      "type": "number_integer",
-      "value": "430"
-     },
-     "recharge.sail_mast_length_max_cm": {
-      "type": "number_integer",
-      "value": "460"
-     },
-     "recharge.sail_boom_min_cm": {
-      "type": "number_integer",
-      "value": "165"
-     },
-     "recharge.sail_boom_max_cm": {
-      "type": "number_integer",
-      "value": "175"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":34.0,\"unit\":\"CENTIMETERS\"}"
      }
     }
    }
   ]
  },
  {
-  "shopId": "shop-b",
-  "productId": "gid://shopify/Product/145",
-  "title": "Other Shop Board 105",
-  "handle": "other-shop-board-105",
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/132",
+  "title": "Patrik FIN P-RIDE (TUTTLE)",
+  "handle": "patrik-fin-p-ride-(tuttle)",
   "status": "ACTIVE",
-  "productType": "Boards",
+  "productType": "Fins",
   "categoryName": null,
   "chosenTypeId": null,
-  "imageUrl": "https://cdn.example.test/145.jpg",
+  "imageUrl": "https://cdn.example.test/132.jpg",
   "metafields": {
-   "recharge.board_fin_box": {
+   "recharge.fin_box": {
     "type": "single_line_text_field",
     "value": "tuttle"
    }
   },
   "variants": [
    {
-    "variantId": "gid://shopify/ProductVariant/45500000045",
-    "title": "105 L",
-    "priceMinor": 19900,
+    "variantId": "gid://shopify/ProductVariant/45500000044",
+    "title": "440",
+    "options": [
+     {
+      "name": "Size",
+      "value": "440"
+     }
+    ],
+    "priceMinor": 7900,
     "currency": "EUR",
-    "inventoryQuantity": 9,
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000045",
+    "title": "460",
+    "options": [
+     {
+      "name": "Size",
+      "value": "460"
+     }
+    ],
+    "priceMinor": 8200,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
+   },
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000046",
+    "title": "480",
+    "options": [
+     {
+      "name": "Size",
+      "value": "480"
+     }
+    ],
+    "priceMinor": 8500,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {}
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/133",
+  "title": "Fin no box",
+  "handle": "fin-no-box",
+  "status": "ACTIVE",
+  "productType": "Fins",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/133.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000047",
+    "title": "38 cm",
+    "options": [
+     {
+      "name": "Size",
+      "value": "38 cm"
+     }
+    ],
+    "priceMinor": 6900,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
     "availableForSale": true,
     "metafields": {
-     "recharge.board_volume_l": {
-      "type": "number_decimal",
-      "value": "105"
+     "recharge.length_cm": {
+      "type": "dimension",
+      "value": "{\"value\":38.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/134",
+  "title": "Free Board 105",
+  "handle": "free-board-105",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/134.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000048",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 129900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "volume",
+      "value": "{\"value\":105.0,\"unit\":\"LITERS\"}"
      },
-     "recharge.board_min_sail_m2": {
+     "recharge.board_sail_min_m2": {
       "type": "number_decimal",
-      "value": "5"
+      "value": "4.5"
      },
-     "recharge.board_max_sail_m2": {
+     "recharge.board_sail_max_m2": {
       "type": "number_decimal",
-      "value": "7"
+      "value": "6.5"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\",\"deep_tuttle\"]"
+     },
+     "recharge.board_fin_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":32.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.board_fin_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":40.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.rider_mass_min_kg": {
+      "type": "weight",
+      "value": "{\"value\":70.0,\"unit\":\"KILOGRAMS\"}"
+     },
+     "recharge.rider_mass_max_kg": {
+      "type": "weight",
+      "value": "{\"value\":95.0,\"unit\":\"KILOGRAMS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/135",
+  "title": "Free Board 95",
+  "handle": "free-board-95",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/135.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000049",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 119900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "95.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "4.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "6.0"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/136",
+  "title": "Free Board 115",
+  "handle": "free-board-115",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/136.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000050",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 139900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "115.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "5.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "7.5"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\",\"us_box\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/137",
+  "title": "Free Board 130",
+  "handle": "free-board-130",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/137.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000051",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 149900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "130.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "5.5"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "8.0"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/138",
+  "title": "Power Board 110",
+  "handle": "power-board-110",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/138.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000052",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 134900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "110.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "5.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "7.0"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"power_box\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/139",
+  "title": "Range Only Board",
+  "handle": "range-only-board",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/139.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000053",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 124900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "5.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "6.5"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/140",
+  "title": "Board no fin boxes",
+  "handle": "board-no-fin-boxes",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/140.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000054",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 109900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "105.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "4.5"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "6.5"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/141",
+  "title": "Draft Board 105",
+  "handle": "draft-board-105",
+  "status": "DRAFT",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/141.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000055",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 99900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "105.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "4.5"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "6.5"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/142",
+  "title": "Narrow Board 105",
+  "handle": "narrow-board-105",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/142.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000056",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 129000,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "105.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "4.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "5.0"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/143",
+  "title": "Wave Board 85",
+  "handle": "wave-board-85",
+  "status": "ACTIVE",
+  "productType": "Wave boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/143.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000057",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 139900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "85.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "3.5"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "5.5"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"us_box\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/144",
+  "title": "Foil Board 110",
+  "handle": "foil-board-110",
+  "status": "ACTIVE",
+  "productType": "Foil boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/144.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000058",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 169900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "110.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "5.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "7.0"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-a",
+  "productId": "gid://shopify/Product/145",
+  "title": "Beginner Board 140",
+  "handle": "beginner-board-140",
+  "status": "ACTIVE",
+  "productType": "Beginner boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/145.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000059",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 99900,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "140.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "5.0"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "8.0"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-b",
+  "productId": "gid://shopify/Product/146",
+  "title": "Other Shop Sail",
+  "handle": "other-shop-sail",
+  "status": "ACTIVE",
+  "productType": "Freeride sails",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/146.jpg",
+  "metafields": {
+   "recharge.recommended_mast_diameter": {
+    "type": "single_line_text_field",
+    "value": "rdm"
+   }
+  },
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000060",
+    "title": "5.8 m2 / Red",
+    "options": [
+     {
+      "name": "Size",
+      "value": "5.8 m2 / Red"
+     }
+    ],
+    "priceMinor": 100,
+    "currency": "EUR",
+    "inventoryQuantity": 3,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.canopy_area": {
+      "type": "number_decimal",
+      "value": "5.8"
+     },
+     "recharge.recommended_mast_cm": {
+      "type": "dimension",
+      "value": "{\"value\":460.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_min_cm": {
+      "type": "dimension",
+      "value": "{\"value\":170.0,\"unit\":\"CENTIMETERS\"}"
+     },
+     "recharge.boom_max_cm": {
+      "type": "dimension",
+      "value": "{\"value\":190.0,\"unit\":\"CENTIMETERS\"}"
+     }
+    }
+   }
+  ]
+ },
+ {
+  "shopId": "shop-b",
+  "productId": "gid://shopify/Product/147",
+  "title": "Other Shop Board",
+  "handle": "other-shop-board",
+  "status": "ACTIVE",
+  "productType": "Freeride boards",
+  "categoryName": null,
+  "chosenTypeId": null,
+  "imageUrl": "https://cdn.example.test/147.jpg",
+  "metafields": {},
+  "variants": [
+   {
+    "variantId": "gid://shopify/ProductVariant/45500000061",
+    "title": "Default Title",
+    "options": [],
+    "priceMinor": 100,
+    "currency": "EUR",
+    "inventoryQuantity": 2,
+    "availableForSale": true,
+    "metafields": {
+     "recharge.volume_l": {
+      "type": "number_decimal",
+      "value": "105.0"
+     },
+     "recharge.board_sail_min_m2": {
+      "type": "number_decimal",
+      "value": "4.5"
+     },
+     "recharge.board_sail_max_m2": {
+      "type": "number_decimal",
+      "value": "6.5"
+     },
+     "recharge.fin_box_types": {
+      "type": "list.single_line_text_field",
+      "value": "[\"tuttle\"]"
      }
     }
    }

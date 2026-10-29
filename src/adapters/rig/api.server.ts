@@ -5,12 +5,18 @@ import { z } from "zod";
 import type { ProviderResult, RigAiProvider } from "~/adapters/ai/rig-provider.server";
 import { clientIp, hashIp, type RateLimiter } from "~/adapters/rig/rate-limit";
 import type { RigSource, RigRequestWrite, RigUsageWrite } from "~/adapters/db/repositories/rig.server";
+import { SnapshotCache } from "~/adapters/rig/snapshot-cache";
 import {
   candidatesFrom,
-  rigReadiness,
+  readinessFromCandidates,
   type RigReadiness,
 } from "~/domain/rig/candidates";
-import { buildRig, checkRig, resolveFit } from "~/domain/rig/engine";
+import {
+  buildRig,
+  checkReport,
+  resolveFit,
+  uncheckedWarnings,
+} from "~/domain/rig/engine";
 import { warningMessage } from "~/domain/rig/messages";
 import {
   answersSchema,
@@ -71,8 +77,10 @@ export interface RigApiConfig {
   dailyCalls: number;
   /** Secret that salts the IP hash. */
   ipSalt: string;
-  /** Seconds a loaded catalogue is reused. */
+  /** Seconds a loaded catalogue is fresh; after that it is served stale while it refreshes. */
   cacheSeconds: number;
+  /** Seconds a stale catalogue may still be served before a caller waits for the load (default 1800). */
+  maxStaleSeconds?: number;
 }
 
 export interface RigApiDeps {
@@ -214,6 +222,7 @@ function wireItem(
     quantity: item.quantity,
     why: why ?? templateWhy(item, rider, locale),
     specs: item.specs,
+    ...(item.derived.length > 0 ? { derived: item.derived } : {}),
     ...(stale ? { checkAvailability: true } : {}),
   };
 }
@@ -233,6 +242,7 @@ function wireRig(
     total: formatMinor(rig.totalMinor),
     currency: rig.currency,
     checks: rig.checks,
+    ...(rig.unchecked.length > 0 ? { unchecked: rig.unchecked } : {}),
     alternatives: rig.alternatives.map((alternative) => ({
       role: alternative.role,
       variantId: alternative.variantId,
@@ -255,11 +265,11 @@ interface Prepared {
   byVariant: Map<number, RigCandidate>;
   titles: string[];
   readiness: RigReadiness;
-  snapshotAgeMinutes: number | null;
-  loadedAtMs: number;
+  /** When the newest row was touched (ms), for the age of the stock. */
+  newestMs: number | null;
 }
 
-function prepare(source: RigSource, now: Date): Prepared {
+function prepare(source: RigSource): Prepared {
   const candidates = candidatesFrom(source.plan, source.products);
   const touched = [source.snapshotAt, source.observedAt].filter(
     (date): date is Date => date !== null,
@@ -272,10 +282,8 @@ function prepare(source: RigSource, now: Date): Prepared {
     candidates,
     byVariant: new Map(candidates.map((c) => [c.variantId, c])),
     titles: candidates.map((c) => c.title),
-    readiness: rigReadiness(source.plan, source.products),
-    snapshotAgeMinutes:
-      newest === null ? null : Math.max(0, Math.floor((now.getTime() - newest) / 60_000)),
-    loadedAtMs: now.getTime(),
+    readiness: readinessFromCandidates(candidates),
+    newestMs: newest,
   };
 }
 
@@ -304,18 +312,31 @@ export function createRigApi(deps: RigApiDeps): {
   verify: Handler;
 } {
   const { store, config, rules } = deps;
-  const cache = new Map<string, Prepared>();
   const log = deps.log ?? (() => undefined);
 
-  async function load(domain: string): Promise<Prepared> {
-    const now = deps.now();
-    const cached = cache.get(domain);
-    if (cached && now.getTime() - cached.loadedAtMs < config.cacheSeconds * 1000) {
-      return cached;
-    }
-    const prepared = prepare(await store.loadSource(domain), now);
-    cache.set(domain, prepared);
-    return prepared;
+  /** Fresh for `cacheSeconds`, then served stale while one refresh runs (snapshot-cache.ts). */
+  const cache = new SnapshotCache<Prepared>({
+    ttlMs: config.cacheSeconds * 1000,
+    maxStaleMs: Math.max(config.maxStaleSeconds ?? 1800, config.cacheSeconds) * 1000,
+    load: async (domain) => prepare(await store.loadSource(domain)),
+    now: () => deps.now().getTime(),
+    onRefreshError: (domain, error) =>
+      deps.logError?.(
+        { domain, error: errorFields(error) },
+        "The rig catalogue could not be refreshed; serving the last one",
+      ),
+  });
+
+  const load = (domain: string): Promise<Prepared> => cache.get(domain);
+
+  /** Minutes since the newest row was touched, as of now. */
+  function ageMinutes(prepared: Prepared): number | null {
+    return prepared.newestMs === null
+      ? null
+      : Math.max(
+          0,
+          Math.floor((deps.now().getTime() - prepared.newestMs) / 60_000),
+        );
   }
 
   /**
@@ -423,6 +444,9 @@ export function createRigApi(deps: RigApiDeps): {
     return json(NOT_SERVED, {
       code: "not_ready",
       reason: context.enabled ? "catalogue" : "disabled",
+      ...(context.enabled && prepared.readiness.stockNotRead
+        ? { detail: "stock_not_read" }
+        : {}),
     });
   }
 
@@ -447,14 +471,9 @@ export function createRigApi(deps: RigApiDeps): {
   }
 
   function staleWarning(prepared: Prepared): EngineWarning[] {
-    return prepared.snapshotAgeMinutes !== null &&
-      prepared.snapshotAgeMinutes > STALE_MINUTES
-      ? [
-          {
-            code: "stale_snapshot",
-            detail: { minutes: prepared.snapshotAgeMinutes },
-          },
-        ]
+    const minutes = ageMinutes(prepared);
+    return minutes !== null && minutes > STALE_MINUTES
+      ? [{ code: "stale_snapshot", detail: { minutes } }]
       : [];
   }
 
@@ -483,8 +502,8 @@ export function createRigApi(deps: RigApiDeps): {
     const profile = mergeProfile(body.answers, undefined);
     const result = engineRun(profile, prepared);
     const warnings = [...result.warnings, ...staleWarning(prepared)];
-    const stale = prepared.snapshotAgeMinutes !== null &&
-      prepared.snapshotAgeMinutes > STALE_MINUTES;
+    const snapshotAgeMinutes = ageMinutes(prepared);
+    const stale = snapshotAgeMinutes !== null && snapshotAgeMinutes > STALE_MINUTES;
     const fit = resolveFit(profile, rules);
     const rider = riderFacts(profile, fit);
 
@@ -523,7 +542,7 @@ export function createRigApi(deps: RigApiDeps): {
       unmet: result.unmet,
       warnings: wireWarnings(warnings, locale),
       mode: "plain",
-      snapshotAgeMinutes: prepared.snapshotAgeMinutes,
+      snapshotAgeMinutes,
     });
   };
 
@@ -744,14 +763,19 @@ export function createRigApi(deps: RigApiDeps): {
       });
     }
     // The same function the engine used to choose the parts.
-    const checks = [...checkRig(selection, fit.context), ...problems];
+    const report = checkReport(selection, fit.context);
+    const checks = [...report.checks, ...problems];
     return json(200, {
       ok: checks.every((check) => check.ok),
       checks,
+      ...(report.unchecked.length > 0 ? { unchecked: report.unchecked } : {}),
       items,
       total: formatMinor(total),
       currency: Object.values(selection)[0]?.currency ?? "",
-      warnings: wireWarnings(fit.warnings, body.locale ?? "en"),
+      warnings: wireWarnings(
+        [...fit.warnings, ...uncheckedWarnings(report.unchecked)],
+        body.locale ?? "en",
+      ),
     });
   };
 

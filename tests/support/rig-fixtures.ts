@@ -22,7 +22,11 @@ export function loadCatalogue(): RigSnapshotProduct[] {
   ) as RigSnapshotProduct[];
 }
 
-/** A plan whose leaf types carry the names the rig pack uses. */
+/**
+ * A plan shaped like the store own: Windsurf with Boards and Sails as parents
+ * of per-discipline leaves, and Masts, Booms, Mast extensions, Mast bases and
+ * Fins as leaves. Wing boards sit beside, to prove they are not windsurf.
+ */
 export function rigPlan(): AttributeSchema {
   const plan = emptySchema();
   const type = (
@@ -42,16 +46,19 @@ export function rigPlan(): AttributeSchema {
   plan.types = [
     type("all", "All products", null, false),
     type("windsurf", "Windsurf", "all", false),
-    ...[
-      "Boards",
-      "Sails",
-      "Masts",
-      "Booms",
-      "Bases and extensions",
-      "Fins",
-    ].map((name) =>
+    type("boards", "Boards", "windsurf", false),
+    type("sails", "Sails", "windsurf", false),
+    ...["Freeride", "Wave", "Foil", "Beginner"].map((name) =>
+      type(`${name.toLowerCase()}-boards`, `${name} boards`, "boards", true),
+    ),
+    ...["Freeride", "Wave", "Foil", "Beginner"].map((name) =>
+      type(`${name.toLowerCase()}-sails`, `${name} sails`, "sails", true),
+    ),
+    ...["Masts", "Booms", "Mast extensions", "Mast bases", "Fins"].map((name) =>
       type(name.toLowerCase().replace(/ /g, "-"), name, "windsurf", true),
     ),
+    type("wing", "Wing", "all", false),
+    type("wing-boards", "Boards", "wing", true),
   ];
   return plan;
 }
