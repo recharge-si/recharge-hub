@@ -33,7 +33,7 @@ export function parseCsv(text: string): string[][] {
   let row: string[] = [];
   let cell = "";
   let quoted = false;
-  const source = text.replace(/^﻿/, "");
+  const source = text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
   for (let i = 0; i < source.length; i += 1) {
     const char = source[i] as string;
     if (quoted) {

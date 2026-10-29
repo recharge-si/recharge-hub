@@ -1,16 +1,14 @@
 import { describe, expect, it } from "vitest";
 
-import { RateLimiter } from "~/adapters/rig/rate-limit";
 import {
   REFERENCE,
-  SHOP_A,
-  SHOP_B,
   loadCatalogue,
 } from "../support/rig-fixtures";
 import {
   fail,
   goodModel,
   ok,
+  type Json,
   post,
   read,
   setup,
@@ -48,7 +46,7 @@ describe("signature and tenant", () => {
   it("never returns shop A products to shop B", async () => {
     const a = setup();
     const resultA = await read(await a.api.build(post({ answers: REFERENCE })));
-    const idsA = new Set<number>(resultA["rigs"][0].items.map((i: any) => i.variantId));
+    const idsA = new Set<number>(resultA["rigs"][0].items.map((i: Json) => i.variantId));
     expect(idsA.size).toBeGreaterThan(0);
 
     const b = setup({ authenticate: async () => "b.myshopify.com" });
@@ -162,7 +160,7 @@ describe("build", () => {
       expect(item["quantity"]).toBe(1);
       expect(typeof item["why"]).toBe("string");
     }
-    expect(rig["checks"].every((c: any) => c.ok)).toBe(true);
+    expect(rig["checks"].every((c: Json) => c.ok)).toBe(true);
     expect(rig["total"]).toMatch(/^\d+\.\d{2}$/);
     expect(body["profile"]["source"]["weightKg"]).toBe("form");
     expect(provider.prompts).toEqual([]);
@@ -198,7 +196,7 @@ describe("build", () => {
     const { api, clock } = setup();
     clock.ms = Date.parse("2026-10-28T13:30:00Z");
     const body = await read(await api.build(post({ answers: REFERENCE })));
-    expect(body["warnings"].map((w: any) => w.code)).toContain("stale_snapshot");
+    expect(body["warnings"].map((w: Json) => w.code)).toContain("stale_snapshot");
     expect(body["rigs"][0]["items"][0]["checkAvailability"]).toBe(true);
     expect(body["snapshotAgeMinutes"]).toBe(90);
   });
@@ -214,7 +212,7 @@ describe("explain", () => {
     expect(body["mode"]).toBe("ai");
     expect(body["profile"]["source"]["weightKg"]).toBe("text");
     expect(provider.prompts).toHaveLength(2);
-    const ids = plainBuild["rigs"][0]["items"].map((i: any) => String(i.variantId));
+    const ids = plainBuild["rigs"][0]["items"].map((i: Json) => String(i.variantId));
     expect(Object.keys(body["whys"]).sort()).toEqual([...ids].sort());
     expect(body["variantIds"].map(String).sort()).toEqual([...ids].sort());
   });
@@ -227,7 +225,7 @@ describe("explain", () => {
     expect(a["mode"]).toBe("ai");
     expect(p["mode"]).toBe("plain");
     expect(p["variantIds"]).toEqual(a["variantIds"]);
-    expect(p["warnings"].map((w: any) => w.code)).toContain("mode_plain");
+    expect(p["warnings"].map((w: Json) => w.code)).toContain("mode_plain");
     expect(Object.keys(p["whys"]).sort()).toEqual(Object.keys(a["whys"]).sort());
     // Both buildings of the rig are the same rig.
     const buildA = await read(await ai.api.build(post({ answers: REFERENCE })));
@@ -243,7 +241,7 @@ describe("explain", () => {
         await api.explain(post({ text: "82 kg", answers: REFERENCE })),
       );
       expect(body["mode"]).toBe("plain");
-      const codes = body["warnings"].map((w: any) => w.code);
+      const codes = body["warnings"].map((w: Json) => w.code);
       expect(codes).toEqual(expect.arrayContaining(["mode_plain", "text_not_read"]));
       expect(body["variantIds"]).toHaveLength(6);
     },
@@ -342,7 +340,7 @@ describe("verify", () => {
     const { api } = setup();
     const built = await read(await api.build(post({ answers: REFERENCE })));
     const rig = built["rigs"][0];
-    const ids = rig["items"].map((i: any) => i["variantId"]);
+    const ids = rig["items"].map((i: Json) => i["variantId"]);
     const verified = await read(
       await api.verify(post({ variantIds: ids, answers: REFERENCE })),
     );
@@ -354,13 +352,13 @@ describe("verify", () => {
   it("fails an incompatible swap and an unknown variant", async () => {
     const { api } = setup();
     const built = await read(await api.build(post({ answers: REFERENCE })));
-    const items = built["rigs"][0]["items"] as any[];
+    const items = built["rigs"][0]["items"] as Json[];
     const powerFin = loadCatalogue().find((p) => p.title === "Power Fin 36");
     const powerId = Number(powerFin?.variants[0]?.variantId.split("/").pop());
     const ids = items.map((i) => (i.role === "fin" ? powerId : i.variantId));
     const verified = await read(await api.verify(post({ variantIds: ids, answers: REFERENCE })));
     expect(verified["ok"]).toBe(false);
-    expect(verified["checks"].find((c: any) => c.id === "fin-box").ok).toBe(false);
+    expect(verified["checks"].find((c: Json) => c.id === "fin-box").ok).toBe(false);
 
     const unknown = await read(await api.verify(post({ variantIds: [1], answers: REFERENCE })));
     expect(unknown["ok"]).toBe(false);

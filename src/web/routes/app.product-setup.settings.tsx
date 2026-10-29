@@ -9,11 +9,8 @@ import {
 } from "react-router";
 
 import { getAttributeSchema } from "~/adapters/db/repositories/attribute-schema.server";
-import {
-  rigSettingsFor,
-  roleWord,
-  setRigEnabled,
-} from "~/adapters/rig/settings.server";
+import { rigSettingsFor, setRigEnabled } from "~/adapters/rig/settings.server";
+import { roleWord } from "~/domain/rig/keys";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { schemaFromCsv } from "~/domain/attributes/csv";
 import { workspaceState } from "~/domain/attributes/impact";

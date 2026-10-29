@@ -156,3 +156,18 @@ export const READINESS_ROLES: readonly RigRole[] = [
   "fin",
 ];
 export const READINESS_MIN_COMPLETE = 3;
+
+const ROLE_WORDS: Record<RigRole, string> = {
+  board: "boards",
+  sail: "sails",
+  mast: "masts",
+  extension: "extensions",
+  base: "bases",
+  boom: "booms",
+  fin: "fins",
+};
+
+/** The plural a merchant reads in the readiness line. */
+export function roleWord(role: RigRole): string {
+  return ROLE_WORDS[role];
+}

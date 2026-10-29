@@ -90,6 +90,9 @@ describe("parseCatalogueJsonl", () => {
         title: "4.7",
         priceMinor: 89_900,
         compareAtMinor: null,
+        options: [],
+        inventoryQuantity: null,
+        availableForSale: false,
         metafields: { "custom.size": { type: "number_decimal", value: "4.7" } },
       },
       {
@@ -100,6 +103,9 @@ describe("parseCatalogueJsonl", () => {
         title: "5.0",
         priceMinor: 89_900,
         compareAtMinor: 99_900,
+        options: [],
+        inventoryQuantity: null,
+        availableForSale: false,
         metafields: {},
       },
     ]);

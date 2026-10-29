@@ -5,7 +5,12 @@ import {
   setRigBuilderEnabled,
 } from "~/adapters/db/repositories/rig.server";
 import { rigReadiness, type RigReadiness } from "~/domain/rig/candidates";
-import { RIG_ROLES, READINESS_ROLES, type RigRole } from "~/domain/rig/keys";
+import {
+  RIG_ROLES,
+  READINESS_ROLES,
+  roleWord,
+  type RigRole,
+} from "~/domain/rig/keys";
 import { placeholderRules } from "~/domain/rig/rules";
 import type { Principal } from "~/domain/types";
 
@@ -54,20 +59,6 @@ export async function rigSettingsFor(principal: Principal): Promise<RigSettings>
     notReady: readiness.notReady,
     plain: await recentPlainShare(source.shopId),
   };
-}
-
-const ROLE_WORDS: Record<RigRole, string> = {
-  board: "boards",
-  sail: "sails",
-  mast: "masts",
-  extension: "extensions",
-  base: "bases",
-  boom: "booms",
-  fin: "fins",
-};
-
-export function roleWord(role: RigRole): string {
-  return ROLE_WORDS[role];
 }
 
 export type ToggleResult = { ok: true; message: string } | { ok: false; message: string };

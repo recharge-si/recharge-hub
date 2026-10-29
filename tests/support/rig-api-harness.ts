@@ -150,7 +150,11 @@ export function post(body: unknown, headers: Record<string, string> = {}): Reque
   });
 }
 
-export async function read(response: Response) {
-  return (await response.json()) as Record<string, any>;
+// A response body the tests index freely; the shapes are asserted by the tests.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export type Json = any;
+
+export async function read(response: Response): Promise<Json> {
+  return (await response.json()) as Json;
 }
 
