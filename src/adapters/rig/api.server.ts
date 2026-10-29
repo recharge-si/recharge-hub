@@ -17,6 +17,7 @@ import {
   resolveFit,
   uncheckedWarnings,
 } from "~/domain/rig/engine";
+import { factsOf } from "~/domain/rig/facts";
 import { warningMessage } from "~/domain/rig/messages";
 import {
   answersSchema,
@@ -32,6 +33,7 @@ import type {
   EngineWarning,
   Profile,
   Rig,
+  RigAlternative,
   RigCandidate,
   RigItem,
   RigRules,
@@ -96,6 +98,26 @@ export interface RigApiDeps {
   log?: (fields: Record<string, unknown>, message: string) => void;
   /** Where a failure the API turns into a 409 is recorded, with its cause. */
   logError?: (fields: Record<string, unknown>, message: string) => void;
+  /**
+   * One breadcrumb per build, explain and verify answer (Sentry in
+   * production): ids, counts, mode, status and latency, never the buyer's
+   * text or address.
+   */
+  breadcrumb?: (call: RigCall) => void;
+}
+
+export interface RigCall {
+  route: "build" | "explain" | "verify";
+  status: number;
+  latencyMs: number;
+  requestId?: string;
+  mode?: string;
+  /** Parts in the rig (verify: parts checked). */
+  parts?: number;
+  warnings?: number;
+  /** Checks that failed (verify), or `code` of a refusal. */
+  failedChecks?: number;
+  code?: string;
 }
 
 /**
@@ -117,18 +139,26 @@ const MIN_CALL_MS = 2_000;
 /* Wire format                                                                */
 /* -------------------------------------------------------------------------- */
 
+/** Variants the rig must not contain (a cart refused them as sold out). */
+const excludeSchema = z
+  .array(z.number().int().positive())
+  .max(50)
+  .optional();
+
 const bodySchema = z
   .object({
     text: z.string().optional(),
     answers: answersSchema.optional(),
     locale: z.enum(["en", "sl"]).optional(),
     requestId: z.string().regex(REQUEST_ID).optional(),
+    excludeVariantIds: excludeSchema,
   })
   .strict();
 
 const verifySchema = z
   .object({
     variantIds: z.array(z.number().int().positive()).min(1).max(12),
+    excludeVariantIds: excludeSchema,
     answers: answersSchema.optional(),
     locale: z.enum(["en", "sl"]).optional(),
   })
@@ -201,6 +231,45 @@ export function wireProfile(profile: Profile): Record<string, unknown> {
   return out;
 }
 
+/** An image address the storefront may load: https only, else none. */
+function httpsUrl(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).protocol === "https:" ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * What the theme prints for a part, the same on an item and an alternative.
+ * `image` and `url` are the first names of `imageUrl` and `productUrl` and
+ * stay for older themes. `specs` is the numbers the engine read, `facts` the
+ * same in words with units, `derived` the fields read off the variant's name.
+ */
+function display(
+  part: Pick<
+    RigItem | RigAlternative,
+    "handle" | "imageUrl" | "vendor" | "specs" | "derived"
+  >,
+  locale: Locale,
+) {
+  const imageUrl = httpsUrl(part.imageUrl);
+  const productUrl = part.handle
+    ? `/products/${encodeURIComponent(part.handle)}`
+    : null;
+  return {
+    url: productUrl,
+    productUrl,
+    image: imageUrl,
+    imageUrl,
+    vendor: part.vendor,
+    specs: part.specs,
+    facts: factsOf(part.specs, part.derived, locale),
+    ...(part.derived.length > 0 ? { derived: part.derived } : {}),
+  };
+}
+
 function wireItem(
   item: RigItem,
   rider: RiderFacts,
@@ -214,15 +283,12 @@ function wireItem(
     variantId: item.variantId,
     title: item.title,
     variantTitle: item.variantTitle,
-    url: item.handle ? `/products/${item.handle}` : null,
-    image: item.imageUrl,
     price: formatMinor(item.priceMinor),
     currency: item.currency,
     available: item.available,
     quantity: item.quantity,
     why: why ?? templateWhy(item, rider, locale),
-    specs: item.specs,
-    ...(item.derived.length > 0 ? { derived: item.derived } : {}),
+    ...display(item, locale),
     ...(stale ? { checkAvailability: true } : {}),
   };
 }
@@ -245,12 +311,14 @@ function wireRig(
     ...(rig.unchecked.length > 0 ? { unchecked: rig.unchecked } : {}),
     alternatives: rig.alternatives.map((alternative) => ({
       role: alternative.role,
+      productId: alternative.productId,
       variantId: alternative.variantId,
       title: alternative.title,
       variantTitle: alternative.variantTitle,
       price: formatMinor(alternative.priceMinor),
       currency: alternative.currency,
       why: templateWhy(alternative, rider, locale),
+      ...display(alternative, locale),
     })),
   };
 }
@@ -464,9 +532,16 @@ export function createRigApi(deps: RigApiDeps): {
     return { id: newId(), existing: false };
   }
 
-  function engineRun(profile: Profile, prepared: Prepared): BuildResult {
+  function engineRun(
+    profile: Profile,
+    prepared: Prepared,
+    exclude: readonly number[] | undefined,
+  ): BuildResult {
     return buildRig(profile, prepared.candidates, rules, {
       shopId: prepared.shopId,
+      ...(exclude && exclude.length > 0
+        ? { excludeVariantIds: new Set(exclude) }
+        : {}),
     });
   }
 
@@ -500,7 +575,7 @@ export function createRigApi(deps: RigApiDeps): {
     if (refused) return refused;
 
     const profile = mergeProfile(body.answers, undefined);
-    const result = engineRun(profile, prepared);
+    const result = engineRun(profile, prepared, body.excludeVariantIds);
     const warnings = [...result.warnings, ...staleWarning(prepared)];
     const snapshotAgeMinutes = ageMinutes(prepared);
     const stale = snapshotAgeMinutes !== null && snapshotAgeMinutes > STALE_MINUTES;
@@ -635,7 +710,7 @@ export function createRigApi(deps: RigApiDeps): {
     const profile = mergeProfile(body.answers, reading);
 
     // 2. The rig. The model has no say in it.
-    const result = engineRun(profile, prepared);
+    const result = engineRun(profile, prepared, body.excludeVariantIds);
     warnings.push(...result.warnings, ...staleWarning(prepared));
     const fit = resolveFit(profile, rules);
     const rider = riderFacts(profile, fit);
@@ -738,17 +813,23 @@ export function createRigApi(deps: RigApiDeps): {
       available: boolean;
     }> = [];
     let total = 0;
+    const excluded = new Set(body.excludeVariantIds);
     for (const id of [...new Set(body.variantIds)].sort((a, b) => a - b)) {
       const candidate = prepared.byVariant.get(id);
       if (!candidate || candidate.shopId !== prepared.shopId) {
         problems.push({ id: `unknown-variant-${id}`, ok: false });
         continue;
       }
+      const refused = excluded.has(id);
       const usable =
+        !refused &&
         candidate.status === "ACTIVE" &&
         candidate.inStock &&
         candidate.missing.length === 0;
-      if (!usable) problems.push({ id: `unavailable-variant-${id}`, ok: false });
+      if (refused) problems.push({ id: `excluded-variant-${id}`, ok: false });
+      else if (!usable) {
+        problems.push({ id: `unavailable-variant-${id}`, ok: false });
+      }
       if (selection[candidate.role]) {
         problems.push({ id: `duplicate-${candidate.role}`, ok: false });
         continue;
@@ -779,7 +860,64 @@ export function createRigApi(deps: RigApiDeps): {
     });
   };
 
-  return { build, explain, verify };
+  /** What an answer says about the call, read from the JSON that already goes out. */
+  async function describeCall(
+    route: RigCall["route"],
+    response: Response,
+    startedMs: number,
+  ): Promise<RigCall> {
+    const call: RigCall = {
+      route,
+      status: response.status,
+      latencyMs: deps.now().getTime() - startedMs,
+    };
+    try {
+      const body = (await response.clone().json()) as Record<string, unknown>;
+      if (typeof body["code"] === "string") call.code = body["code"];
+      if (typeof body["requestId"] === "string") call.requestId = body["requestId"];
+      if (typeof body["mode"] === "string") call.mode = body["mode"];
+      if (Array.isArray(body["warnings"])) call.warnings = body["warnings"].length;
+      const rigs = body["rigs"];
+      if (Array.isArray(rigs)) {
+        const items = (rigs[0] as { items?: unknown[] } | undefined)?.items;
+        call.parts = items?.length ?? 0;
+      } else if (Array.isArray(body["variantIds"])) {
+        call.parts = body["variantIds"].length;
+      } else if (Array.isArray(body["items"])) {
+        call.parts = body["items"].length;
+      }
+      if (route === "verify" && Array.isArray(body["checks"])) {
+        call.failedChecks = body["checks"].filter(
+          (check) => (check as { ok?: unknown }).ok === false,
+        ).length;
+      }
+    } catch {
+      // Not JSON: the status says enough.
+    }
+    return call;
+  }
+
+  /** A breadcrumb must never change or delay an answer. */
+  function observed(route: RigCall["route"], handler: Handler): Handler {
+    if (!deps.breadcrumb) return handler;
+    const crumb = deps.breadcrumb;
+    return async (request) => {
+      const startedMs = deps.now().getTime();
+      const response = await handler(request);
+      try {
+        crumb(await describeCall(route, response, startedMs));
+      } catch {
+        // Ignored on purpose.
+      }
+      return response;
+    };
+  }
+
+  return {
+    build: observed("build", build),
+    explain: observed("explain", explain),
+    verify: observed("verify", verify),
+  };
 }
 
 /* -------------------------------------------------------------------------- */

@@ -50,4 +50,20 @@ export function captureException(
   Sentry.captureException(error, context ? { extra: context } : undefined);
 }
 
+/**
+ * A breadcrumb for one rig builder call, attached to the next error event.
+ * Whatever is in `data` leaves the VM, so callers pass ids and counts only.
+ */
+export function addRigBreadcrumb(
+  data: Record<string, string | number | boolean | undefined>,
+  failed: boolean,
+): void {
+  Sentry.addBreadcrumb({
+    category: "rig",
+    message: `rig ${String(data["route"])}`,
+    level: failed ? "warning" : "info",
+    data,
+  });
+}
+
 export { Sentry };

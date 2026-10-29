@@ -1,0 +1,760 @@
+{
+  "requestId": "rb_0123456789abcdef01234567",
+  "profile": {
+    "discipline": "windsurf",
+    "weightKg": 82,
+    "skill": "intermediate",
+    "windMinKn": 15,
+    "windMaxKn": 25,
+    "boardKind": "freeride",
+    "source": {
+      "discipline": "form",
+      "windMinKn": "form",
+      "windMaxKn": "form",
+      "weightKg": "form",
+      "skill": "form",
+      "boardKind": "form"
+    }
+  },
+  "needs": [],
+  "rigs": [
+    {
+      "label": "Recommended",
+      "items": [
+        {
+          "role": "sail",
+          "productId": "gid://shopify/Product/104",
+          "variantId": 45500000012,
+          "title": "XO Sails - Experience TR Dacron Sail Only",
+          "variantTitle": "5.7 m2 / Fluo Yellow",
+          "price": "289.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 5.7 m² sail suits 82 kg riders in 15–25 knots.",
+          "url": "/products/xo-sails---experience-tr-dacron-sail-only",
+          "productUrl": "/products/xo-sails---experience-tr-dacron-sail-only",
+          "image": "https://cdn.example.test/104.jpg",
+          "imageUrl": "https://cdn.example.test/104.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "areaM2": 5.7
+          },
+          "facts": [
+            {
+              "field": "areaM2",
+              "label": "Sail area",
+              "value": "5.7 m²",
+              "derived": true
+            }
+          ],
+          "derived": [
+            "areaM2"
+          ]
+        },
+        {
+          "role": "mast",
+          "productId": "gid://shopify/Product/111",
+          "variantId": 45500000022,
+          "title": "Unifiber - HD RDM C75 Constant FL Curve Incl. Mastbag",
+          "variantTitle": "430",
+          "price": "539.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 430 cm RDM mast, chosen to go with the sail.",
+          "url": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
+          "productUrl": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
+          "image": "https://cdn.example.test/111.jpg",
+          "imageUrl": "https://cdn.example.test/111.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "lengthCm": 430,
+            "mastDiameter": "rdm",
+            "carbonPercent": 75
+          },
+          "facts": [
+            {
+              "field": "lengthCm",
+              "label": "Mast length",
+              "value": "430 cm",
+              "derived": true
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "RDM",
+              "derived": true
+            },
+            {
+              "field": "carbonPercent",
+              "label": "Carbon %",
+              "value": "75",
+              "derived": true
+            }
+          ],
+          "derived": [
+            "lengthCm",
+            "mastDiameter",
+            "carbonPercent"
+          ]
+        },
+        {
+          "role": "base",
+          "productId": "gid://shopify/Product/118",
+          "variantId": 45500000030,
+          "title": "Euro Pin Base",
+          "variantTitle": "Default Title",
+          "price": "39.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A mast base chosen for this mast.",
+          "url": "/products/euro-pin-base",
+          "productUrl": "/products/euro-pin-base",
+          "image": "https://cdn.example.test/118.jpg",
+          "imageUrl": "https://cdn.example.test/118.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "baseConnection": "euro_pin"
+          },
+          "facts": [
+            {
+              "field": "baseConnection",
+              "label": "Base connection",
+              "value": "euro pin"
+            }
+          ]
+        },
+        {
+          "role": "boom",
+          "productId": "gid://shopify/Product/121",
+          "variantId": 45500000033,
+          "title": "Boom 150-190",
+          "variantTitle": "Default Title",
+          "price": "219.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "This boom opens from 150 to 190 cm.",
+          "url": "/products/boom-150-190",
+          "productUrl": "/products/boom-150-190",
+          "image": "https://cdn.example.test/121.jpg",
+          "imageUrl": "https://cdn.example.test/121.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "boomMinCm": 150,
+            "boomMaxCm": 190,
+            "compatibleDiameters": [
+              "rdm",
+              "sdm"
+            ]
+          },
+          "facts": [
+            {
+              "field": "compatibleDiameters",
+              "label": "Fits masts",
+              "value": "RDM, SDM"
+            },
+            {
+              "field": "boomMinCm",
+              "label": "Boom range",
+              "value": "150–190 cm"
+            }
+          ]
+        },
+        {
+          "role": "board",
+          "productId": "gid://shopify/Product/134",
+          "variantId": 45500000048,
+          "title": "Free Board 105",
+          "variantTitle": "Default Title",
+          "price": "1299.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 105 L board suits 82 kg riders and takes this sail size.",
+          "url": "/products/free-board-105",
+          "productUrl": "/products/free-board-105",
+          "image": "https://cdn.example.test/134.jpg",
+          "imageUrl": "https://cdn.example.test/134.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "volumeL": 105,
+            "sailMinM2": 4.5,
+            "sailMaxM2": 6.5,
+            "finMinCm": 32,
+            "finMaxCm": 40,
+            "finBoxTypes": [
+              "deep_tuttle",
+              "tuttle"
+            ],
+            "riderMinKg": 70,
+            "riderMaxKg": 95
+          },
+          "facts": [
+            {
+              "field": "volumeL",
+              "label": "Volume",
+              "value": "105 L"
+            },
+            {
+              "field": "finBoxTypes",
+              "label": "Fin boxes",
+              "value": "deep tuttle, tuttle"
+            },
+            {
+              "field": "sailMinM2",
+              "label": "Sail range",
+              "value": "4.5–6.5 m²"
+            },
+            {
+              "field": "finMinCm",
+              "label": "Fin range",
+              "value": "32–40 cm"
+            },
+            {
+              "field": "riderMinKg",
+              "label": "Rider weight",
+              "value": "70–95 kg"
+            }
+          ]
+        },
+        {
+          "role": "fin",
+          "productId": "gid://shopify/Product/128",
+          "variantId": 45500000040,
+          "title": "Tuttle Fin 40",
+          "variantTitle": "40 cm",
+          "price": "109.00",
+          "currency": "EUR",
+          "available": true,
+          "quantity": 1,
+          "why": "A 40 cm tuttle fin for the board's fin box.",
+          "url": "/products/tuttle-fin-40",
+          "productUrl": "/products/tuttle-fin-40",
+          "image": "https://cdn.example.test/128.jpg",
+          "imageUrl": "https://cdn.example.test/128.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "finBox": "tuttle",
+            "finLengthCm": 40
+          },
+          "facts": [
+            {
+              "field": "finBox",
+              "label": "Fin box",
+              "value": "tuttle"
+            },
+            {
+              "field": "finLengthCm",
+              "label": "Fin length",
+              "value": "40 cm"
+            }
+          ]
+        }
+      ],
+      "total": "2494.00",
+      "currency": "EUR",
+      "checks": [
+        {
+          "id": "sail-fit",
+          "ok": true
+        },
+        {
+          "id": "board-fit",
+          "ok": true
+        },
+        {
+          "id": "board-sail-range",
+          "ok": true
+        },
+        {
+          "id": "rider-fit",
+          "ok": true
+        },
+        {
+          "id": "mast-boom-diameter",
+          "ok": true
+        },
+        {
+          "id": "fin-box",
+          "ok": true
+        },
+        {
+          "id": "fin-length",
+          "ok": true
+        }
+      ],
+      "unchecked": [
+        {
+          "id": "sail-mast-diameter",
+          "missing": [
+            {
+              "role": "sail",
+              "key": "recommended_mast_diameter"
+            }
+          ]
+        },
+        {
+          "id": "sail-mast-length",
+          "missing": [
+            {
+              "role": "sail",
+              "key": "recommended_mast_cm"
+            }
+          ]
+        },
+        {
+          "id": "sail-boom-range",
+          "missing": [
+            {
+              "role": "sail",
+              "key": "boom_min_cm"
+            },
+            {
+              "role": "sail",
+              "key": "boom_max_cm"
+            }
+          ]
+        }
+      ],
+      "alternatives": [
+        {
+          "role": "sail",
+          "productId": "gid://shopify/Product/101",
+          "variantId": 45500000003,
+          "title": "Aero Ride",
+          "variantTitle": "5.5 m2 / Orange",
+          "price": "599.00",
+          "currency": "EUR",
+          "why": "A 5.5 m² sail suits 82 kg riders in 15–25 knots.",
+          "url": "/products/aero-ride",
+          "productUrl": "/products/aero-ride",
+          "image": "https://cdn.example.test/101.jpg",
+          "imageUrl": "https://cdn.example.test/101.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "areaM2": 5.5,
+            "mastCm": 430,
+            "mastDiameter": "rdm",
+            "compatibleDiameters": [
+              "rdm"
+            ],
+            "boomMinCm": 160,
+            "boomMaxCm": 180
+          },
+          "facts": [
+            {
+              "field": "areaM2",
+              "label": "Sail area",
+              "value": "5.5 m²"
+            },
+            {
+              "field": "mastCm",
+              "label": "Recommended mast",
+              "value": "430 cm"
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "RDM"
+            },
+            {
+              "field": "compatibleDiameters",
+              "label": "Fits masts",
+              "value": "RDM"
+            },
+            {
+              "field": "boomMinCm",
+              "label": "Boom range",
+              "value": "160–180 cm"
+            }
+          ]
+        },
+        {
+          "role": "mast",
+          "productId": "gid://shopify/Product/112",
+          "variantId": 45500000024,
+          "title": "Unifiber - Mast Epoxy SDM",
+          "variantTitle": "472",
+          "price": "319.00",
+          "currency": "EUR",
+          "why": "A 472 cm SDM mast, chosen to go with the sail.",
+          "url": "/products/unifiber---mast-epoxy-sdm",
+          "productUrl": "/products/unifiber---mast-epoxy-sdm",
+          "image": "https://cdn.example.test/112.jpg",
+          "imageUrl": "https://cdn.example.test/112.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "mastDiameter": "sdm",
+            "lengthCm": 472
+          },
+          "facts": [
+            {
+              "field": "lengthCm",
+              "label": "Mast length",
+              "value": "472 cm",
+              "derived": true
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "SDM"
+            }
+          ],
+          "derived": [
+            "lengthCm"
+          ]
+        },
+        {
+          "role": "mast",
+          "productId": "gid://shopify/Product/113",
+          "variantId": 45500000025,
+          "title": "Carbon Mast RDM 370",
+          "variantTitle": "370",
+          "price": "499.00",
+          "currency": "EUR",
+          "why": "A 370 cm RDM mast, chosen to go with the sail.",
+          "url": "/products/carbon-mast-rdm-370",
+          "productUrl": "/products/carbon-mast-rdm-370",
+          "image": "https://cdn.example.test/113.jpg",
+          "imageUrl": "https://cdn.example.test/113.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "lengthCm": 370,
+            "mastDiameter": "rdm",
+            "mastImcs": 19
+          },
+          "facts": [
+            {
+              "field": "lengthCm",
+              "label": "Mast length",
+              "value": "370 cm"
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "RDM"
+            },
+            {
+              "field": "mastImcs",
+              "label": "IMCS",
+              "value": "19"
+            }
+          ]
+        },
+        {
+          "role": "mast",
+          "productId": "gid://shopify/Product/111",
+          "variantId": 45500000021,
+          "title": "Unifiber - HD RDM C75 Constant FL Curve Incl. Mastbag",
+          "variantTitle": "400",
+          "price": "529.00",
+          "currency": "EUR",
+          "why": "A 400 cm RDM mast, chosen to go with the sail.",
+          "url": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
+          "productUrl": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
+          "image": "https://cdn.example.test/111.jpg",
+          "imageUrl": "https://cdn.example.test/111.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "lengthCm": 400,
+            "mastDiameter": "rdm",
+            "carbonPercent": 75
+          },
+          "facts": [
+            {
+              "field": "lengthCm",
+              "label": "Mast length",
+              "value": "400 cm",
+              "derived": true
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "RDM",
+              "derived": true
+            },
+            {
+              "field": "carbonPercent",
+              "label": "Carbon %",
+              "value": "75",
+              "derived": true
+            }
+          ],
+          "derived": [
+            "lengthCm",
+            "mastDiameter",
+            "carbonPercent"
+          ]
+        },
+        {
+          "role": "base",
+          "productId": "gid://shopify/Product/120",
+          "variantId": 45500000032,
+          "title": "Base no data",
+          "variantTitle": "Default Title",
+          "price": "29.00",
+          "currency": "EUR",
+          "why": "A mast base chosen for this mast.",
+          "url": "/products/base-no-data",
+          "productUrl": "/products/base-no-data",
+          "image": "https://cdn.example.test/120.jpg",
+          "imageUrl": "https://cdn.example.test/120.jpg",
+          "vendor": null,
+          "specs": {},
+          "facts": []
+        },
+        {
+          "role": "base",
+          "productId": "gid://shopify/Product/119",
+          "variantId": 45500000031,
+          "title": "Tendon Base",
+          "variantTitle": "Default Title",
+          "price": "49.00",
+          "currency": "EUR",
+          "why": "A mast base chosen for this mast.",
+          "url": "/products/tendon-base",
+          "productUrl": "/products/tendon-base",
+          "image": "https://cdn.example.test/119.jpg",
+          "imageUrl": "https://cdn.example.test/119.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "baseConnection": "tendon"
+          },
+          "facts": [
+            {
+              "field": "baseConnection",
+              "label": "Base connection",
+              "value": "tendon"
+            }
+          ]
+        },
+        {
+          "role": "boom",
+          "productId": "gid://shopify/Product/124",
+          "variantId": 45500000036,
+          "title": "Boom 100-130 Kids",
+          "variantTitle": "Default Title",
+          "price": "129.00",
+          "currency": "EUR",
+          "why": "This boom opens from 100 to 130 cm.",
+          "url": "/products/boom-100-130-kids",
+          "productUrl": "/products/boom-100-130-kids",
+          "image": "https://cdn.example.test/124.jpg",
+          "imageUrl": "https://cdn.example.test/124.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "boomMinCm": 100,
+            "boomMaxCm": 130
+          },
+          "facts": [
+            {
+              "field": "boomMinCm",
+              "label": "Boom range",
+              "value": "100–130 cm"
+            }
+          ]
+        },
+        {
+          "role": "boom",
+          "productId": "gid://shopify/Product/122",
+          "variantId": 45500000034,
+          "title": "Boom 140-190",
+          "variantTitle": "Default Title",
+          "price": "199.00",
+          "currency": "EUR",
+          "why": "This boom opens from 140 to 190 cm.",
+          "url": "/products/boom-140-190",
+          "productUrl": "/products/boom-140-190",
+          "image": "https://cdn.example.test/122.jpg",
+          "imageUrl": "https://cdn.example.test/122.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "boomMinCm": 140,
+            "boomMaxCm": 190,
+            "compatibleDiameters": [
+              "rdm"
+            ]
+          },
+          "facts": [
+            {
+              "field": "compatibleDiameters",
+              "label": "Fits masts",
+              "value": "RDM"
+            },
+            {
+              "field": "boomMinCm",
+              "label": "Boom range",
+              "value": "140–190 cm"
+            }
+          ]
+        },
+        {
+          "role": "boom",
+          "productId": "gid://shopify/Product/123",
+          "variantId": 45500000035,
+          "title": "Boom 160-210",
+          "variantTitle": "Default Title",
+          "price": "259.00",
+          "currency": "EUR",
+          "why": "This boom opens from 160 to 210 cm.",
+          "url": "/products/boom-160-210",
+          "productUrl": "/products/boom-160-210",
+          "image": "https://cdn.example.test/123.jpg",
+          "imageUrl": "https://cdn.example.test/123.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "boomMinCm": 160,
+            "boomMaxCm": 210,
+            "compatibleDiameters": [
+              "rdm",
+              "sdm"
+            ]
+          },
+          "facts": [
+            {
+              "field": "compatibleDiameters",
+              "label": "Fits masts",
+              "value": "RDM, SDM"
+            },
+            {
+              "field": "boomMinCm",
+              "label": "Boom range",
+              "value": "160–210 cm"
+            }
+          ]
+        },
+        {
+          "role": "board",
+          "productId": "gid://shopify/Product/136",
+          "variantId": 45500000050,
+          "title": "Free Board 115",
+          "variantTitle": "Default Title",
+          "price": "1399.00",
+          "currency": "EUR",
+          "why": "A 115 L board suits 82 kg riders and takes this sail size.",
+          "url": "/products/free-board-115",
+          "productUrl": "/products/free-board-115",
+          "image": "https://cdn.example.test/136.jpg",
+          "imageUrl": "https://cdn.example.test/136.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "volumeL": 115,
+            "sailMinM2": 5,
+            "sailMaxM2": 7.5,
+            "finBoxTypes": [
+              "tuttle",
+              "us_box"
+            ]
+          },
+          "facts": [
+            {
+              "field": "volumeL",
+              "label": "Volume",
+              "value": "115 L"
+            },
+            {
+              "field": "finBoxTypes",
+              "label": "Fin boxes",
+              "value": "tuttle, us box"
+            },
+            {
+              "field": "sailMinM2",
+              "label": "Sail range",
+              "value": "5–7.5 m²"
+            }
+          ]
+        },
+        {
+          "role": "fin",
+          "productId": "gid://shopify/Product/127",
+          "variantId": 45500000039,
+          "title": "Tuttle Fin 36",
+          "variantTitle": "36 cm",
+          "price": "99.00",
+          "currency": "EUR",
+          "why": "A 36 cm tuttle fin for the board's fin box.",
+          "url": "/products/tuttle-fin-36",
+          "productUrl": "/products/tuttle-fin-36",
+          "image": "https://cdn.example.test/127.jpg",
+          "imageUrl": "https://cdn.example.test/127.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "finBox": "tuttle",
+            "finLengthCm": 36
+          },
+          "facts": [
+            {
+              "field": "finBox",
+              "label": "Fin box",
+              "value": "tuttle"
+            },
+            {
+              "field": "finLengthCm",
+              "label": "Fin length",
+              "value": "36 cm"
+            }
+          ]
+        },
+        {
+          "role": "fin",
+          "productId": "gid://shopify/Product/130",
+          "variantId": 45500000042,
+          "title": "Deep Tuttle Fin 38",
+          "variantTitle": "38 cm",
+          "price": "119.00",
+          "currency": "EUR",
+          "why": "A 38 cm deep_tuttle fin for the board's fin box.",
+          "url": "/products/deep-tuttle-fin-38",
+          "productUrl": "/products/deep-tuttle-fin-38",
+          "image": "https://cdn.example.test/130.jpg",
+          "imageUrl": "https://cdn.example.test/130.jpg",
+          "vendor": null,
+          "specs": {
+            "finBox": "deep_tuttle",
+            "finLengthCm": 38
+          },
+          "facts": [
+            {
+              "field": "finBox",
+              "label": "Fin box",
+              "value": "deep tuttle"
+            },
+            {
+              "field": "finLengthCm",
+              "label": "Fin length",
+              "value": "38 cm"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "unmet": [],
+  "warnings": [
+    {
+      "code": "stock_not_read",
+      "message": "Stock has not been read for some parts yet, so they were left out."
+    },
+    {
+      "code": "unchecked_sail_recommended_mast_diameter",
+      "message": "Not checked: the sail has no recommended_mast_diameter, so that fit is unknown."
+    },
+    {
+      "code": "unchecked_sail_recommended_mast_cm",
+      "message": "Not checked: the sail has no recommended_mast_cm, so that fit is unknown."
+    },
+    {
+      "code": "unchecked_sail_boom_min_cm",
+      "message": "Not checked: the sail has no boom_min_cm, so that fit is unknown."
+    },
+    {
+      "code": "unchecked_sail_boom_max_cm",
+      "message": "Not checked: the sail has no boom_max_cm, so that fit is unknown."
+    }
+  ],
+  "mode": "plain",
+  "snapshotAgeMinutes": 10
+}

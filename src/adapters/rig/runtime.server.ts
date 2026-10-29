@@ -11,6 +11,7 @@ import {
   saveRigRequest,
 } from "~/adapters/db/repositories/rig.server";
 import { getLogger } from "~/adapters/observability/logger.server";
+import { addRigBreadcrumb } from "~/adapters/observability/sentry.server";
 import { createRigApi, type RigStore } from "~/adapters/rig/api.server";
 import { RateLimiter } from "~/adapters/rig/rate-limit";
 import shopify from "~/adapters/shopify/shopify.server";
@@ -75,6 +76,7 @@ export function rigApi(): ReturnType<typeof createRigApi> {
       now: () => new Date(),
       log: (fields, message) => getLogger().info(fields, message),
       logError: (fields, message) => getLogger().error(fields, message),
+      breadcrumb: (call) => addRigBreadcrumb({ ...call }, call.status >= 400),
     });
   }
   return api;
