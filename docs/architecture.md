@@ -66,7 +66,8 @@ Products          /app/products         the catalogue snapshot as a list; /app/p
 Product setup     /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
-                                        /attributes/:id one attribute), /sets and /settings
+                                        /attributes/:id one attribute), /sets, /definitions
+                                        (Shopify metafield definitions), /menu and /settings
 Translations      /app/translations     the store's languages (docs/translations.md); its own
                                         navigation reaches /add, /languages/:locale, /editor,
                                         /translate, /syncs (/:syncId), /glossary and /usage
@@ -653,7 +654,12 @@ inherited down a tree of types — `docs/attributes.md`. Pure rules in
 as a function over the document); one row in `attribute_schema` with a
 revision every write is conditional on; screens under `app.product-setup.*`
 sharing `web/lib/attributes.server.ts` as the one path that changes it.
-Nothing here reads or writes Shopify yet.
+The plan meets Shopify in the Definitions tab (`domain/attributes/definitions.ts`,
+`adapters/shopify/metafield-definitions.ts`, `web/lib/definitions.server.ts`),
+the product page's value writes, the store menu, and AI autofill, whose bulk
+producer is the operator script `scripts/fill-attributes.ts` over
+`adapters/products/fill-runner.server.ts` and the shared claude-pool runner
+`adapters/ai/claude-pool.server.ts`. See docs/attributes.md.
 
 ### Translations
 
@@ -759,6 +765,11 @@ history under `prisma/migrations/`. Major groups are:
 - tenancy and auth: `Shop` (including `setup_completed_at`, the activation
   boundary, and `setup_step`, guided setup's own place-keeping), encrypted
   `Session`, `MetakockaCredential`;
+- rig builder: `RigRequest` (`rig_request`, no buyer text, purged after 90
+  days), `Shop.rigBuilderEnabled`, and the snapshot columns that carry
+  options and stock on `CatalogVariant` (docs/rig-builder.md); `AiUsage`
+  has a `provider` (`openai` for translation, `claude-pool` for the rig
+  builder) and the translation usage pages read only `openai`;
 - audit and delivery: `EventLog`, `IdempotencyKey`, pg-boss queues;
 - supply and inventory: `SupplySource`, `SupplySetting`, `SupplyLevel`, cached
   warehouse/profit-centre registers;

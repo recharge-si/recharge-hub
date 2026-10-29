@@ -876,7 +876,7 @@ export interface UsageWrite {
   resourceType: string | null;
   sourceLocale: string;
   targetLocale: string;
-  purpose: "translate" | "detect" | "profile";
+  purpose: "translate" | "detect" | "profile" | "autofill";
   /** The prompt version the request was built with; null for requests without one. */
   promptVersion: string | null;
   model: string;
@@ -928,6 +928,8 @@ export interface UsageScope {
 function usageWhere(shopId: string, scope: UsageScope): Prisma.AiUsageWhereInput {
   return {
     shopId,
+    // The rig builder's claude-pool rows share the table (docs/rig-builder.md).
+    provider: "openai",
     ...(scope.from || scope.to
       ? {
           createdAt: {
@@ -943,6 +945,7 @@ function usageWhere(shopId: string, scope: UsageScope): Prisma.AiUsageWhereInput
 
 function usageSql(shopId: string, scope: UsageScope): Prisma.Sql {
   return Prisma.sql`u."shop_id" = ${shopId}
+    AND u."provider" = 'openai'
     ${scope.from ? Prisma.sql`AND u."created_at" >= ${scope.from}` : Prisma.empty}
     ${scope.to ? Prisma.sql`AND u."created_at" < ${scope.to}` : Prisma.empty}
     ${scope.syncId ? Prisma.sql`AND u."sync_id" = ${scope.syncId}` : Prisma.empty}

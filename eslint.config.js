@@ -18,7 +18,7 @@ export default tseslint.config(
   js.configs.recommended,
   ...tseslint.configs.recommended,
   {
-    files: ["src/**/*.{ts,tsx}", "tests/**/*.ts"],
+    files: ["src/**/*.{ts,tsx}", "tests/**/*.ts", "scripts/**/*.ts"],
     plugins: { import: importPlugin },
     settings: {
       "import/resolver": {

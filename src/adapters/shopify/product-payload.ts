@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { toMinorUnits } from "~/adapters/metakocka/values";
+import { plainDescription } from "~/adapters/shopify/catalogue";
 import type { ProductUpdate } from "~/adapters/db/repositories/catalogue.server";
 
 /**
@@ -24,6 +25,10 @@ const productUpdateSchema = z.object({
     .optional(),
   updated_at: z.string().nullable().optional(),
   image: z.object({ src: z.string() }).nullable().optional(),
+  body_html: z.string().nullable().optional(),
+  options: z
+    .array(z.object({ name: z.string(), position: z.number().optional() }))
+    .optional(),
   variants: z
     .array(
       z.object({
@@ -37,6 +42,12 @@ const productUpdateSchema = z.object({
           .union([z.string(), z.number()])
           .nullable()
           .optional(),
+        option1: z.string().nullable().optional(),
+        option2: z.string().nullable().optional(),
+        option3: z.string().nullable().optional(),
+        inventory_quantity: z.number().int().nullable().optional(),
+        inventory_management: z.string().nullable().optional(),
+        inventory_policy: z.string().nullable().optional(),
       }),
     )
     .optional(),
@@ -73,6 +84,7 @@ export function parseProductUpdate(payload: unknown): ProductUpdate {
     status: product.status ? product.status.toUpperCase() : null,
     tags: tagsFrom(product.tags),
     imageUrl: product.image?.src ?? null,
+    description: plainDescription(product.body_html),
     shopifyUpdatedAt: product.updated_at ?? null,
     variants: (product.variants ?? []).map((variant) => ({
       variantId: variantGid(variant.id, variant.admin_graphql_api_id),
@@ -85,8 +97,48 @@ export function parseProductUpdate(payload: unknown): ProductUpdate {
         variant.compare_at_price === undefined
           ? null
           : toMinorUnits(variant.compare_at_price),
+      options: optionsFrom(product.options ?? [], [
+        variant.option1,
+        variant.option2,
+        variant.option3,
+      ]),
+      ...stockFrom(variant),
     })),
   };
+}
+
+/** The variant's chosen values paired with the product's option names, in order. */
+function optionsFrom(
+  names: Array<{ name: string; position?: number | undefined }>,
+  values: Array<string | null | undefined>,
+): Array<{ name: string; value: string }> {
+  const ordered = [...names].sort(
+    (a, b) => (a.position ?? 0) - (b.position ?? 0),
+  );
+  const out: Array<{ name: string; value: string }> = [];
+  ordered.forEach((option, index) => {
+    const value = values[index];
+    if (value) out.push({ name: option.name, value });
+  });
+  return out;
+}
+
+/**
+ * Stock as the snapshot holds it. The payload has no `availableForSale`, so
+ * it is read the way Shopify sells: a variant that does not track inventory is
+ * always available; a tracked one when units remain or overselling is allowed.
+ * The quantity is only meaningful for a tracked variant.
+ */
+function stockFrom(variant: {
+  inventory_quantity?: number | null | undefined;
+  inventory_management?: string | null | undefined;
+  inventory_policy?: string | null | undefined;
+}): { inventoryQuantity: number | null; availableForSale: boolean } {
+  const tracked = Boolean(variant.inventory_management);
+  const quantity = tracked ? (variant.inventory_quantity ?? 0) : null;
+  const available =
+    !tracked || (quantity ?? 0) > 0 || variant.inventory_policy === "continue";
+  return { inventoryQuantity: quantity, availableForSale: available };
 }
 
 export function parseProductDelete(payload: unknown): { productId: string } {

@@ -33,8 +33,10 @@ import {
 import {
   assignableTypes,
   attributeChanges,
+  namedWriteErrors,
   sameInput,
   type AttributeChanges,
+  type AttributeField,
   type AttributeInputs,
 } from "~/domain/products/attribute-values";
 import {
@@ -547,7 +549,7 @@ async function runProductAction(input: {
     if (!outcome.ok)
       return {
         ok: false,
-        message: `${saved.length > 0 ? `Saved the ${saved.join(" and ")}, but ` : ""}Shopify refused the product details: ${outcome.errors.map((e) => e.message).join("; ")}`,
+        message: `${saved.length > 0 ? `Saved the ${saved.join(" and ")}, but ` : ""}Shopify refused the product details: ${namedWriteErrors(outcome.errors, attributePlan.writes, attributePlan.fields).join("; ")}`,
       };
     const count = attributePlan.writes.length + attributePlan.clears.length;
     await appendEvent(principal, {
@@ -579,7 +581,10 @@ async function planAttributeSave(
     inputs: AttributeInputs;
   },
 ): Promise<
-  | ({ ok: true; stale: boolean } & Pick<AttributeChanges, "writes" | "clears">)
+  | ({ ok: true; stale: boolean; fields: AttributeField[] } & Pick<
+      AttributeChanges,
+      "writes" | "clears"
+    >)
   | Extract<ProductActionResult, { ok: false }>
 > {
   const [{ schema }, chosenTypeId] = await Promise.all([
@@ -622,5 +627,6 @@ async function planAttributeSave(
     ),
     writes: planned.writes,
     clears: planned.clears,
+    fields: now.fields,
   };
 }

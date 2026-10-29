@@ -3,7 +3,10 @@ import { randomUUID } from "node:crypto";
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
-import type { CatalogueProductRecord } from "~/adapters/shopify/catalogue";
+import type {
+  CatalogueProductRecord,
+  VariantOption,
+} from "~/adapters/shopify/catalogue";
 import type { PriceList } from "~/adapters/shopify/price-lists";
 import type { CatalogueVariantFacts, MetafieldMap } from "~/domain/sales/types";
 import { shopDomainOf, type Principal } from "~/domain/types";
@@ -24,7 +27,7 @@ async function shopIdFor(principal: Principal): Promise<string> {
 }
 
 /** JSON in, `MetafieldMap` out, tolerating an old or malformed column. */
-function metafieldsFrom(json: Prisma.JsonValue | null): MetafieldMap {
+export function metafieldsFrom(json: Prisma.JsonValue | null): MetafieldMap {
   if (!json || typeof json !== "object" || Array.isArray(json)) return {};
   const map: MetafieldMap = {};
   for (const [name, entry] of Object.entries(json)) {
@@ -175,6 +178,8 @@ export async function replaceCatalogue(
       categoryName: product.categoryName,
       metafields: toJson(product.metafields),
       imageUrl: product.imageUrl,
+      onlineStoreUrl: product.onlineStoreUrl,
+      description: product.description,
       shopifyUpdatedAt: product.shopifyUpdatedAt
         ? new Date(product.shopifyUpdatedAt)
         : null,
@@ -193,6 +198,9 @@ export async function replaceCatalogue(
         compareAtMinor: variant.compareAtMinor,
         currency,
         metafields: toJson(variant.metafields),
+        options: variant.options.map((option) => ({ ...option })),
+        inventoryQuantity: variant.inventoryQuantity,
+        availableForSale: variant.availableForSale,
         observedAt: now,
       });
     }
@@ -263,6 +271,8 @@ export interface ProductUpdate {
   status: string | null;
   tags: string[];
   imageUrl: string | null;
+  /** Plain text, capped; the webhook carries `body_html`. */
+  description: string | null;
   shopifyUpdatedAt: string | null;
   variants: Array<{
     variantId: string;
@@ -271,6 +281,9 @@ export interface ProductUpdate {
     title: string | null;
     priceMinor: number;
     compareAtMinor: number | null;
+    options: VariantOption[];
+    inventoryQuantity: number | null;
+    availableForSale: boolean;
   }>;
 }
 
@@ -304,6 +317,7 @@ export async function applyProductUpdate(
       status: true,
       tags: true,
       imageUrl: true,
+      description: true,
       variants: {
         select: {
           shopifyVariantId: true,
@@ -312,6 +326,9 @@ export async function applyProductUpdate(
           title: true,
           priceMinor: true,
           compareAtMinor: true,
+          options: true,
+          inventoryQuantity: true,
+          availableForSale: true,
         },
       },
     },
@@ -355,6 +372,7 @@ export async function applyProductUpdate(
         tags: update.tags,
         collectionIds: [],
         imageUrl: update.imageUrl,
+        description: update.description,
         shopifyUpdatedAt: update.shopifyUpdatedAt
           ? new Date(update.shopifyUpdatedAt)
           : null,
@@ -368,6 +386,7 @@ export async function applyProductUpdate(
         status: update.status,
         tags: update.tags,
         imageUrl: update.imageUrl,
+        description: update.description,
         shopifyUpdatedAt: update.shopifyUpdatedAt
           ? new Date(update.shopifyUpdatedAt)
           : null,
@@ -399,6 +418,9 @@ export async function applyProductUpdate(
           priceMinor: variant.priceMinor,
           compareAtMinor: variant.compareAtMinor,
           currency,
+          options: variant.options.map((option) => ({ ...option })),
+          inventoryQuantity: variant.inventoryQuantity,
+          availableForSale: variant.availableForSale,
           observedAt: now,
         },
         update: {
@@ -408,6 +430,9 @@ export async function applyProductUpdate(
           title: variant.title,
           priceMinor: variant.priceMinor,
           compareAtMinor: variant.compareAtMinor,
+          options: variant.options.map((option) => ({ ...option })),
+          inventoryQuantity: variant.inventoryQuantity,
+          availableForSale: variant.availableForSale,
           observedAt: now,
         },
       });
@@ -426,6 +451,7 @@ function sameProduct(
     status: string | null;
     tags: string[];
     imageUrl: string | null;
+    description: string | null;
     variants: Array<{
       shopifyVariantId: string;
       sku: string | null;
@@ -433,6 +459,9 @@ function sameProduct(
       title: string | null;
       priceMinor: number;
       compareAtMinor: number | null;
+      options: Prisma.JsonValue | null;
+      inventoryQuantity: number | null;
+      availableForSale: boolean | null;
     }>;
   },
   update: ProductUpdate,
@@ -444,6 +473,7 @@ function sameProduct(
     existing.productType !== update.productType ||
     existing.status !== update.status ||
     existing.imageUrl !== update.imageUrl ||
+    existing.description !== update.description ||
     existing.tags.length !== update.tags.length ||
     existing.tags.some((tag, index) => tag !== update.tags[index]) ||
     existing.variants.length !== update.variants.length
@@ -459,7 +489,10 @@ function sameProduct(
       have.barcode === variant.barcode &&
       have.title === variant.title &&
       have.priceMinor === variant.priceMinor &&
-      have.compareAtMinor === variant.compareAtMinor
+      have.compareAtMinor === variant.compareAtMinor &&
+      have.inventoryQuantity === variant.inventoryQuantity &&
+      have.availableForSale === variant.availableForSale &&
+      JSON.stringify(have.options ?? []) === JSON.stringify(variant.options)
     );
   });
 }

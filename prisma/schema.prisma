@@ -161,6 +161,12 @@ model Shop {
   translationTerms        TranslationTerm[]
   translationMemory       TranslationMemory[]
   aiUsage                 AiUsage[]
+  rigRequests             RigRequest[]
+
+  /// The rig builder on the storefront (docs/rig-builder.md § Readiness): off
+  /// until a person turns it on, and it cannot be turned on while the
+  /// catalogue is not ready. The proxy answers 503 `not_ready` while it is off.
+  rigBuilderEnabled Boolean @default(false) @map("rig_builder_enabled")
 
   @@map("shop")
 }
@@ -2214,6 +2220,11 @@ model CatalogProduct {
   /// `{ "namespace.key": { type, value } }`.
   metafields       Json?
   imageUrl         String?  @map("image_url")
+  /// The storefront address, when the product is published to the online store.
+  onlineStoreUrl   String?  @map("online_store_url")
+  /// Plain text of the description, capped at 2000 characters (the rig
+  /// builder reads it; docs/rig-builder.md § Snapshot).
+  description      String?
 
   shopifyUpdatedAt DateTime? @map("shopify_updated_at")
   observedAt       DateTime  @default(now()) @map("observed_at")
@@ -2230,15 +2241,22 @@ model CatalogVariant {
   shopId    String @map("shop_id")
   productId String @map("product_id")
 
-  shopifyVariantId String  @map("shopify_variant_id")
-  sku              String?
-  barcode          String?
-  title            String?
-  priceMinor       Int     @map("price_minor")
-  compareAtMinor   Int?    @map("compare_at_minor")
-  currency         String
+  shopifyVariantId  String   @map("shopify_variant_id")
+  sku               String?
+  barcode           String?
+  title             String?
+  priceMinor        Int      @map("price_minor")
+  compareAtMinor    Int?     @map("compare_at_minor")
+  currency          String
   /// `{ "namespace.key": { type, value } }`.
-  metafields       Json?
+  metafields        Json?
+  /// `[{ "name": "Size", "value": "5.8" }]`, Shopify's `selectedOptions`.
+  options           Json?
+  /// Units Shopify holds in total. Null on rows read before the column
+  /// existed, and for a variant that does not track inventory.
+  inventoryQuantity Int?     @map("inventory_quantity")
+  /// Shopify's `availableForSale`. Null on rows read before the column existed.
+  availableForSale  Boolean? @map("available_for_sale")
 
   observedAt DateTime @default(now()) @map("observed_at")
 
@@ -2378,19 +2396,23 @@ model ProductAutofill {
   /// `queued`, `running`, `ready`, `applied`, `discarded` or `failed`.
   status         String
   /// The suggested type, or the type a person had already chosen.
-  typeId         String?  @map("type_id")
+  typeId         String?   @map("type_id")
   /// `suggested` (the categorizer chose it) or `kept` (a person's choice).
-  typeOrigin     String?  @map("type_origin")
-  typeConfidence Float?   @map("type_confidence")
-  typeReason     String?  @map("type_reason")
+  typeOrigin     String?   @map("type_origin")
+  typeConfidence Float?    @map("type_confidence")
+  typeReason     String?   @map("type_reason")
   /// `[{ key, attributeId, variantId, name, input, display }]`.
-  values         Json     @default("[]")
+  values         Json      @default("[]")
   /// Who suggested it: `export-portal`.
   engine         String?
+  /// Where the suggestion came from: `export-portal` or `claude-pool`.
+  source         String?
+  /// The model that answered, as the producer reported it (null for the portal).
+  model          String?
   error          String?
-  requestedBy    String?  @map("requested_by")
-  decidedBy      String?  @map("decided_by")
-  requestedAt    DateTime @default(now()) @map("requested_at")
+  requestedBy    String?   @map("requested_by")
+  decidedBy      String?   @map("decided_by")
+  requestedAt    DateTime  @default(now()) @map("requested_at")
   decidedAt      DateTime? @map("decided_at")
 
   createdAt DateTime @default(now()) @map("created_at")
@@ -2937,6 +2959,12 @@ model AiUsage {
   pricingVersion      String? @map("pricing_version")
   estimatedCostMicros BigInt? @map("estimated_cost_micros")
 
+  /// Who answered: `openai` for translation, `claude-pool` for the rig
+  /// builder. The translation usage pages read only `openai` rows.
+  provider  String @default("openai")
+  /// Wall-clock milliseconds of the request, where the provider is timed.
+  latencyMs Int?   @map("latency_ms")
+
   createdAt DateTime @default(now()) @map("created_at")
 
   shop Shop             @relation(fields: [shopId], references: [id], onDelete: Cascade)
@@ -2944,5 +2972,37 @@ model AiUsage {
 
   @@index([shopId, createdAt])
   @@index([syncId])
+  @@index([shopId, provider, createdAt])
   @@map("ai_usage")
+}
+
+/// One rig-builder request (docs/rig-builder.md § Storage and privacy). It
+/// holds the profile the engine ran on and the variants it chose, never what
+/// the buyer typed: there is no text column, and the IP is a salted hash.
+/// Nothing links it to a customer, so the privacy webhooks need no change.
+/// Rows older than 90 days are purged by the `purge-rig-requests` job.
+model RigRequest {
+  /// `rb_` plus 24 hex characters; the storefront puts it on the cart lines as `_rig`.
+  id     String @id
+  shopId String @map("shop_id")
+
+  createdAt   DateTime  @default(now()) @map("created_at")
+  /// Set when the explain call has run, whatever it produced.
+  explainedAt DateTime? @map("explained_at")
+
+  profile        Json
+  /// Numeric Shopify variant ids of the rig, in rig order.
+  rigVariantIds  BigInt[] @map("rig_variant_ids")
+  /// `plain` (template sentences) or `ai`.
+  mode           String
+  ipHash         String   @map("ip_hash")
+  latencyMs      Int      @map("latency_ms")
+  /// Pool capacity is not billed per call, so this stays null for claude-pool.
+  aiCostMicroEur Int?     @map("ai_cost_micro_eur")
+
+  shop Shop @relation(fields: [shopId], references: [id], onDelete: Cascade)
+
+  @@index([shopId, createdAt])
+  @@index([createdAt])
+  @@map("rig_request")
 }

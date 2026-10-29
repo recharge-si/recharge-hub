@@ -26,6 +26,10 @@ export interface AutofillState {
   typeReason: string | null;
   values: AutofillValue[];
   engine: string | null;
+  /** `export-portal` or `claude-pool`; null on rows made before it was recorded. */
+  source: string | null;
+  /** The model that answered, when the producer reports one. */
+  model: string | null;
   error: string | null;
   requestedAt: Date;
   decidedAt: Date | null;
@@ -58,6 +62,8 @@ function stateOf(row: Row): AutofillState {
     typeReason: row.typeReason,
     values: values.success ? values.data : [],
     engine: row.engine,
+    source: row.source,
+    model: row.model,
     error: row.error,
     requestedAt: row.requestedAt,
     decidedAt: row.decidedAt,
@@ -203,6 +209,8 @@ const blank = {
   typeReason: null,
   values: [],
   engine: null,
+  source: null,
+  model: null,
   error: null,
   decidedBy: null,
   decidedAt: null,
@@ -268,11 +276,17 @@ export async function saveAutofillSuggestion(
     typeReason: string | null;
     values: AutofillValue[];
     engine: string;
+    /** Defaults to the engine. */
+    source?: string;
+    /** The model the producer reports, if it does. */
+    model?: string | null;
   },
 ): Promise<void> {
   const shopId = await shopIdOf(principal);
   const data = {
     ...suggestion,
+    source: suggestion.source ?? suggestion.engine,
+    model: suggestion.model ?? null,
     values: suggestion.values as unknown as Prisma.InputJsonValue,
     status: "ready",
     error: null,
@@ -290,12 +304,42 @@ export async function failAutofill(
   principal: Principal,
   productId: string,
   error: string,
+  source: string | null = null,
 ): Promise<void> {
   const shopId = await shopIdOf(principal);
   await prisma.productAutofill.upsert({
     where: { shopId_productId: { shopId, productId } },
-    create: { shopId, productId, status: "failed", error },
-    update: { ...blank, status: "failed", error },
+    create: { shopId, productId, status: "failed", error, source },
+    update: { ...blank, status: "failed", error, source },
+  });
+}
+
+/**
+ * A producer asked and found nothing to suggest. Recorded as decided, so the
+ * review queue does not show it and a resumed run does not ask again.
+ */
+export async function recordNothingSuggested(
+  principal: Principal,
+  productId: string,
+  producer: { source: string; model: string | null },
+  typeId: string | null,
+): Promise<void> {
+  const shopId = await shopIdOf(principal);
+  const data = {
+    ...blank,
+    status: "discarded",
+    typeId,
+    typeOrigin: typeId ? "kept" : null,
+    engine: producer.source,
+    source: producer.source,
+    model: producer.model,
+    decidedBy: producer.source,
+    decidedAt: new Date(),
+  };
+  await prisma.productAutofill.upsert({
+    where: { shopId_productId: { shopId, productId } },
+    create: { shopId, productId, ...data },
+    update: data,
   });
 }
 

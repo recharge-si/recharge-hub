@@ -1,0 +1,1 @@
+{"weightKg":"85","skill":"srednje","windMinKn":"12","windMaxKn":"20"}

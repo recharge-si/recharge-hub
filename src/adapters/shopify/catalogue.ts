@@ -25,6 +25,8 @@ export const CATALOGUE_BULK_QUERY = `
           id
           title
           handle
+          onlineStoreUrl
+          descriptionHtml
           vendor
           productType
           status
@@ -47,6 +49,9 @@ export const CATALOGUE_BULK_QUERY = `
                 title
                 price
                 compareAtPrice
+                selectedOptions { name value }
+                inventoryQuantity
+                availableForSale
                 metafields {
                   edges { node { id namespace key type value } }
                 }
@@ -233,6 +238,8 @@ const productLineSchema = z.object({
   id: z.string(),
   title: z.string(),
   handle: z.string().nullable().optional(),
+  onlineStoreUrl: z.string().nullable().optional(),
+  descriptionHtml: z.string().nullable().optional(),
   vendor: z.string().nullable().optional(),
   productType: z.string().nullable().optional(),
   status: z.string().nullable().optional(),
@@ -260,6 +267,12 @@ const variantLineSchema = z.object({
   title: z.string().nullable().optional(),
   price: z.string(),
   compareAtPrice: z.string().nullable().optional(),
+  selectedOptions: z
+    .array(z.object({ name: z.string(), value: z.string() }))
+    .nullable()
+    .optional(),
+  inventoryQuantity: z.number().int().nullable().optional(),
+  availableForSale: z.boolean().nullable().optional(),
 });
 
 const metafieldLineSchema = z.object({
@@ -284,13 +297,26 @@ export interface CatalogueVariantRecord {
   title: string | null;
   priceMinor: number;
   compareAtMinor: number | null;
+  /** Shopify's `selectedOptions`, in the product's option order. */
+  options: VariantOption[];
+  /** Null when Shopify does not track inventory for the variant. */
+  inventoryQuantity: number | null;
+  availableForSale: boolean;
   metafields: MetafieldMap;
+}
+
+export interface VariantOption {
+  name: string;
+  value: string;
 }
 
 export interface CatalogueProductRecord {
   productId: string;
   title: string;
   handle: string | null;
+  onlineStoreUrl: string | null;
+  /** The description as plain text, at most `DESCRIPTION_LIMIT` characters. */
+  description: string | null;
   vendor: string | null;
   productType: string | null;
   status: string | null;
@@ -302,6 +328,54 @@ export interface CatalogueProductRecord {
   shopifyUpdatedAt: string | null;
   metafields: MetafieldMap;
   variants: CatalogueVariantRecord[];
+}
+
+/** The longest description kept in the snapshot. */
+export const DESCRIPTION_LIMIT = 2000;
+
+const ENTITIES: Record<string, string> = {
+  amp: "&",
+  lt: "<",
+  gt: ">",
+  quot: '"',
+  apos: "'",
+  nbsp: " ",
+};
+
+/**
+ * A product description as plain text: tags dropped, the common entities
+ * decoded, white space collapsed, capped at `DESCRIPTION_LIMIT`. Null when
+ * nothing is left.
+ */
+export function plainDescription(
+  html: string | null | undefined,
+): string | null {
+  if (!html) return null;
+  const text = html
+    .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, " ")
+    .replace(/<br\s*\/?>|<\/(p|div|li|h[1-6])>/gi, " ")
+    .replace(/<[^>]*>/g, "")
+    .replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (match, entity: string) => {
+      if (entity.startsWith("#x")) {
+        return safeChar(Number.parseInt(entity.slice(2), 16), match);
+      }
+      if (entity.startsWith("#")) {
+        return safeChar(Number.parseInt(entity.slice(1), 10), match);
+      }
+      return ENTITIES[entity.toLowerCase()] ?? match;
+    })
+    .replace(/\s+/g, " ")
+    .trim();
+  if (text === "") return null;
+  return text.length > DESCRIPTION_LIMIT
+    ? text.slice(0, DESCRIPTION_LIMIT)
+    : text;
+}
+
+function safeChar(code: number, fallback: string): string {
+  return Number.isInteger(code) && code > 0 && code <= 0x10ffff
+    ? String.fromCodePoint(code)
+    : fallback;
 }
 
 const PRODUCT = "gid://shopify/Product/";
@@ -333,6 +407,8 @@ export function parseCatalogueJsonl(text: string): CatalogueProductRecord[] {
         productId: product.id,
         title: product.title,
         handle: product.handle ?? null,
+        onlineStoreUrl: product.onlineStoreUrl ?? null,
+        description: plainDescription(product.descriptionHtml),
         vendor: product.vendor ?? null,
         productType: product.productType ?? null,
         status: product.status ?? null,
@@ -362,6 +438,9 @@ export function parseCatalogueJsonl(text: string): CatalogueProductRecord[] {
           variant.compareAtPrice === undefined
             ? null
             : toMinorUnits(variant.compareAtPrice),
+        options: variant.selectedOptions ?? [],
+        inventoryQuantity: variant.inventoryQuantity ?? null,
+        availableForSale: variant.availableForSale ?? false,
         metafields: {},
       };
       variants.set(variant.id, record);

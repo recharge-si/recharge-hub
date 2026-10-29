@@ -544,7 +544,12 @@ const updateSchema = z.object({
 export interface WriteOutcome {
   ok: boolean;
   /** Shopify's own objections, verbatim, each with the field it named. */
-  errors: Array<{ field: string | null; message: string }>;
+  errors: Array<{
+    field: string | null;
+    message: string;
+    /** For a metafield write: the position of the write the error names, if it said. */
+    index?: number | null;
+  }>;
 }
 
 /** The `ProductUpdateInput` for exactly the fields that changed. */
@@ -567,6 +572,13 @@ export function productUpdateInput(
     input.seo = seo;
   }
   return input;
+}
+
+/** `["metafields", "3", "value"]` → 3: which write of the call the error names. */
+function indexOf(path: string[] | null | undefined): number | null {
+  if (!path || path[0] !== "metafields") return null;
+  const index = Number(path[1]);
+  return Number.isInteger(index) && index >= 0 ? index : null;
 }
 
 /** The last element of a user error's field path: `["product", "title"]` → `title`. */
@@ -773,6 +785,7 @@ export async function writeMetafields(
   writes: readonly MetafieldWrite[],
   clears: readonly MetafieldClear[],
 ): Promise<WriteOutcome> {
+  let offset = 0;
   for (const batch of chunked(writes, METAFIELDS_PER_CALL)) {
     const response = await admin.graphql(METAFIELDS_SET_MUTATION, {
       variables: { metafields: batch },
@@ -783,11 +796,16 @@ export async function writeMetafields(
         field: null,
         message: error.message,
       })),
-      ...(parsed.data?.metafieldsSet?.userErrors ?? []).map((error) => ({
-        field: fieldOf(error.field),
-        message: error.message,
-      })),
+      ...(parsed.data?.metafieldsSet?.userErrors ?? []).map((error) => {
+        const at = indexOf(error.field);
+        return {
+          field: fieldOf(error.field),
+          message: error.message,
+          index: at === null ? null : offset + at,
+        };
+      }),
     ];
+    offset += batch.length;
     if (errors.length > 0) return { ok: false, errors };
   }
   for (const batch of chunked(clears, METAFIELDS_PER_CALL)) {

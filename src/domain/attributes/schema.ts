@@ -59,6 +59,7 @@ const attribute = z.object({
   searchable: z.boolean().default(false),
   comparable: z.boolean().default(false),
   valueListId: ID.nullable().default(null),
+  storefront: z.boolean().optional(),
 });
 
 const setAssignment = z.object({ id: ID, typeId: ID, setId: ID });

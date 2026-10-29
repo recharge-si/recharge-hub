@@ -56,8 +56,10 @@ import {
 } from "~/web/lib/autofill";
 import { autofillListAction } from "~/web/lib/autofill-actions.server";
 import { autofillView } from "~/web/lib/autofill.server";
+import { countOf } from "~/web/lib/attributes";
 import { formatListDateTime } from "~/web/lib/datetime";
 import { useLiveRevalidation } from "~/web/lib/live";
+import { incompleteRigProducts } from "~/web/lib/rig-readiness.server";
 import { formatMoney } from "~/web/lib/money";
 import {
   actorFromSession,
@@ -116,16 +118,27 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     autofillAvailability(principal),
   ]);
 
+  // Rig readiness: only the products of one rig type that still lack data
+  // (docs/attributes.md, Rig readiness), the same ones the count was made of.
+  const incompleteType = url.searchParams.get("incomplete");
+  const incompleteIds = incompleteType
+    ? await incompleteRigProducts(principal, schema, incompleteType)
+    : null;
+
   const [result, facetOptions] = await Promise.all([
     listCatalogueProducts(principal, {
       q,
-      status: review ? "all" : status,
-      hideArchived: review ? false : hideArchived,
+      status: review || incompleteIds ? "all" : status,
+      hideArchived: review || incompleteIds ? false : hideArchived,
       filters,
       sort,
       page,
       pageSize: PAGE_SIZE,
-      ...(review ? { productIds: readyIds } : {}),
+      ...(review
+        ? { productIds: readyIds }
+        : incompleteIds
+          ? { productIds: incompleteIds }
+          : {}),
     }),
     catalogueFacetOptions(principal),
   ]);
@@ -135,6 +148,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   );
   return {
     review,
+    incomplete:
+      incompleteIds && incompleteType
+        ? { type: incompleteType, count: incompleteIds.length }
+        : null,
     reviewCount: readyIds.length,
     autofillAvailable: autofillReady.ok,
     q,
@@ -328,6 +345,7 @@ export default function Products() {
     rows,
     snapshotAt,
     review,
+    incomplete,
     reviewCount,
     autofillAvailable,
   } = useLoaderData<typeof loader>();
@@ -538,6 +556,18 @@ export default function Products() {
                       {applying ? "Applying…" : `Apply all (${reviewCount})`}
                     </s-button>
                   ) : null}
+                </s-grid>
+              ) : null}
+              {incomplete ? (
+                <s-grid
+                  gridTemplateColumns="1fr auto"
+                  gap="base"
+                  alignItems="center"
+                >
+                  <s-text color="subdued">
+                    {`${countOf(incomplete.count, "product")} still missing data the rig builder needs. Open one to fill it in.`}
+                  </s-text>
+                  <s-link href="/app/products">Show all products</s-link>
                 </s-grid>
               ) : null}
               <ProductFilterChips

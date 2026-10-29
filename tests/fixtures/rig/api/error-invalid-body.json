@@ -1,0 +1,5 @@
+{
+  "code": "invalid_body",
+  "field": "answers.weightKg",
+  "message": "Too small: expected number to be >=30"
+}

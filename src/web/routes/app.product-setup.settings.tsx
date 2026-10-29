@@ -9,11 +9,14 @@ import {
 } from "react-router";
 
 import { getAttributeSchema } from "~/adapters/db/repositories/attribute-schema.server";
+import { rigSettingsFor, setRigEnabled } from "~/adapters/rig/settings.server";
+import { roleWord } from "~/domain/rig/keys";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { schemaFromCsv } from "~/domain/attributes/csv";
 import { workspaceState } from "~/domain/attributes/impact";
 import { clearRule } from "~/domain/attributes/mutations";
 import { pathOf } from "~/domain/attributes/resolve";
+import { mergeRigPack } from "~/domain/attributes/rig-pack";
 import { parseAttributeSchema } from "~/domain/attributes/schema";
 import { starterSchema } from "~/domain/attributes/starter";
 import { emptySchema } from "~/domain/attributes/types";
@@ -60,8 +63,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const attributeName = (id: string) =>
     schema.attributes.find((a) => a.id === id)?.name ?? "";
   const state = workspaceState(schema);
+  const rig = await rigSettingsFor(principal);
 
   return {
+    rig,
     revision,
     updatedAt: updatedAt?.toISOString() ?? null,
     empty: state.stage === "empty",
@@ -119,6 +124,12 @@ export const action = async ({
   ) => commitSchemaChange(principal, revision, event, change, actor);
 
   switch (intent) {
+    case "rig-builder": {
+      const outcome = await setRigEnabled(principal, field("enabled") === "on");
+      return outcome.ok
+        ? { ok: true, message: outcome.message, revision }
+        : outcome;
+    }
     case "import": {
       const text = field("file");
       if (text.length > IMPORT_LIMIT)
@@ -169,6 +180,27 @@ export const action = async ({
         schema: starterSchema(),
         message: "Example loaded.",
       }));
+    case "rig-pack": {
+      const current = await getAttributeSchema(principal);
+      if (
+        current.revision === revision &&
+        !mergeRigPack(current.schema).changed
+      )
+        return {
+          ok: true,
+          message: "Already in the plan",
+          revision: current.revision,
+        };
+      return commit("attribute_schema.rig_pack.added", (schema) => {
+        const merged = mergeRigPack(schema);
+        const kept = merged.skipped.length;
+        return {
+          ok: true,
+          schema: merged.schema,
+          message: `Added ${countOf(merged.added.attributes, "rig attribute")} and ${countOf(merged.added.types, "product type")}${kept > 0 ? `; ${kept} already in the plan` : ""}.`,
+        };
+      });
+    }
     case "clear":
       return commit("attribute_schema.cleared", () => ({
         ok: true,
@@ -192,6 +224,7 @@ type Overlay = { showOverlay?: () => void };
 
 export default function ProductSetupSettings() {
   const {
+    rig,
     revision,
     updatedAt,
     empty,
@@ -379,6 +412,51 @@ export default function ProductSetupSettings() {
           </s-section>
 
           <s-section>
+            <s-stack direction="block" gap="small-300">
+              <CardHeader
+                title="Rig builder"
+                subtitle={
+                  rig.ready
+                    ? "The catalogue has enough complete products for the storefront rig builder."
+                    : `Not ready: ${rig.notReady.map(roleWord).join(", ")} need at least ${rig.minComplete} complete products in stock.`
+                }
+              >
+                <s-button
+                  {...(busy ? { disabled: true } : {})}
+                  onClick={() =>
+                    submit({
+                      intent: "rig-builder",
+                      enabled: rig.enabled ? "off" : "on",
+                    })
+                  }
+                >
+                  {rig.enabled ? "Turn off" : "Turn on"}
+                </s-button>
+              </CardHeader>
+              <s-text>{rig.enabled ? "The builder is on." : "The builder is off."}</s-text>
+              {rig.roles.map((row) => (
+                <s-text key={row.role}>
+                  {`${roleWord(row.role)}: ${row.complete} complete of ${row.products}${row.missing.length > 0 ? ` (missing ${row.missing.map((m) => `${m.key} x${m.count}`).join(", ")})` : ""}`}
+                </s-text>
+              ))}
+              {rig.placeholderRules ? (
+                <s-banner tone="warning" heading="Placeholder rules">
+                  <s-paragraph>
+                    The sizing rules are placeholder values, not advice. Do not
+                    turn the builder on for customers until Recharge staff have
+                    signed off the rules table (docs/rig-builder.md).
+                  </s-paragraph>
+                </s-banner>
+              ) : null}
+              <s-text>
+                {rig.plain.of === 0
+                  ? "No explanations yet."
+                  : `Plain mode ${rig.plain.plain} of last ${rig.plain.of}`}
+              </s-text>
+            </s-stack>
+          </s-section>
+
+          <s-section>
             <s-stack direction="block" gap="base">
               <CardHeader
                 title="Import and export"
@@ -525,6 +603,20 @@ export default function ProductSetupSettings() {
                 </s-grid>
               ))}
             </s-stack>
+          </s-section>
+
+          <s-section>
+            <CardHeader
+              title="Rig attributes"
+              subtitle="Adds the product types and measurements the rig builder reads: sails, masts, boards, booms, bases, fins. Nothing in Shopify changes."
+            >
+              <s-button
+                onClick={() => submit({ intent: "rig-pack" })}
+                {...(busy ? { disabled: true } : {})}
+              >
+                Add rig attributes
+              </s-button>
+            </CardHeader>
           </s-section>
 
           <s-section>

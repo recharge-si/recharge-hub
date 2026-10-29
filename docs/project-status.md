@@ -96,6 +96,26 @@ Completed work belongs in Git history, not in this file.
 
 ## Product and integration gaps
 
+### Rig builder (docs/rig-builder.md)
+
+- The rules table is a placeholder (`R1-placeholder`). Launch needs the
+  expert-signed table, 30/30 on `scripts/rig-eval.ts` and ten rigs reviewed by
+  hand; the sign-off name and date are not recorded yet.
+- The App Proxy is configured in `shopify.app.toml` but not yet enabled or
+  verified on a dev app (single-merchant distribution); `npm run deploy` follows
+  the merge.
+- The image change (python3, `claude`, vendored claude-pool, read-only pool
+  mount) has not been built or run; `claude` on Alpine/musl is unverified.
+- The pack has no per-board fin length range; the fin rule is part of the rules
+  table. No harness, no "on order" parts, no live stock read, no
+  Good/Better/Best.
+- Rate limits are per web process and reset on restart. Bulk read duration with
+  the new fields is not measured on the real store. Sentry breadcrumbs per build
+  are not added. The "Plain mode N of last 50" line is on the Rig builder card,
+  not on Home.
+- Slovenian sentences are drafts. Legal wording for AI processing of the
+  buyer's text is open (PRD 4 question 4).
+
 ### T-27 — Sources: built on both sides, not yet run against the real store
 
 Both sides of `docs/sources.md` § The contract exist as of 2026-09-22: this
@@ -112,13 +132,13 @@ Recharge store on the portal's Shopify page under *API access*, paste it
 into `/app/sources/connection`, and watch the first real per-source run.
 Known limits stay as listed in `docs/sources.md` § Known limits.
 
-**Review before publish** (2026-09-27): this app's side is built — the queue
+**Review before publish** (2026-09-27): built on both sides — the queue
 at `/app/sources/review`, translate and approve from it, counts on the
-Sources pages (`docs/sources.md` § Review before publish). The portal's side
-is not: a per-source setting for new products (publish / wait for review),
-creating them as drafts tagged `awaiting-review` and `portal-source:<id>`,
-and never writing `status` on a later update. Not yet tried against the
-store.
+Sources pages (`docs/sources.md` § Review before publish), and the portal's
+per-source setting for new products (publish / wait for review), drafts
+tagged `awaiting-review` and `portal-source:<id>`, and no `status` write on
+a later update (`t4a-partner-portal-api/docs/sources-api.md`). Not yet tried
+against the store.
 
 **AI autofill** (2026-10-06): both sides built — the portal's
 `POST /api/v1/ai/categorize` and `/ai/extract-attributes`
@@ -129,6 +149,27 @@ portal API deployed with the two routes (it already has
 `ANTHROPIC_API_KEY`), then one product autofilled and its suggestion
 checked by hand before a batch. Prompt quality against the real catalogue
 is untested.
+
+**First live pass checklist** (PRD 1, US-108; not run — it writes to the
+live store and needs a person with credentials and explicit approval). Use a
+source whose scope is a single test product; delete the run's product changes
+afterwards. Record pass/fail, counts and screenshots here, and delete the
+"not yet run" text above when done.
+
+1. Portal deployed with `/api/v1` and the two `/ai/*` routes. `GET
+   <portal>/api/v1/connection` with the minted key and `X-Shop-Domain:
+   <store>.myshopify.com` returns 200 and the tenant name; a key for another
+   shop returns 403.
+2. `/app/sources/connection`, key pasted: the tenant name and "verified".
+3. `/app/sources` lists the real sources; the counts equal the portal's own
+   admin page (record both numbers).
+4. One source set to Run now: a run appears as `running`, then `completed`;
+   `itemCount` equals the portal's own count; the log lines are readable.
+5. One product autofilled: the suggested type is one of the plan's
+   assignable types, and three suggested values checked by hand against the
+   product page.
+6. Open question to settle from the real run history: does the portal's
+   `needs_attention` match what the Sources header counts?
 
 ### T-05/T-06 — Shipping and discounts: representable, not yet configured
 
@@ -321,13 +362,26 @@ current list. The ones a person may want to decide on:
   sort (Shopify's index has them); adding them means reading them into the
   snapshot. Each facet offers at most 500 values.
 
-### T-25 — Product setup: a plan with no Shopify side yet
+### T-25 — Product setup: the Shopify side is partly there
 
-- **Nothing is created in Shopify.** The schema names a Shopify field per
-  attribute and a category per type, but no metafield definition, category
-  or product assignment is written. That is the next piece of work and the
-  reason the module exists; until it lands the plan is the deliverable, and
-  the export is how it leaves the app.
+- **Metafield definitions are created from the Definitions tab** (preview,
+  then create; docs/attributes.md § Metafield definitions). Still not
+  written to Shopify: product categories from the plan (a type's category is
+  a note) and updates or deletes of definitions. **Not yet driven against a
+  live store:** the mutation and the `access.storefront` input are written
+  from Shopify's documented 2026-07 behaviour (the installed packages carry
+  no Admin schema) and checked only against recorded fixtures; run PRD 1's
+  live pass (US-108) and the first Create on the development store before
+  relying on them. The bulk filler (`scripts/fill-attributes.ts`) was
+  tested with a fake `claude-pool`, not the real pool, and its e2e and
+  database tests (`tests/e2e/specs/product-*.spec.ts`,
+  `tests/db/attribute-definitions.test.ts`, `tests/db/fill-resume.test.ts`)
+  were written but not run where it was built (no PostgreSQL or browser).
+- **The rig attribute list is a draft** until a Recharge windsurf expert signs
+  it off (keys, choices, which attributes are required and which are per
+  variant).
+- **Coverage is read from the catalogue snapshot,** so it follows the
+  snapshot; metafields written since the last read show after it.
 - **No undo.** Each destructive change is behind a confirmation and the export
   is the backup. The standalone builder had an in-session undo stack; it was
   not carried over because server-side persistence has no session to hold it

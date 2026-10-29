@@ -4,12 +4,7 @@
  */
 
 export type AutofillStatus =
-  | "queued"
-  | "running"
-  | "ready"
-  | "applied"
-  | "discarded"
-  | "failed";
+  "queued" | "running" | "ready" | "applied" | "discarded" | "failed";
 
 export interface AutofillView {
   status: AutofillStatus;
@@ -27,8 +22,22 @@ export interface AutofillView {
     variantId: string | null;
   }>;
   error: string | null;
+  /** Where the suggestion came from: `export-portal` or `claude-pool`; null on older rows. */
+  source: string | null;
+  /** The model that answered, when the producer reported one. */
+  model: string | null;
   requestedAt: string;
   decidedAt: string | null;
+}
+
+/** Where a suggestion came from, in words; null for the portal's, which is the usual one. */
+export function sourceLine(
+  view: Pick<AutofillView, "source" | "model">,
+): string | null {
+  if (view.source !== "claude-pool") return null;
+  return view.model
+    ? `Suggested by Claude through the team pool (${view.model}).`
+    : "Suggested by Claude through the team pool.";
 }
 
 export const isAutofillWorking = (view: AutofillView | null): boolean =>

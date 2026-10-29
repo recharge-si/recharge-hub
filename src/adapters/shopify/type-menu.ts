@@ -31,9 +31,9 @@ const errorsSchema = z
   )
   .optional();
 
-const userErrorsSchema = z.array(z.object({ message: z.string() }));
+export const userErrorsSchema = z.array(z.object({ message: z.string() }));
 
-function refuse(messages: string[]): never {
+export function refuse(messages: string[]): never {
   if (
     messages.some((m) =>
       /access denied|requires .* scope|ACCESS_DENIED/i.test(m),
@@ -44,7 +44,7 @@ function refuse(messages: string[]): never {
 }
 
 /** One call: thrown or returned top-level errors become a `TypeMenuError`. */
-async function call<T extends z.ZodTypeAny>(
+export async function call<T extends z.ZodTypeAny>(
   admin: AdminApiContext,
   query: string,
   variables: Record<string, unknown>,
@@ -68,7 +68,7 @@ async function call<T extends z.ZodTypeAny>(
   return parsed.data;
 }
 
-function checked(userErrors: Array<{ message: string }>): void {
+export function checked(userErrors: Array<{ message: string }>): void {
   if (userErrors.length > 0) refuse(userErrors.map((e) => e.message));
 }
 

@@ -54,6 +54,7 @@ import {
 } from "~/web/components/attribute-form";
 import { Dropdown } from "~/web/components/dropdown";
 import { ProductSetupNav } from "~/web/components/product-setup-nav";
+import { RigReadiness } from "~/web/components/rig-readiness";
 import {
   PRODUCT_SETUP_ROUTES,
   SCOPE_LABEL,
@@ -71,6 +72,7 @@ import {
   principalFromSession,
 } from "~/web/lib/principal.server";
 import { redirectWithin } from "~/web/lib/redirects";
+import { rigReadiness } from "~/web/lib/rig-readiness.server";
 import { useResetWhenSaved } from "~/web/lib/use-save-bar";
 
 /**
@@ -317,6 +319,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     revision,
     stage: state.stage,
     summary: state.summary,
+    readiness: await rigReadiness(principal, schema),
     tree,
     selected,
     dragImpact,
@@ -654,8 +657,16 @@ function attachDragGhost(event: React.DragEvent<HTMLElement>, name: string) {
 }
 
 export default function ProductTypes() {
-  const { revision, stage, summary, tree, selected, typeOptions, sets } =
-    useLoaderData<typeof loader>();
+  const {
+    revision,
+    stage,
+    summary,
+    readiness,
+    tree,
+    selected,
+    typeOptions,
+    sets,
+  } = useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const busy = fetcher.state !== "idle";
   const result = fetcher.data;
@@ -1995,6 +2006,8 @@ export default function ProductTypes() {
             </s-link>
           </s-banner>
         ) : null}
+
+        {readiness ? <RigReadiness lines={readiness} /> : null}
 
         {tree.length === 0 ? (
           <s-section heading="Nothing configured yet">

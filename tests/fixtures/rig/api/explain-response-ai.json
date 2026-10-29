@@ -1,0 +1,41 @@
+{
+  "requestId": "rb_0123456789abcdef01234567",
+  "profile": {
+    "discipline": "windsurf",
+    "weightKg": 82,
+    "skill": "intermediate",
+    "windMinKn": 15,
+    "windMaxKn": 25,
+    "source": {
+      "discipline": "form",
+      "windMinKn": "text",
+      "windMaxKn": "text",
+      "weightKg": "text",
+      "skill": "text"
+    }
+  },
+  "needs": [],
+  "whys": {
+    "45500000005": "Reason 45500000005.",
+    "45500000015": "Reason 45500000015.",
+    "45500000019": "Reason 45500000019.",
+    "45500000025": "Reason 45500000025.",
+    "45500000031": "Reason 45500000031.",
+    "45500000037": "Reason 45500000037."
+  },
+  "variantIds": [
+    45500000005,
+    45500000015,
+    45500000019,
+    45500000025,
+    45500000031,
+    45500000037
+  ],
+  "mode": "ai",
+  "warnings": [
+    {
+      "code": "kind_assumed",
+      "message": "We assumed freeride gear."
+    }
+  ]
+}

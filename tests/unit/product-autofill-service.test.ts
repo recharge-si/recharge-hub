@@ -31,6 +31,10 @@ const state = vi.hoisted(() => ({
     value: string | string[];
   }>,
   portalOk: true,
+  /** When set, the plan is padded to exactly this many assignable types. */
+  assignable: null as number | null,
+  /** When set, this many attributes are missing on every product. */
+  attributeCount: null as number | null,
   categorizeFails: null as Error | null,
   autofill: null as unknown,
   typeChoices: [] as unknown[],
@@ -40,7 +44,23 @@ const state = vi.hoisted(() => ({
 }));
 
 vi.mock("~/adapters/db/repositories/attribute-schema.server", () => ({
-  getAttributeSchema: async () => ({ schema: starterSchema(), revision: 1 }),
+  getAttributeSchema: async () => {
+    const schema = starterSchema();
+    if (state.assignable !== null) {
+      const have = schema.types.filter((t) => t.leaf).length;
+      for (let i = have; i < state.assignable; i++)
+        schema.types.push({
+          id: `extra-${i}`,
+          name: `Extra ${i}`,
+          parentId: null,
+          leaf: true,
+          sortOrder: i,
+          shopifyCategory: "",
+          archetype: "",
+        });
+    }
+    return { schema, revision: 1 };
+  },
 }));
 vi.mock("~/adapters/db/repositories/event-log.server", () => ({
   appendEvent: async () => undefined,
@@ -110,7 +130,15 @@ const FIELDS: AttributeField[] = [
 ];
 vi.mock("~/adapters/products/attribute-values.server", () => ({
   readAttributeValues: async () => ({
-    fields: FIELDS,
+    fields:
+      state.attributeCount === null
+        ? FIELDS
+        : Array.from({ length: state.attributeCount }, (_, i) => ({
+            ...FIELDS[0]!,
+            attributeId: `a${i}`,
+            name: `Attribute ${i}`,
+            key: `a${i}`,
+          })),
     inputs: state.inputs,
     variantMetafields: [],
     variantDetailsRead: true,
@@ -173,6 +201,8 @@ beforeEach(() => {
   state.categorizeAnswer = [];
   state.extractAnswer = [];
   state.portalOk = true;
+  state.assignable = null;
+  state.attributeCount = null;
   state.categorizeFails = null;
   state.autofill = null;
   state.typeChoices = [];
@@ -259,6 +289,53 @@ describe("suggesting", () => {
       "Connect the export portal first.",
       "Connect the export portal first.",
     ]);
+  });
+});
+
+// A plan of 2000 types is slow to resolve (every path is built): allow for a loaded machine.
+describe("the portal's request limits", { timeout: 30_000 }, () => {
+  it("does not call the portal with 2001 assignable types, and says so on each product", async () => {
+    state.assignable = 2001;
+    await suggestAutofill(admin, principal, ["p1", "p2"]);
+    expect(state.categorizeCalls).toEqual([]);
+    const message =
+      "The product type list has 2001 entries; the AI can read at most 2000.";
+    expect(state.failed.get("p1")).toBe(message);
+    expect(state.failed.get("p2")).toBe(message);
+    expect(state.saved.size).toBe(0);
+  });
+
+  it("still keeps the type of a product that has one when the list is too long", async () => {
+    state.assignable = 2001;
+    await suggestAutofill(admin, principal, ["typed"]);
+    expect(state.failed.size).toBe(0);
+    expect(state.saved.get("typed")).toMatchObject({ typeOrigin: "kept" });
+  });
+
+  it("calls the portal with exactly 2000 types", async () => {
+    state.assignable = 2000;
+    await suggestAutofill(admin, principal, ["p1"]);
+    const sent = state.categorizeCalls[0] as { categories: unknown[] };
+    expect(sent.categories).toHaveLength(2000);
+    expect(state.failed.size).toBe(0);
+  });
+
+  it("does not call the portal for 201 attributes, and names the limit", async () => {
+    state.attributeCount = 201;
+    await suggestAutofill(admin, principal, ["typed"]);
+    expect(state.extractCalls).toEqual([]);
+    expect(state.failed.get("typed")).toBe(
+      "This product has 201 attributes to fill; the AI can read at most 200.",
+    );
+    expect(state.saved.has("typed")).toBe(false);
+  });
+
+  it("calls the portal with exactly 200 attributes", async () => {
+    state.attributeCount = 200;
+    await suggestAutofill(admin, principal, ["typed"]);
+    const sent = state.extractCalls[0] as { attributes: unknown[] };
+    expect(sent.attributes).toHaveLength(200);
+    expect(state.failed.size).toBe(0);
   });
 });
 

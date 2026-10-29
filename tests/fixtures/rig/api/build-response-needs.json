@@ -1,0 +1,29 @@
+{
+  "profile": {
+    "discipline": "windsurf",
+    "source": {
+      "discipline": "default"
+    }
+  },
+  "needs": [
+    "weightKg"
+  ],
+  "rigs": [],
+  "unmet": [],
+  "warnings": [
+    {
+      "code": "kind_assumed",
+      "message": "We assumed freeride gear."
+    },
+    {
+      "code": "skill_assumed",
+      "message": "We assumed an intermediate level."
+    },
+    {
+      "code": "wind_assumed",
+      "message": "We assumed 15 to 25 knots."
+    }
+  ],
+  "mode": "plain",
+  "snapshotAgeMinutes": 10
+}
