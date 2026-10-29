@@ -19,6 +19,8 @@ export const PRODUCT_SETUP_ROUTES = {
   sets: "/app/product-setup/sets",
   definitions: "/app/product-setup/definitions",
   menu: "/app/product-setup/menu",
+  values: "/app/product-setup/values",
+  valuesCsv: "/app/product-setup/values.csv",
   settings: "/app/product-setup/settings",
   export: "/app/product-setup/schema.json",
   exportCsv: "/app/product-setup/schema.csv",
@@ -39,6 +41,7 @@ export const PRODUCT_SETUP_SECTIONS = [
     href: PRODUCT_SETUP_ROUTES.definitions,
   },
   { key: "menu", label: "Store menu", href: PRODUCT_SETUP_ROUTES.menu },
+  { key: "values", label: "Values", href: PRODUCT_SETUP_ROUTES.values },
   { key: "settings", label: "Settings", href: PRODUCT_SETUP_ROUTES.settings },
 ] as const;
 
