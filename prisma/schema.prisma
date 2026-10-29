@@ -2387,6 +2387,10 @@ model ProductAutofill {
   values         Json     @default("[]")
   /// Who suggested it: `export-portal`.
   engine         String?
+  /// Where the suggestion came from: `export-portal` or `claude-pool`.
+  source         String?
+  /// The model that answered, as the producer reported it (null for the portal).
+  model          String?
   error          String?
   requestedBy    String?  @map("requested_by")
   decidedBy      String?  @map("decided_by")

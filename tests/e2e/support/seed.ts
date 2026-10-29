@@ -125,7 +125,7 @@ export async function seedCatalogueSnapshot(shop: TestShop): Promise<void> {
       categoryName: null,
       imageUrl: null,
       shopifyUpdatedAt: new Date().toISOString(),
-      metafields: {},
+      metafields: product.metafields,
       variants: product.variants.map((variant) => ({
         variantId: variant.id,
         productId: product.id,
@@ -137,7 +137,7 @@ export async function seedCatalogueSnapshot(shop: TestShop): Promise<void> {
           variant.compareAtPrice === null
             ? null
             : minor(variant.compareAtPrice),
-        metafields: {},
+        metafields: variant.metafields,
       })),
     })),
     shopify.currencyCode,

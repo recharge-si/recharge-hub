@@ -24,7 +24,7 @@ async function shopIdFor(principal: Principal): Promise<string> {
 }
 
 /** JSON in, `MetafieldMap` out, tolerating an old or malformed column. */
-function metafieldsFrom(json: Prisma.JsonValue | null): MetafieldMap {
+export function metafieldsFrom(json: Prisma.JsonValue | null): MetafieldMap {
   if (!json || typeof json !== "object" || Array.isArray(json)) return {};
   const map: MetafieldMap = {};
   for (const [name, entry] of Object.entries(json)) {

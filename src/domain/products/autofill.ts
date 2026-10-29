@@ -196,6 +196,9 @@ function optionCode(
   );
 }
 
+/** "5.0-5.5", "430 to 460", "5..6": two numbers, which is a range and not a value. */
+const RANGE = /\d\s*(?:[-–—]|to\b|\.\.)\s*\d/i;
+
 function inputFor(
   edit: FieldEdit,
   raw: z.infer<typeof answerValue>,
@@ -224,7 +227,9 @@ function inputFor(
     edit.kind === "measurement"
   ) {
     // "4.7 m²" or "4,7" → "4.7": the number, never a unit or a range.
-    const match = /^-?\d+(?:[.,]\d+)?/.exec(String(raw).trim());
+    const text = String(raw).trim();
+    if (RANGE.test(text)) return null;
+    const match = /^-?\d+(?:[.,]\d+)?/.exec(text);
     return match ? match[0].replace(",", ".") : null;
   }
   return String(raw).trim();

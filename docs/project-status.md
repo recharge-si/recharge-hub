@@ -342,13 +342,26 @@ current list. The ones a person may want to decide on:
   sort (Shopify's index has them); adding them means reading them into the
   snapshot. Each facet offers at most 500 values.
 
-### T-25 — Product setup: a plan with no Shopify side yet
+### T-25 — Product setup: the Shopify side is partly there
 
-- **Nothing is created in Shopify.** The schema names a Shopify field per
-  attribute and a category per type, but no metafield definition, category
-  or product assignment is written. That is the next piece of work and the
-  reason the module exists; until it lands the plan is the deliverable, and
-  the export is how it leaves the app.
+- **Metafield definitions are created from the Definitions tab** (preview,
+  then create; docs/attributes.md § Metafield definitions). Still not
+  written to Shopify: product categories from the plan (a type's category is
+  a note) and updates or deletes of definitions. **Not yet driven against a
+  live store:** the mutation and the `access.storefront` input are written
+  from Shopify's documented 2026-07 behaviour (the installed packages carry
+  no Admin schema) and checked only against recorded fixtures; run PRD 1's
+  live pass (US-108) and the first Create on the development store before
+  relying on them. The bulk filler (`scripts/fill-attributes.ts`) was
+  tested with a fake `claude-pool`, not the real pool, and its e2e and
+  database tests (`tests/e2e/specs/product-*.spec.ts`,
+  `tests/db/attribute-definitions.test.ts`, `tests/db/fill-resume.test.ts`)
+  were written but not run where it was built (no PostgreSQL or browser).
+- **The rig attribute list is a draft** until a Recharge windsurf expert signs
+  it off (keys, choices, which attributes are required and which are per
+  variant).
+- **Coverage is read from the catalogue snapshot,** so it follows the
+  snapshot; metafields written since the last read show after it.
 - **No undo.** Each destructive change is behind a confirmation and the export
   is the backup. The standalone builder had an in-session undo stack; it was
   not carried over because server-side persistence has no session to hold it

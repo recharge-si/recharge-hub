@@ -65,6 +65,12 @@ export interface Attribute {
   comparable: boolean;
   /** The options of a select attribute. */
   valueListId: string | null;
+  /**
+   * Readable through the Storefront API (`access.storefront` on the metafield
+   * definition). Off unless set; Liquid does not need it (docs/attributes.md
+   * § Metafield definitions). Absent means off.
+   */
+  storefront?: boolean;
 }
 
 /** A set attached to a type; its attributes flow to the type's descendants. */

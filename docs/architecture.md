@@ -66,7 +66,8 @@ Products          /app/products         the catalogue snapshot as a list; /app/p
 Metafields        /app/product-setup    lands on /app/product-setup/types/:typeId?, the tree of
                                         product types beside the selected one; the workspace's
                                         own navigation reaches /attributes (the catalogue,
-                                        /attributes/:id one attribute), /sets and /settings
+                                        /attributes/:id one attribute), /sets, /definitions
+                                        (Shopify metafield definitions), /menu and /settings
 Translations      /app/translations     the store's languages (docs/translations.md); its own
                                         navigation reaches /add, /languages/:locale, /editor,
                                         /translate, /syncs (/:syncId), /glossary and /usage
@@ -651,7 +652,12 @@ inherited down a tree of types — `docs/attributes.md`. Pure rules in
 as a function over the document); one row in `attribute_schema` with a
 revision every write is conditional on; screens under `app.product-setup.*`
 sharing `web/lib/attributes.server.ts` as the one path that changes it.
-Nothing here reads or writes Shopify yet.
+The plan meets Shopify in the Definitions tab (`domain/attributes/definitions.ts`,
+`adapters/shopify/metafield-definitions.ts`, `web/lib/definitions.server.ts`),
+the product page's value writes, the store menu, and AI autofill, whose bulk
+producer is the operator script `scripts/fill-attributes.ts` over
+`adapters/products/fill-runner.server.ts` and the shared claude-pool runner
+`adapters/ai/claude-pool.server.ts`. See docs/attributes.md.
 
 ### Translations
 
