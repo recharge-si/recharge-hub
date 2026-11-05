@@ -430,6 +430,26 @@ const handlers: Record<string, Handler> = {
     };
   },
 
+  // Bulk values re-read what it is about to change: products and variants together.
+  OrchestratorOwnerMetafields: (store, variables) => {
+    const ids = z.array(z.string()).parse(variables.ids);
+    const keys = new Set(z.array(z.string()).parse(variables.keys));
+    return {
+      nodes: ids.map((id) => {
+        const owner = ownerOf(store, id);
+        if (!owner) return null;
+        return {
+          id,
+          metafields: {
+            nodes: metafieldNodesOf(owner.metafields).filter((m) =>
+              keys.has(`${m.namespace}.${m.key}`),
+            ),
+          },
+        };
+      }),
+    };
+  },
+
   // A value must have the type of the definition the store holds, as in Shopify.
   OrchestratorWorkspaceMetafieldsSet: (store, variables) => {
     const writes = z.array(metafieldWriteSchema).parse(variables.metafields);

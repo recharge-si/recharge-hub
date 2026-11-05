@@ -76,7 +76,10 @@ const yesNo = (value: boolean) => (value ? "yes" : "no");
  * RFC 4180 rows. The delimiter is whatever the header uses — a comma, or the
  * semicolon a spreadsheet set to a European locale writes.
  */
-export function parseCsvRows(text: string): string[][] {
+export function parseCsvRows(
+  text: string,
+  options: { keepEmptyRows?: boolean } = {},
+): string[][] {
   const source = text.replace(/^\uFEFF/, "");
   const firstLine = source.slice(0, source.search(/\r?\n|$/));
   const delimiter =
@@ -114,7 +117,9 @@ export function parseCsvRows(text: string): string[][] {
     row.push(value);
     rows.push(row);
   }
-  return rows.filter((r) => r.some((v) => v.trim() !== ""));
+  return options.keepEmptyRows
+    ? rows
+    : rows.filter((r) => r.some((v) => v.trim() !== ""));
 }
 
 /* -------------------------------------------------------------------------- */

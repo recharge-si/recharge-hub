@@ -1,0 +1,8 @@
+product_id,variant_id,sku,type,vendor,product,variant,option,Length [recharge.length_cm] (cm),Mast diameter [recharge.mast_diameter],Luff [recharge.luff_cm] (cm),Compatible mast diameters [recharge.compatible_mast_diameters],hint_length_cm,Colour
+gid://shopify/Product/100,gid://shopify/ProductVariant/1001,M-370,Masts,Loftsails,Loftsails Team Edition III C100 RDM,370,370,370,RDM,,,370,red
+gid://shopify/Product/100,gid://shopify/ProductVariant/1002,M-430,Masts,Loftsails,Loftsails Team Edition III C100 RDM,430,430,"435,5",,,,,red
+gid://shopify/Product/100,gid://shopify/ProductVariant/1003,,Masts,Loftsails,Loftsails Team Edition III C100 RDM,460,460,460,sdm,,,460,red
+gid://shopify/Product/200,gid://shopify/ProductVariant/2001,,Freeride sails,Gaastra,Gaastra Vapor,5.8 m2 / Orange,5.8 m2 / Orange,,,395,[clear],,red
+gid://shopify/Product/200,gid://shopify/ProductVariant/2002,,Freeride sails,Gaastra,Gaastra Vapor,6.4 m2 / Orange,6.4 m2 / Orange,,,"395,5",,,red
+gid://shopify/Product/200,gid://shopify/ProductVariant/2003,,Freeride sails,Gaastra,Gaastra Vapor,7.0 m2 / Orange,7.0 m2 / Orange,,,396,"RDM, SDM",,red
+gid://shopify/Product/100,gid://shopify/ProductVariant/1003,,Masts,Loftsails,Loftsails Team Edition III C100 RDM,460,460,460-480,,,,,red

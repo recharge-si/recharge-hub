@@ -352,7 +352,8 @@ export function sameInput(
   return [...a].sort().every((code, index) => code === sorted[index]);
 }
 
-function inputOf(
+/** What a stored value is as a form holds it (the codes of a list, a measurement's number). */
+export function storedInput(
   edit: FieldEdit,
   stored: { type: string; value: string } | undefined,
 ): AttributeInput {
@@ -391,12 +392,12 @@ export function inputsFrom(
     const fullKey = `${field.namespace}.${field.key}`;
     if (field.scope === "variant")
       for (const variant of variants)
-        inputs[inputKey(field.attributeId, variant.variantId)] = inputOf(
+        inputs[inputKey(field.attributeId, variant.variantId)] = storedInput(
           field.edit,
           variant.metafields[fullKey],
         );
     else
-      inputs[inputKey(field.attributeId, null)] = inputOf(
+      inputs[inputKey(field.attributeId, null)] = storedInput(
         field.edit,
         product[fullKey],
       );
