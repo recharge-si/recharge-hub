@@ -58,6 +58,7 @@ export interface RigSnapshotProduct {
   /** The type a person chose for the product in the plan, if any. */
   chosenTypeId: string | null;
   imageUrl: string | null;
+  vendor?: string | null;
   metafields: MetafieldMap;
   variants: RigSnapshotVariant[];
 }
@@ -213,6 +214,7 @@ export function candidatesFrom(
         variantTitle: variant.title,
         handle: product.handle,
         imageUrl: product.imageUrl,
+        vendor: product.vendor?.trim() || null,
         priceMinor: variant.priceMinor,
         currency: variant.currency,
         // Unknown stock (null) is not stock: the snapshot must be refreshed.

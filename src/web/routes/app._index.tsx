@@ -10,6 +10,7 @@ import { getDashboard } from "~/adapters/db/repositories/dashboard.server";
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
 import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
 import { getReadiness } from "~/adapters/db/repositories/readiness.server";
+import { getRigHomeFacts } from "~/adapters/db/repositories/rig.server";
 import {
   countVariantStatesFor,
   listCampaigns,
@@ -103,6 +104,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     coverage,
     languages,
     activeSyncs,
+    rigFacts,
   ] = await Promise.all([
     getDashboard(principal, now),
     recentEvents(principal, 60, { excludePrefixes: HOME_ACTIVITY_EXCLUDED }),
@@ -114,6 +116,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     getCoverage(principal),
     listLanguageSettings(principal),
     listActiveSyncs(principal),
+    getRigHomeFacts(principal, now),
   ]);
   const campaignCounts = await countVariantStatesFor(
     campaigns.map((campaign) => campaign.id),
@@ -167,6 +170,13 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
         activeSyncs: activeSyncs.length,
       }),
       sales,
+      rig: rigFacts
+        ? {
+            buildsToday: rigFacts.buildsToday,
+            plain: rigFacts.plain,
+            lastExhaustedAt: rigFacts.lastExhaustedAt?.toISOString() ?? null,
+          }
+        : null,
       timeZone,
       formatDate: formatInZone,
       now,

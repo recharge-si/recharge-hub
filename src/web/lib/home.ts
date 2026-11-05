@@ -190,12 +190,58 @@ export interface OperationTile {
     | "inventory"
     | "products"
     | "translations"
-    | "sales";
+    | "sales"
+    | "rig";
   title: string;
   /** The first line is the area's state; the rest support it. At most three. */
   lines: OperationLine[];
   /** Where the whole tile goes. */
   href: string;
+}
+
+/** What the Rig builder tile states; only read when the builder is on. */
+export interface RigHomeSummary {
+  buildsToday: number;
+  /** Explained requests answered in plain wording, of the last `of`. */
+  plain: { plain: number; of: number };
+  /** The last time the pool answered "every account is full" (ISO). */
+  lastExhaustedAt: string | null;
+}
+
+/**
+ * The Rig builder line: requests today, how often the words fell back to
+ * templates, and when the AI pool last ran out. Healthy is calm, so the
+ * pool line is only toned when it ran out in the last day.
+ */
+export function rigTile(summary: RigHomeSummary, now: Date): OperationTile {
+  const lines: OperationLine[] = [
+    {
+      text:
+        summary.buildsToday === 0
+          ? "No builds today"
+          : `${n(summary.buildsToday)} ${summary.buildsToday === 1 ? "build" : "builds"} today`,
+    },
+  ];
+  if (summary.plain.of > 0) {
+    const share = Math.round((summary.plain.plain / summary.plain.of) * 100);
+    lines.push({
+      text: `Plain wording in ${share}% of the last ${summary.plain.of} explanations`,
+    });
+  }
+  if (summary.lastExhaustedAt) {
+    const hours =
+      (now.getTime() - new Date(summary.lastExhaustedAt).getTime()) / 3_600_000;
+    lines.push({
+      text: `AI pool was full ${ago(summary.lastExhaustedAt, now)}`,
+      ...(hours < 24 ? { tone: "caution" as const } : {}),
+    });
+  }
+  return {
+    key: "rig",
+    title: "Rig builder",
+    href: "/app/product-setup/settings",
+    lines,
+  };
 }
 
 /** The figures Home reads from `getDashboard`, as strings the page can carry. */
@@ -275,6 +321,8 @@ export function storeOperations(input: {
   productSync: { enabled: boolean; lastRunAt: string | null };
   translations: TranslationsFacts;
   sales: SalesOverview;
+  /** Present only when the rig builder is on. */
+  rig?: RigHomeSummary | null;
   timeZone: string;
   formatDate: (iso: string, timeZone: string) => string;
   now: Date;
@@ -465,6 +513,8 @@ export function storeOperations(input: {
         : [{ text: "No active campaign" }],
     });
   }
+
+  if (input.rig) tiles.push(rigTile(input.rig, now));
 
   return tiles.map((tile) => ({ ...tile, lines: tile.lines.slice(0, 3) }));
 }

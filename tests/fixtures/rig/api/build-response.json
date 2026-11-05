@@ -33,13 +33,16 @@
           "variantId": 45500000004,
           "title": "Aero Ride",
           "variantTitle": "5.8 m2 / Orange",
-          "url": "/products/aero-ride",
-          "image": "https://cdn.example.test/101.jpg",
           "price": "619.00",
           "currency": "EUR",
           "available": true,
           "quantity": 1,
           "why": "A 5.8 m² sail suits 82 kg riders in 15–25 knots.",
+          "url": "/products/aero-ride",
+          "productUrl": "/products/aero-ride",
+          "image": "https://cdn.example.test/101.jpg",
+          "imageUrl": "https://cdn.example.test/101.jpg",
+          "vendor": "Point-7",
           "specs": {
             "areaM2": 5.8,
             "mastCm": 460,
@@ -49,7 +52,34 @@
             ],
             "boomMinCm": 170,
             "boomMaxCm": 190
-          }
+          },
+          "facts": [
+            {
+              "field": "areaM2",
+              "label": "Sail area",
+              "value": "5.8 m²"
+            },
+            {
+              "field": "mastCm",
+              "label": "Recommended mast",
+              "value": "460 cm"
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "RDM"
+            },
+            {
+              "field": "compatibleDiameters",
+              "label": "Fits masts",
+              "value": "RDM"
+            },
+            {
+              "field": "boomMinCm",
+              "label": "Boom range",
+              "value": "170–190 cm"
+            }
+          ]
         },
         {
           "role": "mast",
@@ -57,18 +87,41 @@
           "variantId": 45500000023,
           "title": "Unifiber - HD RDM C75 Constant FL Curve Incl. Mastbag",
           "variantTitle": "460",
-          "url": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
-          "image": "https://cdn.example.test/111.jpg",
           "price": "549.00",
           "currency": "EUR",
           "available": true,
           "quantity": 1,
           "why": "A 460 cm RDM mast, chosen to go with the sail.",
+          "url": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
+          "productUrl": "/products/unifiber---hd-rdm-c75-constant-fl-curve-incl--mastbag",
+          "image": "https://cdn.example.test/111.jpg",
+          "imageUrl": "https://cdn.example.test/111.jpg",
+          "vendor": "Point-7",
           "specs": {
             "lengthCm": 460,
             "mastDiameter": "rdm",
             "carbonPercent": 75
           },
+          "facts": [
+            {
+              "field": "lengthCm",
+              "label": "Mast length",
+              "value": "460 cm",
+              "derived": true
+            },
+            {
+              "field": "mastDiameter",
+              "label": "Mast diameter",
+              "value": "RDM",
+              "derived": true
+            },
+            {
+              "field": "carbonPercent",
+              "label": "Carbon %",
+              "value": "75",
+              "derived": true
+            }
+          ],
           "derived": [
             "lengthCm",
             "mastDiameter",
@@ -81,16 +134,26 @@
           "variantId": 45500000030,
           "title": "Euro Pin Base",
           "variantTitle": "Default Title",
-          "url": "/products/euro-pin-base",
-          "image": "https://cdn.example.test/118.jpg",
           "price": "39.00",
           "currency": "EUR",
           "available": true,
           "quantity": 1,
           "why": "A mast base chosen for this mast.",
+          "url": "/products/euro-pin-base",
+          "productUrl": "/products/euro-pin-base",
+          "image": "https://cdn.example.test/118.jpg",
+          "imageUrl": "https://cdn.example.test/118.jpg",
+          "vendor": "Duotone",
           "specs": {
             "baseConnection": "euro_pin"
-          }
+          },
+          "facts": [
+            {
+              "field": "baseConnection",
+              "label": "Base connection",
+              "value": "euro pin"
+            }
+          ]
         },
         {
           "role": "board",
@@ -98,13 +161,16 @@
           "variantId": 45500000048,
           "title": "Free Board 105",
           "variantTitle": "Default Title",
-          "url": "/products/free-board-105",
-          "image": "https://cdn.example.test/134.jpg",
           "price": "1299.00",
           "currency": "EUR",
           "available": true,
           "quantity": 1,
           "why": "A 105 L board suits 82 kg riders and takes this sail size.",
+          "url": "/products/free-board-105",
+          "productUrl": "/products/free-board-105",
+          "image": "https://cdn.example.test/134.jpg",
+          "imageUrl": "https://cdn.example.test/134.jpg",
+          "vendor": "Duotone",
           "specs": {
             "volumeL": 105,
             "sailMinM2": 4.5,
@@ -117,7 +183,34 @@
             ],
             "riderMinKg": 70,
             "riderMaxKg": 95
-          }
+          },
+          "facts": [
+            {
+              "field": "volumeL",
+              "label": "Volume",
+              "value": "105 L"
+            },
+            {
+              "field": "finBoxTypes",
+              "label": "Fin boxes",
+              "value": "deep tuttle, tuttle"
+            },
+            {
+              "field": "sailMinM2",
+              "label": "Sail range",
+              "value": "4.5–6.5 m²"
+            },
+            {
+              "field": "finMinCm",
+              "label": "Fin range",
+              "value": "32–40 cm"
+            },
+            {
+              "field": "riderMinKg",
+              "label": "Rider weight",
+              "value": "70–95 kg"
+            }
+          ]
         },
         {
           "role": "fin",
@@ -125,17 +218,32 @@
           "variantId": 45500000040,
           "title": "Tuttle Fin 40",
           "variantTitle": "40 cm",
-          "url": "/products/tuttle-fin-40",
-          "image": "https://cdn.example.test/128.jpg",
           "price": "109.00",
           "currency": "EUR",
           "available": true,
           "quantity": 1,
           "why": "A 40 cm tuttle fin for the board's fin box.",
+          "url": "/products/tuttle-fin-40",
+          "productUrl": "/products/tuttle-fin-40",
+          "image": "https://cdn.example.test/128.jpg",
+          "imageUrl": "https://cdn.example.test/128.jpg",
+          "vendor": "Duotone",
           "specs": {
             "finBox": "tuttle",
             "finLengthCm": 40
-          }
+          },
+          "facts": [
+            {
+              "field": "finBox",
+              "label": "Fin box",
+              "value": "tuttle"
+            },
+            {
+              "field": "finLengthCm",
+              "label": "Fin length",
+              "value": "40 cm"
+            }
+          ]
         }
       ],
       "total": "2615.00",
@@ -181,48 +289,148 @@
       "alternatives": [
         {
           "role": "base",
+          "productId": "gid://shopify/Product/120",
           "variantId": 45500000032,
           "title": "Base no data",
           "variantTitle": "Default Title",
           "price": "29.00",
           "currency": "EUR",
-          "why": "A mast base chosen for this mast."
+          "why": "A mast base chosen for this mast.",
+          "url": "/products/base-no-data",
+          "productUrl": "/products/base-no-data",
+          "image": "https://cdn.example.test/120.jpg",
+          "imageUrl": "https://cdn.example.test/120.jpg",
+          "vendor": null,
+          "specs": {},
+          "facts": []
         },
         {
           "role": "base",
+          "productId": "gid://shopify/Product/119",
           "variantId": 45500000031,
           "title": "Tendon Base",
           "variantTitle": "Default Title",
           "price": "49.00",
           "currency": "EUR",
-          "why": "A mast base chosen for this mast."
+          "why": "A mast base chosen for this mast.",
+          "url": "/products/tendon-base",
+          "productUrl": "/products/tendon-base",
+          "image": "https://cdn.example.test/119.jpg",
+          "imageUrl": "https://cdn.example.test/119.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "baseConnection": "tendon"
+          },
+          "facts": [
+            {
+              "field": "baseConnection",
+              "label": "Base connection",
+              "value": "tendon"
+            }
+          ]
         },
         {
           "role": "board",
+          "productId": "gid://shopify/Product/136",
           "variantId": 45500000050,
           "title": "Free Board 115",
           "variantTitle": "Default Title",
           "price": "1399.00",
           "currency": "EUR",
-          "why": "A 115 L board suits 82 kg riders and takes this sail size."
+          "why": "A 115 L board suits 82 kg riders and takes this sail size.",
+          "url": "/products/free-board-115",
+          "productUrl": "/products/free-board-115",
+          "image": "https://cdn.example.test/136.jpg",
+          "imageUrl": "https://cdn.example.test/136.jpg",
+          "vendor": "Duotone",
+          "specs": {
+            "volumeL": 115,
+            "sailMinM2": 5,
+            "sailMaxM2": 7.5,
+            "finBoxTypes": [
+              "tuttle",
+              "us_box"
+            ]
+          },
+          "facts": [
+            {
+              "field": "volumeL",
+              "label": "Volume",
+              "value": "115 L"
+            },
+            {
+              "field": "finBoxTypes",
+              "label": "Fin boxes",
+              "value": "tuttle, us box"
+            },
+            {
+              "field": "sailMinM2",
+              "label": "Sail range",
+              "value": "5–7.5 m²"
+            }
+          ]
         },
         {
           "role": "fin",
+          "productId": "gid://shopify/Product/127",
           "variantId": 45500000039,
           "title": "Tuttle Fin 36",
           "variantTitle": "36 cm",
           "price": "99.00",
           "currency": "EUR",
-          "why": "A 36 cm tuttle fin for the board's fin box."
+          "why": "A 36 cm tuttle fin for the board's fin box.",
+          "url": "/products/tuttle-fin-36",
+          "productUrl": "/products/tuttle-fin-36",
+          "image": "https://cdn.example.test/127.jpg",
+          "imageUrl": "https://cdn.example.test/127.jpg",
+          "vendor": "Point-7",
+          "specs": {
+            "finBox": "tuttle",
+            "finLengthCm": 36
+          },
+          "facts": [
+            {
+              "field": "finBox",
+              "label": "Fin box",
+              "value": "tuttle"
+            },
+            {
+              "field": "finLengthCm",
+              "label": "Fin length",
+              "value": "36 cm"
+            }
+          ]
         },
         {
           "role": "fin",
+          "productId": "gid://shopify/Product/130",
           "variantId": 45500000042,
           "title": "Deep Tuttle Fin 38",
           "variantTitle": "38 cm",
           "price": "119.00",
           "currency": "EUR",
-          "why": "A 38 cm deep_tuttle fin for the board's fin box."
+          "why": "A 38 cm deep_tuttle fin for the board's fin box.",
+          "url": "/products/deep-tuttle-fin-38",
+          "productUrl": "/products/deep-tuttle-fin-38",
+          "image": "https://cdn.example.test/130.jpg",
+          "imageUrl": "https://cdn.example.test/130.jpg",
+          "vendor": null,
+          "specs": {
+            "finBox": "deep_tuttle",
+            "finLengthCm": 38
+          },
+          "facts": [
+            {
+              "field": "finBox",
+              "label": "Fin box",
+              "value": "deep tuttle"
+            },
+            {
+              "field": "finLengthCm",
+              "label": "Fin length",
+              "value": "38 cm"
+            }
+          ]
         }
       ]
     }

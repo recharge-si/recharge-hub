@@ -60,6 +60,7 @@ function part(role: RigRole, specs: Specs): RigCandidate {
     variantTitle: null,
     handle: null,
     imageUrl: null,
+    vendor: null,
     priceMinor: 100,
     currency: "EUR",
     inStock: true,

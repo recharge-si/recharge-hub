@@ -742,6 +742,7 @@ function toItem(candidate: RigCandidate): RigItem {
     variantTitle: candidate.variantTitle,
     handle: candidate.handle,
     imageUrl: candidate.imageUrl,
+    vendor: candidate.vendor,
     priceMinor: candidate.priceMinor,
     currency: candidate.currency,
     available: candidate.inStock,
@@ -759,9 +760,13 @@ function toAlternative(candidate: RigCandidate): RigAlternative {
     productId: candidate.productId,
     title: candidate.title,
     variantTitle: candidate.variantTitle,
+    handle: candidate.handle,
+    imageUrl: candidate.imageUrl,
+    vendor: candidate.vendor,
     priceMinor: candidate.priceMinor,
     currency: candidate.currency,
     specs: candidate.specs,
+    derived: candidate.derived,
   };
 }
 
@@ -844,6 +849,11 @@ function attempt(
 
 export interface BuildContext {
   shopId: string;
+  /**
+   * Variants never to pick or offer, alternatives included (a buyer's cart
+   * refused one as sold out). Unknown ids are ignored.
+   */
+  excludeVariantIds?: ReadonlySet<number>;
 }
 
 /**
@@ -872,6 +882,7 @@ export function buildRig(
   for (const candidate of ordered) {
     if (candidate.shopId !== context.shopId) continue;
     if (candidate.status !== "ACTIVE") continue;
+    if (context.excludeVariantIds?.has(candidate.variantId)) continue;
     if (seen.has(candidate.variantGid)) continue;
     seen.add(candidate.variantGid);
     if (candidate.missing.length > 0) {

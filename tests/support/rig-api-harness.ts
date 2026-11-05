@@ -10,7 +10,7 @@ import type {
   RigSource,
   RigUsageWrite,
 } from "~/adapters/db/repositories/rig.server";
-import { createRigApi, type RigStore } from "~/adapters/rig/api.server";
+import { createRigApi, type RigCall, type RigStore } from "~/adapters/rig/api.server";
 import { RateLimiter } from "~/adapters/rig/rate-limit";
 
 import {
@@ -115,6 +115,7 @@ export function setup(options: {
   buildLimiter?: RateLimiter;
   dailyCalls?: number;
   logError?: (fields: Record<string, unknown>, message: string) => void;
+  breadcrumb?: (call: RigCall) => void;
 } = {}) {
   const store = new FakeStore();
   const provider = new FakeProvider(options.script ?? goodModel());
@@ -140,6 +141,7 @@ export function setup(options: {
     },
     now: () => new Date(clock.ms),
     ...(options.logError ? { logError: options.logError } : {}),
+    ...(options.breadcrumb ? { breadcrumb: options.breadcrumb } : {}),
   });
   return { api, store, provider, clock };
 }

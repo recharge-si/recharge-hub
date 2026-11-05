@@ -16,6 +16,8 @@ export interface RigCandidate {
   variantTitle: string | null;
   handle: string | null;
   imageUrl: string | null;
+  /** The product's vendor, when the snapshot has one. */
+  vendor: string | null;
   priceMinor: number;
   currency: string;
   inStock: boolean;
@@ -120,6 +122,7 @@ export interface RigItem {
   variantTitle: string | null;
   handle: string | null;
   imageUrl: string | null;
+  vendor: string | null;
   priceMinor: number;
   currency: string;
   available: boolean;
@@ -135,9 +138,13 @@ export interface RigAlternative {
   productId: string;
   title: string;
   variantTitle: string | null;
+  handle: string | null;
+  imageUrl: string | null;
+  vendor: string | null;
   priceMinor: number;
   currency: string;
   specs: Specs;
+  derived: SpecField[];
 }
 
 export interface Check {

@@ -50,6 +50,17 @@ const part = z.object({
   variantTitle: z.string().nullable(),
   url: z.string().nullable(),
   image: z.string().nullable(),
+  productUrl: z.string().regex(/^\/products\/[^/]+$/).nullable(),
+  imageUrl: z.string().regex(/^https:\/\//).nullable(),
+  vendor: z.string().nullable(),
+  facts: z.array(
+    z.object({
+      field: z.string(),
+      label: z.string(),
+      value: z.string(),
+      derived: z.literal(true).optional(),
+    }),
+  ),
   price: z.string().regex(/^\d+\.\d{2}$/),
   currency: z.string(),
   available: z.boolean(),
@@ -84,9 +95,16 @@ const buildResponse = z.object({
           variantId: z.number().int(),
           title: z.string(),
           variantTitle: z.string().nullable(),
+          productId: z.string(),
           price: z.string(),
           currency: z.string(),
           why: z.string(),
+          productUrl: z.string().nullable(),
+          imageUrl: z.string().regex(/^https:\/\//).nullable(),
+          vendor: z.string().nullable(),
+          specs: z.record(z.string(), z.unknown()),
+          facts: z.array(z.object({ label: z.string(), value: z.string() }).passthrough()),
+          derived: z.array(z.string()).optional(),
         }),
       ),
     }),
@@ -117,6 +135,7 @@ describe("contract examples for the theme", () => {
     };
     const response = await api.build(post(request));
     const body = await read(response);
+    const built = body;
     expect(buildResponse.parse(body)).toBeTruthy();
     check("build-request", request);
     check("build-response", body);
@@ -124,6 +143,14 @@ describe("contract examples for the theme", () => {
     const needs = await read(await api.build(post({ text: "I want a rig" })));
     expect(buildResponse.parse(needs)).toBeTruthy();
     check("build-response-needs", needs);
+
+    // The theme rebuilds without a variant the cart refused as sold out.
+    const sold = built.rigs[0].items[0].variantId as number;
+    const rebuildRequest = { answers: REFERENCE, excludeVariantIds: [sold] };
+    const rebuilt = await read(await api.build(post(rebuildRequest)));
+    expect(buildResponse.parse(rebuilt)).toBeTruthy();
+    check("build-request-exclude", rebuildRequest);
+    check("build-response-exclude", rebuilt);
 
     check("error-invalid-body", await read(await api.build(post({ answers: { weightKg: 0 } }))));
     check("error-text-too-long", await read(await api.build(post({ text: "x".repeat(1001) }))));
@@ -163,5 +190,9 @@ describe("contract examples for the theme", () => {
     };
     check("verify-request", request);
     check("verify-response", await read(await api.verify(post(request))));
+
+    const refused = { ...request, excludeVariantIds: [request.variantIds[0]] };
+    check("verify-request-exclude", refused);
+    check("verify-response-exclude", await read(await api.verify(post(refused))));
   });
 });
