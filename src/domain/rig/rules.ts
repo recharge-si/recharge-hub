@@ -134,6 +134,9 @@ export function placeholderRules(): RigRules {
     sail: sailRules(),
     board: boardRules(),
     fin: FIN_LENGTH,
+    // PLACEHOLDER: how far a mast may be from the sail's recommended length,
+    // and an IMCS from the recommended one. Not advice.
+    tolerances: { mastLengthCm: 10, imcs: 1 },
     defaultWind: DEFAULT_WIND,
     defaultSkill: "intermediate",
     defaultBoardKind: "freeride",

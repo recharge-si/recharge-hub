@@ -70,7 +70,7 @@ export function rigApi(): ReturnType<typeof createRigApi> {
         ipSalt: createHmac("sha256", env.ENCRYPTION_KEY)
           .update("rig-ip-salt-v1")
           .digest("hex"),
-        cacheSeconds: 60,
+        cacheSeconds: 300,
       },
       now: () => new Date(),
       log: (fields, message) => getLogger().info(fields, message),

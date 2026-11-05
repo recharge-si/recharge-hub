@@ -10,6 +10,7 @@ import {
 
 import { getAttributeSchema } from "~/adapters/db/repositories/attribute-schema.server";
 import { rigSettingsFor, setRigEnabled } from "~/adapters/rig/settings.server";
+import { planCoversRig } from "~/domain/rig/plan";
 import { roleWord } from "~/domain/rig/keys";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { schemaFromCsv } from "~/domain/attributes/csv";
@@ -67,6 +68,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     rig,
+    rigPlanCovered: planCoversRig(schema),
     revision,
     updatedAt: updatedAt?.toISOString() ?? null,
     empty: state.stage === "empty",
@@ -225,6 +227,7 @@ type Overlay = { showOverlay?: () => void };
 export default function ProductSetupSettings() {
   const {
     rig,
+    rigPlanCovered,
     revision,
     updatedAt,
     empty,
@@ -436,9 +439,14 @@ export default function ProductSetupSettings() {
               <s-text>{rig.enabled ? "The builder is on." : "The builder is off."}</s-text>
               {rig.roles.map((row) => (
                 <s-text key={row.role}>
-                  {`${roleWord(row.role)}: ${row.complete} complete of ${row.products}${row.missing.length > 0 ? ` (missing ${row.missing.map((m) => `${m.key} x${m.count}`).join(", ")})` : ""}`}
+                  {`${roleWord(row.role)}: ${row.complete} complete of ${row.products}, ${row.inStock} in stock${row.missing.length > 0 ? ` (missing ${row.missing.map((m) => `${m.key} x${m.count}`).join(", ")})` : ""}`}
                 </s-text>
               ))}
+              {rig.stockNotRead ? (
+                <s-text color="subdued">
+                  Stock not read yet: refresh the catalogue.
+                </s-text>
+              ) : null}
               {rig.placeholderRules ? (
                 <s-banner tone="warning" heading="Placeholder rules">
                   <s-paragraph>
@@ -605,19 +613,21 @@ export default function ProductSetupSettings() {
             </s-stack>
           </s-section>
 
-          <s-section>
-            <CardHeader
-              title="Rig attributes"
-              subtitle="Adds the product types and measurements the rig builder reads: sails, masts, boards, booms, bases, fins. Nothing in Shopify changes."
-            >
-              <s-button
-                onClick={() => submit({ intent: "rig-pack" })}
-                {...(busy ? { disabled: true } : {})}
+          {rigPlanCovered ? null : (
+            <s-section>
+              <CardHeader
+                title="Rig attributes"
+                subtitle="Example product types and measurements for a plan that has none: sails, masts, boards, booms, bases, fins. The rig builder reads the keys in docs/rig-builder.md (canopy_area, mast_diameter, fin_box and so on), which this plan does not yet hold in full. Nothing in Shopify changes."
               >
-                Add rig attributes
-              </s-button>
-            </CardHeader>
-          </s-section>
+                <s-button
+                  onClick={() => submit({ intent: "rig-pack" })}
+                  {...(busy ? { disabled: true } : {})}
+                >
+                  Add rig attributes
+                </s-button>
+              </CardHeader>
+            </s-section>
+          )}
 
           <s-section>
             <CardHeader

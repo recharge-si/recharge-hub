@@ -14,7 +14,11 @@
       "ok": true
     },
     {
-      "id": "sail-mast-rdm",
+      "id": "rider-fit",
+      "ok": true
+    },
+    {
+      "id": "sail-mast-diameter",
       "ok": true
     },
     {
@@ -22,11 +26,11 @@
       "ok": true
     },
     {
-      "id": "sail-boom-range",
+      "id": "mast-boom-diameter",
       "ok": true
     },
     {
-      "id": "mast-base-type",
+      "id": "sail-boom-range",
       "ok": true
     },
     {
@@ -40,43 +44,43 @@
   ],
   "items": [
     {
-      "variantId": 45500000005,
+      "variantId": 45500000004,
       "role": "sail",
-      "price": "699.00",
+      "price": "619.00",
       "available": true
     },
     {
-      "variantId": 45500000015,
+      "variantId": 45500000023,
       "role": "mast",
-      "price": "399.00",
+      "price": "549.00",
       "available": true
     },
     {
-      "variantId": 45500000019,
+      "variantId": 45500000030,
       "role": "base",
-      "price": "19.90",
+      "price": "39.00",
       "available": true
     },
     {
-      "variantId": 45500000025,
+      "variantId": 45500000033,
       "role": "boom",
-      "price": "299.00",
+      "price": "219.00",
       "available": true
     },
     {
-      "variantId": 45500000031,
-      "role": "board",
-      "price": "899.00",
-      "available": true
-    },
-    {
-      "variantId": 45500000037,
+      "variantId": 45500000040,
       "role": "fin",
-      "price": "69.90",
+      "price": "109.00",
+      "available": true
+    },
+    {
+      "variantId": 45500000048,
+      "role": "board",
+      "price": "1299.00",
       "available": true
     }
   ],
-  "total": "2385.80",
+  "total": "2834.00",
   "currency": "EUR",
   "warnings": []
 }

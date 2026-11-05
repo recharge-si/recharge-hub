@@ -2,7 +2,7 @@ import { prisma } from "~/adapters/db/client.server";
 import { getAttributeSchema } from "~/adapters/db/repositories/attribute-schema.server";
 import { metafieldsFrom } from "~/adapters/db/repositories/catalogue.server";
 import type { AttributeSchema } from "~/domain/attributes/types";
-import type { RigSnapshotProduct } from "~/domain/rig/candidates";
+import { classifyProduct, type RigSnapshotProduct } from "~/domain/rig/candidates";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -38,7 +38,19 @@ export async function findRigShop(
   };
 }
 
-/** The shop's catalogue as rig parts will be made from it, with the plan that names their roles. */
+/** Shopify selectedOptions as stored (a list of name and value); anything else reads as none. */
+function optionsFrom(raw: unknown): Array<{ name: string; value: string }> {
+  if (!Array.isArray(raw)) return [];
+  return raw.flatMap((entry: unknown) => {
+    if (!entry || typeof entry !== "object") return [];
+    const { name, value } = entry as { name?: unknown; value?: unknown };
+    return typeof name === "string" && typeof value === "string"
+      ? [{ name, value }]
+      : [];
+  });
+}
+
+/** The shop catalogue as rig parts will be made from it, with the plan that names their roles. */
 export async function loadRigSource(principal: Principal): Promise<RigSource> {
   const domain = shopDomainOf(principal);
   const shop = await prisma.shop.findUnique({
@@ -52,7 +64,11 @@ export async function loadRigSource(principal: Principal): Promise<RigSource> {
   });
   if (!shop) throw new Error(`Unknown shop ${domain}`);
 
-  const [{ schema }, assignments, rows] = await Promise.all([
+  // Two reads, so the heavy columns (metafields, variants) are read only for
+  // the products the plan makes rig parts: a catalogue of 1,300 products holds
+  // about 250 of them, and reading the rest took most of the 3 seconds a
+  // Shopify App Proxy request cannot spare.
+  const [{ schema }, assignments, light] = await Promise.all([
     getAttributeSchema(principal),
     prisma.productTypeAssignment.findMany({
       where: { shopId: shop.id },
@@ -62,30 +78,52 @@ export async function loadRigSource(principal: Principal): Promise<RigSource> {
       where: { shopId: shop.id },
       select: {
         shopifyProductId: true,
-        title: true,
-        handle: true,
-        status: true,
         productType: true,
         categoryName: true,
-        imageUrl: true,
-        metafields: true,
-        observedAt: true,
-        variants: {
-          select: {
-            shopifyVariantId: true,
-            title: true,
-            priceMinor: true,
-            currency: true,
-            inventoryQuantity: true,
-            availableForSale: true,
-            metafields: true,
-            observedAt: true,
-          },
-        },
       },
     }),
   ]);
   const chosen = new Map(assignments.map((a) => [a.productId, a.typeId]));
+  const partIds = light
+    .filter(
+      (row) =>
+        classifyProduct(schema, {
+          productType: row.productType,
+          categoryName: row.categoryName,
+          chosenTypeId: chosen.get(row.shopifyProductId) ?? null,
+        }) !== null,
+    )
+    .map((row) => row.shopifyProductId);
+  const rows =
+    partIds.length === 0
+      ? []
+      : await prisma.catalogProduct.findMany({
+          where: { shopId: shop.id, shopifyProductId: { in: partIds } },
+          select: {
+            shopifyProductId: true,
+            title: true,
+            handle: true,
+            status: true,
+            productType: true,
+            categoryName: true,
+            imageUrl: true,
+            metafields: true,
+            observedAt: true,
+            variants: {
+              select: {
+                shopifyVariantId: true,
+                title: true,
+                options: true,
+                priceMinor: true,
+                currency: true,
+                inventoryQuantity: true,
+                availableForSale: true,
+                metafields: true,
+                observedAt: true,
+              },
+            },
+          },
+        });
 
   let observedAt: Date | null = null;
   const products: RigSnapshotProduct[] = rows.map((row) => {
@@ -104,6 +142,7 @@ export async function loadRigSource(principal: Principal): Promise<RigSource> {
       variants: row.variants.map((variant) => ({
         variantId: variant.shopifyVariantId,
         title: variant.title,
+        options: optionsFrom(variant.options),
         priceMinor: variant.priceMinor,
         currency: variant.currency,
         inventoryQuantity: variant.inventoryQuantity,

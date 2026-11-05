@@ -55,7 +55,8 @@ const part = z.object({
   available: z.boolean(),
   quantity: z.literal(1),
   why: z.string(),
-  specs: z.record(z.string(), z.union([z.string(), z.number()])),
+  specs: z.record(z.string(), z.union([z.string(), z.number(), z.array(z.string())])),
+  derived: z.array(z.string()).optional(),
 });
 
 const buildResponse = z.object({
@@ -69,6 +70,14 @@ const buildResponse = z.object({
       total: z.string(),
       currency: z.string(),
       checks: z.array(z.object({ id: z.string(), ok: z.boolean() })),
+      unchecked: z
+        .array(
+          z.object({
+            id: z.string(),
+            missing: z.array(z.object({ role: z.string(), key: z.string() })),
+          }),
+        )
+        .optional(),
       alternatives: z.array(
         z.object({
           role: z.string(),

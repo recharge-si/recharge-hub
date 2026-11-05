@@ -1,10 +1,8 @@
 /**
- * The attribute keys the rig engine reads (docs/rig-builder.md § Attributes
- * the engine reads). They are the keys of the rig attribute pack (PRD 2
- * US-204, `domain/attributes/rig-pack.ts` on the metafields branch), defined
- * here so this module does not depend on that branch. Every key lives in the
- * `recharge` namespace; a variant-scope key falls back to the product's, and
- * the other way round, so the plan may attach either.
+ * The one map from the engine's fields to the store's real attribute keys
+ * (docs/rig-builder.md § Attributes the engine reads). They are the keys of
+ * the store's own product plan, in the `recharge` namespace; a variant-scope
+ * key falls back to the product's, and the other way round.
  */
 
 export const RIG_NAMESPACE = "recharge";
@@ -21,133 +19,190 @@ export const RIG_ROLES = [
 export type RigRole = (typeof RIG_ROLES)[number];
 
 /**
- * The plan's product type that makes a product a candidate for a role. A
- * product is a candidate when the type the plan resolves for it, or one of
- * that type's ancestors, has this name (case-insensitive). The base and the
- * extension are one type in the pack ("Bases and extensions"); an extension
- * is the one with `extension_length_cm`.
+ * Plan type names that make a product a candidate for a role. A product is a
+ * candidate when the type the plan resolves for it, or one of that type's
+ * ancestors, has one of these names (case-insensitive) AND the path runs
+ * through "Windsurf" (the plan also has Wing and SUP boards). "Bases and
+ * extensions" is the old rig pack's single type; an extension is then the one
+ * with extension_min_cm.
  */
-export const ROLE_TYPE_NAMES: Readonly<Record<"board" | "sail" | "mast" | "boom" | "base" | "fin", string>> = {
-  board: "Boards",
-  sail: "Sails",
-  mast: "Masts",
-  boom: "Booms",
-  base: "Bases and extensions",
-  fin: "Fins",
+export const ROLE_TYPE_NAMES: Readonly<
+  Record<"board" | "sail" | "mast" | "boom" | "base" | "extension" | "fin", readonly string[]>
+> = {
+  board: ["Boards"],
+  sail: ["Sails"],
+  mast: ["Masts"],
+  boom: ["Booms"],
+  extension: ["Mast extensions"],
+  base: ["Mast bases", "Bases and extensions"],
+  fin: ["Fins"],
 };
+export const DISCIPLINE_TYPE_NAME = "Windsurf";
 
-/** The attribute keys (after `recharge.`) of each candidate field. */
+/** Every key the engine reads, by field, after `recharge.`. */
 export const KEYS = {
-  sailAreaM2: "sail_area_m2",
-  sailMastRdm: "sail_mast_rdm",
-  sailMastLengthMinCm: "sail_mast_length_min_cm",
-  sailMastLengthMaxCm: "sail_mast_length_max_cm",
-  sailBoomMinCm: "sail_boom_min_cm",
-  sailBoomMaxCm: "sail_boom_max_cm",
-  sailCategory: "sail_category",
-  mastLengthCm: "mast_length_cm",
-  mastRdm: "mast_rdm",
-  mastBaseType: "mast_base_type",
-  boardVolumeL: "board_volume_l",
-  boardFinBox: "board_fin_box",
-  boardMinSailM2: "board_min_sail_m2",
-  boardMaxSailM2: "board_max_sail_m2",
+  canopyArea: "canopy_area",
+  luffCm: "luff_cm",
   boomMinCm: "boom_min_cm",
   boomMaxCm: "boom_max_cm",
-  baseType: "base_type",
-  extensionLengthCm: "extension_length_cm",
+  recommendedMastCm: "recommended_mast_cm",
+  recommendedMastDiameter: "recommended_mast_diameter",
+  recommendedMastImcs: "recommended_mast_imcs",
+  compatibleMastDiameters: "compatible_mast_diameters",
+  recommendedBoomCm: "recommended_boom_cm",
+  lengthCm: "length_cm",
+  mastDiameter: "mast_diameter",
+  mastImcs: "mast_imcs",
+  carbonPercent: "carbon_percent",
+  extensionMinCm: "extension_min_cm",
+  extensionMaxCm: "extension_max_cm",
+  baseConnection: "base_connection",
   finBox: "fin_box",
-  finLengthCm: "fin_length_cm",
+  finBoxTypes: "fin_box_types",
+  volumeL: "volume_l",
+  boardSailMinM2: "board_sail_min_m2",
+  boardSailMaxM2: "board_sail_max_m2",
+  boardFinMinCm: "board_fin_min_cm",
+  boardFinMaxCm: "board_fin_max_cm",
+  riderMassMinKg: "rider_mass_min_kg",
+  riderMassMaxKg: "rider_mass_max_kg",
 } as const;
 
 export type SpecField =
   | "areaM2"
-  | "mastRdm"
-  | "mastLengthMinCm"
-  | "mastLengthMaxCm"
+  | "mastCm"
+  | "mastDiameter"
+  | "mastImcs"
+  | "compatibleDiameters"
+  | "recommendedBoomCm"
+  | "lengthCm"
+  | "carbonPercent"
   | "boomMinCm"
   | "boomMaxCm"
-  | "category"
-  | "lengthCm"
-  | "baseType"
-  | "volumeL"
+  | "extensionMinCm"
+  | "extensionMaxCm"
+  | "baseConnection"
   | "finBox"
-  | "minSailM2"
-  | "maxSailM2"
-  | "extensionLengthCm"
-  | "finLengthCm";
+  | "finLengthCm"
+  | "finBoxTypes"
+  | "volumeL"
+  | "sailMinM2"
+  | "sailMaxM2"
+  | "finMinCm"
+  | "finMaxCm"
+  | "riderMinKg"
+  | "riderMaxKg";
 
-/**
- * Which key fills which field, and whether a role needs it. A variant that
- * lacks a required field is never chosen and is counted under its key, so
- * coverage gaps are visible (PRD 4 US-403, feeding PRD 2 US-207).
- * `kind` says how the stored text is read.
- */
+export type SpecValue = number | string | string[];
+export type Specs = Partial<Record<SpecField, SpecValue>>;
+
+/** How a stored value is read (values.ts). */
+export type FieldKind = "cm" | "kg" | "m2" | "l" | "number" | "code" | "list";
+
 export interface FieldSpec {
   field: SpecField;
   key: string;
-  kind: "number" | "code";
+  kind: FieldKind;
 }
 
-export const ROLE_FIELDS: Readonly<
-  Record<RigRole, { required: readonly FieldSpec[]; optional: readonly FieldSpec[] }>
-> = {
-  sail: {
-    required: [
-      { field: "areaM2", key: KEYS.sailAreaM2, kind: "number" },
-      { field: "mastRdm", key: KEYS.sailMastRdm, kind: "code" },
-      { field: "mastLengthMinCm", key: KEYS.sailMastLengthMinCm, kind: "number" },
-      { field: "mastLengthMaxCm", key: KEYS.sailMastLengthMaxCm, kind: "number" },
-      { field: "boomMinCm", key: KEYS.sailBoomMinCm, kind: "number" },
-      { field: "boomMaxCm", key: KEYS.sailBoomMaxCm, kind: "number" },
-      { field: "category", key: KEYS.sailCategory, kind: "code" },
-    ],
-    optional: [],
-  },
-  mast: {
-    required: [
-      { field: "lengthCm", key: KEYS.mastLengthCm, kind: "number" },
-      { field: "mastRdm", key: KEYS.mastRdm, kind: "code" },
-      { field: "baseType", key: KEYS.mastBaseType, kind: "code" },
-    ],
-    optional: [],
-  },
-  board: {
-    required: [
-      { field: "volumeL", key: KEYS.boardVolumeL, kind: "number" },
-      { field: "finBox", key: KEYS.boardFinBox, kind: "code" },
-      { field: "minSailM2", key: KEYS.boardMinSailM2, kind: "number" },
-      { field: "maxSailM2", key: KEYS.boardMaxSailM2, kind: "number" },
-    ],
-    optional: [],
-  },
-  boom: {
-    required: [
-      { field: "boomMinCm", key: KEYS.boomMinCm, kind: "number" },
-      { field: "boomMaxCm", key: KEYS.boomMaxCm, kind: "number" },
-    ],
-    optional: [],
-  },
-  base: {
-    required: [{ field: "baseType", key: KEYS.baseType, kind: "code" }],
-    optional: [],
-  },
-  extension: {
-    required: [
-      { field: "extensionLengthCm", key: KEYS.extensionLengthCm, kind: "number" },
-    ],
-    optional: [{ field: "baseType", key: KEYS.baseType, kind: "code" }],
-  },
-  fin: {
-    required: [
-      { field: "finBox", key: KEYS.finBox, kind: "code" },
-      { field: "finLengthCm", key: KEYS.finLengthCm, kind: "number" },
-    ],
-    optional: [],
-  },
+const f = (field: SpecField, key: string, kind: FieldKind): FieldSpec => ({
+  field,
+  key,
+  kind,
+});
+
+/** What is read per role; the same field can sit on another key in another role. */
+export const ROLE_FIELDS: Readonly<Record<RigRole, readonly FieldSpec[]>> = {
+  sail: [
+    f("areaM2", KEYS.canopyArea, "m2"),
+    f("mastCm", KEYS.recommendedMastCm, "cm"),
+    f("mastDiameter", KEYS.recommendedMastDiameter, "code"),
+    f("mastImcs", KEYS.recommendedMastImcs, "number"),
+    f("compatibleDiameters", KEYS.compatibleMastDiameters, "list"),
+    f("boomMinCm", KEYS.boomMinCm, "cm"),
+    f("boomMaxCm", KEYS.boomMaxCm, "cm"),
+    f("recommendedBoomCm", KEYS.recommendedBoomCm, "cm"),
+  ],
+  mast: [
+    f("lengthCm", KEYS.lengthCm, "cm"),
+    f("mastDiameter", KEYS.mastDiameter, "code"),
+    f("mastImcs", KEYS.mastImcs, "number"),
+    f("carbonPercent", KEYS.carbonPercent, "number"),
+  ],
+  boom: [
+    f("boomMinCm", KEYS.boomMinCm, "cm"),
+    f("boomMaxCm", KEYS.boomMaxCm, "cm"),
+    f("compatibleDiameters", KEYS.compatibleMastDiameters, "list"),
+  ],
+  extension: [
+    f("extensionMinCm", KEYS.extensionMinCm, "cm"),
+    f("extensionMaxCm", KEYS.extensionMaxCm, "cm"),
+    f("baseConnection", KEYS.baseConnection, "code"),
+    f("mastDiameter", KEYS.mastDiameter, "code"),
+  ],
+  base: [f("baseConnection", KEYS.baseConnection, "code")],
+  fin: [
+    f("finBox", KEYS.finBox, "code"),
+    f("finLengthCm", KEYS.lengthCm, "cm"),
+  ],
+  board: [
+    f("volumeL", KEYS.volumeL, "l"),
+    f("sailMinM2", KEYS.boardSailMinM2, "m2"),
+    f("sailMaxM2", KEYS.boardSailMaxM2, "m2"),
+    f("finMinCm", KEYS.boardFinMinCm, "cm"),
+    f("finMaxCm", KEYS.boardFinMaxCm, "cm"),
+    f("finBoxTypes", KEYS.finBoxTypes, "list"),
+    f("riderMinKg", KEYS.riderMassMinKg, "kg"),
+    f("riderMaxKg", KEYS.riderMassMaxKg, "kg"),
+  ],
 };
 
-/** The roles readiness gates on (PRD 4 US-406); the base is reported, not gating. */
+/** The key of a field in a role, for messages. */
+export function keyOf(role: RigRole, field: SpecField): string {
+  return ROLE_FIELDS[role].find((spec) => spec.field === field)?.key ?? field;
+}
+
+/**
+ * What a candidate needs to be placed in a rig (readiness "complete"): the
+ * keys it lacks, in the order they are reported. A role the rules do not need
+ * anything of returns none.
+ *
+ * - sail: the area.
+ * - mast: the length and the diameter.
+ * - boom: the minimum and the maximum.
+ * - fin: the fin box.
+ * - board: a volume or a sail range, and the fin box types.
+ * - extension: its minimum and maximum.
+ * - base: nothing (its connection is checked when there is data).
+ */
+export function placementGaps(role: RigRole, specs: Specs): string[] {
+  const need = (field: SpecField) =>
+    specs[field] === undefined ? [keyOf(role, field)] : [];
+  switch (role) {
+    case "sail":
+      return need("areaM2");
+    case "mast":
+      return [...need("lengthCm"), ...need("mastDiameter")];
+    case "boom":
+      return [...need("boomMinCm"), ...need("boomMaxCm")];
+    case "fin":
+      return need("finBox");
+    case "board": {
+      const hasRange =
+        specs.sailMinM2 !== undefined && specs.sailMaxM2 !== undefined;
+      return [
+        ...(specs.volumeL === undefined && !hasRange ? [KEYS.volumeL] : []),
+        ...need("finBoxTypes"),
+      ];
+    }
+    case "extension":
+      return [...need("extensionMinCm"), ...need("extensionMaxCm")];
+    case "base":
+      return [];
+  }
+}
+
+/** The roles readiness gates on (PRD 4 US-406); the base and extension are reported, not gating. */
 export const READINESS_ROLES: readonly RigRole[] = [
   "board",
   "sail",
@@ -171,3 +226,8 @@ const ROLE_WORDS: Record<RigRole, string> = {
 export function roleWord(role: RigRole): string {
   return ROLE_WORDS[role];
 }
+
+/** Every key the engine reads for any role, for "does the plan already cover it". */
+export const ENGINE_KEYS: readonly string[] = [
+  ...new Set(Object.values(ROLE_FIELDS).flatMap((fields) => fields.map((s) => s.key))),
+].sort();

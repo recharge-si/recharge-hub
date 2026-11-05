@@ -7,11 +7,11 @@ Write each sentence in English, at most 200 characters.
 Reply with one JSON object and nothing else: {"whys": {"<id>": "<sentence>"}} with one entry per id.
 Rider: 82 kg; skill intermediate; freeride; wind 15-25 knots.
 Parts:
-- id 45500000005: sail; title "Aero Ride 5.8"; variant 5.8; area m2 5.8, boom max cm 175, boom min cm 165, category freeride, mast length max cm 460, mast length min cm 430, mast RDM 30
-- id 45500000015: mast; title "Carbon Mast 430"; variant 430; base type tendon, length cm 430, mast RDM 30
-- id 45500000019: base; title "Tendon Base"; variant Default; base type tendon
-- id 45500000025: boom; title "Alu Boom 150-190"; variant 150-190; boom max cm 190, boom min cm 150
-- id 45500000031: board; title "Free Board 105"; variant 105 L; fin box tuttle, largest sail m2 7, smallest sail m2 5, volume L 105
-- id 45500000037: fin; title "Tuttle Fin 36"; variant 36 cm; fin box tuttle, fin length cm 36
-Checks that passed: sail-fit, board-fit, board-sail-range, sail-mast-rdm, sail-mast-length, sail-boom-range, mast-base-type, fin-box, fin-length."
+- id 45500000004: sail; title "Aero Ride"; variant 5.8 m2 / Orange; area m2 5.8, boom max cm 190, boom min cm 170, compatible mast diameters rdm, recommended mast cm 460, mast diameter rdm
+- id 45500000023: mast; title "Unifiber - HD RDM C75 Constant FL Curve Incl. Mastbag"; variant 460; carbon percent 75, length cm 460, mast diameter rdm
+- id 45500000030: base; title "Euro Pin Base"; variant Default Title; base connection euro_pin
+- id 45500000033: boom; title "Boom 150-190"; variant Default Title; boom max cm 190, boom min cm 150, compatible mast diameters rdm/sdm
+- id 45500000048: board; title "Free Board 105"; variant Default Title; fin boxes deep_tuttle/tuttle, largest fin cm 40, smallest fin cm 32, rider max kg 95, rider min kg 70, largest sail m2 6.5, smallest sail m2 4.5, volume L 105
+- id 45500000040: fin; title "Tuttle Fin 40"; variant 40 cm; fin box tuttle, fin length cm 40
+Checks that passed: sail-fit, board-fit, board-sail-range, rider-fit, sail-mast-diameter, sail-mast-length, mast-boom-diameter, sail-boom-range, fin-box, fin-length."
 `;

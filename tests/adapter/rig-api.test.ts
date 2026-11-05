@@ -95,6 +95,42 @@ describe("an unreadable catalogue", () => {
   });
 });
 
+describe("the catalogue cache", () => {
+  it("reads the catalogue once while it is fresh", async () => {
+    const { api, store } = setup();
+    await api.build(post({ answers: REFERENCE }));
+    await api.build(post({ answers: REFERENCE }));
+    expect(store.loadSource).toHaveBeenCalledTimes(1);
+  });
+
+  it("serves the old catalogue at once when it is stale, and refreshes in the background", async () => {
+    const { api, store, clock } = setup();
+    const first = await read(await api.build(post({ answers: REFERENCE })));
+    expect(store.loadSource).toHaveBeenCalledTimes(1);
+
+    // The refresh is held back: the buyer must not wait for it.
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const original = store.loadSource.getMockImplementation();
+    store.loadSource.mockImplementation(async (domain: string) => {
+      await held;
+      return (original as (d: string) => ReturnType<typeof store.loadSource>)(domain);
+    });
+
+    clock.ms += 61_000;
+    const second = await read(await api.build(post({ answers: REFERENCE })));
+    expect(second["rigs"][0].items.map((i: Json) => i.variantId)).toEqual(
+      first["rigs"][0].items.map((i: Json) => i.variantId),
+    );
+    // A second request while it refreshes joins that refresh instead of starting another.
+    await api.build(post({ answers: REFERENCE }));
+    expect(store.loadSource).toHaveBeenCalledTimes(2);
+    release();
+  });
+});
+
 describe("validation", () => {
   it("413 for text over 1000 characters, 200 at exactly 1000", async () => {
     const { api } = setup();
@@ -324,16 +360,22 @@ describe("explain", () => {
 
   it("replaces a sentence that names another product, links, or is too long", async () => {
     const catalogue = loadCatalogue();
-    const sail = catalogue.find((p) => p.title === "Aero Ride 5.8");
+    const sail = catalogue.find((p) => p.title === "Aero Ride");
     const sailId = String(
-      Number((sail?.variants[0]?.variantId ?? "").split("/").pop()),
+      Number(
+        (
+          sail?.variants.find((v) => v.title?.startsWith("5.8"))?.variantId ?? ""
+        )
+          .split("/")
+          .pop(),
+      ),
     );
     const { api } = setup({
       script: (prompt) => {
         const ids = [...prompt.matchAll(/^- id (\d+):/gm)].map((m) => m[1] as string);
         const whys: Record<string, string> = {};
         for (const id of ids) whys[id] = `Fine reason ${id}.`;
-        whys[sailId] = "Better than the Swell Wave 5.8 for you.";
+        whys[sailId] = "Better than the Wave Blade for you.";
         const other = ids.find((id) => id !== sailId) as string;
         whys[other] = "See https://evil.example for more";
         return ok({ whys });

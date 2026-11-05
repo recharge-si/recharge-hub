@@ -18,23 +18,27 @@
   },
   "needs": [],
   "whys": {
-    "45500000005": "A 5.8 m² sail suits 82 kg riders in 15–25 knots.",
-    "45500000015": "This 430 cm RDM 30 mast matches the sail.",
-    "45500000019": "This tendon base fits the mast.",
-    "45500000025": "This boom opens from 150 to 190 cm, which covers the sail.",
-    "45500000031": "A 105 L board suits 82 kg riders and takes this sail size.",
-    "45500000037": "A 36 cm tuttle fin fits the board's fin box."
+    "45500000004": "A 5.8 m² sail suits 82 kg riders in 15–25 knots.",
+    "45500000023": "A 460 cm RDM mast, chosen to go with the sail.",
+    "45500000030": "A mast base chosen for this mast.",
+    "45500000033": "This boom opens from 150 to 190 cm.",
+    "45500000048": "A 105 L board suits 82 kg riders and takes this sail size.",
+    "45500000040": "A 40 cm tuttle fin for the board's fin box."
   },
   "variantIds": [
-    45500000005,
-    45500000015,
-    45500000019,
-    45500000025,
-    45500000031,
-    45500000037
+    45500000004,
+    45500000023,
+    45500000030,
+    45500000033,
+    45500000048,
+    45500000040
   ],
   "mode": "plain",
   "warnings": [
+    {
+      "code": "stock_not_read",
+      "message": "Stock has not been read for some parts yet, so they were left out."
+    },
     {
       "code": "mode_plain",
       "message": "Short descriptions today. The rig is the same."

@@ -1,4 +1,4 @@
-import type { RigRole, SpecField } from "~/domain/rig/keys";
+import type { RigRole, SpecField, Specs } from "~/domain/rig/keys";
 
 /** A part of a rig as the engine sees it: one purchasable variant. */
 export interface RigCandidate {
@@ -19,11 +19,18 @@ export interface RigCandidate {
   priceMinor: number;
   currency: string;
   inStock: boolean;
-  /** Units, when the snapshot knows them. */
+  /** Units, when the snapshot knows them; null means unknown, and unknown is not in stock. */
   inventoryQuantity: number | null;
-  /** Numbers and codes read off the metafields, by field. */
-  specs: Partial<Record<SpecField, number | string>>;
-  /** Required keys this variant has no usable value for. */
+  /** Numbers and codes read off the metafields (or derived), by field. */
+  specs: Specs;
+  /** The fields whose value was derived (derive.ts), not stored. */
+  derived: SpecField[];
+  /**
+   * The discipline a sail or board belongs to, read from its plan type
+   * ("Freeride sails" gives "freeride"); null when the type does not say.
+   */
+  category: string | null;
+  /** Keys this variant lacks that the rules need to place it (keys.ts `placementGaps`). */
   missing: string[];
 }
 
@@ -71,6 +78,14 @@ export interface BoardRule {
   weightMaxKg: number;
   volumeL: Band;
 }
+/** How close two numbers must be to count as the same recommendation. */
+export interface Tolerances {
+  /** Sail recommended mast length vs mast (plus extension), cm. */
+  mastLengthCm: number;
+  /** Sail recommended IMCS vs mast IMCS. */
+  imcs: number;
+}
+
 export interface FinRule {
   /** Boards up to and including this volume. */
   maxVolumeL: number;
@@ -88,6 +103,8 @@ export interface RigRules {
   sail: readonly SailRule[];
   board: readonly BoardRule[];
   fin: readonly FinRule[];
+  /** PLACEHOLDER like the rest of the table until staff set them. */
+  tolerances: Tolerances;
   /** Wind assumed when the buyer gave none. */
   defaultWind: Band;
   defaultSkill: Skill;
@@ -107,7 +124,8 @@ export interface RigItem {
   currency: string;
   available: boolean;
   quantity: number;
-  specs: Partial<Record<SpecField, number | string>>;
+  specs: Specs;
+  derived: SpecField[];
 }
 
 export interface RigAlternative {
@@ -119,12 +137,22 @@ export interface RigAlternative {
   variantTitle: string | null;
   priceMinor: number;
   currency: string;
-  specs: Partial<Record<SpecField, number | string>>;
+  specs: Specs;
 }
 
 export interface Check {
   id: string;
   ok: boolean;
+}
+
+/**
+ * A rule that could not run because a part lacks the data it needs. It is
+ * neither a pass nor a fail: the rig is verified only for the checks that ran.
+ */
+export interface Unchecked {
+  id: string;
+  /** What is missing: the role and the attribute key. */
+  missing: Array<{ role: RigRole; key: string }>;
 }
 
 export interface Rig {
@@ -133,6 +161,7 @@ export interface Rig {
   totalMinor: number;
   currency: string;
   checks: Check[];
+  unchecked: Unchecked[];
   alternatives: RigAlternative[];
 }
 
@@ -154,6 +183,7 @@ export interface BuildResult {
   needs: string[];
   rigs: Rig[];
   checks: Check[];
+  unchecked: Unchecked[];
   unmet: Unmet[];
   warnings: EngineWarning[];
   /** Variants left out for lacking an attribute, by key (feeds readiness). */

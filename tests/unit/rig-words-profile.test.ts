@@ -125,7 +125,7 @@ describe("acceptWhy", () => {
 
   it("refuses a sentence that names a product outside the rig, case-insensitively", () => {
     const { replaced } = acceptWhy(
-      { [String(first.variantId)]: "Nicer than SWELL WAVE 5.8." },
+      { [String(first.variantId)]: "Nicer than WAVE BLADE." },
       rig.items,
       titles,
       rider,
