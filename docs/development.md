@@ -379,7 +379,35 @@ Shopify), `exceptions` (Resolve and Ignore), `sales` (activate writes sale
 prices, End restores them) and `pages` (every parameterless page renders for a
 set-up shop).
 
-## Production Compose
+## Production on t4a (since 2026-11-06)
+
+Production moved from t2 to t4a (Hetzner, `77.42.42.60`; time-4-action/t4a-infra, `servers/t4a`).
+The sections below describe the t2 setup (root `docker-compose.yml` with its own PostgreSQL and
+the host nginx); on t4a it differs like this:
+
+- `/srv/recharge-hub` (owned by `deploy`) holds `docker-compose.yml` (= `deploy/docker-compose.t4a.yml`)
+  and `.env`. Traefik (`/srv/edge`) routes `recharge-hub.time-4-action.com` to `web`, behind
+  Cloudflare; `web` still publishes `127.0.0.1:3192` for the deploy's health check. No nginx.
+- The database is t4a's shared PostgreSQL 18 (`/srv/postgres`, nightly pgBackRest backups to the
+  Storage Box), database and role `recharge-hub`, made by `new-app-db.sh`. `DATABASE_URL` is in
+  `.env` (with `?schema=public`); the containers join the external `db` network. There is no
+  postgres service in the t4a compose file. CI still tests against PostgreSQL 16; the schema
+  (54 migrations, `public` and `pgboss`) runs unchanged on 18.
+- The move: `web` and `worker` stopped on t2, `pg_dump -Fc --no-owner --no-acl` from t2 restored
+  with `pg_restore --no-owner --role=recharge-hub` into a freshly created database (not `--clean`:
+  dropping pg-boss's partitioned `queue_stats_*` tables fails), every table's row count compared
+  (73 tables, all equal), the same image started on t4a, then the DNS record. About 6 minutes
+  of downtime; Shopify retries webhooks.
+- The `production` environment overrides the organization's deploy secrets: `PROD_DEPLOY_HOST`
+  (`77.42.42.60`), `PROD_DEPLOY_SSH_KEY` (the key `github-actions@recharge-hub-t4a`, public half in
+  `/home/deploy/.ssh/authorized_keys` on t4a), `PROD_DEPLOY_FINGERPRINT` (t4a's **ECDSA** host key,
+  `SHA256:2wkXWs0QETKFiXKXbxbJRASeNd9I6zigPKVQGBtwfTk`; the Ed25519 one fails with "host key
+  fingerprint mismatch") and the variable `DEPLOY_DIR=/srv/recharge-hub`.
+- Only one copy may run (the worker's MetaKocka and Shopify jobs). The t2 containers are stopped,
+  not removed. To go back: delete the DNS record `recharge-hub` and the four settings above, dump
+  t4a's database back into t2's PostgreSQL, then `docker compose start` there.
+
+## Production Compose (t2, historical)
 
 The production VM has too little memory to build the image next to PostgreSQL,
 so the image is built by CI, pushed to GitHub Container Registry as
@@ -408,7 +436,8 @@ one at a time (concurrency group `deploy-prod`). It builds the image on GitHub A
 with the commit SHA baked in as `APP_VERSION` (and the
 `org.opencontainers.image.revision` label), pushes it tagged with the full
 commit SHA and `latest`, then SSHes to the VM as the `deploy` user and, in
-`/data/stack/apps/recharge-hub`:
+the `DEPLOY_DIR` variable's directory (production on t4a: `/srv/recharge-hub`, see
+"Production on t4a" below; the default `/data/stack/apps/recharge-hub` was t2's):
 
 1. records the image the running `web` container uses;
 2. logs in to `ghcr.io` with the job's own `GITHUB_TOKEN` (valid only while the
