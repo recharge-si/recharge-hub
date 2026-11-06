@@ -164,7 +164,9 @@ jobs:
           envs: GHCR_USER,GHCR_TOKEN
           script: |
             set -u
-            cd /data/stack/apps/recharge-hub || exit 1
+            # DEPLOY_DIR: a variable of the `production` environment (t4a: /srv/recharge-hub,
+            # README "Production on t4a"); the default is the old t2 directory.
+            cd ${{ vars.DEPLOY_DIR || '/data/stack/apps/recharge-hub' }} || exit 1
             SHA=${{ github.sha }}
             NEW=${{ env.IMAGE }}:$SHA
 
