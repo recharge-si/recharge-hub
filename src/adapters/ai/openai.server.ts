@@ -262,7 +262,14 @@ function asFailure(error: unknown): { kind: "failed"; message: string; retryable
 }
 
 export type TranslateOutcome =
-  | { kind: "ok"; values: Map<string, string>; model: string; text: string }
+  | {
+      kind: "ok";
+      values: Map<string, string>;
+      model: string;
+      text: string;
+      /** Field keys the model said are already in the target language. */
+      alreadyInTarget?: ReadonlySet<string>;
+    }
   | { kind: "failed"; message: string; retryable: boolean };
 
 export type TranslationUsageContext = Omit<
@@ -330,7 +337,13 @@ async function answerTranslation(
     );
     const parsed = parseTranslationReply(answer.text, request.fields);
     if (!parsed.ok) return { kind: "failed", message: parsed.reason, retryable: false };
-    return { kind: "ok", values: parsed.values, model: answer.model, text: answer.text };
+    return {
+      kind: "ok",
+      values: parsed.values,
+      model: answer.model,
+      text: answer.text,
+      alreadyInTarget: parsed.alreadyInTarget,
+    };
   } catch (error) {
     return asFailure(error);
   }

@@ -346,6 +346,19 @@ current list. The ones a person may want to decide on:
   language directly from Slovenian but its English text stays whatever is in
   the resource itself. Writing the original would be editing content, which
   this module deliberately does not do.
+- **Translation failures from supplier HTML (fixed 2026-11-16).** 226 open
+  `translation_failed` rows were `html_structure` (the model closing and
+  tidying untidy supplier markup: `<br>`/`<br />`, unclosed `<p>`/`<li>`/
+  `<td>`, empty spans) and `unchanged` (copy already in Slovenian in the
+  default-language field, which the prompt told the model to return as it
+  was and validation then refused). The skeleton is now compared as a
+  browser reads it, and the model can declare a prose field already in the
+  target language. Bumping the prompt and validation versions makes every
+  remembered failure retry on the next automatic pass, so rows that now
+  translate close themselves. After the deploy, check that the open count
+  falls after the next nightly sync; whatever is left is a real failure
+  with a current reason. "Already in the target language" rests on the
+  model's claim (docs/translations.md § Known limits).
 - **Cost is estimated, never billed.** The provider reports tokens; the price
   per token is `src/domain/translations/pricing.ts` under `PRICING_VERSION`.
   Bump the version and the table when OpenAI changes prices; rows already
@@ -524,22 +537,21 @@ App Store app; those requirements (review, Built for Shopify, listing) are not
 current goals. Custom distribution cannot be reverted on the same Partner app,
 so a public release would mean a new app and a re-install.
 
+### D-02 — ERP admins: the store owner or `ERP_ADMIN_EMAILS`, 2026-11-16
+
+Viewing, replacing or disconnecting the MetaKocka credentials (secret key and
+webhook secret) and the export portal key is limited to ERP admins: the store
+owner (`associated_user.account_owner`) or a staff user whose
+`associated_user.email` is on the server's `ERP_ADMIN_EMAILS`
+(`src/domain/erp-admin.ts`). The people who run the store are organization
+administrators, not the store owner, and Shopify reports no organization role
+to apps (`StaffMemberPrivateData.permissions` is deprecated in 2026-07), so an
+allowlist in the server environment is the only reliable source. Unset means
+the owner only; every other staff user sees the screens closed. This replaced
+a temporary gate bypass (2026-09-18 to 2026-11-16) under which every signed-in
+staff account counted as the owner.
+
 ## Decisions requiring a human
-
-### T-21 — MetaKocka credentials gate is DISABLED (security, decide soon)
-
-`src/web/lib/principal.server.ts` has `OWNER_GATE_DISABLED = true`: every
-signed-in staff account counts as the store owner and can read or replace the
-MetaKocka secret key, contrary to `docs/BUILD_SPEC.md` section 9. Disabled on
-2026-09-18 because the people running the store are organization
-administrators, not the store owner, and Shopify exposes no organization role
-to apps (`StaffMemberPrivateData.permissions` and its `FULL` value are
-deprecated in 2026-07). Acceptable only while the store's staff list is the
-merchant's own trusted people. Before adding any further staff or
-collaborators, either re-enable the gate (flip the constant) and use the owner
-account, or replace it with an `ERP_ADMIN_EMAILS` allowlist read from the server
-environment and matched case-insensitively against `associated_user.email`.
-Remove this entry when done.
 
 ### T-02/T-03 — Ambiguous MetaKocka document recovery
 

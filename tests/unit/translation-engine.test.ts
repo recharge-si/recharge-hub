@@ -19,6 +19,13 @@ import {
 import type { Violation } from "~/domain/translations/validate";
 import { serviceToken } from "~/domain/types";
 import { WATERSPORTS_MENU } from "../fixtures/translations/snapshots";
+import {
+  PATRIK_BACK_WING_SOURCE,
+  UNIFIBER_RPM_ANSWER,
+  UNIFIBER_RPM_SOURCE,
+  UNIFIBER_SDM_SLOVENIAN_ANSWER,
+  UNIFIBER_SDM_SLOVENIAN_SOURCE,
+} from "../fixtures/translations/supplier-html";
 
 /**
  * The engine end to end with a scripted provider (docs/translations.md
@@ -81,7 +88,7 @@ vi.mock("~/adapters/db/repositories/translations.server", () => ({
   recordOwnership: (...args: unknown[]) => repo.recordOwnership(...args),
 }));
 
-const { automaticWorkFor, translateResource, hashValue } = await import("~/adapters/translations/engine.server");
+const { automaticWorkFor, translateResource, hashValue, sourceKeyOf } = await import("~/adapters/translations/engine.server");
 
 function reply(values: Record<string, string>): TranslateOutcome {
   const translations = Object.fromEntries(Object.values(values).map((value, index) => [String(index + 1), value]));
@@ -234,7 +241,7 @@ describe("the engine", () => {
     );
     const trace = traceOf(outcome);
     expect(trace).toMatchObject({
-      promptVersion: "translate-v2",
+      promptVersion: "translate-v3",
       profileVersion: 3,
       sourceLocale: "en",
       sourceReason: "primary",
@@ -319,6 +326,71 @@ describe("the engine", () => {
     expect(repo.recordOwnership).not.toHaveBeenCalled();
     expect(remembered).not.toHaveBeenCalled();
     expect(traceOf(outcome).attempts).toBe(2);
+  });
+
+  it("writes a supplier description whose markup the model only tidied, without asking for a correction", async () => {
+    provider.translate.mockImplementation(answer({ body_html: UNIFIBER_RPM_ANSWER }));
+    const outcome = await run(
+      intelligence(),
+      resource("gid://shopify/Product/30", [{ key: "body_html", value: UNIFIBER_RPM_SOURCE, type: "HTML" }]),
+      { type: "PRODUCT" },
+    );
+    expect(outcome.failed).toBe(0);
+    expect(provider.correct).not.toHaveBeenCalled();
+    expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Product/30", [
+      { key: "body_html", locale: "sl", value: UNIFIBER_RPM_ANSWER, digest: "digest-body_html" },
+    ]);
+  });
+
+  it("keeps a description already in the target language as it is when the model says so", async () => {
+    provider.translate.mockImplementation(async (request) => ({
+      ...reply({ body_html: PATRIK_BACK_WING_SOURCE }),
+      alreadyInTarget: new Set(request.fields.map((f) => f.key)),
+    }));
+    const outcome = await run(
+      intelligence(),
+      resource("gid://shopify/Product/31", [{ key: "body_html", value: PATRIK_BACK_WING_SOURCE, type: "HTML" }]),
+      { type: "PRODUCT" },
+    );
+    expect(outcome.failed).toBe(0);
+    expect(provider.correct).not.toHaveBeenCalled();
+    expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Product/31", [
+      { key: "body_html", locale: "sl", value: PATRIK_BACK_WING_SOURCE, digest: "digest-body_html" },
+    ]);
+    expect(traceOf(outcome).validation).toEqual([
+      { attempt: 1, violations: [{ key: "body_html", code: "unchanged", severity: "soft" }] },
+    ]);
+  });
+
+  it("accepts the claim on the correction too: unchanged once, then declared", async () => {
+    provider.translate.mockImplementation(answer({ body_html: UNIFIBER_SDM_SLOVENIAN_ANSWER }));
+    provider.correct.mockImplementation(async (request) => ({
+      ...reply({ body_html: UNIFIBER_SDM_SLOVENIAN_ANSWER }),
+      alreadyInTarget: new Set(request.fields.map((f) => f.key)),
+    }));
+    const outcome = await run(
+      intelligence(),
+      resource("gid://shopify/Product/32", [{ key: "body_html", value: UNIFIBER_SDM_SLOVENIAN_SOURCE, type: "HTML" }]),
+      { type: "PRODUCT" },
+    );
+    expect(provider.correct).toHaveBeenCalledTimes(1);
+    expect(outcome.failed).toBe(0);
+    expect(outcome.items[0]?.status).toBe("translated");
+  });
+
+  it("still fails a description returned untranslated with no claim, and remembers the failure", async () => {
+    const english = "<p>The back wing for the Patrik foil, in carbon, for a calmer and more stable ride.</p>";
+    provider.translate.mockImplementation(answer({ body_html: english }));
+    provider.correct.mockImplementation(answer({ body_html: english }));
+    const outcome = await run(
+      intelligence(),
+      resource("gid://shopify/Product/33", [{ key: "body_html", value: english, type: "HTML" }]),
+      { type: "PRODUCT" },
+    );
+    expect(outcome.failed).toBe(1);
+    expect(outcome.items[0]?.error).toContain("body_html: unchanged");
+    expect(shopify.register).not.toHaveBeenCalled();
+    expect(failures.get("gid://shopify/Product/33|sl")).toMatchObject({ attempts: 1 });
   });
 
   it("gives the merchant's glossary precedence: a remembered answer the glossary contradicts is not reused, and the rule is checked", async () => {
@@ -507,7 +579,7 @@ describe("automaticWorkFor", () => {
     const res = resource("gid://shopify/Product/24", [{ key: "title", value: "Kite" }]);
     const failure: StoredFailure = {
       locale: "sl",
-      sourceKey: hashValue("title:digest-title"),
+      sourceKey: sourceKeyOf([{ key: "title", value: "Kite", digest: "digest-title", type: "STRING" }]),
       attempts: 1,
       lastError: "The reply left out title.",
       failedAt: now,
@@ -515,5 +587,19 @@ describe("automaticWorkFor", () => {
     };
     expect(ask(res, { failure })).toBe(false);
     expect(ask(res, { failure: { ...failure, sourceKey: "another-source" } })).toBe(true);
+  });
+
+  it("tries again a failure remembered under earlier prompt or validation rules, even one it had given up on", () => {
+    const res = resource("gid://shopify/Product/25", [{ key: "title", value: "Kite" }]);
+    // The key as it was computed before the rule versions were part of it.
+    const failure: StoredFailure = {
+      locale: "sl",
+      sourceKey: hashValue("title:digest-title"),
+      attempts: 4,
+      lastError: "The translation broke a rule and could not be corrected: title: unchanged.",
+      failedAt: now,
+      retryAfter: null,
+    };
+    expect(ask(res, { failure })).toBe(true);
   });
 });

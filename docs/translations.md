@@ -413,14 +413,18 @@ CONTEXT, the merchant's TERMINOLOGY OVERRIDES (absolute), the ESTABLISHED
 TRANSLATIONS from memory, the STORE TERMINOLOGY notes and the FIELDS. Nothing
 about any industry is in the system message unless this store's profile put
 it there. `buildCorrectionMessages` appends the model's previous answer and
-each violated invariant against its field number.
+each violated invariant against its field number. The reply is
+`{"translations": {...}, "already_in_target": [...]}`: the second list
+names the fields the model returned unchanged because they are already
+written in the target language (§ Unchanged text). It is optional, and a
+number in it that names no field is ignored.
 
 ### Validation
 
 `validateTranslation` (`domain/translations/validate`) runs before every
 write. Hard: a field missing or empty; placeholders (`{{x}}`, `{0}`, `%s`,
 `${x}`, `[[x]]`) not identical; the HTML tag skeleton (tags, order, nesting,
-`href`/`src`) changed; a rich-text document's structure changed or lost; a URL
+`href`/`src`) changed (§ HTML structure); a rich-text document's structure changed or lost; a URL
 or e-mail gone; a source number missing (digits compared with separators
 removed, so `5.0` → `5,0` passes); a model code or identifier missing
 (letters-and-digits tokens compared without separators and case); a protected
@@ -429,6 +433,36 @@ three words or fewer; ordinary words left untranslated (§ Unchanged text).
 Soft: a translate-as rule not found inside longer prose (it may inflect); a
 single ordinary word unchanged; a translation under a quarter or over four
 times the source's length.
+
+`VALIDATION_VERSION` is bumped whenever a rule changes what is accepted;
+with `TRANSLATION_PROMPT_VERSION` it is part of a remembered failure's key
+(§ Failures).
+
+### HTML structure
+
+`htmlSkeleton` (`domain/translations/text`) reads both the source and the
+answer the lenient way a browser reads supplier markup, then compares the
+two element trees. Supplier descriptions (Unifiber, Patrik exports) leave
+`<p>`, `<li>`, `<td>` and `<tr>` unclosed, carry Word comments, empty styled
+spans and `<p>&nbsp;</p>` spacers; a model writing the answer closes and
+tidies them. So these are the same skeleton:
+
+- `<br>`, `<br/>`, `<br />` (void elements have no children whichever way
+  they are written); `<b>`/`<strong>` and `<i>`/`<em>`; tag-name case;
+- an unclosed `<p>`, `<li>`, `<dt>`/`<dd>`, `<td>`/`<th>`, `<tr>`,
+  `<thead>`/`<tbody>`/`<tfoot>`, `<option>` closed where a browser would
+  close it, a stray end tag ignored, anything left open closed at the end;
+- comments, doctype and processing instructions;
+- attributes other than `href` and `src`, their order and quoting, and
+  `&amp;` versus `&` in a link;
+- an element that shows nothing — no text, no image, table, list or link
+  under it (an empty `<span style>`, `<p>&nbsp;</p>`, `<p><br></p>`).
+
+Still hard: an element, a list item, a cell, a link or an image added,
+dropped, merged or moved, a changed `href` or `src`, plain text wrapped in
+new markup. The correction request says where the two first part ("after
+`<li></li>` the source has `<li>` where your answer has `</ul>`"). URLs in
+text are compared with `&amp;` read as `&` too.
 
 ### Unchanged text
 
@@ -440,6 +474,23 @@ back as they were between different languages: `All Products → All Products`
 for Slovenian is refused and corrected. One ordinary word unchanged is a
 doubt only — it may be the market's established form — and between regional
 variants of one language nothing is doubted.
+
+A word's shape makes it stable too, with no term needed: a short all-caps
+abbreviation (`RPM`, `SL`, `HD`, `SDM`; not inside a heading written all in
+capitals), a word with a capital after a lower-case letter (`iWindsurf`), a
+unit symbol (`cm`, `kg`, `m²`, …). So `Unifiber - RPM iWindsurf 280 (SL)`,
+`HD SDM C75` and a spec line of model names, numbers and units pass as they
+are.
+
+**Already in the target language.** A store's default-language field often
+holds copy written in the target language (a Slovenian description in an
+English store). The prompt tells the model to return such a field unchanged
+and list it in `already_in_target`; an unchanged field it listed is
+accepted (a soft `unchanged` in the trace) and written as the translation,
+so the next pass finds it current. The claim is taken for prose — four or
+more words — only: a short label such as `All Products` returned unchanged
+is still refused whatever the model says. An unchanged answer the model did
+not claim is refused as before.
 
 ### Explainability
 
@@ -651,6 +702,16 @@ then 3, then 7 days after consecutive failures, and after the fourth not at
 all until the source changes. A sync a person started and the editor always
 try. A success, and **Delete all translations**, forget the failure.
 
+The key also carries `TRANSLATION_PROMPT_VERSION` and `VALIDATION_VERSION`.
+A release that changes the prompt or the rules therefore makes every
+remembered failure stale, given-up ones included: the next automatic pass
+(the nightly sync for every language with automatic translation on, or the
+next webhook for a product) tries each failed resource once more. One that
+now translates is written, its failure forgotten and its Needs attention
+row closed by the sync job; one that still fails updates its row with the
+new reason and starts the back-off again from 1 day. A language without
+automatic translation is retried by a person's sync (Translate missing).
+
 A failure is shown on Needs attention as **one row per resource**
 (`translation_failed`, dedupe key `translation-resource:<id>`,
 `domain/translations/failure-notice`): the resource's name, linking to it
@@ -838,6 +899,13 @@ next open. Until then the pages say the app has not been granted permission.
   page shows it, a wrong term can be forgotten there, and a glossary rule
   overrides anything learnt.
 - The primary locale's own text cannot be written (see Source language).
+- "Already in the target language" is the model's word for a prose field
+  that came back unchanged (§ Unchanged text); nothing checks the language
+  deterministically. A model that wrongly claims it for an untranslated
+  description leaves that description in the source language. Short labels
+  are never accepted on the claim alone. HTML is sent to the model as it
+  is, not in a protected form; the lenient comparison (§ HTML structure)
+  absorbs the tidying models do, and real changes are corrected once.
 - Theme, email template and app-embed strings are out of scope: their keys are
   dynamic and their strings are the theme's.
 - The editor's status filter applies within the page it read (25 resources);

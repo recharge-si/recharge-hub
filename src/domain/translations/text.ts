@@ -6,14 +6,12 @@
  * store's own data, never from a list here.
  */
 
-const HTML_TAG = /<\/?([a-zA-Z][a-zA-Z0-9-]*)\b[^>]*>/g;
-
 /** Visible text of an HTML fragment, whitespace collapsed. Plain text passes through. */
 export function stripHtml(value: string): string {
   return value
     .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
     .replace(/<[^>]+>/g, " ")
-    .replace(/&nbsp;/gi, " ")
+    .replace(/&nbsp;|&#0*160;|&#x0*a0;/gi, " ")
     .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
@@ -99,32 +97,207 @@ export function placeholdersOf(value: string): string[] {
 export function urlsOf(value: string): string[] {
   const matches =
     value.match(/https?:\/\/[^\s"'<>)]+|mailto:[^\s"'<>)]+|[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? [];
-  return matches.map((token) => token.replace(/[.,;:]+$/, "")).sort();
+  // `&amp;` in a link's query is how HTML spells `&`; either way is the same URL.
+  return matches.map((token) => token.replace(/&amp;/gi, "&").replace(/[.,;:]+$/, "")).sort();
+}
+
+/** Elements that never have children; `<br>`, `<br/>` and `<br />` are one tag. */
+const VOID_ELEMENTS: ReadonlySet<string> = new Set([
+  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
+]);
+
+/** What a shopper sees even without text: never dropped as an empty element. */
+const CONTENT_ELEMENTS: ReadonlySet<string> = new Set([
+  "img", "iframe", "video", "audio", "source", "embed", "object", "picture", "svg", "input", "hr", "track",
+  "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col",
+  "ul", "ol", "li", "dl", "dt", "dd",
+]);
+
+/** Spellings of one element that render the same. */
+const SAME_ELEMENT: Readonly<Record<string, string>> = { b: "strong", i: "em" };
+
+/** A start tag of one of these closes an open `<p>`, as a browser does. */
+const CLOSES_P: ReadonlySet<string> = new Set([
+  "address", "article", "aside", "blockquote", "details", "div", "dl", "fieldset", "figcaption", "figure",
+  "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "main", "nav", "ol", "p", "pre",
+  "section", "table", "ul",
+]);
+
+/**
+ * Elements a start tag closes implicitly when one is open, up to the
+ * nearest boundary: an `<li>` ends the previous `<li>` of its list, a `<tr>`
+ * the previous row and its cell. Supplier HTML leaves these unclosed and a
+ * model writing the answer closes them; both are the same document.
+ */
+const IMPLIED_END: Readonly<Record<string, { closes: readonly string[]; within: readonly string[] }>> = {
+  li: { closes: ["li"], within: ["ul", "ol"] },
+  dt: { closes: ["dt", "dd"], within: ["dl"] },
+  dd: { closes: ["dt", "dd"], within: ["dl"] },
+  tr: { closes: ["tr", "td", "th"], within: ["table", "thead", "tbody", "tfoot"] },
+  td: { closes: ["td", "th"], within: ["tr", "table"] },
+  th: { closes: ["td", "th"], within: ["tr", "table"] },
+  thead: { closes: ["thead", "tbody", "tfoot", "tr", "td", "th"], within: ["table"] },
+  tbody: { closes: ["thead", "tbody", "tfoot", "tr", "td", "th"], within: ["table"] },
+  tfoot: { closes: ["thead", "tbody", "tfoot", "tr", "td", "th"], within: ["table"] },
+  option: { closes: ["option"], within: ["select", "datalist"] },
+};
+
+/** Where an open `<p>` stops being reachable (the HTML "button scope"). */
+const P_SCOPE: ReadonlySet<string> = new Set(["button", "caption", "object", "table", "td", "th", "template"]);
+
+const NO_BOUNDARY: ReadonlySet<string> = new Set();
+
+const TAG = /<(\/?)([a-zA-Z][\w:.-]*)((?:[^>"']|"[^"]*"|'[^']*')*)>/g;
+
+interface HtmlNode {
+  name: string;
+  attrs: string;
+  children: HtmlNode[];
+  text: boolean;
+}
+
+/**
+ * The element tree of an HTML fragment, parsed the lenient way a browser
+ * parses supplier markup: comments and doctype ignored, void elements
+ * childless whichever way they are written, unclosed `<p>`, `<li>`, `<td>`
+ * and their kind closed where a browser would close them, a stray end tag
+ * ignored, and anything left open closed at the end.
+ */
+function htmlTree(value: string): HtmlNode {
+  const source = value
+    .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
+    .replace(/<![^>]*>|<\?[^>]*>/g, "")
+    .replace(/(<(script|style)\b[^>]*>)[\s\S]*?(<\/\2\s*>)/gi, "$1$3");
+  const root: HtmlNode = { name: "#root", attrs: "", children: [], text: false };
+  const stack: HtmlNode[] = [root];
+  const top = () => stack[stack.length - 1]!;
+  const markText = (text: string) => {
+    if (stripHtml(text) !== "") top().text = true;
+  };
+  /**
+   * Index of an open element named in `names` reachable before a boundary,
+   * or -1: the innermost one, or with `outermost` the outermost, so a `<tr>`
+   * closes the open row and not only its cell.
+   */
+  const openIndex = (names: readonly string[], boundary: ReadonlySet<string>, outermost = false) => {
+    let found = -1;
+    for (let i = stack.length - 1; i > 0; i -= 1) {
+      const node = stack[i]!;
+      if (names.includes(node.name)) {
+        found = i;
+        if (!outermost) break;
+        continue;
+      }
+      if (boundary.has(node.name)) break;
+    }
+    return found;
+  };
+
+  let last = 0;
+  for (const match of source.matchAll(TAG)) {
+    markText(source.slice(last, match.index));
+    last = match.index + match[0].length;
+    const closing = match[1] === "/";
+    const raw = (match[2] ?? "").toLowerCase();
+    const name = SAME_ELEMENT[raw] ?? raw;
+    const rest = match[3] ?? "";
+
+    // `</br>` is read as `<br>` by a browser; every other end tag closes
+    // the innermost open element of its name, or nothing.
+    if (closing && name !== "br") {
+      const index = openIndex([name], NO_BOUNDARY);
+      if (index > 0) stack.length = index;
+      continue;
+    }
+
+    if (CLOSES_P.has(name)) {
+      const p = openIndex(["p"], P_SCOPE);
+      if (p > 0) stack.length = p;
+    }
+    const implied = IMPLIED_END[name];
+    if (implied) {
+      const index = openIndex(implied.closes, new Set(implied.within), true);
+      if (index > 0) stack.length = index;
+    }
+
+    const node: HtmlNode = { name, attrs: meaningfulAttributes(rest), children: [], text: false };
+    top().children.push(node);
+    if (!VOID_ELEMENTS.has(name) && !/\/\s*$/.test(rest)) stack.push(node);
+  }
+  markText(source.slice(last));
+  return root;
+}
+
+/** `href` and `src`, entities decoded and quotes dropped, in a fixed order. */
+function meaningfulAttributes(raw: string): string {
+  const attrs: string[] = [];
+  for (const attr of raw.matchAll(/(?:^|\s)(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi)) {
+    const value = (attr[2] ?? "")
+      .replace(/^["']|["']$/g, "")
+      .replace(/&amp;|&#0*38;/gi, "&")
+      .trim();
+    attrs.push(`${attr[1]!.toLowerCase()}=${value}`);
+  }
+  return attrs.sort().join(" ");
+}
+
+/**
+ * Drops elements that show nothing: no text, no image, table or list, no
+ * link under them — an empty `<span style>`, a `<p>&nbsp;</p>` or a
+ * `<p><br></p>` spacer. A model tidying the markup removes those, and
+ * keeping them is not what a shopper would notice.
+ */
+function prune(node: HtmlNode): HtmlNode | null {
+  const children = node.children.map(prune).filter((child): child is HtmlNode => child !== null);
+  const kept = { ...node, children };
+  if (node.name === "#root" || node.text || CONTENT_ELEMENTS.has(node.name)) return kept;
+  if (node.name === "a" && node.attrs !== "") return kept;
+  if (children.some((child) => child.name !== "br")) return kept;
+  return null;
 }
 
 /**
  * The tag structure of an HTML fragment, as a list of `<tag>` / `</tag>`
- * entries with the attributes that carry meaning (`href`, `src`, `alt` is
+ * entries with the attributes that carry meaning (`href`, `src`; `alt` is
  * translatable so it is excluded). Two fragments with the same skeleton
  * have the same markup; the text between the tags is what moved.
+ *
+ * Both sides of a comparison are read as a browser would read them
+ * (`htmlTree`), so what differs only in spelling — `<br>` and `<br />`, an
+ * unclosed `<p>` or `<li>`, `<b>` and `<strong>`, attribute order, quotes,
+ * `&amp;` in a link, comments, empty spacer elements — is the same
+ * skeleton, while an element, a link or an image added, dropped or moved
+ * is not (docs/translations.md § HTML structure).
  */
 export function htmlSkeleton(value: string): string[] {
-  const skeleton: string[] = [];
-  for (const match of value.matchAll(HTML_TAG)) {
-    const raw = match[0];
-    const name = (match[1] ?? "").toLowerCase();
-    const closing = raw.startsWith("</");
-    if (closing) {
-      skeleton.push(`</${name}>`);
-      continue;
+  const out: string[] = [];
+  const walk = (node: HtmlNode) => {
+    for (const child of node.children) {
+      out.push(`<${child.name}${child.attrs === "" ? "" : ` ${child.attrs}`}>`);
+      if (VOID_ELEMENTS.has(child.name)) continue;
+      walk(child);
+      out.push(`</${child.name}>`);
     }
-    const attrs: string[] = [];
-    for (const attr of raw.matchAll(/\b(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi)) {
-      attrs.push(`${attr[1]!.toLowerCase()}=${(attr[2] ?? "").replace(/^["']|["']$/g, "")}`);
-    }
-    skeleton.push(`<${name}${attrs.length > 0 ? " " + attrs.join(" ") : ""}${raw.endsWith("/>") ? "/" : ""}>`);
+  };
+  const tree = prune(htmlTree(value));
+  if (tree) walk(tree);
+  return out;
+}
+
+/**
+ * Where two skeletons first part, for the correction request: the model
+ * is told which tag it dropped or added rather than only that one moved.
+ */
+export function skeletonDifference(before: readonly string[], after: readonly string[]): string | null {
+  const length = Math.max(before.length, after.length);
+  for (let i = 0; i < length; i += 1) {
+    if (before[i] === after[i]) continue;
+    const near = before.slice(Math.max(0, i - 2), i).join("");
+    const expected = before[i] ?? "the end of the field";
+    const found = after[i] ?? "the end of the field";
+    return `The source has ${before.length} tags and your answer ${after.length}; after ${near || "the start"} the source has ${expected} where your answer has ${found}.`;
   }
-  return skeleton;
+  return null;
 }
 
 /**

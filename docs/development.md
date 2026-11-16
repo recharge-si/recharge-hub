@@ -104,6 +104,7 @@ HMAC verification and can look like an application regression.
 | `DATABASE_URL`                                      |      yes | Host-process PostgreSQL connection                                   |
 | `ENCRYPTION_KEY`                                    |      yes | 32 random bytes encoded as Base64                                    |
 | `SHOP_CUSTOM_DOMAIN`                                |       no | Custom shop domain accepted by Shopify auth                          |
+| `ERP_ADMIN_EMAILS`                                  | production | Comma-separated staff emails that may view, replace and disconnect the MetaKocka credentials and the export portal key, in addition to the store owner (`docs/project-status.md` D-02). Matched trimmed and case-insensitively against the Shopify staff user's email. Unset means the store owner only: every other staff user sees those screens closed, so set it on the server **before** deploying a build that reads it |
 | `OPENAI_API_KEY`                                    |       no | The one server-side key AI translation uses (docs/translations.md § The provider). Never shown, stored or logged; blank disables AI translation and every other feature still works |
 | `OPENAI_TRANSLATION_MODEL`                          |       no | The OpenAI model to translate with; defaults to `gpt-4.1-mini`. Costs are estimated only for models in `src/domain/translations/pricing.ts` |
 | `EXPORT_PORTAL_URL`                                 |       no | The export portal's origin, for the Sources area (docs/sources.md). Per deployment; the per-store API key is pasted into the app. Blank leaves the Sources pages saying the portal is not configured; everything else works |
@@ -405,6 +406,10 @@ the host nginx); on t4a it differs like this:
   `/home/deploy/.ssh/authorized_keys` on t4a), `PROD_DEPLOY_FINGERPRINT` (t4a's **ECDSA** host key,
   `SHA256:2wkXWs0QETKFiXKXbxbJRASeNd9I6zigPKVQGBtwfTk`; the Ed25519 one fails with "host key
   fingerprint mismatch") and the variable `DEPLOY_DIR=/srv/recharge-hub`.
+- `.env` must set `ERP_ADMIN_EMAILS` to the staff who manage the MetaKocka connection (the
+  organization administrators are not the store owner). Without it only the store owner can open
+  Settings > MetaKocka, the setup's Connect step and Sources > Connection. Set it, then deploy;
+  `docker compose up -d` re-reads `.env`.
 - Only one copy may run (the worker's MetaKocka and Shopify jobs). The t2 containers are stopped,
   not removed. To go back: delete the DNS record `recharge-hub` and the four settings above, dump
   t4a's database back into t2's PostgreSQL, then `docker compose start` there.

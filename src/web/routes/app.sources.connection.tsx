@@ -27,7 +27,7 @@ import { SourcesNav } from "~/web/components/sources-nav";
 import { formatDateTime } from "~/web/lib/datetime";
 import {
   actorFromSession,
-  isOwnershipKnown,
+  isUserKnown,
   principalFromSession,
 } from "~/web/lib/principal.server";
 import { redirectWithin } from "~/web/lib/redirects";
@@ -55,10 +55,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  if (!principal.isShopOwner) {
+  if (!principal.isErpAdmin) {
     return {
       allowed: false as const,
-      ownershipKnown: isOwnershipKnown(session),
+      userKnown: isUserKnown(session),
       configured: isPortalConfigured(),
       summary: null,
       shopDomain: session.shop,
@@ -67,7 +67,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     allowed: true as const,
-    ownershipKnown: true,
+    userKnown: true,
     configured: isPortalConfigured(),
     summary: await getExportPortalSummary(principal),
     shopDomain: session.shop,
@@ -80,6 +80,15 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   const actor = actorFromSession(session);
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "save");
+
+  // Refused before anything is read; the repository refuses too.
+  if (!principal.isErpAdmin) {
+    return {
+      ok: false,
+      intent: intent === "test" || intent === "disconnect" ? intent : "save",
+      message: "Only ERP admins can change the export portal connection.",
+    } satisfies ActionResult;
+  }
 
   try {
     if (intent === "disconnect") {
@@ -191,7 +200,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function SourcesConnection() {
-  const { allowed, ownershipKnown, configured, summary, shopDomain } =
+  const { allowed, userKnown, configured, summary, shopDomain } =
     useLoaderData<typeof loader>();
   const fetcher = useFetcher<typeof action>();
   const result = fetcher.data;
@@ -212,12 +221,12 @@ export default function SourcesConnection() {
         <s-link slot="breadcrumb-actions" href={SOURCE_ROUTES.index}>
           Sources
         </s-link>
-        <s-section heading="Store owner only">
+        <s-section heading="ERP admins only">
           <s-banner tone="warning">
             <s-paragraph>
-              {ownershipKnown
-                ? "Only the store owner can view or change the export portal connection, because the API key configures what the portal writes into the store."
-                : "Shopify did not confirm which user you are, so this screen stays closed. Open the app again from the Shopify admin, and if this keeps happening, sign in as the store owner."}
+              {userKnown
+                ? "Only ERP admins can change the export portal connection, because the API key configures what the portal writes into the store. Ask the store owner or one of the staff named as ERP admins."
+                : "Shopify did not confirm which user you are, so this screen stays closed. Open the app again from the Shopify admin, and if this keeps happening, sign in as the store owner or an ERP admin."}
             </s-paragraph>
           </s-banner>
         </s-section>

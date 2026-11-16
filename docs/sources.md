@@ -110,8 +110,9 @@ key is and that it was issued for this shop — and the answer's tenant name
 and time are recorded. A key the portal refuses stays saved so the person
 can read what the portal said and paste again.
 
-**Who may do what.** Saving and forgetting the key is the store owner's
-(or a job's), like the MetaKocka credential; the same T-21 gate applies.
+**Who may do what.** Saving and forgetting the key is an ERP admin's (the
+store owner or a staff user on `ERP_ADMIN_EMAILS`) or a job's, like the
+MetaKocka credential (`docs/project-status.md` D-02).
 _Using_ the key — listing, editing and running sources — is open to any
 signed-in staff member: it is day-to-day work, the key is only ever used
 server-side, and the portal decides what the key may do.
@@ -279,7 +280,7 @@ Sources            /app/sources                      every source, how it is doi
     Run            /app/sources/:sourceId/runs/:runId  what happened and the log
   AI categorization /app/sources/categorization      which sources' new products the AI
                                                      sorts into product types
-  Connection       /app/sources/connection           the API key (store owner only);
+  Connection       /app/sources/connection           the API key (ERP admins only);
                                                      also linked from Settings
 ```
 

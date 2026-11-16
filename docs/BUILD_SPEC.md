@@ -1198,8 +1198,9 @@ keeps that from being a way to hide a real difference.
 
 - Token exchange, offline token per shop (§2.2).
 - Identity from the App Bridge ID token. **No separate login, no user table in v1.**
-- Gate the MetaKocka credentials screen to the shop owner; staff accounts must not read or
-  set the ERP key.
+- Gate the MetaKocka credentials screen to ERP admins: the shop owner, or a staff user whose
+  email is on the server's `ERP_ADMIN_EMAILS` allowlist (`docs/project-status.md` D-02).
+  Other staff accounts must not read or set the ERP key.
 - Every query must filter by tenant. The repository layer is the target boundary
   so route/job code cannot forget; existing direct Prisma calls outside that
   boundary are tracked in `docs/project-status.md` T-14 and should be migrated

@@ -12,6 +12,7 @@ import {
 import { z } from "zod";
 
 import {
+  ERP_ADMIN_ONLY,
   NotPermittedError,
   assertMayDisconnect,
   getCredential,
@@ -31,7 +32,7 @@ import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { getEnv } from "~/adapters/config/env.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import {
-  isOwnershipKnown,
+  isUserKnown,
   principalFromSession,
 } from "~/web/lib/principal.server";
 
@@ -66,10 +67,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const principal = principalFromSession(session);
 
-  if (!principal.isShopOwner) {
+  if (!principal.isErpAdmin) {
     return {
       allowed: false as const,
-      ownershipKnown: isOwnershipKnown(session),
+      userKnown: isUserKnown(session),
       summary: null,
       stockWebhookUrl: "",
     };
@@ -77,7 +78,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
 
   return {
     allowed: true as const,
-    ownershipKnown: true,
+    userKnown: true,
     summary: await getCredentialSummary(principal),
     /*
      * The URL to paste into MetaKocka's own webhook settings.
@@ -98,6 +99,16 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 
   const formData = await request.formData();
   const intent = String(formData.get("intent") ?? "save");
+
+  // Refused before anything is read: the repository refuses too, but a
+  // non-admin should not get as far as the confirmation check either.
+  if (!principal.isErpAdmin) {
+    return {
+      ok: false,
+      intent: intent === "test" || intent === "disconnect" ? intent : "save",
+      message: ERP_ADMIN_ONLY,
+    } satisfies ActionResult;
+  }
 
   try {
     if (intent === "disconnect") {
@@ -257,7 +268,7 @@ export const action = async ({ request }: ActionFunctionArgs) => {
 };
 
 export default function MetakockaSettings() {
-  const { allowed, ownershipKnown, summary, stockWebhookUrl } =
+  const { allowed, userKnown, summary, stockWebhookUrl } =
     useLoaderData<typeof loader>();
   const result = useActionData<typeof action>();
   const navigation = useNavigation();
@@ -295,12 +306,12 @@ export default function MetakockaSettings() {
   if (!allowed) {
     return (
       <s-page heading="MetaKocka connection">
-        <s-section heading="Store owner only">
+        <s-section heading="ERP admins only">
           <s-banner tone="warning">
             <s-paragraph>
-              {ownershipKnown
-                ? "Only the store owner can view or change the MetaKocka connection, because the secret key gives full access to the ERP."
-                : "Shopify did not confirm which user you are, so this screen stays closed. Open the app again from the Shopify admin, and if this keeps happening, sign in as the store owner."}
+              {userKnown
+                ? "Only ERP admins can change the MetaKocka connection. The secret key gives full access to the ERP, so viewing and changing it is limited to the store owner and the staff named as ERP admins. Ask one of them if something here needs to change."
+                : "Shopify did not confirm which user you are, so this screen stays closed. Open the app again from the Shopify admin, and if this keeps happening, sign in as the store owner or an ERP admin."}
             </s-paragraph>
           </s-banner>
         </s-section>

@@ -195,7 +195,7 @@ const admin = {} as AdminApiContext;
 const principal = {
   kind: "shop" as const,
   shopDomain: "demo.myshopify.com",
-  isShopOwner: true,
+  isErpAdmin: true,
 };
 
 function product(overrides: Partial<WorkspaceProduct> = {}): WorkspaceProduct {
