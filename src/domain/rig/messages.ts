@@ -22,18 +22,21 @@ const EN: Record<string, (detail: Detail) => string> = {
     `This is the lowest-priced rig that fits together, and it is ${formatEuro(d?.["overMinor"])} over your budget.`,
   stale_snapshot: (d) =>
     `Stock was last checked ${String(d?.["minutes"] ?? "a while")} minutes ago. Check availability before you buy.`,
-  unsupported_discipline: () =>
-    "We only build windsurf rigs for now.",
+  unsupported_discipline: () => "We only build windsurf rigs for now.",
   skill_contradiction: () =>
     "Your description mentions both beginner and several years of experience. Please check your level.",
   owned_boom_unchecked: () =>
     "We did not check that your boom fits the sail. Give its length range and we will.",
   stock_not_read: () =>
     "Stock has not been read for some parts yet, so they were left out.",
-  owned_board_unchecked: () => "We did not check the gear you already own: board.",
-  owned_sail_unchecked: () => "We did not check the gear you already own: sail.",
-  owned_mast_unchecked: () => "We did not check the gear you already own: mast.",
-  owned_base_unchecked: () => "We did not check the gear you already own: base.",
+  owned_board_unchecked: () =>
+    "We did not check the gear you already own: board.",
+  owned_sail_unchecked: () =>
+    "We did not check the gear you already own: sail.",
+  owned_mast_unchecked: () =>
+    "We did not check the gear you already own: mast.",
+  owned_base_unchecked: () =>
+    "We did not check the gear you already own: base.",
   owned_fin_unchecked: () => "We did not check the gear you already own: fin.",
 };
 
@@ -41,7 +44,8 @@ const SL: Record<string, (detail: Detail) => string> = {
   mode_plain: () => "Danes krajši opisi. Oprema je enaka.",
   text_not_read: () =>
     "Opisa nismo mogli prebrati, zato oprema temelji samo na vaših odgovorih.",
-  kind_assumed: (d) => `Predpostavili smo opremo za ${String(d?.["kind"] ?? "freeride")}.`,
+  kind_assumed: (d) =>
+    `Predpostavili smo opremo za ${String(d?.["kind"] ?? "freeride")}.`,
   skill_assumed: () => "Predpostavili smo srednjo raven znanja.",
   wind_assumed: (d) =>
     `Predpostavili smo ${String(d?.["windMinKn"] ?? 15)} do ${String(d?.["windMaxKn"] ?? 25)} vozlov.`,

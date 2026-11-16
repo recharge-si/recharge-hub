@@ -139,7 +139,9 @@ export async function handlePollMetakockaDocuments(
 
   const now = new Date();
   const staleBefore = new Date(now.getTime() - RECHECK_AFTER_MS);
-  const oldest = new Date(now.getTime() - FOLLOW_FOR_DAYS * 24 * 60 * 60 * 1000);
+  const oldest = new Date(
+    now.getTime() - FOLLOW_FOR_DAYS * 24 * 60 * 60 * 1000,
+  );
 
   const documents = await prisma.metakockaDocument.findMany({
     where: {

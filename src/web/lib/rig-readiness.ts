@@ -33,7 +33,8 @@ export function roleOfType(type: string): RigRole | null {
   return RIG_ROLES.find((role) => roleWord(role) === type) ?? null;
 }
 
-const capitalise = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
+const capitalise = (text: string) =>
+  text.charAt(0).toUpperCase() + text.slice(1);
 
 export function readinessLines(
   schema: AttributeSchema,

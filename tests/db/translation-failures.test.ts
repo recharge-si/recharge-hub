@@ -37,7 +37,9 @@ describeDatabase("translation failures", () => {
 
   it("counts failures on the same source up and starts over when it changes", async () => {
     const record = async (sourceKey: string) => {
-      const previous = (await listFailures(tenant.principal, resourceId)).get("de");
+      const previous = (await listFailures(tenant.principal, resourceId)).get(
+        "de",
+      );
       await recordFailure(
         tenant.principal,
         { resourceId, locale: "de", sourceKey, error: "Cut short.", previous },
@@ -65,9 +67,8 @@ describeDatabase("translation failures", () => {
       ...settings,
       keepOriginal: ["product_titles", "product_options"],
     });
-    expect((await getLanguageSettings(tenant.principal, "de")).keepOriginal).toEqual([
-      "product_titles",
-      "product_options",
-    ]);
+    expect(
+      (await getLanguageSettings(tenant.principal, "de")).keepOriginal,
+    ).toEqual(["product_titles", "product_options"]);
   });
 });

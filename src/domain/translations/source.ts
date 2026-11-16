@@ -56,6 +56,8 @@ export function resolveSourceLocale(input: SourceInput): SourceResolution {
     reason = "primary";
   }
   const disputedBy =
-    input.detected && !sameLanguage(input.detected, locale) ? input.detected : null;
+    input.detected && !sameLanguage(input.detected, locale)
+      ? input.detected
+      : null;
   return { locale, reason, disputedBy };
 }

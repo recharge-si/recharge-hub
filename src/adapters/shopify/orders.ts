@@ -457,8 +457,12 @@ export function toWebhookShape(node: OrderNode): Record<string, unknown> {
             title: line.title ?? null,
             price: amountOf(line.originalPriceSet),
             price_set: setOf(line.originalPriceSet),
-            discounted_price: amountOf(line.discountedPriceSet ?? line.originalPriceSet),
-            discounted_price_set: setOf(line.discountedPriceSet ?? line.originalPriceSet),
+            discounted_price: amountOf(
+              line.discountedPriceSet ?? line.originalPriceSet,
+            ),
+            discounted_price_set: setOf(
+              line.discountedPriceSet ?? line.originalPriceSet,
+            ),
             tax_lines: taxLinesOf(line.taxLines),
           })),
         }

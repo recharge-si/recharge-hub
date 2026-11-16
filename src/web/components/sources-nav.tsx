@@ -2,10 +2,7 @@ import { AreaNav } from "~/web/components/area-nav";
 import { SOURCE_ROUTES } from "~/web/lib/sources";
 
 export type SourcesSection =
-  | "sources"
-  | "review"
-  | "categorization"
-  | "connection";
+  "sources" | "review" | "categorization" | "connection";
 
 /**
  * The Sources area's own navigation, the same tab row as Translations and

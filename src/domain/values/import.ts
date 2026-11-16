@@ -29,12 +29,7 @@ import { LIMITS, type ValuesProduct } from "./types";
  */
 
 export type Outcome =
-  | "set"
-  | "change"
-  | "clear"
-  | "unchanged"
-  | "skipped"
-  | "error";
+  "set" | "change" | "clear" | "unchanged" | "skipped" | "error";
 
 export const OUTCOMES: readonly Outcome[] = [
   "set",
@@ -245,7 +240,9 @@ export function planImport(input: PlanInput): ImportPlan {
   const { schema, rows } = input;
   const header = rows[0];
   if (!header || header.every((cell) => cell.trim() === ""))
-    return emptyPlan(["The file is empty. Export a file from this page and fill it in."]);
+    return emptyPlan([
+      "The file is empty. Export a file from this page and fill it in.",
+    ]);
   if (rows.length - 1 > LIMITS.importRows)
     return emptyPlan([
       `The file has more than ${LIMITS.importRows.toLocaleString("en")} rows. Split it and import the parts one after another.`,
@@ -293,7 +290,8 @@ export function planImport(input: PlanInput): ImportPlan {
     taken.set(hit.key, text);
     attributes.push({ index: i, header: text, key: hit.key, name: hit.name });
   });
-  if (fileErrors.length > 0) return { ...emptyPlan(fileErrors), unknownColumns, hintColumns };
+  if (fileErrors.length > 0)
+    return { ...emptyPlan(fileErrors), unknownColumns, hintColumns };
   if (attributes.length === 0)
     return {
       ...emptyPlan([
@@ -335,10 +333,12 @@ export function planImport(input: PlanInput): ImportPlan {
   };
   const fail = (row: number, column: string, message: string) => {
     errorTotal += 1;
-    if (errors.length < LIMITS.errorsShown) errors.push({ row, column, message });
+    if (errors.length < LIMITS.errorsShown)
+      errors.push({ row, column, message });
   };
   const skip = (row: number, column: string, message: string) => {
-    if (skipped.length < LIMITS.errorsShown) skipped.push({ row, column, message });
+    if (skipped.length < LIMITS.errorsShown)
+      skipped.push({ row, column, message });
   };
 
   for (let r = 1; r < rows.length; r += 1) {
@@ -351,10 +351,15 @@ export function planImport(input: PlanInput): ImportPlan {
     const variantId = (cells[variantCol] ?? "").trim();
     const found = variantId ? variants.get(variantId) : undefined;
     if (variantId && !found) {
-      fail(row, "variant_id", `Unknown variant ${variantId}. It is not in this shop's catalogue.`);
+      fail(
+        row,
+        "variant_id",
+        `Unknown variant ${variantId}. It is not in this shop's catalogue.`,
+      );
       continue;
     }
-    const product = found?.product ?? (productId ? products.get(productId) : undefined);
+    const product =
+      found?.product ?? (productId ? products.get(productId) : undefined);
     if (!product) {
       fail(
         row,
@@ -366,7 +371,11 @@ export function planImport(input: PlanInput): ImportPlan {
       continue;
     }
     if (found && productId && productId !== product.productId) {
-      fail(row, "product_id", `Variant ${variantId} belongs to another product than ${productId}.`);
+      fail(
+        row,
+        "product_id",
+        `Variant ${variantId} belongs to another product than ${productId}.`,
+      );
       continue;
     }
     rowsMatched += 1;
@@ -388,7 +397,11 @@ export function planImport(input: PlanInput): ImportPlan {
       const field = byKey.get(column.key);
       if (!typeId) {
         tally(column, "skipped");
-        skip(row, column.header, "The product has no product type in the plan, so it has no attributes.");
+        skip(
+          row,
+          column.header,
+          "The product has no product type in the plan, so it has no attributes.",
+        );
         continue;
       }
       if (!field) {
@@ -402,11 +415,19 @@ export function planImport(input: PlanInput): ImportPlan {
         continue;
       }
       const edit = field.edit;
-      let owner: { id: string; stored: { type: string; value: string } | undefined; label: string };
+      let owner: {
+        id: string;
+        stored: { type: string; value: string } | undefined;
+        label: string;
+      };
       if (field.scope === "variant") {
         if (!found) {
           tally(column, "error");
-          fail(row, column.header, "This attribute is per variant, so the row needs a variant_id.");
+          fail(
+            row,
+            column.header,
+            "This attribute is per variant, so the row needs a variant_id.",
+          );
           continue;
         }
         owner = {
@@ -456,11 +477,17 @@ export function planImport(input: PlanInput): ImportPlan {
         : beforeCanon === ""
           ? "set"
           : "change";
-      const defined = input.definitions.has(definitionKey(field.scope, column.key));
+      const defined = input.definitions.has(
+        definitionKey(field.scope, column.key),
+      );
       if (!defined) untyped.add(column.name);
       tally(column, outcome);
       if (changes.length >= LIMITS.changes) {
-        fail(row, column.header, `The file changes more than ${LIMITS.changes.toLocaleString("en")} values. Split it.`);
+        fail(
+          row,
+          column.header,
+          `The file changes more than ${LIMITS.changes.toLocaleString("en")} values. Split it.`,
+        );
         continue;
       }
       const change: PlannedChange = {
@@ -480,8 +507,7 @@ export function planImport(input: PlanInput): ImportPlan {
         beforeCanon,
         afterCanon,
         beforeText: displayStored(edit, owner.stored),
-        afterText:
-          parsed && parsed.ok ? displayOf(edit, parsed.input) : "",
+        afterText: parsed && parsed.ok ? displayOf(edit, parsed.input) : "",
         defined,
       };
       changes.push(change);

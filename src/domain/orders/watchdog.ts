@@ -20,7 +20,8 @@ import {
 } from "~/domain/orders/transfer";
 
 export type WatchedDocumentStatus = "pending" | "written" | "failed";
-export type WatchedSyncState = "pending" | "in_sync" | "inconsistent" | "blocked";
+export type WatchedSyncState =
+  "pending" | "in_sync" | "inconsistent" | "blocked";
 
 export interface WatchedOrder {
   readonly receivedAt: Date;
@@ -94,17 +95,22 @@ export type WatchFine =
  *    counted from the latest of: when it arrived, when setup was finished,
  *    when order settings last changed.
  */
-export function watchOrder(order: WatchedOrder, context: WatchContext): WatchVerdict {
+export function watchOrder(
+  order: WatchedOrder,
+  context: WatchContext,
+): WatchVerdict {
   if (order.cancelled || order.deleted || order.redacted) {
     return { kind: "fine", why: "over" };
   }
-  if (context.activatedAt === null) return { kind: "fine", why: "not_activated" };
+  if (context.activatedAt === null)
+    return { kind: "fine", why: "not_activated" };
 
   const transfer = decideOrderTransfer(context.transfer, {
     receivedAt: order.receivedAt,
     hasDocuments: order.documents.length > 0,
   });
-  if (!transfer.allowed) return { kind: "fine", why: `held_${transfer.reason}` };
+  if (!transfer.allowed)
+    return { kind: "fine", why: `held_${transfer.reason}` };
 
   const allWritten =
     order.documents.length > 0 &&

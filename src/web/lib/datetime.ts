@@ -27,7 +27,10 @@ export function formatDateTime(iso: string): string {
  *
  * `now` is injected so the boundaries can be tested.
  */
-export function formatListDateTime(iso: string, now: Date = new Date()): string {
+export function formatListDateTime(
+  iso: string,
+  now: Date = new Date(),
+): string {
   const at = new Date(iso);
   const time = at.toLocaleTimeString(undefined, { timeStyle: "short" });
 
@@ -91,7 +94,10 @@ function startOfDay(date: Date): Date {
  * either side falls back to the short date, which is what a column of runs
  * would show anyway. `now` is injected so the boundaries can be tested.
  */
-export function formatRelativeTime(iso: string, now: Date = new Date()): string {
+export function formatRelativeTime(
+  iso: string,
+  now: Date = new Date(),
+): string {
   const at = new Date(iso);
   if (Number.isNaN(at.getTime())) return "unknown";
   const ms = at.getTime() - now.getTime();

@@ -19,7 +19,13 @@ export interface Fact {
 
 type Unit = "cm" | "kg" | "m2" | "l" | "";
 
-const UNIT: Record<Unit, string> = { cm: " cm", kg: " kg", m2: " m²", l: " L", "": "" };
+const UNIT: Record<Unit, string> = {
+  cm: " cm",
+  kg: " kg",
+  m2: " m²",
+  l: " L",
+  "": "",
+};
 
 interface Def {
   field: SpecField;
@@ -49,7 +55,13 @@ const DEFS: readonly Def[] = [
   d("compatibleDiameters", "", "Fits masts", "Primerno za droge"),
   d("boomMinCm", "cm", "Boom range", "Razpon boma", "boomMaxCm"),
   d("recommendedBoomCm", "cm", "Recommended boom", "Priporočen bom"),
-  d("extensionMinCm", "cm", "Extension range", "Razpon podaljška", "extensionMaxCm"),
+  d(
+    "extensionMinCm",
+    "cm",
+    "Extension range",
+    "Razpon podaljška",
+    "extensionMaxCm",
+  ),
   d("baseConnection", "", "Base connection", "Priključek podnožja"),
   d("finBox", "", "Fin box", "Utor za fin"),
   d("finLengthCm", "cm", "Fin length", "Dolžina fina"),
@@ -103,10 +115,14 @@ export function factsOf(
       value = show(low, def.unit);
     }
     const isDerived =
-      derived.includes(def.field) || (def.to ? derived.includes(def.to) : false);
+      derived.includes(def.field) ||
+      (def.to ? derived.includes(def.to) : false);
     out.push({
       field: def.field,
-      label: def.to && high === undefined ? `${def.label[locale]} (min)` : def.label[locale],
+      label:
+        def.to && high === undefined
+          ? `${def.label[locale]} (min)`
+          : def.label[locale],
       value,
       ...(isDerived ? { derived: true as const } : {}),
     });

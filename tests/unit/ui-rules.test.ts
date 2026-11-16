@@ -121,12 +121,12 @@ describe("US-303 one process header", () => {
   const allow: Allowed[] = [
     {
       file: "src/web/components/sources-list.tsx",
-      includes: '>Last run</s-table-header>',
+      includes: ">Last run</s-table-header>",
       reason: "a column of per-source values in the table, not a page header",
     },
     {
       file: "src/web/components/sources-list.tsx",
-      includes: '>Next run</s-table-header>',
+      includes: ">Next run</s-table-header>",
       reason: "a column of per-source values in the table, not a page header",
     },
   ];
@@ -139,20 +139,52 @@ describe("US-303 one process header", () => {
 });
 
 describe("US-308 words", () => {
-  const shopifyArticle = "Shopify's own blog article resource, named as Shopify names it";
+  const shopifyArticle =
+    "Shopify's own blog article resource, named as Shopify names it";
   const allowByWord: Record<string, Allowed[]> = {
     article: [
-      { file: "src/web/components/ai-translation-settings.tsx", includes: "Collections, pages, articles", reason: shopifyArticle },
-      { file: "src/web/routes/app.translations._index.tsx", includes: "A page, product or article written", reason: shopifyArticle },
-      { file: "src/web/routes/app.translations.add.tsx", includes: "Every product, collection, page, article", reason: shopifyArticle },
-      { file: "src/web/routes/app.translations.languages.$locale.tsx", includes: "Shopify \u2014 products, collections, pages, articles", reason: shopifyArticle },
+      {
+        file: "src/web/components/ai-translation-settings.tsx",
+        includes: "Collections, pages, articles",
+        reason: shopifyArticle,
+      },
+      {
+        file: "src/web/routes/app.translations._index.tsx",
+        includes: "A page, product or article written",
+        reason: shopifyArticle,
+      },
+      {
+        file: "src/web/routes/app.translations.add.tsx",
+        includes: "Every product, collection, page, article",
+        reason: shopifyArticle,
+      },
+      {
+        file: "src/web/routes/app.translations.languages.$locale.tsx",
+        includes: "Shopify \u2014 products, collections, pages, articles",
+        reason: shopifyArticle,
+      },
     ],
     exception: [
-      { file: "src/web/routes/app.product-setup.settings.tsx", includes: "every set and every exception", reason: "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue" },
-      { file: "src/web/routes/app.product-setup.types.($typeId).tsx", includes: "has no children, sources or exceptions", reason: "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue" },
+      {
+        file: "src/web/routes/app.product-setup.settings.tsx",
+        includes: "every set and every exception",
+        reason:
+          "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue",
+      },
+      {
+        file: "src/web/routes/app.product-setup.types.($typeId).tsx",
+        includes: "has no children, sources or exceptions",
+        reason:
+          "an exception to an inherited attribute rule in product setup: a different concept from the needs-attention queue",
+      },
     ],
     feed: [
-      { file: "src/web/lib/empty-states.ts", includes: "a brand feed", reason: "the Sources area's own noun for a kind of source (docs/ui-conventions.md glossary)" },
+      {
+        file: "src/web/lib/empty-states.ts",
+        includes: "a brand feed",
+        reason:
+          "the Sources area's own noun for a kind of source (docs/ui-conventions.md glossary)",
+      },
     ],
   };
   /** Text a merchant reads: quoted strings with a space, and JSX text. */
@@ -160,7 +192,9 @@ describe("US-308 words", () => {
     if (/^(import|export \* from)\b/.test(l.text) || /\bfrom "/.test(l.text))
       return [];
     const out: string[] = [];
-    for (const m of l.text.matchAll(/"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g)) {
+    for (const m of l.text.matchAll(
+      /"((?:[^"\\]|\\.)*)"|`((?:[^`\\]|\\.)*)`/g,
+    )) {
       const s = (m[1] ?? m[2] ?? "").replace(/\$\{[^}]*\}/g, "");
       if (s.includes(" ") && !s.startsWith("/")) out.push(s);
     }
@@ -191,13 +225,41 @@ describe("US-307 no page load waits for an integration", () => {
   const portal =
     "the export portal read is awaited in the loader on purpose (docs/sources.md: one call per page, 8 s timeout). PRD 3 Open question 2 proposes deferring it; not done blind, without a browser to check the live re-reads and the failure states";
   const allow: Allowed[] = [
-    { file: "src/web/routes/app.sources._index.tsx", includes: "readPortal(", reason: portal },
-    { file: "src/web/routes/app.sources.$sourceId._index.tsx", includes: "readPortal(", reason: portal },
-    { file: "src/web/routes/app.sources.$sourceId.runs._index.tsx", includes: "readPortal(", reason: portal },
-    { file: "src/web/routes/app.sources.$sourceId.runs.$runId.tsx", includes: "readPortal(", reason: portal },
-    { file: "src/web/routes/app.sources.new.tsx", includes: "readPortal(", reason: portal },
-    { file: "src/web/routes/app.sources.categorization.tsx", includes: "readPortal(", reason: portal },
-    { file: "src/web/routes/app.sources.review.tsx", includes: "readPortal(", reason: portal },
+    {
+      file: "src/web/routes/app.sources._index.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
+    {
+      file: "src/web/routes/app.sources.$sourceId._index.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
+    {
+      file: "src/web/routes/app.sources.$sourceId.runs._index.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
+    {
+      file: "src/web/routes/app.sources.$sourceId.runs.$runId.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
+    {
+      file: "src/web/routes/app.sources.new.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
+    {
+      file: "src/web/routes/app.sources.categorization.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
+    {
+      file: "src/web/routes/app.sources.review.tsx",
+      includes: "readPortal(",
+      reason: portal,
+    },
   ];
   it("keeps MetaKocka and the export portal out of loaders, except the documented portal reads", () => {
     expectClean(
@@ -225,7 +287,9 @@ describe("US-304 the nine polling routes use the hook", () => {
     it(`${route} calls useLiveRevalidation`, () => {
       const file = `src/web/routes/${route}`;
       expect(
-        lines.some((l) => l.file === file && /useLiveRevalidation\(/.test(l.text)),
+        lines.some(
+          (l) => l.file === file && /useLiveRevalidation\(/.test(l.text),
+        ),
       ).toBe(true);
     });
   it("uses useWatchWindow in the payments page after a save", () => {
@@ -244,7 +308,9 @@ describe("US-311 empty states live in one file", () => {
     const { EMPTY } = await import("~/web/lib/empty-states");
     const sentences: string[] = [];
     for (const value of Object.values(EMPTY))
-      sentences.push(...(typeof value === "string" ? [value] : Object.values(value)));
+      sentences.push(
+        ...(typeof value === "string" ? [value] : Object.values(value)),
+      );
     const repeats = hit(
       (l) =>
         l.file !== "src/web/lib/empty-states.ts" &&

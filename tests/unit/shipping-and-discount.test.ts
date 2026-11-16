@@ -4,7 +4,10 @@ import { buildSalesOrderBody } from "~/adapters/metakocka/documents";
 import { splitOrderMoney } from "~/domain/money/split";
 import { reconcileValue } from "~/domain/orders/invariants";
 import { contentOf, verifyOrder } from "~/jobs/orders/verification";
-import { classifyQuantities, type CanonicalLine } from "~/domain/orders/canonical";
+import {
+  classifyQuantities,
+  type CanonicalLine,
+} from "~/domain/orders/canonical";
 
 /**
  * Shipping and discounts on a MetaKocka sales order.
@@ -49,7 +52,12 @@ describe("the document body", () => {
     });
 
     expect(linesOf(body)).toEqual([
-      { code: "SKU-A", amount: "1", price_with_tax: "100.00", tax_factor: "0.22" },
+      {
+        code: "SKU-A",
+        amount: "1",
+        price_with_tax: "100.00",
+        tax_factor: "0.22",
+      },
       { code: SHIP, amount: "1", price_with_tax: "5.00", tax_factor: "0.22" },
     ]);
   });
@@ -80,7 +88,9 @@ describe("the document body", () => {
   it("omits both when the order has neither", () => {
     const body = buildSalesOrderBody(BASE);
     expect(linesOf(body)).toHaveLength(1);
-    expect((body as { discount_value?: string }).discount_value).toBeUndefined();
+    expect(
+      (body as { discount_value?: string }).discount_value,
+    ).toBeUndefined();
   });
 
   it("is byte-identical when built twice", () => {
@@ -245,7 +255,11 @@ describe("the value invariant once shipping and discounts are represented", () =
       lines: [line],
       classification,
       documents: [
-        { countCode: "SH-1050-A", retired: false, requestBody: buildSalesOrderBody(BASE) },
+        {
+          countCode: "SH-1050-A",
+          retired: false,
+          requestBody: buildSalesOrderBody(BASE),
+        },
       ],
       orderTotalMinor: 9_500,
       shippingMinor: 500,

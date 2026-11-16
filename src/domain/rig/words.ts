@@ -111,36 +111,109 @@ export function templateWhy(
   if (locale === "sl") {
     switch (item.role) {
       case "sail":
-        return line(item, ["areaM2"], ([a]) => `Jadro velikosti ${a} m² ustreza jahačem s ${weight} kg pri ${wind} vozlih.`, "Jadro ustreza jahačem te teže in vetra.");
+        return line(
+          item,
+          ["areaM2"],
+          ([a]) =>
+            `Jadro velikosti ${a} m² ustreza jahačem s ${weight} kg pri ${wind} vozlih.`,
+          "Jadro ustreza jahačem te teže in vetra.",
+        );
       case "board":
-        return line(item, ["volumeL"], ([v]) => `Deska s prostornino ${v} L ustreza jahačem s ${weight} kg in tej velikosti jadra.`, "Deska je primerna za to velikost jadra.");
+        return line(
+          item,
+          ["volumeL"],
+          ([v]) =>
+            `Deska s prostornino ${v} L ustreza jahačem s ${weight} kg in tej velikosti jadra.`,
+          "Deska je primerna za to velikost jadra.",
+        );
       case "mast":
-        return line(item, ["lengthCm"], ([l]) => `Jambor ${diameter} dolžine ${l} cm je izbran za to jadro.`.replace("  ", " "), "Jambor je izbran za to jadro.");
+        return line(
+          item,
+          ["lengthCm"],
+          ([l]) =>
+            `Jambor ${diameter} dolžine ${l} cm je izbran za to jadro.`.replace(
+              "  ",
+              " ",
+            ),
+          "Jambor je izbran za to jadro.",
+        );
       case "extension":
-        return line(item, ["extensionMinCm", "extensionMaxCm"], ([a, b]) => `Podaljšek ${a}–${b} cm podaljša jambor na dolžino, ki jo jadro potrebuje.`, "Podaljšek podaljša jambor na dolžino, ki jo jadro potrebuje.");
+        return line(
+          item,
+          ["extensionMinCm", "extensionMaxCm"],
+          ([a, b]) =>
+            `Podaljšek ${a}–${b} cm podaljša jambor na dolžino, ki jo jadro potrebuje.`,
+          "Podaljšek podaljša jambor na dolžino, ki jo jadro potrebuje.",
+        );
       case "base":
         return "Podnožje je izbrano za ta jambor.";
       case "boom":
-        return line(item, ["boomMinCm", "boomMaxCm"], ([a, b]) => `Boom se odpira od ${a} do ${b} cm.`, "Boom je izbran za to jadro.");
+        return line(
+          item,
+          ["boomMinCm", "boomMaxCm"],
+          ([a, b]) => `Boom se odpira od ${a} do ${b} cm.`,
+          "Boom je izbran za to jadro.",
+        );
       case "fin":
-        return line(item, ["finLengthCm", "finBox"], ([l, box]) => `Plavut ${l} cm za ${box} ustreza deski.`, "Plavut je izbrana za to desko.");
+        return line(
+          item,
+          ["finLengthCm", "finBox"],
+          ([l, box]) => `Plavut ${l} cm za ${box} ustreza deski.`,
+          "Plavut je izbrana za to desko.",
+        );
     }
   }
   switch (item.role) {
     case "sail":
-      return line(item, ["areaM2"], ([a]) => `A ${a} m² sail suits ${weight} kg riders in ${wind} knots.`, "A sail for this rider and wind.");
+      return line(
+        item,
+        ["areaM2"],
+        ([a]) => `A ${a} m² sail suits ${weight} kg riders in ${wind} knots.`,
+        "A sail for this rider and wind.",
+      );
     case "board":
-      return line(item, ["volumeL"], ([v]) => `A ${v} L board suits ${weight} kg riders and takes this sail size.`, "A board that takes this sail size.");
+      return line(
+        item,
+        ["volumeL"],
+        ([v]) =>
+          `A ${v} L board suits ${weight} kg riders and takes this sail size.`,
+        "A board that takes this sail size.",
+      );
     case "mast":
-      return line(item, ["lengthCm"], ([l]) => `A ${l} cm ${diameter} mast, chosen to go with the sail.`.replace("  ", " "), "A mast chosen to go with the sail.");
+      return line(
+        item,
+        ["lengthCm"],
+        ([l]) =>
+          `A ${l} cm ${diameter} mast, chosen to go with the sail.`.replace(
+            "  ",
+            " ",
+          ),
+        "A mast chosen to go with the sail.",
+      );
     case "extension":
-      return line(item, ["extensionMinCm", "extensionMaxCm"], ([a, b]) => `A ${a}–${b} cm extension brings the mast to the length the sail needs.`, "An extension that brings the mast to the length the sail needs.");
+      return line(
+        item,
+        ["extensionMinCm", "extensionMaxCm"],
+        ([a, b]) =>
+          `A ${a}–${b} cm extension brings the mast to the length the sail needs.`,
+        "An extension that brings the mast to the length the sail needs.",
+      );
     case "base":
       return "A mast base chosen for this mast.";
     case "boom":
-      return line(item, ["boomMinCm", "boomMaxCm"], ([a, b]) => `This boom opens from ${a} to ${b} cm.`, "A boom chosen for this sail.");
+      return line(
+        item,
+        ["boomMinCm", "boomMaxCm"],
+        ([a, b]) => `This boom opens from ${a} to ${b} cm.`,
+        "A boom chosen for this sail.",
+      );
     case "fin":
-      return line(item, ["finLengthCm", "finBox"], ([l, box]) => `A ${l} cm ${box} fin for the board's fin box.`, "A fin chosen for this board.");
+      return line(
+        item,
+        ["finLengthCm", "finBox"],
+        ([l, box]) => `A ${l} cm ${box} fin for the board's fin box.`,
+        "A fin chosen for this board.",
+      );
   }
 }
 
@@ -178,7 +251,10 @@ function itemFacts(item: RigItem): string {
   const specs = Object.entries(item.specs)
     .filter(([, value]) => value !== undefined)
     .sort(([a], [b]) => a.localeCompare(b))
-    .map(([field, value]) => `${FACT_LABELS[field] ?? field} ${Array.isArray(value) ? value.join("/") : String(value)}`);
+    .map(
+      ([field, value]) =>
+        `${FACT_LABELS[field] ?? field} ${Array.isArray(value) ? value.join("/") : String(value)}`,
+    );
   const variant = item.variantTitle ? `; variant ${item.variantTitle}` : "";
   return `- id ${item.variantId}: ${item.role}; title ${JSON.stringify(item.title)}${variant}; ${specs.join(", ")}`;
 }
@@ -232,7 +308,9 @@ export function acceptWhy(
       ? (reply as Record<string, unknown>)
       : {};
   const rigTitles = new Set(items.map((item) => item.title.toLowerCase()));
-  const foreign = [...new Set(catalogueTitles.map((t) => t.trim().toLowerCase()))]
+  const foreign = [
+    ...new Set(catalogueTitles.map((t) => t.trim().toLowerCase())),
+  ]
     .filter((title) => title.length >= 3 && !rigTitles.has(title))
     // Longest first, only for a stable `reason`; the result does not depend on it.
     .sort((a, b) => b.length - a.length || a.localeCompare(b));
@@ -258,7 +336,8 @@ export function acceptWhy(
     else if (/[<>]/.test(sentence)) reason = "markup";
     else {
       const lower = sentence.toLowerCase();
-      if (foreign.some((title) => lower.includes(title))) reason = "foreign_product";
+      if (foreign.some((title) => lower.includes(title)))
+        reason = "foreign_product";
     }
     if (reason) {
       fallback();

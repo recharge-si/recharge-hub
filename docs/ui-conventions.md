@@ -212,6 +212,13 @@ the real `polaris.js`:
 - **An area's sections and an index's views are a row of tabs** drawn as buttons — the
   current one `secondary`, the others `tertiary` with an `href` — the way the admin's own
   index pages switch views (`TranslationsNav`, `ProductSetupNav`, the editor's kinds).
+- **`polaris.js` goes last in `<head>`** (`web/root.tsx`). It appends the Inter
+  stylesheet to `<head>` while it runs, before React hydrates the document. React accepts
+  extra nodes at the end of `<head>` but not between nodes it rendered, so anywhere else
+  every page fails hydration (#418/#423) and is rendered twice.
+- **A `<style>` whose CSS has quotes is set with `dangerouslySetInnerHTML`.** React
+  escapes text children, so `content: ""` reaches the page as `&quot;&quot;` and the
+  page fails hydration. The e2e fixture fails on any page error, so this is caught.
 
 ---
 

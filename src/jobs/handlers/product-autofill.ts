@@ -92,7 +92,10 @@ export async function handleProductAutofill(job: Job<unknown>): Promise<void> {
       requestedBy,
     });
   } catch (error) {
-    getLogger().error({ err: error, shopDomain }, "Product autofill pass failed");
+    getLogger().error(
+      { err: error, shopDomain },
+      "Product autofill pass failed",
+    );
     for (const id of pass)
       await failAutofill(
         principal,

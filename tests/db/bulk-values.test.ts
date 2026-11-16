@@ -96,26 +96,46 @@ describeDatabase("stored bulk value previews", () => {
       plan: plan(),
     });
 
-    expect(await getImport(a.principal, id)).toMatchObject({ id, status: "previewed", total: 1 });
+    expect(await getImport(a.principal, id)).toMatchObject({
+      id,
+      status: "previewed",
+      total: 1,
+    });
     expect(await getImport(b.principal, id)).toBeNull();
     expect(await latestImport(b.principal)).toBeNull();
     expect(await importProblems(b.principal, id)).toBeNull();
-    expect(await claimApply(b.principal, id, null)).toEqual({ ok: false, reason: "unknown" });
+    expect(await claimApply(b.principal, id, null)).toEqual({
+      ok: false,
+      reason: "unknown",
+    });
     expect(await discardImport(b.principal, id)).toBe(false);
     expect(await startRun(b.domain, id)).toBeNull();
 
     // Nothing of B's attempts touched A's.
-    expect(await getImport(a.principal, id)).toMatchObject({ status: "previewed" });
+    expect(await getImport(a.principal, id)).toMatchObject({
+      status: "previewed",
+    });
     expect(await claimApply(a.principal, id, "staff:1")).toEqual({ ok: true });
   });
 
   it("applies a preview once, and only while it lives", async () => {
     const { a } = await two();
-    const id = await createImport(a.principal, { fileName: "a.csv", createdBy: null, plan: plan() });
+    const id = await createImport(a.principal, {
+      fileName: "a.csv",
+      createdBy: null,
+      plan: plan(),
+    });
     expect(await claimApply(a.principal, id, null)).toEqual({ ok: true });
-    expect(await claimApply(a.principal, id, null)).toEqual({ ok: false, reason: "already" });
+    expect(await claimApply(a.principal, id, null)).toEqual({
+      ok: false,
+      reason: "already",
+    });
 
-    const old = await createImport(a.principal, { fileName: "b.csv", createdBy: null, plan: plan() });
+    const old = await createImport(a.principal, {
+      fileName: "b.csv",
+      createdBy: null,
+      plan: plan(),
+    });
     await prisma.bulkValueImport.update({
       where: { id: old },
       data: { status: "previewed", expiresAt: new Date(Date.now() - 1000) },
@@ -126,12 +146,19 @@ describeDatabase("stored bulk value previews", () => {
 
   it("refuses an expired preview, one with errors and one with nothing to write", async () => {
     const { a } = await two();
-    const expired = await createImport(a.principal, { fileName: "e.csv", createdBy: null, plan: plan() });
+    const expired = await createImport(a.principal, {
+      fileName: "e.csv",
+      createdBy: null,
+      plan: plan(),
+    });
     await prisma.bulkValueImport.update({
       where: { id: expired },
       data: { expiresAt: new Date(Date.now() - 1000) },
     });
-    expect(await claimApply(a.principal, expired, null)).toEqual({ ok: false, reason: "expired" });
+    expect(await claimApply(a.principal, expired, null)).toEqual({
+      ok: false,
+      reason: "expired",
+    });
     expect(await latestImport(a.principal)).toBeNull();
 
     const errors = await createImport(a.principal, {
@@ -139,17 +166,35 @@ describeDatabase("stored bulk value previews", () => {
       createdBy: null,
       plan: plan({ safeToApply: false, errorTotal: 1 }),
     });
-    expect(await claimApply(a.principal, errors, null)).toEqual({ ok: false, reason: "nothing" });
+    expect(await claimApply(a.principal, errors, null)).toEqual({
+      ok: false,
+      reason: "nothing",
+    });
   });
 
   it("applies one import at a time per shop", async () => {
     const { a, b } = await two();
-    const first = await createImport(a.principal, { fileName: "1.csv", createdBy: null, plan: plan() });
-    const second = await createImport(a.principal, { fileName: "2.csv", createdBy: null, plan: plan() });
+    const first = await createImport(a.principal, {
+      fileName: "1.csv",
+      createdBy: null,
+      plan: plan(),
+    });
+    const second = await createImport(a.principal, {
+      fileName: "2.csv",
+      createdBy: null,
+      plan: plan(),
+    });
     expect(await claimApply(a.principal, first, null)).toEqual({ ok: true });
-    expect(await claimApply(a.principal, second, null)).toEqual({ ok: false, reason: "busy" });
+    expect(await claimApply(a.principal, second, null)).toEqual({
+      ok: false,
+      reason: "busy",
+    });
     // Another shop is not held up by it.
-    const other = await createImport(b.principal, { fileName: "3.csv", createdBy: null, plan: plan() });
+    const other = await createImport(b.principal, {
+      fileName: "3.csv",
+      createdBy: null,
+      plan: plan(),
+    });
     expect(await claimApply(b.principal, other, null)).toEqual({ ok: true });
   });
 
@@ -167,9 +212,15 @@ describeDatabase("stored bulk value previews", () => {
     const problems = await importProblems(a.principal, id);
     expect(problems?.counts).toMatchObject({ written: 1, changedMeanwhile: 1 });
     expect(problems?.problems).toHaveLength(1);
-    expect(await getImport(a.principal, id)).toMatchObject({ status: "running", done: 2 });
+    expect(await getImport(a.principal, id)).toMatchObject({
+      status: "running",
+      done: 2,
+    });
     // A run that is picked up again keeps what it has.
-    expect((await startRun(a.domain, id))?.outcomes).toEqual(["written", "changed_meanwhile"]);
+    expect((await startRun(a.domain, id))?.outcomes).toEqual([
+      "written",
+      "changed_meanwhile",
+    ]);
   });
 
   it("reads and mirrors only the shop's own catalogue", async () => {
@@ -189,7 +240,9 @@ describeDatabase("stored bulk value previews", () => {
           shopifyVariantId: "gid://shopify/ProductVariant/1",
           priceMinor: 100,
           currency: "EUR",
-          metafields: { "recharge.luff_cm": { type: "dimension", value: "{}" } },
+          metafields: {
+            "recharge.luff_cm": { type: "dimension", value: "{}" },
+          },
         },
       });
     }
@@ -205,11 +258,17 @@ describeDatabase("stored bulk value previews", () => {
         ownerId: "gid://shopify/ProductVariant/1",
         scope: "variant",
         name: "recharge.luff_cm",
-        stored: { type: "dimension", value: '{"value":400,"unit":"CENTIMETERS"}' },
+        stored: {
+          type: "dimension",
+          value: '{"value":400,"unit":"CENTIMETERS"}',
+        },
       },
     ]);
     const rows = await prisma.catalogVariant.findMany({
-      where: { shopifyVariantId: "gid://shopify/ProductVariant/1", shopId: { in: [a.shopId, b.shopId] } },
+      where: {
+        shopifyVariantId: "gid://shopify/ProductVariant/1",
+        shopId: { in: [a.shopId, b.shopId] },
+      },
       select: { shopId: true, metafields: true },
     });
     const mirrored = (shopId: string) =>

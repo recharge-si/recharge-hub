@@ -78,7 +78,10 @@ const errorsSchema = z
     z
       .object({
         message: z.string(),
-        extensions: z.object({ code: z.string().optional() }).passthrough().optional(),
+        extensions: z
+          .object({ code: z.string().optional() })
+          .passthrough()
+          .optional(),
       })
       .passthrough(),
   )
@@ -288,8 +291,7 @@ export interface TranslationWrite {
 }
 
 export type RegisterResult =
-  | { kind: "ok"; written: number }
-  | { kind: "rejected"; messages: string[] };
+  { kind: "ok"; written: number } | { kind: "rejected"; messages: string[] };
 
 const REGISTER_MUTATION = `#graphql
   mutation OrchestratorRegisterTranslations($resourceId: ID!, $translations: [TranslationInput!]!) {
@@ -318,7 +320,13 @@ const writePayloadSchema = z
 /** The envelope of a write mutation, whichever of the two it is. */
 function writeSchema<K extends string>(name: K) {
   return z.object({
-    data: z.object({ [name]: writePayloadSchema } as Record<K, typeof writePayloadSchema>).nullable().optional(),
+    data: z
+      .object({ [name]: writePayloadSchema } as Record<
+        K,
+        typeof writePayloadSchema
+      >)
+      .nullable()
+      .optional(),
     errors: errorsSchema,
   });
 }
@@ -330,12 +338,15 @@ function writeOutcome(
 ): RegisterResult {
   if (errors && errors.length > 0)
     return { kind: "rejected", messages: errors.map((error) => error.message) };
-  if (!payload) return { kind: "rejected", messages: ["Shopify did not answer."] };
+  if (!payload)
+    return { kind: "rejected", messages: ["Shopify did not answer."] };
   if (payload.userErrors.length > 0)
     return {
       kind: "rejected",
       messages: payload.userErrors.map((error) =>
-        error.field ? `${error.field.join(".")}: ${error.message}` : error.message,
+        error.field
+          ? `${error.field.join(".")}: ${error.message}`
+          : error.message,
       ),
     };
   return { kind: "ok", written: payload.translations?.length ?? asked };
@@ -368,7 +379,9 @@ export async function registerTranslations(
       },
       tries: 2,
     });
-    const parsed = writeSchema("translationsRegister").parse(await response.json());
+    const parsed = writeSchema("translationsRegister").parse(
+      await response.json(),
+    );
     const outcome = writeOutcome(
       parsed.errors,
       parsed.data?.translationsRegister,
@@ -396,13 +409,18 @@ export async function removeTranslations(
   locales: readonly string[],
   keys: readonly string[],
 ): Promise<RegisterResult> {
-  if (locales.length === 0 || keys.length === 0) return { kind: "ok", written: 0 };
+  if (locales.length === 0 || keys.length === 0)
+    return { kind: "ok", written: 0 };
   const response = await admin.graphql(REMOVE_MUTATION, {
     variables: { resourceId, locales, keys },
     tries: 2,
   });
   const parsed = writeSchema("translationsRemove").parse(await response.json());
-  return writeOutcome(parsed.errors, parsed.data?.translationsRemove, keys.length);
+  return writeOutcome(
+    parsed.errors,
+    parsed.data?.translationsRemove,
+    keys.length,
+  );
 }
 
 /** The resource types the editor can search by title, and the query each uses. */
@@ -438,10 +456,15 @@ export async function searchResourceIds(
     }
   `;
   const schema = z.object({
-    data: z.record(
-      z.string(),
-      z.object({ nodes: z.array(z.object({ id: z.string(), title: z.string() })) }),
-    ).nullable().optional(),
+    data: z
+      .record(
+        z.string(),
+        z.object({
+          nodes: z.array(z.object({ id: z.string(), title: z.string() })),
+        }),
+      )
+      .nullable()
+      .optional(),
     errors: errorsSchema,
   });
   const response = await admin.graphql(query, {
@@ -463,23 +486,38 @@ const SHOP_QUERY = `#graphql
   query OrchestratorShopName { shop { name } }
 `;
 
-export async function readShopName(admin: AdminApiContext): Promise<string | null> {
+export async function readShopName(
+  admin: AdminApiContext,
+): Promise<string | null> {
   const response = await admin.graphql(SHOP_QUERY, { tries: 2 });
   const parsed = z
-    .object({ data: z.object({ shop: z.object({ name: z.string() }) }).nullable().optional() })
+    .object({
+      data: z
+        .object({ shop: z.object({ name: z.string() }) })
+        .nullable()
+        .optional(),
+    })
     .parse(await response.json());
   return parsed.data?.shop.name ?? null;
 }
 
 /** What to call a resource in a list, from its own translatable fields. */
-export function resourceTitle(fields: readonly SourceField[], resourceId: string): string {
+export function resourceTitle(
+  fields: readonly SourceField[],
+  resourceId: string,
+): string {
   for (const key of ["title", "name", "label", "meta_title"]) {
-    const found = fields.find((field) => field.key === key && field.value.trim() !== "");
+    const found = fields.find(
+      (field) => field.key === key && field.value.trim() !== "",
+    );
     if (found) return found.value.trim();
   }
   const first = fields.find((field) => field.value.trim() !== "");
   if (first) {
-    const text = first.value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    const text = first.value
+      .replace(/<[^>]+>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
     if (text !== "") return text.length > 60 ? `${text.slice(0, 57)}…` : text;
   }
   return resourceId.replace("gid://shopify/", "");
@@ -553,7 +591,10 @@ const cardNodeSchema = z.discriminatedUnion("__typename", [
 ]);
 
 const cardsSchema = z.object({
-  data: z.object({ nodes: z.array(z.unknown()) }).nullable().optional(),
+  data: z
+    .object({ nodes: z.array(z.unknown()) })
+    .nullable()
+    .optional(),
   errors: errorsSchema,
 });
 

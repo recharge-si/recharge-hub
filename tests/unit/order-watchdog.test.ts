@@ -78,7 +78,9 @@ describe("watchOrder", () => {
 
   it("gives every order the grace period from activation, not only from arrival", () => {
     const justActivated = new Date(now.getTime() - HOUR);
-    expect(watchOrder(order1006, { ...on, activatedAt: justActivated })).toEqual({
+    expect(
+      watchOrder(order1006, { ...on, activatedAt: justActivated }),
+    ).toEqual({
       kind: "fine",
       why: "recent",
     });
@@ -131,7 +133,10 @@ describe("watchOrder", () => {
   it("calls an order transferred once every document is written and a verdict exists", () => {
     const written = {
       ...order1006,
-      documents: [{ status: "written" as const }, { status: "written" as const }],
+      documents: [
+        { status: "written" as const },
+        { status: "written" as const },
+      ],
     };
     for (const syncState of ["in_sync", "blocked", "inconsistent"] as const) {
       expect(watchOrder({ ...written, syncState }, on)).toEqual({
@@ -144,7 +149,11 @@ describe("watchOrder", () => {
   it("flags a written order whose verification never ran", () => {
     expect(
       watchOrder(
-        { ...order1006, documents: [{ status: "written" }], syncState: "pending" },
+        {
+          ...order1006,
+          documents: [{ status: "written" }],
+          syncState: "pending",
+        },
         on,
       ),
     ).toMatchObject({ kind: "overdue", problem: "not_verified" });
@@ -167,7 +176,10 @@ describe("watchOrder", () => {
     expect(
       watchOrder(
         { ...order1006, documents: [{ status: "failed" }] },
-        { ...on, transfer: { transferOrders: false, transferOrdersSince: null } },
+        {
+          ...on,
+          transfer: { transferOrders: false, transferOrdersSince: null },
+        },
       ),
     ).toEqual({ kind: "fine", why: "held_transfer_off" });
   });

@@ -38,8 +38,11 @@ export const databaseAvailable = process.env.TEST_DATABASE_AVAILABLE === "1";
 export const describeDatabase: typeof describe | typeof describe.skip =
   databaseAvailable
     ? describe
-    : ((name: string, fn: () => void) =>
-        describe.skip(`${name} [skipped: no DATABASE_URL, start Compose to run]`, fn)) as typeof describe;
+    : (((name: string, fn: () => void) =>
+        describe.skip(
+          `${name} [skipped: no DATABASE_URL, start Compose to run]`,
+          fn,
+        )) as typeof describe);
 
 export interface TestTenant {
   shopId: string;

@@ -1,5 +1,10 @@
 import { compareCodepoints } from "~/domain/types";
-import { containsTerm, normaliseTerm, stripHtml, wordsOf } from "~/domain/translations/text";
+import {
+  containsTerm,
+  normaliseTerm,
+  stripHtml,
+  wordsOf,
+} from "~/domain/translations/text";
 import type { GlossaryTerm, SourceField } from "~/domain/translations/types";
 
 /**
@@ -55,10 +60,17 @@ export function memoryKey(text: string): string {
  * short, with at least one letter. HTML and rich text never qualify — their
  * markup makes every occurrence unique.
  */
-export function isMemorable(field: Pick<SourceField, "type" | "value">): boolean {
+export function isMemorable(
+  field: Pick<SourceField, "type" | "value">,
+): boolean {
   if (!PLAIN_TYPES.has(field.type)) return false;
   const text = field.value.trim();
-  return text.length > 0 && text.length <= MEMORABLE_MAX_CHARS && /\p{L}/u.test(text) && !/<[a-z][^>]*>/i.test(text);
+  return (
+    text.length > 0 &&
+    text.length <= MEMORABLE_MAX_CHARS &&
+    /\p{L}/u.test(text) &&
+    !/<[a-z][^>]*>/i.test(text)
+  );
 }
 
 export type ReuseVerdict = "reuse" | "hint" | "ignore";
@@ -77,14 +89,31 @@ export type ReuseVerdict = "reuse" | "hint" | "ignore";
 export function reuseVerdict(
   field: SourceField,
   entry: MemoryEntry,
-  context: { resourceType: string; glossary: readonly GlossaryTerm[]; targetLocale: string },
+  context: {
+    resourceType: string;
+    glossary: readonly GlossaryTerm[];
+    targetLocale: string;
+  },
 ): ReuseVerdict {
-  if (!isMemorable(field) || field.value.trim().length > REUSABLE_MAX_CHARS) return "hint";
+  if (!isMemorable(field) || field.value.trim().length > REUSABLE_MAX_CHARS)
+    return "hint";
   if (entry.targetText.trim() === "") return "ignore";
-  if (!honoursGlossary(field.value, entry.targetText, context.glossary, context.targetLocale)) return "ignore";
+  if (
+    !honoursGlossary(
+      field.value,
+      entry.targetText,
+      context.glossary,
+      context.targetLocale,
+    )
+  )
+    return "ignore";
   if (entry.origin === "manual") return "reuse";
   if (entry.usageCount >= 2) return "reuse";
-  if (entry.resourceType !== null && entry.resourceType === context.resourceType) return "reuse";
+  if (
+    entry.resourceType !== null &&
+    entry.resourceType === context.resourceType
+  )
+    return "reuse";
   return "hint";
 }
 
@@ -96,7 +125,8 @@ function honoursGlossary(
 ): boolean {
   for (const term of glossary) {
     if (!containsTerm(source, term.sourceTerm)) continue;
-    if (term.kind === "protect" && !target.includes(term.sourceTerm)) return false;
+    if (term.kind === "protect" && !target.includes(term.sourceTerm))
+      return false;
     if (
       term.kind === "translate" &&
       term.targetTerm &&
@@ -134,7 +164,12 @@ export function selectMemoryHints(
     if (entry.targetText.trim() === "") continue;
     if (wordsOf(entry.sourceText).length > HINT_MAX_WORDS) continue;
     if (texts.some((text) => containsTerm(text, entry.sourceText)))
-      hits.push({ id: entry.id, sourceText: entry.sourceText, targetText: entry.targetText, origin: entry.origin });
+      hits.push({
+        id: entry.id,
+        sourceText: entry.sourceText,
+        targetText: entry.targetText,
+        origin: entry.origin,
+      });
   }
   const rank = (origin: MemoryOrigin) => (origin === "ai" ? 1 : 0);
   return hits
@@ -158,12 +193,18 @@ export function memorablePairs(
   fields: readonly SourceField[],
   values: ReadonlyMap<string, string>,
 ): Array<{ key: string; sourceText: string; targetText: string }> {
-  const pairs: Array<{ key: string; sourceText: string; targetText: string }> = [];
+  const pairs: Array<{ key: string; sourceText: string; targetText: string }> =
+    [];
   for (const field of fields) {
     const target = values.get(field.key);
     if (target === undefined || !isMemorable(field)) continue;
-    if (target.trim() === "" || target.length > MEMORABLE_MAX_CHARS * 2) continue;
-    pairs.push({ key: field.key, sourceText: field.value.trim(), targetText: target.trim() });
+    if (target.trim() === "" || target.length > MEMORABLE_MAX_CHARS * 2)
+      continue;
+    pairs.push({
+      key: field.key,
+      sourceText: field.value.trim(),
+      targetText: target.trim(),
+    });
   }
   return pairs;
 }

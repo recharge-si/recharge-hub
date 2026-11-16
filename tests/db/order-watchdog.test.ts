@@ -1,7 +1,10 @@
 import type { Job } from "pg-boss";
 import { afterEach, expect, it } from "vitest";
 
-import { claimExceptionAlert, releaseExceptionAlert } from "~/adapters/db/repositories/exception.server";
+import {
+  claimExceptionAlert,
+  releaseExceptionAlert,
+} from "~/adapters/db/repositories/exception.server";
 import {
   countPaidOrdersWithoutDocument,
   listWatchdogOrders,
@@ -32,33 +35,49 @@ describeDatabase("order watchdog", () => {
     tenant = null;
   });
 
-  const jobFor = (t: TestTenant) => ({ data: { shopDomain: t.domain } }) as Job<unknown>;
+  const jobFor = (t: TestTenant) =>
+    ({ data: { shopDomain: t.domain } }) as Job<unknown>;
 
   it("raises one exception per quiet order, and closes it when transfer is turned off", async () => {
     tenant = await createTenant("watchdog");
     await markSetupComplete(tenant.principal, new Date(Date.now() - 24 * HOUR));
     const orderId = await createOrder(tenant, { number: "#1006" });
-    await prisma.order.update({ where: { id: orderId }, data: { financialStatus: "paid" } });
+    await prisma.order.update({
+      where: { id: orderId },
+      data: { financialStatus: "paid" },
+    });
     const later = new Date(Date.now() + 3 * HOUR);
 
     // Twice: the second run updates the open row rather than adding one.
-    expect((await handleWatchOrders(jobFor(tenant), { now: later })).raised).toBe(1);
-    expect((await handleWatchOrders(jobFor(tenant), { now: later })).raised).toBe(0);
+    expect(
+      (await handleWatchOrders(jobFor(tenant), { now: later })).raised,
+    ).toBe(1);
+    expect(
+      (await handleWatchOrders(jobFor(tenant), { now: later })).raised,
+    ).toBe(0);
 
     const open = await prisma.exception.findMany({
       where: { shopId: tenant.shopId, kind: "order_not_transferred" },
     });
     expect(open).toHaveLength(1);
-    expect(open[0]).toMatchObject({ orderId, status: "open", dedupeKey: `order:${orderId}` });
+    expect(open[0]).toMatchObject({
+      orderId,
+      status: "open",
+      dedupeKey: `order:${orderId}`,
+    });
 
     expect(await countPaidOrdersWithoutDocument(tenant.principal)).toBe(1);
 
     await prisma.salesOrderSetting.create({
       data: { shopId: tenant.shopId, transferOrders: false },
     });
-    expect((await handleWatchOrders(jobFor(tenant), { now: later })).cleared).toBe(1);
+    expect(
+      (await handleWatchOrders(jobFor(tenant), { now: later })).cleared,
+    ).toBe(1);
 
-    const closed = await prisma.exception.findFirstOrThrow({ where: { id: open[0]!.id } });
+    const closed = await prisma.exception.findFirstOrThrow({
+      where: { id: open[0]!.id },
+    });
     expect(closed).toMatchObject({ status: "resolved", resolvedBy: "app" });
   });
 
@@ -66,7 +85,10 @@ describeDatabase("order watchdog", () => {
     tenant = await createTenant("watchdog-ok");
     const written = await createOrder(tenant, { number: "#2001" });
     const cancelled = await createOrder(tenant, { number: "#2002" });
-    await prisma.order.update({ where: { id: written }, data: { syncState: "in_sync" } });
+    await prisma.order.update({
+      where: { id: written },
+      data: { syncState: "in_sync" },
+    });
     await prisma.metakockaDocument.create({
       data: {
         shopId: tenant.shopId,
@@ -76,7 +98,10 @@ describeDatabase("order watchdog", () => {
         status: "written",
       },
     });
-    await prisma.order.update({ where: { id: cancelled }, data: { cancelledAt: new Date() } });
+    await prisma.order.update({
+      where: { id: cancelled },
+      data: { cancelledAt: new Date() },
+    });
 
     const rows = await listWatchdogOrders(tenant.principal, {
       receivedAfter: new Date(Date.now() - 24 * HOUR),
@@ -90,12 +115,18 @@ describeDatabase("order watchdog", () => {
     tenant = await createTenant("watchdog-alert");
     await markSetupComplete(tenant.principal, new Date(Date.now() - 24 * HOUR));
     await createOrder(tenant, { number: "#3001" });
-    await handleWatchOrders(jobFor(tenant), { now: new Date(Date.now() + 3 * HOUR) });
+    await handleWatchOrders(jobFor(tenant), {
+      now: new Date(Date.now() + 3 * HOUR),
+    });
     const row = await prisma.exception.findFirstOrThrow({
       where: { shopId: tenant.shopId, kind: "order_not_transferred" },
     });
 
-    const options = { now: new Date(), repeatWindowMs: 24 * HOUR, perShopHourly: 20 };
+    const options = {
+      now: new Date(),
+      repeatWindowMs: 24 * HOUR,
+      perShopHourly: 20,
+    };
     const first = await claimExceptionAlert(tenant.principal, row.id, options);
     expect(first).toEqual({
       claimed: true,
@@ -104,12 +135,16 @@ describeDatabase("order watchdog", () => {
         orderNumber: "#3001",
       }),
     });
-    expect(await claimExceptionAlert(tenant.principal, row.id, options)).toEqual({
+    expect(
+      await claimExceptionAlert(tenant.principal, row.id, options),
+    ).toEqual({
       claimed: false,
       why: "already_alerted",
     });
 
     await releaseExceptionAlert(tenant.principal, row.id);
-    expect((await claimExceptionAlert(tenant.principal, row.id, options)).claimed).toBe(true);
+    expect(
+      (await claimExceptionAlert(tenant.principal, row.id, options)).claimed,
+    ).toBe(true);
   });
 });

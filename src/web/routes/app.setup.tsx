@@ -97,10 +97,7 @@ import {
   orderReferenceRows,
 } from "~/web/lib/order-reference-fields";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
-import {
-  isUserKnown,
-  principalFromSession,
-} from "~/web/lib/principal.server";
+import { isUserKnown, principalFromSession } from "~/web/lib/principal.server";
 
 /**
  * Guided setup (the product UX brief, section 3).

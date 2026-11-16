@@ -70,9 +70,7 @@ export const fieldSchema = z.object({
    * With `tokens`: the real record the examples come from — what it is
    * called, and the text the value is put in front of — for a preview.
    */
-  sample: z
-    .object({ label: z.string().min(1), after: z.string() })
-    .optional(),
+  sample: z.object({ label: z.string().min(1), after: z.string() }).optional(),
   /** A heading the field is grouped under, so a long form reads in parts. */
   group: z.string().nullable().optional(),
 });

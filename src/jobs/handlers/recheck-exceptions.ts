@@ -218,7 +218,11 @@ async function verdictFor(
           },
           supplySource: { enabled: true },
         },
-        select: { quantity: true, reserved: true, sku: { select: { sku: true } } },
+        select: {
+          quantity: true,
+          reserved: true,
+          sku: { select: { sku: true } },
+        },
       });
 
       const free = new Map<string, number>();
@@ -336,7 +340,10 @@ async function verdictFor(
       const paid = facts.order.documents.filter(
         (document) => document.status === "written",
       );
-      if (paid.length > 0 && paid.every((doc) => doc.paymentMarkedAt !== null)) {
+      if (
+        paid.length > 0 &&
+        paid.every((doc) => doc.paymentMarkedAt !== null)
+      ) {
         return FIXED("The payment is recorded in MetaKocka.");
       }
       if (order.financialStatus !== "paid") {
@@ -347,7 +354,7 @@ async function verdictFor(
       const mapped = await findPaymentType(principal, order.paymentGateway);
       const fallback = mapped ? null : await getFallbackPaymentType(principal);
 
-      return mapped ?? fallback
+      return (mapped ?? fallback)
         ? {
             kind: "unblocked",
             note: `"${order.paymentGateway}" now has a MetaKocka payment type.`,
@@ -436,7 +443,10 @@ async function verdictFor(
       const written = order.documents.filter(
         (document) => document.status === "written",
       );
-      if (written.length > 0 && written.every((d) => d.paymentMarkedAt !== null)) {
+      if (
+        written.length > 0 &&
+        written.every((d) => d.paymentMarkedAt !== null)
+      ) {
         return FIXED("The payment is recorded in MetaKocka.");
       }
       if (order.financialStatus !== "paid") {
@@ -630,7 +640,9 @@ async function verdictFor(
       });
 
       const mapped = enabled.filter((source) =>
-        unmapped.some((location) => sameLocation(source.shopifyLocationId, location)),
+        unmapped.some((location) =>
+          sameLocation(source.shopifyLocationId, location),
+        ),
       ).length;
 
       return mapped > 0
@@ -647,8 +659,12 @@ async function verdictFor(
   }
 }
 
-export async function handleRecheckExceptions(job: Job<unknown>): Promise<void> {
-  const { shopDomain, limit } = recheckExceptionsJobSchema.parse(job.data ?? {});
+export async function handleRecheckExceptions(
+  job: Job<unknown>,
+): Promise<void> {
+  const { shopDomain, limit } = recheckExceptionsJobSchema.parse(
+    job.data ?? {},
+  );
   const principal = serviceToken(shopDomain, "recheck-exceptions");
   const log = getLogger();
 

@@ -61,9 +61,7 @@ const responseSchema = z
     // sent is meant to be complete, so a non-empty response here means it
     // was not — a real product this app does not manage, or a whole
     // warehouse, was left out and just lost its recorded stock.
-    stock_remove_list: z
-      .array(z.object({}).passthrough())
-      .optional(),
+    stock_remove_list: z.array(z.object({}).passthrough()).optional(),
   })
   .passthrough();
 

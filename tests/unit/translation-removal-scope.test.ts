@@ -21,9 +21,7 @@ describe("removalScope", () => {
   });
 
   it("takes a content group out of scope whole", () => {
-    expect(
-      removalScope(settings(), settings(["products", "pages"])),
-    ).toEqual([
+    expect(removalScope(settings(), settings(["products", "pages"]))).toEqual([
       { type: "COLLECTION", keys: null },
       { type: "BLOG", keys: null },
       { type: "ARTICLE", keys: null },
@@ -44,7 +42,11 @@ describe("removalScope", () => {
     expect(
       removalScope(
         settings(undefined, ["product_types"]),
-        settings(undefined, ["product_types", "product_titles", "product_options"]),
+        settings(undefined, [
+          "product_types",
+          "product_titles",
+          "product_options",
+        ]),
       ),
     ).toEqual([
       { type: "PRODUCT", keys: ["title"] },

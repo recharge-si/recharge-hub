@@ -114,8 +114,7 @@ export function estimateCostMicros(
 export function formatMicrosUsd(micros: number | bigint | null): string {
   if (micros === null) return "—";
   const value = Number(micros) / 1_000_000;
-  if (value !== 0 && Math.abs(value) < 0.01)
-    return `$${value.toFixed(4)}`;
+  if (value !== 0 && Math.abs(value) < 0.01) return `$${value.toFixed(4)}`;
   return `$${value.toLocaleString("en-US", {
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,

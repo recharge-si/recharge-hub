@@ -194,7 +194,12 @@ export function valuesCatalogue(): ValuesProduct[] {
       chosenTypeId: null,
       metafields: { "recharge.carbon_percent": decimal("100.0") },
       variants: [
-        variant(1001, "370", { "recharge.mast_diameter": text("rdm") }, "M-370"),
+        variant(
+          1001,
+          "370",
+          { "recharge.mast_diameter": text("rdm") },
+          "M-370",
+        ),
         variant(1002, "430", { "recharge.length_cm": dimension(430) }, "M-430"),
         variant(1003, "460"),
       ],

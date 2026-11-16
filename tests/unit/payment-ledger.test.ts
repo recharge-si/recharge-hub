@@ -52,7 +52,13 @@ describe("what counts as money", () => {
   });
 
   it("counts only successful transactions", () => {
-    for (const status of ["pending", "failure", "error", "awaiting_response", "unknown"] as const) {
+    for (const status of [
+      "pending",
+      "failure",
+      "error",
+      "awaiting_response",
+      "unknown",
+    ] as const) {
       expect(isSettledReceipt(tx({ kind: "sale", status }))).toBe(false);
       expect(isSettledRefund(tx({ kind: "refund", status }))).toBe(false);
     }
@@ -138,7 +144,11 @@ describe("an authorization only (§17)", () => {
 describe("partial payments (§18)", () => {
   it("walks the brief's example to the cent", () => {
     const first = tx({ kind: "capture", amountMinor: 10_000, gateway: "bank" });
-    const second = tx({ kind: "capture", amountMinor: 20_000, gateway: "card" });
+    const second = tx({
+      kind: "capture",
+      amountMinor: 20_000,
+      gateway: "card",
+    });
     const third = tx({ kind: "capture", amountMinor: 20_000, gateway: "card" });
 
     const afterFirst = summarisePayments([first], TOTAL);
@@ -199,7 +209,11 @@ describe("failed and voided transactions", () => {
   });
 
   it("ignores a pending transaction until it succeeds", () => {
-    const pending = tx({ kind: "sale", amountMinor: 50_000, status: "pending" });
+    const pending = tx({
+      kind: "sale",
+      amountMinor: 50_000,
+      status: "pending",
+    });
     expect(summarisePayments([pending], TOTAL).state).toBe("unpaid");
 
     // Shopify updates the same transaction id in place; the ledger upserts it.

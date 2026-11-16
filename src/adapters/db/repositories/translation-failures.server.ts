@@ -25,7 +25,9 @@ const BACKOFF_DAYS = [1, 3, 7] as const;
 
 export function nextRetry(attempts: number, now: Date): Date | null {
   const days = BACKOFF_DAYS[attempts - 1];
-  return days === undefined ? null : new Date(now.getTime() + days * 86_400_000);
+  return days === undefined
+    ? null
+    : new Date(now.getTime() + days * 86_400_000);
 }
 
 /** Whether automatic work should leave this source alone for now. */
@@ -99,7 +101,12 @@ export async function recordFailure(
         locale: input.locale,
       },
     },
-    create: { shopId: shop.id, resourceId: input.resourceId, locale: input.locale, ...data },
+    create: {
+      shopId: shop.id,
+      resourceId: input.resourceId,
+      locale: input.locale,
+      ...data,
+    },
     update: data,
   });
 }

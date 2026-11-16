@@ -41,12 +41,17 @@ export function translationFailureMessage(
   const byReason = new Map<string, string[]>();
   for (const failure of failures) {
     const reason = failure.error?.trim() || "No reason was recorded.";
-    byReason.set(reason, [...(byReason.get(reason) ?? []), languageName(failure.locale)]);
+    byReason.set(reason, [
+      ...(byReason.get(reason) ?? []),
+      languageName(failure.locale),
+    ]);
   }
   const reasons = [...byReason.entries()].map(([reason, names]) => {
     const text = /[.!?]$/.test(reason) ? reason : `${reason}.`;
     return byReason.size === 1 ? text : `${list(names)}: ${text}`;
   });
-  const languages = list([...new Set(failures.map((f) => languageName(f.locale)))]);
+  const languages = list([
+    ...new Set(failures.map((f) => languageName(f.locale))),
+  ]);
   return `“${title}” could not be translated into ${languages}. ${reasons.join(" ")}`;
 }

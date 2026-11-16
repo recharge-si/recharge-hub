@@ -148,7 +148,11 @@ export function planResource(input: PlanInput): FieldDecision[] {
 
   return input.fields.map((field): FieldDecision => {
     const translation = byKey.get(field.key);
-    const state = classifyField(translation, records.get(field.key), input.hash);
+    const state = classifyField(
+      translation,
+      records.get(field.key),
+      input.hash,
+    );
 
     if (field.value.trim() === "")
       return { kind: "skip", field, reason: "empty_source", state };
@@ -199,12 +203,16 @@ export interface PlanSummary {
   skipped: Partial<Record<SkipReason, number>>;
 }
 
-export function summarisePlan(decisions: readonly FieldDecision[]): PlanSummary {
+export function summarisePlan(
+  decisions: readonly FieldDecision[],
+): PlanSummary {
   const summary: PlanSummary = { translate: 0, copy: 0, skipped: {} };
   for (const decision of decisions) {
     if (decision.kind === "translate") summary.translate += 1;
     else if (decision.kind === "copy_source") summary.copy += 1;
-    else summary.skipped[decision.reason] = (summary.skipped[decision.reason] ?? 0) + 1;
+    else
+      summary.skipped[decision.reason] =
+        (summary.skipped[decision.reason] ?? 0) + 1;
   }
   return summary;
 }

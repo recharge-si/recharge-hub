@@ -32,15 +32,21 @@ import type { SourceField } from "~/domain/translations/types";
 describe("pricing", () => {
   it("prices a known model and a dated snapshot of it, and refuses an unknown one", () => {
     expect(pricingFor("gpt-4.1-mini")).not.toBeNull();
-    expect(pricingFor("gpt-4.1-mini-2025-04-14")).toEqual(pricingFor("gpt-4.1-mini"));
+    expect(pricingFor("gpt-4.1-mini-2025-04-14")).toEqual(
+      pricingFor("gpt-4.1-mini"),
+    );
     // The longest family prefix wins: not priced as "gpt-4.1".
-    expect(pricingFor("gpt-4.1-nano-2025-04-14")).toEqual(pricingFor("gpt-4.1-nano"));
+    expect(pricingFor("gpt-4.1-nano-2025-04-14")).toEqual(
+      pricingFor("gpt-4.1-nano"),
+    );
     expect(pricingFor("some-future-model")).toBeNull();
-    expect(estimateCostMicros("some-future-model", {
-      inputTokens: 1000,
-      cachedInputTokens: 0,
-      outputTokens: 1000,
-    })).toBeNull();
+    expect(
+      estimateCostMicros("some-future-model", {
+        inputTokens: 1000,
+        cachedInputTokens: 0,
+        outputTokens: 1000,
+      }),
+    ).toBeNull();
   });
 
   it("costs a million input and output tokens at the listed rate, exactly", () => {
@@ -88,7 +94,12 @@ describe("coverage and estimate", () => {
   function fields(): SourceField[] {
     return [
       { key: "title", value: "Patrik 5-Wave", digest: "a", type: "STRING" },
-      { key: "body_html", value: "<p>".padEnd(400, "x"), digest: "b", type: "HTML" },
+      {
+        key: "body_html",
+        value: "<p>".padEnd(400, "x"),
+        digest: "b",
+        type: "HTML",
+      },
       { key: "handle", value: "patrik-5-wave", digest: "c", type: "STRING" },
     ];
   }
@@ -100,12 +111,33 @@ describe("coverage and estimate", () => {
       fields: fields(),
       locales: ["de", "it"],
       translations: new Map([
-        ["de", [{ key: "title", value: "Patrik 5-Wave", outdated: false, updatedAt: null }]],
-        ["it", [{ key: "body_html", value: "…", outdated: true, updatedAt: null }]],
+        [
+          "de",
+          [
+            {
+              key: "title",
+              value: "Patrik 5-Wave",
+              outdated: false,
+              updatedAt: null,
+            },
+          ],
+        ],
+        [
+          "it",
+          [{ key: "body_html", value: "…", outdated: true, updatedAt: null }],
+        ],
       ]),
     });
     const rows = coverageRows(acc);
-    expect(rows.map((row) => [row.locale, row.fields, row.translated, row.outdated, row.missing])).toEqual([
+    expect(
+      rows.map((row) => [
+        row.locale,
+        row.fields,
+        row.translated,
+        row.outdated,
+        row.missing,
+      ]),
+    ).toEqual([
       ["de", 2, 1, 0, 1],
       ["it", 2, 0, 1, 1],
     ]);
@@ -206,9 +238,24 @@ describe("prompt", () => {
       resourceTitle: "Boom",
       fields,
       glossary: [
-        { kind: "protect", targetLocale: null, sourceTerm: "Patrik", targetTerm: null },
-        { kind: "translate", targetLocale: "de", sourceTerm: "Boom", targetTerm: "Gabelbaum" },
-        { kind: "translate", targetLocale: "it", sourceTerm: "Boom", targetTerm: "Boma" },
+        {
+          kind: "protect",
+          targetLocale: null,
+          sourceTerm: "Patrik",
+          targetTerm: null,
+        },
+        {
+          kind: "translate",
+          targetLocale: "de",
+          sourceTerm: "Boom",
+          targetTerm: "Gabelbaum",
+        },
+        {
+          kind: "translate",
+          targetLocale: "it",
+          sourceTerm: "Boom",
+          targetTerm: "Boma",
+        },
       ],
       storeName: "Recharge",
       storeContext: null,
@@ -233,10 +280,11 @@ describe("prompt", () => {
       fields,
     );
     expect(ok.ok).toBe(true);
-    if (ok.ok) expect([...ok.values]).toEqual([
-      ["title", "Gabelbaum"],
-      ["body_html", "<p>Ein Gabelbaum.</p>"],
-    ]);
+    if (ok.ok)
+      expect([...ok.values]).toEqual([
+        ["title", "Gabelbaum"],
+        ["body_html", "<p>Ein Gabelbaum.</p>"],
+      ]);
 
     const fenced = parseTranslationReply(
       '```json\n{"translations":{"1":"A","2":"B"}}\n```',
@@ -244,7 +292,10 @@ describe("prompt", () => {
     );
     expect(fenced.ok).toBe(true);
 
-    const short = parseTranslationReply('{"translations":{"1":"Gabelbaum"}}', fields);
+    const short = parseTranslationReply(
+      '{"translations":{"1":"Gabelbaum"}}',
+      fields,
+    );
     expect(short.ok).toBe(false);
     if (!short.ok) expect(short.reason).toContain("body_html");
 
@@ -262,7 +313,8 @@ describe("prompt", () => {
       fields,
     );
     expect(declared.ok).toBe(true);
-    if (declared.ok) expect([...declared.alreadyInTarget]).toEqual(["body_html"]);
+    if (declared.ok)
+      expect([...declared.alreadyInTarget]).toEqual(["body_html"]);
 
     // Absent, or not a list, declares nothing and fails nothing.
     for (const text of [
@@ -276,13 +328,18 @@ describe("prompt", () => {
   });
 
   it("reads a detection reply and caps its confidence by the sample's length", () => {
-    const long = "Deska za jadranje na deski je pripravljena za novo sezono na obali.";
-    expect(parseDetectionReply('{"locale":"SL","confidence":0.9}', long)).toMatchObject({
+    const long =
+      "Deska za jadranje na deski je pripravljena za novo sezono na obali.";
+    expect(
+      parseDetectionReply('{"locale":"SL","confidence":0.9}', long),
+    ).toMatchObject({
       locale: "sl",
       confidence: 0.9,
       shortSample: false,
     });
-    expect(parseDetectionReply('{"locale":"en","confidence":0.99}', "Foil")).toMatchObject({
+    expect(
+      parseDetectionReply('{"locale":"en","confidence":0.99}', "Foil"),
+    ).toMatchObject({
       locale: "en",
       confidence: 0.45,
       reportedConfidence: 0.99,

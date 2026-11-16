@@ -13,18 +13,22 @@ describe("formatListDateTime", () => {
   const now = new Date(2026, 7, 25, 14, 0); // 25 August 2026, local time.
 
   it("calls anything on today's date Today, including one minute past midnight", () => {
-    expect(formatListDateTime(new Date(2026, 7, 25, 13, 0).toISOString(), now))
-      .toMatch(/^Today at /);
-    expect(formatListDateTime(new Date(2026, 7, 25, 0, 1).toISOString(), now))
-      .toMatch(/^Today at /);
+    expect(
+      formatListDateTime(new Date(2026, 7, 25, 13, 0).toISOString(), now),
+    ).toMatch(/^Today at /);
+    expect(
+      formatListDateTime(new Date(2026, 7, 25, 0, 1).toISOString(), now),
+    ).toMatch(/^Today at /);
   });
 
   it("calls yesterday Yesterday however few hours ago it was", () => {
     // 23:59 yesterday is under an hour before midnight and still not today.
-    expect(formatListDateTime(new Date(2026, 7, 24, 23, 59).toISOString(), now))
-      .toMatch(/^Yesterday at /);
-    expect(formatListDateTime(new Date(2026, 7, 24, 0, 5).toISOString(), now))
-      .toMatch(/^Yesterday at /);
+    expect(
+      formatListDateTime(new Date(2026, 7, 24, 23, 59).toISOString(), now),
+    ).toMatch(/^Yesterday at /);
+    expect(
+      formatListDateTime(new Date(2026, 7, 24, 0, 5).toISOString(), now),
+    ).toMatch(/^Yesterday at /);
   });
 
   it("drops the year for a date in the current year and keeps it otherwise", () => {

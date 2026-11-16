@@ -111,7 +111,10 @@ export interface Classified {
 
 export function classifyProduct(
   plan: AttributeSchema,
-  product: Pick<RigSnapshotProduct, "productType" | "categoryName" | "chosenTypeId">,
+  product: Pick<
+    RigSnapshotProduct,
+    "productType" | "categoryName" | "chosenTypeId"
+  >,
 ): Classified | null {
   const match = typeForProduct(plan, {
     categoryName: product.categoryName,
@@ -141,7 +144,10 @@ export function classifyProduct(
 /** The role of a product (kept for callers that only need that). */
 export function roleOfProduct(
   plan: AttributeSchema,
-  product: Pick<RigSnapshotProduct, "productType" | "categoryName" | "chosenTypeId">,
+  product: Pick<
+    RigSnapshotProduct,
+    "productType" | "categoryName" | "chosenTypeId"
+  >,
 ): RigRole | null {
   return classifyProduct(plan, product)?.role ?? null;
 }
@@ -153,7 +159,10 @@ function derive(
   specs: Specs,
 ): SpecField[] {
   const derived: SpecField[] = [];
-  const texts = [...(variant.options ?? []).map((o) => o.value), variant.title ?? ""]
+  const texts = [
+    ...(variant.options ?? []).map((o) => o.value),
+    variant.title ?? "",
+  ]
     .map((text) => text.trim())
     .filter((text) => text !== "" && text.toLowerCase() !== "default title");
   const fill = (field: SpecField, value: SpecValue | null) => {
@@ -191,7 +200,8 @@ export function candidatesFrom(
       if (role === "base" && classified.combined) {
         const hasExtension = ROLE_FIELDS.extension.some(
           (spec) =>
-            (spec.field === "extensionMinCm" || spec.field === "extensionMaxCm") &&
+            (spec.field === "extensionMinCm" ||
+              spec.field === "extensionMaxCm") &&
             readField(spec, product, variant) !== null,
         );
         if (hasExtension) role = "extension";
@@ -222,7 +232,8 @@ export function candidatesFrom(
         inventoryQuantity: quantity,
         specs,
         derived,
-        category: role === "sail" || role === "board" ? classified.category : null,
+        category:
+          role === "sail" || role === "board" ? classified.category : null,
         missing: placementGaps(role, specs),
       });
     }
@@ -314,9 +325,11 @@ export function readinessFromCandidates(
     }
     missingCounts.set(candidate.role, counts);
 
-    const seen =
-      products.get(candidate.productId) ??
-      { role: candidate.role, complete: false, inStock: false };
+    const seen = products.get(candidate.productId) ?? {
+      role: candidate.role,
+      complete: false,
+      inStock: false,
+    };
     const complete = candidate.missing.length === 0;
     seen.complete ||= complete;
     seen.inStock ||= complete && candidate.inStock;

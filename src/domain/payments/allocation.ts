@@ -98,7 +98,11 @@ export interface AllocationResult {
    * (§11), and it is the situation that used to end in the payment being
    * recorded against a document that no longer described the order.
    */
-  unallocated: { shopifyTransactionId: string; amountMinor: number; reason: string }[];
+  unallocated: {
+    shopifyTransactionId: string;
+    amountMinor: number;
+    reason: string;
+  }[];
 }
 
 /**
@@ -251,7 +255,14 @@ export function allocatedTotalFor(
 export function allocationPreservesReceipts(input: {
   receipts: readonly AllocatableReceipt[];
   result: AllocationResult;
-}): { ok: boolean; drift: { shopifyTransactionId: string; expected: number; allocated: number }[] } {
+}): {
+  ok: boolean;
+  drift: {
+    shopifyTransactionId: string;
+    expected: number;
+    allocated: number;
+  }[];
+} {
   const allocated = new Map<string, number>();
   for (const entry of input.result.entries) {
     allocated.set(

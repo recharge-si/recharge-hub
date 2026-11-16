@@ -36,7 +36,9 @@ describe("recorded bulk operation (3 products, 7 variants)", () => {
     expect(products.flatMap((p) => p.variants)).toHaveLength(7);
     const sail = products[0];
     expect(sail?.handle).toBe("aero-ride-sail");
-    expect(sail?.onlineStoreUrl).toBe("https://recharge.si/products/aero-ride-sail");
+    expect(sail?.onlineStoreUrl).toBe(
+      "https://recharge.si/products/aero-ride-sail",
+    );
     expect(sail?.imageUrl).toBe("https://cdn.example.test/9001.jpg");
     expect(sail?.description).toBe("Fast & stable. Made for freeride.");
     expect(sail?.variants.map((v) => v.options)).toEqual([
@@ -44,7 +46,9 @@ describe("recorded bulk operation (3 products, 7 variants)", () => {
       [{ name: "Size", value: "6.2" }],
       [{ name: "Size", value: "6.6" }],
     ]);
-    expect(sail?.variants.map((v) => [v.inventoryQuantity, v.availableForSale])).toEqual([
+    expect(
+      sail?.variants.map((v) => [v.inventoryQuantity, v.availableForSale]),
+    ).toEqual([
       [4, true],
       [0, false],
       [null, true],
@@ -62,9 +66,11 @@ describe("recorded bulk operation (3 products, 7 variants)", () => {
 
 describe("plainDescription", () => {
   it("drops tags and scripts, decodes entities, collapses space", () => {
-    expect(plainDescription("<p>A&nbsp;&lt;b&gt; &#8211; <em>x</em></p><style>p{}</style>")).toBe(
-      "A <b> – x",
-    );
+    expect(
+      plainDescription(
+        "<p>A&nbsp;&lt;b&gt; &#8211; <em>x</em></p><style>p{}</style>",
+      ),
+    ).toBe("A <b> – x");
   });
   it("caps at 2000 characters and returns null for nothing", () => {
     expect(plainDescription("x".repeat(5000))).toHaveLength(DESCRIPTION_LIMIT);
@@ -88,7 +94,9 @@ describe("products/update payload", () => {
   });
 
   it("reads stock the way Shopify sells", () => {
-    expect(update.variants.map((v) => [v.inventoryQuantity, v.availableForSale])).toEqual([
+    expect(
+      update.variants.map((v) => [v.inventoryQuantity, v.availableForSale]),
+    ).toEqual([
       [3, true],
       [0, false],
       // Inventory is not tracked: always available, quantity meaningless.

@@ -25,10 +25,7 @@ import type { ValuesProduct } from "./types";
 /** The type of a product, or null when it has none or is claimed by two. */
 export function typeOfProduct(
   schema: AttributeSchema,
-  product: Pick<
-    ValuesProduct,
-    "productType" | "categoryName" | "chosenTypeId"
-  >,
+  product: Pick<ValuesProduct, "productType" | "categoryName" | "chosenTypeId">,
 ): string | null {
   const match = typeForProduct(schema, {
     categoryName: product.categoryName,

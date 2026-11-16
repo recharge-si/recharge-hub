@@ -52,7 +52,9 @@ function describe(readiness: RigReadiness): RigSettings["roles"] {
   }));
 }
 
-export async function rigSettingsFor(principal: Principal): Promise<RigSettings> {
+export async function rigSettingsFor(
+  principal: Principal,
+): Promise<RigSettings> {
   const source = await loadRigSource(principal);
   const readiness = rigReadiness(source.plan, source.products);
   return {
@@ -67,7 +69,8 @@ export async function rigSettingsFor(principal: Principal): Promise<RigSettings>
   };
 }
 
-export type ToggleResult = { ok: true; message: string } | { ok: false; message: string };
+export type ToggleResult =
+  { ok: true; message: string } | { ok: false; message: string };
 
 /** Turning it on needs a ready catalogue and a claude that can run with tools off. */
 export async function setRigEnabled(

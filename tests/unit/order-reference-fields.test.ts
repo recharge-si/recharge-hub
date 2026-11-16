@@ -29,9 +29,9 @@ describe("orderReferenceRows", () => {
     expect(
       group?.rows.find((row) => row.field.id === "order.number")?.value,
     ).toBe("1050");
-    expect(group?.rows.find((row) => row.field.id === "order.name")?.value).toBe(
-      "#1050",
-    );
+    expect(
+      group?.rows.find((row) => row.field.id === "order.name")?.value,
+    ).toBe("#1050");
   });
 
   it("shows no value for a field this app keeps nothing for", () => {

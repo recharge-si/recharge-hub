@@ -1,7 +1,10 @@
 import type { Job } from "pg-boss";
 import { z } from "zod";
 
-import { postSlackMessage, type FetchLike } from "~/adapters/alerts/slack.server";
+import {
+  postSlackMessage,
+  type FetchLike,
+} from "~/adapters/alerts/slack.server";
 import { getEnv } from "~/adapters/config/env.server";
 import {
   claimExceptionAlert,
@@ -50,7 +53,10 @@ export async function handleNotifyException(
     perShopHourly: ALERTS_PER_SHOP_HOURLY,
   });
   if (!claim.claimed) {
-    log.info({ shop: shopDomain, exceptionId, why: claim.why }, "Exception alert not sent");
+    log.info(
+      { shop: shopDomain, exceptionId, why: claim.why },
+      "Exception alert not sent",
+    );
     return;
   }
   const { alert } = claim;
@@ -76,5 +82,8 @@ export async function handleNotifyException(
     throw error;
   }
 
-  log.info({ shop: shopDomain, exceptionId, kind: alert.kind }, "Exception alert sent");
+  log.info(
+    { shop: shopDomain, exceptionId, kind: alert.kind },
+    "Exception alert sent",
+  );
 }

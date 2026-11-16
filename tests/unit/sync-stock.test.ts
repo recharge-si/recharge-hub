@@ -345,9 +345,7 @@ describe("syncStockToMetakocka", () => {
     });
 
     it("classifies a 4xx as an exception", async () => {
-      const fetchImpl = vi.fn(
-        async () => new Response("no", { status: 403 }),
-      );
+      const fetchImpl = vi.fn(async () => new Response("no", { status: 403 }));
 
       const error = await syncStockToMetakocka(
         CREDENTIALS,

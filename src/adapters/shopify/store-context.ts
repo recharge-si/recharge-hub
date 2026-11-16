@@ -33,7 +33,8 @@ const errorsSchema = z
   .optional();
 
 function throwOnErrors(errors: z.infer<typeof errorsSchema>): void {
-  if (errors && errors.length > 0) throw new Error(errors.map((e) => e.message).join("; "));
+  if (errors && errors.length > 0)
+    throw new Error(errors.map((e) => e.message).join("; "));
 }
 
 /* -------------------------------------------------------------------------- */
@@ -51,7 +52,11 @@ const menuItemSchema = menuItemBase.extend({
   items: z
     .array(
       menuItemBase.extend({
-        items: z.array(menuItemBase.extend({ items: z.array(menuItemBase).optional() })).optional(),
+        items: z
+          .array(
+            menuItemBase.extend({ items: z.array(menuItemBase).optional() }),
+          )
+          .optional(),
       }),
     )
     .optional(),
@@ -109,10 +114,13 @@ function toMenuItem(item: RawItem): SnapshotMenuItem {
 }
 
 /** Every menu with its items four levels deep, or none when navigation is not readable. */
-export async function readMenus(admin: AdminApiContext): Promise<SnapshotMenu[]> {
+export async function readMenus(
+  admin: AdminApiContext,
+): Promise<SnapshotMenu[]> {
   const response = await admin.graphql(MENUS_QUERY, { tries: 2 });
   const parsed = menusSchema.safeParse(await response.json());
-  if (!parsed.success || (parsed.data.errors && parsed.data.errors.length > 0)) return [];
+  if (!parsed.success || (parsed.data.errors && parsed.data.errors.length > 0))
+    return [];
   return (parsed.data.data?.menus.nodes ?? []).map((menu) => ({
     id: menu.id,
     handle: menu.handle,
@@ -150,7 +158,9 @@ const shopSchema = z.object({
           }),
         ),
       }),
-      blogs: z.object({ nodes: z.array(z.object({ id: z.string(), title: z.string() })) }),
+      blogs: z.object({
+        nodes: z.array(z.object({ id: z.string(), title: z.string() })),
+      }),
       productsCount: z.object({ count: z.number() }).nullable(),
     })
     .nullable()
@@ -174,7 +184,10 @@ const productsSchema = z.object({
   data: z
     .object({
       products: z.object({
-        pageInfo: z.object({ hasNextPage: z.boolean(), endCursor: z.string().nullable() }),
+        pageInfo: z.object({
+          hasNextPage: z.boolean(),
+          endCursor: z.string().nullable(),
+        }),
         nodes: z.array(
           z.object({
             id: z.string(),
@@ -183,7 +196,10 @@ const productsSchema = z.object({
             productType: z.string(),
             tags: z.array(z.string()),
             options: z.array(
-              z.object({ name: z.string(), optionValues: z.array(z.object({ name: z.string() })) }),
+              z.object({
+                name: z.string(),
+                optionValues: z.array(z.object({ name: z.string() })),
+              }),
             ),
           }),
         ),
@@ -219,7 +235,10 @@ export async function readStoreSnapshot(
   let after: string | null = null;
   while (products.length < SNAPSHOT_PRODUCTS) {
     const response = await admin.graphql(PRODUCTS_QUERY, {
-      variables: { first: Math.min(PRODUCT_PAGE, SNAPSHOT_PRODUCTS - products.length), after },
+      variables: {
+        first: Math.min(PRODUCT_PAGE, SNAPSHOT_PRODUCTS - products.length),
+        after,
+      },
       tries: 2,
     });
     const page = productsSchema.parse(await response.json());
@@ -238,11 +257,14 @@ export async function readStoreSnapshot(
           values: option.optionValues.map((value) => value.name),
         })),
       });
-    if (!connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor) break;
+    if (!connection.pageInfo.hasNextPage || !connection.pageInfo.endCursor)
+      break;
     after = connection.pageInfo.endCursor;
   }
 
-  const collections: SnapshotCollection[] = (shop.data?.collections.nodes ?? []).map((node) => ({
+  const collections: SnapshotCollection[] = (
+    shop.data?.collections.nodes ?? []
+  ).map((node) => ({
     id: node.id,
     title: node.title,
     description: node.description,
@@ -272,7 +294,11 @@ export interface ProductFacts {
   productType: string | null;
   tags: string[];
   collections: string[];
-  options: Array<{ id: string; name: string; values: Array<{ id: string; name: string }> }>;
+  options: Array<{
+    id: string;
+    name: string;
+    values: Array<{ id: string; name: string }>;
+  }>;
 }
 
 export interface CollectionFacts {
@@ -352,7 +378,11 @@ const NODES_QUERY = `#graphql
   }
 `;
 
-const titled = z.object({ __typename: z.string(), title: z.string().optional(), name: z.string().optional() });
+const titled = z.object({
+  __typename: z.string(),
+  title: z.string().optional(),
+  name: z.string().optional(),
+});
 
 const nodeSchema = z.discriminatedUnion("__typename", [
   z.object({
@@ -363,7 +393,11 @@ const nodeSchema = z.discriminatedUnion("__typename", [
     productType: z.string(),
     tags: z.array(z.string()),
     options: z.array(
-      z.object({ id: z.string(), name: z.string(), optionValues: z.array(z.object({ id: z.string(), name: z.string() })) }),
+      z.object({
+        id: z.string(),
+        name: z.string(),
+        optionValues: z.array(z.object({ id: z.string(), name: z.string() })),
+      }),
     ),
     collections: z.object({ nodes: z.array(z.object({ title: z.string() })) }),
   }),
@@ -386,7 +420,9 @@ const nodeSchema = z.discriminatedUnion("__typename", [
     namespace: z.string(),
     key: z.string(),
     owner: titled.nullable(),
-    definition: z.object({ name: z.string(), description: z.string().nullable() }).nullable(),
+    definition: z
+      .object({ name: z.string(), description: z.string().nullable() })
+      .nullable(),
   }),
   z.object({
     __typename: z.literal("ProductOption"),
@@ -394,11 +430,18 @@ const nodeSchema = z.discriminatedUnion("__typename", [
     name: z.string(),
     optionValues: z.array(z.object({ id: z.string(), name: z.string() })),
   }),
-  z.object({ __typename: z.literal("ProductOptionValue"), id: z.string(), name: z.string() }),
+  z.object({
+    __typename: z.literal("ProductOptionValue"),
+    id: z.string(),
+    name: z.string(),
+  }),
 ]);
 
 const nodesSchema = z.object({
-  data: z.object({ nodes: z.array(z.unknown()) }).nullable().optional(),
+  data: z
+    .object({ nodes: z.array(z.unknown()) })
+    .nullable()
+    .optional(),
   errors: errorsSchema,
 });
 
@@ -419,12 +462,18 @@ export function emptyFacts(): NodeFacts {
  * simply absent; a page of resources translates with less context rather
  * than not at all.
  */
-export async function readNodeFacts(admin: AdminApiContext, ids: readonly string[]): Promise<NodeFacts> {
+export async function readNodeFacts(
+  admin: AdminApiContext,
+  ids: readonly string[],
+): Promise<NodeFacts> {
   const facts = emptyFacts();
   if (ids.length === 0) return facts;
   for (let start = 0; start < ids.length; start += 50) {
     const chunk = ids.slice(start, start + 50);
-    const response = await admin.graphql(NODES_QUERY, { variables: { ids: chunk }, tries: 2 });
+    const response = await admin.graphql(NODES_QUERY, {
+      variables: { ids: chunk },
+      tries: 2,
+    });
     const parsed = nodesSchema.safeParse(await response.json());
     if (!parsed.success) continue;
     for (const raw of parsed.data.data?.nodes ?? []) {
@@ -456,7 +505,11 @@ export async function readNodeFacts(admin: AdminApiContext, ids: readonly string
           });
           break;
         case "Article":
-          facts.articles.set(value.id, { id: value.id, title: value.title, blogTitle: value.blog?.title ?? null });
+          facts.articles.set(value.id, {
+            id: value.id,
+            title: value.title,
+            blogTitle: value.blog?.title ?? null,
+          });
           break;
         case "Metafield":
           facts.metafields.set(value.id, {

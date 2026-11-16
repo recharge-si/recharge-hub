@@ -33,7 +33,8 @@ export function PatternFieldsModal({
       <s-stack direction="block" gap="base">
         <s-paragraph>
           Start typing any of these and it will offer itself — there is no
-          syntax to learn. Each one shows what it comes to for {resolvedAgainst}.
+          syntax to learn. Each one shows what it comes to for {resolvedAgainst}
+          .
         </s-paragraph>
 
         {groups.map((group) => (

@@ -1,5 +1,8 @@
 import type { MetakockaClient } from "~/adapters/metakocka/client";
-import { probeDocument, SENTINEL_PAYMENT_TYPE } from "~/adapters/metakocka/probe";
+import {
+  probeDocument,
+  SENTINEL_PAYMENT_TYPE,
+} from "~/adapters/metakocka/probe";
 
 /**
  * Discovering the payment types a company accepts.

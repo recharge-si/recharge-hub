@@ -1,7 +1,10 @@
 import type { Job } from "pg-boss";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { WatchdogOrder, WatchdogShop } from "~/adapters/db/repositories/order-watchdog.server";
+import type {
+  WatchdogOrder,
+  WatchdogShop,
+} from "~/adapters/db/repositories/order-watchdog.server";
 
 /**
  * The watch-orders job (docs/project-status.md T-11): it raises one
@@ -15,8 +18,17 @@ import type { WatchdogOrder, WatchdogShop } from "~/adapters/db/repositories/ord
 const state = vi.hoisted(() => ({
   shop: null as WatchdogShop | null,
   orders: [] as WatchdogOrder[],
-  listedWith: [] as Array<{ receivedAfter: Date; receivedBefore: Date; limit: number }>,
-  raised: [] as Array<{ orderId?: string | null; kind: string; message: string; detail?: unknown }>,
+  listedWith: [] as Array<{
+    receivedAfter: Date;
+    receivedBefore: Date;
+    limit: number;
+  }>,
+  raised: [] as Array<{
+    orderId?: string | null;
+    kind: string;
+    message: string;
+    detail?: unknown;
+  }>,
   closed: [] as Array<{ orderId: string; kinds: string[] }>,
   events: [] as unknown[],
 }));
@@ -34,7 +46,12 @@ vi.mock("~/adapters/db/repositories/order-watchdog.server", () => ({
 vi.mock("~/adapters/db/repositories/exception.server", () => ({
   raiseException: async (
     _p: unknown,
-    input: { orderId?: string | null; kind: string; message: string; detail?: unknown },
+    input: {
+      orderId?: string | null;
+      kind: string;
+      message: string;
+      detail?: unknown;
+    },
   ) => {
     state.raised.push(input);
   },
@@ -48,10 +65,13 @@ vi.mock("~/adapters/db/repositories/event-log.server", () => ({
   },
 }));
 
-const { handleWatchOrders, LOOKBACK_DAYS } = await import("~/jobs/handlers/watch-orders");
+const { handleWatchOrders, LOOKBACK_DAYS } =
+  await import("~/jobs/handlers/watch-orders");
 
 const now = new Date("2026-11-16T09:00:00Z");
-const job = { data: { shopDomain: "recharge-test.myshopify.com" } } as Job<unknown>;
+const job = {
+  data: { shopDomain: "recharge-test.myshopify.com" },
+} as Job<unknown>;
 
 const transferOn: WatchdogShop = {
   activatedAt: new Date("2026-10-01T08:00:00Z"),
@@ -110,7 +130,10 @@ describe("handleWatchOrders", () => {
 
   it("raises nothing while transfer is off, and closes a flag the switch now explains", async () => {
     state.shop = transferOff;
-    state.orders = [order1006(), order1006({ id: "ord_1007", orderNumber: "#1007", flagged: true })];
+    state.orders = [
+      order1006(),
+      order1006({ id: "ord_1007", orderNumber: "#1007", flagged: true }),
+    ];
 
     const result = await handleWatchOrders(job, { now });
 
@@ -121,7 +144,9 @@ describe("handleWatchOrders", () => {
     expect(state.events).toEqual([
       expect.objectContaining({
         event: "exception.resolved_automatically",
-        detail: expect.objectContaining({ why: "Order transfer was turned off." }),
+        detail: expect.objectContaining({
+          why: "Order transfer was turned off.",
+        }),
       }),
     ]);
     expect(result.cleared).toBe(1);
@@ -159,7 +184,9 @@ describe("handleWatchOrders", () => {
 
   it("leaves an order that another open exception already explains", async () => {
     state.orders = [
-      order1006({ watched: { ...order1006().watched, otherOpenExceptions: 2 } }),
+      order1006({
+        watched: { ...order1006().watched, otherOpenExceptions: 2 },
+      }),
       order1006({
         id: "ord_1008",
         flagged: true,
@@ -178,7 +205,9 @@ describe("handleWatchOrders", () => {
 
     expect(state.listedWith).toHaveLength(1);
     const window = state.listedWith[0]!;
-    expect(window.receivedBefore.toISOString()).toBe("2026-11-16T07:00:00.000Z");
+    expect(window.receivedBefore.toISOString()).toBe(
+      "2026-11-16T07:00:00.000Z",
+    );
     expect(now.getTime() - window.receivedAfter.getTime()).toBe(
       LOOKBACK_DAYS * 24 * 60 * 60_000,
     );

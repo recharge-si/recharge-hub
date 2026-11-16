@@ -14,13 +14,19 @@ export interface WatchdogShop {
   settingsChangedAt: Date | null;
 }
 
-export async function getWatchdogShop(principal: Principal): Promise<WatchdogShop | null> {
+export async function getWatchdogShop(
+  principal: Principal,
+): Promise<WatchdogShop | null> {
   const shop = await prisma.shop.findUnique({
     where: { domain: shopDomainOf(principal) },
     select: {
       setupCompletedAt: true,
       salesOrderSetting: {
-        select: { transferOrders: true, transferOrdersSince: true, updatedAt: true },
+        select: {
+          transferOrders: true,
+          transferOrdersSince: true,
+          updatedAt: true,
+        },
       },
     },
   });
@@ -67,7 +73,11 @@ export async function listWatchdogOrders(
     where: {
       shop: { domain: shopDomainOf(principal) },
       OR: [
-        { exceptions: { some: { kind: "order_not_transferred", status: "open" } } },
+        {
+          exceptions: {
+            some: { kind: "order_not_transferred", status: "open" },
+          },
+        },
         {
           receivedAt: { gte: input.receivedAfter, lt: input.receivedBefore },
           cancelledAt: null,
@@ -118,7 +128,9 @@ export async function listWatchdogOrders(
  * Paid orders this app holds that MetaKocka has no document for — while
  * transfer is off, exactly the ones waiting on the switch.
  */
-export async function countPaidOrdersWithoutDocument(principal: Principal): Promise<number> {
+export async function countPaidOrdersWithoutDocument(
+  principal: Principal,
+): Promise<number> {
   return prisma.order.count({
     where: {
       shop: { domain: shopDomainOf(principal) },

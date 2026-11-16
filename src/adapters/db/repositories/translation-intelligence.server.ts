@@ -15,7 +15,10 @@ import {
   type StoreProfile,
   type TermClassification,
 } from "~/domain/translations/profile";
-import type { StoredTerm, TermCandidate } from "~/domain/translations/terminology";
+import type {
+  StoredTerm,
+  TermCandidate,
+} from "~/domain/translations/terminology";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -51,7 +54,11 @@ export interface StoredProfile {
   promptVersion: string | null;
   model: string | null;
   vocabulary: string[];
-  sampleStats: { products: number; collections: number; menuItems: number } | null;
+  sampleStats: {
+    products: number;
+    collections: number;
+    menuItems: number;
+  } | null;
   useStoreContext: boolean;
   learnTerminology: boolean;
   generatedAt: Date | null;
@@ -61,12 +68,16 @@ export interface StoredProfile {
 }
 
 function toStoredProfile(row: TranslationStoreProfile): StoredProfile {
-  const parsed = row.profile === null ? null : storeProfileSchema.safeParse(row.profile);
+  const parsed =
+    row.profile === null ? null : storeProfileSchema.safeParse(row.profile);
   const stats =
-    row.sampleStats && typeof row.sampleStats === "object" && !Array.isArray(row.sampleStats)
+    row.sampleStats &&
+    typeof row.sampleStats === "object" &&
+    !Array.isArray(row.sampleStats)
       ? row.sampleStats
       : null;
-  const int = (value: unknown) => (typeof value === "number" ? Math.round(value) : 0);
+  const int = (value: unknown) =>
+    typeof value === "number" ? Math.round(value) : 0;
   return {
     profile: parsed?.success ? parsed.data : null,
     summary: row.summary,
@@ -75,7 +86,11 @@ function toStoredProfile(row: TranslationStoreProfile): StoredProfile {
     model: row.model,
     vocabulary: row.vocabulary,
     sampleStats: stats
-      ? { products: int(stats.products), collections: int(stats.collections), menuItems: int(stats.menuItems) }
+      ? {
+          products: int(stats.products),
+          collections: int(stats.collections),
+          menuItems: int(stats.menuItems),
+        }
       : null,
     useStoreContext: row.useStoreContext,
     learnTerminology: row.learnTerminology,
@@ -86,7 +101,9 @@ function toStoredProfile(row: TranslationStoreProfile): StoredProfile {
   };
 }
 
-export async function getStoreProfile(principal: Principal): Promise<StoredProfile | null> {
+export async function getStoreProfile(
+  principal: Principal,
+): Promise<StoredProfile | null> {
   const row = await prisma.translationStoreProfile.findFirst({
     where: { shop: { domain: shopDomainOf(principal) } },
   });
@@ -98,14 +115,21 @@ export async function getStoreProfile(principal: Principal): Promise<StoredProfi
  * workers creating it at the same moment all succeed.
  */
 async function createRowIfMissing(shopId: string): Promise<void> {
-  await prisma.translationStoreProfile.createMany({ data: [{ shopId }], skipDuplicates: true });
+  await prisma.translationStoreProfile.createMany({
+    data: [{ shopId }],
+    skipDuplicates: true,
+  });
 }
 
 /** The settings row, created with the defaults when the shop has none yet. */
-export async function ensureProfileRow(principal: Principal): Promise<StoredProfile> {
+export async function ensureProfileRow(
+  principal: Principal,
+): Promise<StoredProfile> {
   const shopId = await shopIdFor(principal);
   await createRowIfMissing(shopId);
-  const row = await prisma.translationStoreProfile.findUniqueOrThrow({ where: { shopId } });
+  const row = await prisma.translationStoreProfile.findUniqueOrThrow({
+    where: { shopId },
+  });
   return toStoredProfile(row);
 }
 
@@ -124,7 +148,10 @@ export async function claimProfileBuild(
   const claimed = await prisma.translationStoreProfile.updateMany({
     where: {
       shopId,
-      OR: [{ generatingAt: null }, { generatingAt: { lt: new Date(now.getTime() - leaseMs) } }],
+      OR: [
+        { generatingAt: null },
+        { generatingAt: { lt: new Date(now.getTime() - leaseMs) } },
+      ],
     },
     data: { generatingAt: now },
   });
@@ -193,7 +220,10 @@ export async function setProfileSettings(
 ): Promise<void> {
   const shopId = await shopIdFor(principal);
   await createRowIfMissing(shopId);
-  await prisma.translationStoreProfile.update({ where: { shopId }, data: settings });
+  await prisma.translationStoreProfile.update({
+    where: { shopId },
+    data: settings,
+  });
 }
 
 /* -------------------------------------------------------------------------- */
@@ -209,7 +239,9 @@ function toStoredTerm(row: TranslationTerm): StoredTerm {
     id: row.id,
     term: row.term,
     normalised: row.normalised,
-    classification: isClassification(row.classification) ? row.classification : "generic",
+    classification: isClassification(row.classification)
+      ? row.classification
+      : "generic",
     confidence: row.confidence,
     evidence: readEvidence(row.evidence),
   };
@@ -218,7 +250,8 @@ function toStoredTerm(row: TranslationTerm): StoredTerm {
 function readEvidence(value: Prisma.JsonValue | null): Record<string, number> {
   if (!value || typeof value !== "object" || Array.isArray(value)) return {};
   const out: Record<string, number> = {};
-  for (const [key, count] of Object.entries(value)) if (typeof count === "number") out[key] = count;
+  for (const [key, count] of Object.entries(value))
+    if (typeof count === "number") out[key] = count;
   return out;
 }
 
@@ -239,7 +272,8 @@ export async function replaceDiscoveredTerms(
     const chunk = candidates.slice(start, start + 200);
     if (chunk.length === 0) continue;
     const rows = chunk.map(
-      (candidate) => Prisma.sql`(${randomUUID()}, ${shopId}, ${sourceLocale}, ${candidate.normalised}, ${candidate.term}, ${candidate.classification}, ${candidate.confidence}, 'auto_inferred'::translation_term_origin, ${JSON.stringify(candidate.evidence)}::jsonb, ${candidate.occurrences}, ${now}, ${now})`,
+      (candidate) =>
+        Prisma.sql`(${randomUUID()}, ${shopId}, ${sourceLocale}, ${candidate.normalised}, ${candidate.term}, ${candidate.classification}, ${candidate.confidence}, 'auto_inferred'::translation_term_origin, ${JSON.stringify(candidate.evidence)}::jsonb, ${candidate.occurrences}, ${now}, ${now})`,
     );
     await prisma.$executeRaw`
       INSERT INTO translation_term (id, shop_id, source_locale, normalised, term, classification, confidence, origin, evidence, occurrences, first_seen_at, last_seen_at)
@@ -254,7 +288,12 @@ export async function replaceDiscoveredTerms(
     `;
   }
   await prisma.translationTerm.deleteMany({
-    where: { shopId, sourceLocale, origin: "auto_inferred", lastSeenAt: { lt: now } },
+    where: {
+      shopId,
+      sourceLocale,
+      origin: "auto_inferred",
+      lastSeenAt: { lt: now },
+    },
   });
   return prisma.translationTerm.count({ where: { shopId, sourceLocale } });
 }
@@ -273,24 +312,37 @@ export async function listTerms(
         ? { normalised: { contains: filter.search.toLowerCase().trim() } }
         : {}),
     },
-    orderBy: [{ confidence: "desc" }, { occurrences: "desc" }, { normalised: "asc" }],
+    orderBy: [
+      { confidence: "desc" },
+      { occurrences: "desc" },
+      { normalised: "asc" },
+    ],
     take: filter.limit ?? 1000,
     skip: filter.offset ?? 0,
   });
   return rows.map(toStoredTerm);
 }
 
-export async function countTerms(principal: Principal, sourceLocale: string, search?: string): Promise<number> {
+export async function countTerms(
+  principal: Principal,
+  sourceLocale: string,
+  search?: string,
+): Promise<number> {
   return prisma.translationTerm.count({
     where: {
       shop: { domain: shopDomainOf(principal) },
       sourceLocale,
-      ...(search ? { normalised: { contains: search.toLowerCase().trim() } } : {}),
+      ...(search
+        ? { normalised: { contains: search.toLowerCase().trim() } }
+        : {}),
     },
   });
 }
 
-export async function deleteTerm(principal: Principal, id: string): Promise<boolean> {
+export async function deleteTerm(
+  principal: Principal,
+  id: string,
+): Promise<boolean> {
   const deleted = await prisma.translationTerm.deleteMany({
     where: { id, shop: { domain: shopDomainOf(principal) } },
   });
@@ -301,7 +353,9 @@ export async function deleteTerm(principal: Principal, id: string): Promise<bool
 /* Memory                                                                     */
 /* -------------------------------------------------------------------------- */
 
-function toMemoryEntry(row: TranslationMemory): MemoryEntry & { sourceKey: string; targetLocale: string } {
+function toMemoryEntry(
+  row: TranslationMemory,
+): MemoryEntry & { sourceKey: string; targetLocale: string } {
   return {
     id: row.id,
     sourceKey: row.sourceKey,
@@ -325,7 +379,11 @@ export type StoredMemory = ReturnType<typeof toMemoryEntry>;
  */
 export async function lookupMemory(
   principal: Principal,
-  input: { sourceLocale: string; targetLocales: readonly string[]; keys: readonly string[] },
+  input: {
+    sourceLocale: string;
+    targetLocales: readonly string[];
+    keys: readonly string[];
+  },
 ): Promise<StoredMemory[]> {
   if (input.keys.length === 0 || input.targetLocales.length === 0) return [];
   const rows = await prisma.translationMemory.findMany({
@@ -370,7 +428,8 @@ export async function rememberTranslations(
   for (let start = 0; start < writes.length; start += 200) {
     const chunk = writes.slice(start, start + 200);
     const rows = chunk.map(
-      (write) => Prisma.sql`(${randomUUID()}, ${shopId}, ${write.sourceLocale}, ${write.targetLocale}, ${write.sourceKey}, ${write.sourceText}, ${write.targetText}, ${origin}::translation_memory_origin, 1, 0, ${write.resourceType}, ${write.resourceId}, ${now}, ${now})`,
+      (write) =>
+        Prisma.sql`(${randomUUID()}, ${shopId}, ${write.sourceLocale}, ${write.targetLocale}, ${write.sourceKey}, ${write.sourceText}, ${write.targetText}, ${origin}::translation_memory_origin, 1, 0, ${write.resourceType}, ${write.resourceId}, ${now}, ${now})`,
     );
     await prisma.$executeRaw`
       INSERT INTO translation_memory (id, shop_id, source_locale, target_locale, source_key, source_text, target_text, origin, usage_count, conflicts, resource_type, last_resource_id, first_seen_at, last_seen_at)
@@ -401,7 +460,11 @@ export async function rememberTranslations(
 /** A translation removed in the editor is forgotten by memory too. */
 export async function forgetMemory(
   principal: Principal,
-  input: { sourceLocale: string; targetLocale: string; sourceKeys: readonly string[] },
+  input: {
+    sourceLocale: string;
+    targetLocale: string;
+    sourceKeys: readonly string[];
+  },
 ): Promise<void> {
   if (input.sourceKeys.length === 0) return;
   await prisma.translationMemory.deleteMany({
@@ -416,13 +479,20 @@ export async function forgetMemory(
 
 export async function listMemory(
   principal: Principal,
-  filter: { targetLocale?: string | null; search?: string; limit?: number; offset?: number } = {},
+  filter: {
+    targetLocale?: string | null;
+    search?: string;
+    limit?: number;
+    offset?: number;
+  } = {},
 ): Promise<StoredMemory[]> {
   const rows = await prisma.translationMemory.findMany({
     where: {
       shop: { domain: shopDomainOf(principal) },
       ...(filter.targetLocale ? { targetLocale: filter.targetLocale } : {}),
-      ...(filter.search ? { sourceKey: { contains: filter.search.toLowerCase().trim() } } : {}),
+      ...(filter.search
+        ? { sourceKey: { contains: filter.search.toLowerCase().trim() } }
+        : {}),
     },
     orderBy: [{ usageCount: "desc" }, { lastSeenAt: "desc" }],
     take: filter.limit ?? 100,
@@ -439,12 +509,17 @@ export async function countMemory(
     where: {
       shop: { domain: shopDomainOf(principal) },
       ...(filter.targetLocale ? { targetLocale: filter.targetLocale } : {}),
-      ...(filter.search ? { sourceKey: { contains: filter.search.toLowerCase().trim() } } : {}),
+      ...(filter.search
+        ? { sourceKey: { contains: filter.search.toLowerCase().trim() } }
+        : {}),
     },
   });
 }
 
-export async function deleteMemoryEntry(principal: Principal, id: string): Promise<boolean> {
+export async function deleteMemoryEntry(
+  principal: Principal,
+  id: string,
+): Promise<boolean> {
   const deleted = await prisma.translationMemory.deleteMany({
     where: { id, shop: { domain: shopDomainOf(principal) } },
   });
@@ -452,12 +527,16 @@ export async function deleteMemoryEntry(principal: Principal, id: string): Promi
 }
 
 /** Memory entries per target locale, for the status line. */
-export async function memoryCountsByLocale(principal: Principal): Promise<Map<string, number>> {
+export async function memoryCountsByLocale(
+  principal: Principal,
+): Promise<Map<string, number>> {
   const shopId = await shopIdFor(principal);
   const groups = await prisma.translationMemory.groupBy({
     by: ["targetLocale"],
     where: { shopId },
     _count: { _all: true },
   });
-  return new Map(groups.map((group) => [group.targetLocale, group._count._all]));
+  return new Map(
+    groups.map((group) => [group.targetLocale, group._count._all]),
+  );
 }

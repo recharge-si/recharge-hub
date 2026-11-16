@@ -35,17 +35,6 @@ const appBridgeStub = readFileSync(
   "utf8",
 );
 
-/**
- * Uncaught page errors every page has today, so they do not fail every spec:
- * React's hydration mismatch (#418) and its fallback to client rendering
- * (#423). They come from polaris.js — they disappear when only that script is
- * blocked — and are tracked in docs/project-status.md. Anything else fails.
- */
-const KNOWN_PAGE_ERRORS = [
-  /Minified React error #418;/,
-  /Minified React error #423;/,
-];
-
 export interface TestShop {
   id: string;
   domain: string;
@@ -150,9 +139,7 @@ export const test = base.extend<{ shop: TestShop }>({
   page: async ({ page }, use) => {
     const errors: string[] = [];
     page.on("pageerror", (error) => {
-      if (!KNOWN_PAGE_ERRORS.some((known) => known.test(error.message))) {
-        errors.push(error.message);
-      }
+      errors.push(error.message);
     });
     await use(page);
     expect(errors, "uncaught errors in the page").toEqual([]);

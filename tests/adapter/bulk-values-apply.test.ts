@@ -31,7 +31,11 @@ vi.mock("~/adapters/db/repositories/bulk-values.server", async (original) => {
         outcomes: [...state.outcomes],
       };
     },
-    saveProgress: async (_: string, __: string, outcomes: Array<string | null>) => {
+    saveProgress: async (
+      _: string,
+      __: string,
+      outcomes: Array<string | null>,
+    ) => {
       state.outcomes = [...outcomes];
     },
     finishRun: async (
@@ -54,7 +58,11 @@ vi.mock("~/adapters/db/repositories/event-log.server", () => ({
   },
 }));
 
-import { applyBatch, decide, runBulkApply } from "~/adapters/products/bulk-values.server";
+import {
+  applyBatch,
+  decide,
+  runBulkApply,
+} from "~/adapters/products/bulk-values.server";
 
 type Stored = { type: string; value: string };
 
@@ -63,9 +71,17 @@ function fakeShopify(initial: Record<string, Record<string, Stored>> = {}) {
   const store = new Map(
     Object.entries(initial).map(([owner, map]) => [owner, { ...map }]),
   );
-  const calls = { reads: 0, sets: [] as number[], deletes: [] as number[], singles: 0 };
+  const calls = {
+    reads: 0,
+    sets: [] as number[],
+    deletes: [] as number[],
+    singles: 0,
+  };
   const refuse = new Set<string>();
-  const graphql = async (query: string, options?: { variables?: Record<string, unknown> }) => {
+  const graphql = async (
+    query: string,
+    options?: { variables?: Record<string, unknown> },
+  ) => {
     const v = options?.variables ?? {};
     let data: unknown;
     if (query.includes("OrchestratorOwnerMetafields")) {
@@ -106,7 +122,10 @@ function fakeShopify(initial: Record<string, Record<string, Stored>> = {}) {
         data = {
           metafieldsSet: {
             userErrors: [
-              { field: ["metafields", String(bad), "value"], message: "Value must be a decimal." },
+              {
+                field: ["metafields", String(bad), "value"],
+                message: "Value must be a decimal.",
+              },
             ],
           },
         };
@@ -119,9 +138,14 @@ function fakeShopify(initial: Record<string, Record<string, Stored>> = {}) {
         data = { metafieldsSet: { userErrors: [] } };
       }
     } else if (query.includes("MetafieldsDelete")) {
-      const list = v.metafields as Array<{ ownerId: string; namespace: string; key: string }>;
+      const list = v.metafields as Array<{
+        ownerId: string;
+        namespace: string;
+        key: string;
+      }>;
       calls.deletes.push(list.length);
-      for (const m of list) delete store.get(m.ownerId)?.[`${m.namespace}.${m.key}`];
+      for (const m of list)
+        delete store.get(m.ownerId)?.[`${m.namespace}.${m.key}`];
       data = { metafieldsDelete: { userErrors: [] } };
     } else throw new Error(`unexpected query ${query.slice(0, 60)}`);
     return { json: async () => ({ data }) };
@@ -141,7 +165,10 @@ const dim = (value: number) => ({
 });
 const wire = (value: number) => JSON.stringify({ value, unit: "CENTIMETERS" });
 
-function change(i: number, overrides: Partial<PlannedChange> = {}): PlannedChange {
+function change(
+  i: number,
+  overrides: Partial<PlannedChange> = {},
+): PlannedChange {
   const owner = `gid://shopify/ProductVariant/${i}`;
   return {
     row: i + 1,
@@ -177,7 +204,10 @@ function load(changes: PlannedChange[], outcomes?: Array<string | null>) {
 
 const owners = (count: number) =>
   Object.fromEntries(
-    Array.from({ length: count }, (_, i) => [`gid://shopify/ProductVariant/${i}`, {}]),
+    Array.from({ length: count }, (_, i) => [
+      `gid://shopify/ProductVariant/${i}`,
+      {},
+    ]),
   );
 
 beforeEach(() => load([]));
@@ -206,7 +236,9 @@ describe("applying a stored preview", () => {
     expect(fake.calls.sets).toEqual([25, 25, 10]);
     expect(fake.calls.reads).toBe(3);
     expect(state.outcomes.every((o) => o === "written")).toBe(true);
-    expect(fake.valueOf("gid://shopify/ProductVariant/59", "recharge.luff_cm")).toBe(wire(400));
+    expect(
+      fake.valueOf("gid://shopify/ProductVariant/59", "recharge.luff_cm"),
+    ).toBe(wire(400));
     expect(state.finished).toEqual({ status: "done" });
   });
 
@@ -218,7 +250,9 @@ describe("applying a stored preview", () => {
     load([change(0), change(1), change(2)]);
     await runBulkApply(fake.admin, "shop.test", "imp1");
     expect(state.outcomes).toEqual(["written", "changed_meanwhile", "written"]);
-    expect(fake.valueOf("gid://shopify/ProductVariant/1", "recharge.luff_cm")).toBe(wire(380));
+    expect(
+      fake.valueOf("gid://shopify/ProductVariant/1", "recharge.luff_cm"),
+    ).toBe(wire(380));
   });
 
   it("changes an existing value only while it is still the one the preview saw", async () => {
@@ -252,9 +286,14 @@ describe("applying a stored preview", () => {
     await runBulkApply(fake.admin, "shop.test", "imp1");
     expect(state.outcomes).toEqual(["cleared", "changed_meanwhile"]);
     expect(fake.calls.deletes).toEqual([1]);
-    expect(fake.valueOf("gid://shopify/ProductVariant/0", "recharge.luff_cm")).toBeUndefined();
+    expect(
+      fake.valueOf("gid://shopify/ProductVariant/0", "recharge.luff_cm"),
+    ).toBeUndefined();
     expect(state.mirrored).toContainEqual(
-      expect.objectContaining({ ownerId: "gid://shopify/ProductVariant/0", stored: null }),
+      expect.objectContaining({
+        ownerId: "gid://shopify/ProductVariant/0",
+        stored: null,
+      }),
     );
   });
 
@@ -329,11 +368,20 @@ describe("applying a stored preview", () => {
     load([change(0), change(1), change(2)]);
     await runBulkApply(fake.admin, "shop.test", "imp1");
     expect(state.events).toHaveLength(1);
-    const event = state.events[0] as { event: string; detail: Record<string, unknown> };
+    const event = state.events[0] as {
+      event: string;
+      detail: Record<string, unknown>;
+    };
     expect(event.event).toBe("product.values_imported");
-    expect(event.detail).toMatchObject({ written: 2, changedMeanwhile: 1, total: 3 });
+    expect(event.detail).toMatchObject({
+      written: 2,
+      changedMeanwhile: 1,
+      total: 3,
+    });
     expect(JSON.stringify(event)).not.toContain("400");
-    expect(Object.values(event.detail).every((v) => typeof v === "number")).toBe(true);
+    expect(
+      Object.values(event.detail).every((v) => typeof v === "number"),
+    ).toBe(true);
   });
 
   it("marks the import failed, keeping progress, when Shopify cannot be reached", async () => {
@@ -349,7 +397,9 @@ describe("applying a stored preview", () => {
       return inner(query, options);
     };
     load(Array.from({ length: 30 }, (_, i) => change(i)));
-    await expect(runBulkApply(fake.admin, "shop.test", "imp1")).rejects.toThrow("socket");
+    await expect(runBulkApply(fake.admin, "shop.test", "imp1")).rejects.toThrow(
+      "socket",
+    );
     expect(state.finished?.status).toBe("failed");
     expect(state.outcomes.filter((o) => o === "written")).toHaveLength(25);
     expect(state.outcomes.slice(25).every((o) => o === null)).toBe(true);

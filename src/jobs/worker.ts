@@ -237,7 +237,10 @@ async function main(): Promise<void> {
   });
   await boss.work(
     QUEUES.translationResourceEvent,
-    withIdempotency(QUEUES.translationResourceEvent, handleTranslationResourceEvent),
+    withIdempotency(
+      QUEUES.translationResourceEvent,
+      handleTranslationResourceEvent,
+    ),
   );
 
   // Product setup (docs/attributes.md § Store menu): one run per press,

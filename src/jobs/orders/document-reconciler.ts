@@ -15,7 +15,10 @@ import {
   findSalesOrder,
   updateSalesOrder,
 } from "~/adapters/metakocka/documents";
-import { MetakockaError, describeForMerchant } from "~/adapters/metakocka/errors";
+import {
+  MetakockaError,
+  describeForMerchant,
+} from "~/adapters/metakocka/errors";
 import { getLogger } from "~/adapters/observability/logger.server";
 import {
   retirementPlanFor,
@@ -294,7 +297,8 @@ export async function retireObsoleteDocument(
           stillHoldsQuantity: (verified.lineCount ?? 0) > 0,
           // What MetaKocka itself says is still on it, not what we intended.
           stillHoldsPaymentMinor: verified.paidMinor ?? 0,
-          paymentCleared: emptied.paymentCleared && (verified.paidMinor ?? 0) === 0,
+          paymentCleared:
+            emptied.paymentCleared && (verified.paidMinor ?? 0) === 0,
         };
       }
     }
@@ -308,17 +312,23 @@ export async function retireObsoleteDocument(
      * success it is, records the emptied body so the next pass does not try
      * again, and leaves only genuine failures to be reported.
      */
-    const actual = input.mkId ? await findSalesOrder(input.client, input.mkId) : null;
+    const actual = input.mkId
+      ? await findSalesOrder(input.client, input.mkId)
+      : null;
 
     if (actual && (actual.lineCount ?? 0) === 0 && plan.kind === "empty") {
       await recordDocumentResult(input.action.documentId, {
         status: "written",
-        requestBody: emptiedBody(input.requestBody as Record<string, unknown>).body,
+        requestBody: emptiedBody(input.requestBody as Record<string, unknown>)
+          .body,
         responseBody: { emptied: true, confirmedByReadBack: true },
       });
       await prisma.metakockaDocument.update({
         where: { id: input.action.documentId },
-        data: { mkStatus: "emptied, no longer allocated", mkCheckedAt: input.now },
+        data: {
+          mkStatus: "emptied, no longer allocated",
+          mkCheckedAt: input.now,
+        },
       });
       await touchDocumentReconciled(input.action.documentId, input.now);
 
@@ -350,7 +360,8 @@ export async function retireObsoleteDocument(
       },
     });
 
-    if (!(error instanceof MetakockaError) || error.kind !== "exception") throw error;
+    if (!(error instanceof MetakockaError) || error.kind !== "exception")
+      throw error;
 
     outcome = {
       countCode,

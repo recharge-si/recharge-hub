@@ -3,11 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { LIMITS } from "~/domain/values/types";
 
-import {
-  SHOP,
-  valuesCatalogue,
-  valuesPlan,
-} from "../support/values-fixtures";
+import { SHOP, valuesCatalogue, valuesPlan } from "../support/values-fixtures";
 
 /**
  * docs/attributes.md § Bulk values, at the route: what a request does and
@@ -31,7 +27,8 @@ vi.mock("~/adapters/db/repositories/attribute-schema.server", async () => {
 });
 
 vi.mock("~/adapters/db/repositories/bulk-values.server", async () => {
-  const { valuesCatalogue: catalogue } = await import("../support/values-fixtures");
+  const { valuesCatalogue: catalogue } =
+    await import("../support/values-fixtures");
   return {
     listLightProducts: async () =>
       catalogue().map((p, i) => ({
@@ -78,7 +75,13 @@ vi.mock("~/adapters/shopify/products", () => ({
   listMetafieldDefinitions: async () => {
     graphqlCalls.push("definitions");
     return [
-      { namespace: "recharge", key: "length_cm", name: "Length", ownerType: "PRODUCTVARIANT", type: "dimension" },
+      {
+        namespace: "recharge",
+        key: "length_cm",
+        name: "Length",
+        ownerType: "PRODUCTVARIANT",
+        type: "dimension",
+      },
     ];
   },
 }));
@@ -110,7 +113,10 @@ beforeEach(() => {
 
 describe("the export route", () => {
   it("refuses a request that names no type", async () => {
-    const out = await exportValues(admin, principal, { typeIds: [], preset: "rig" });
+    const out = await exportValues(admin, principal, {
+      typeIds: [],
+      preset: "rig",
+    });
     expect(out).toMatchObject({ ok: false, status: 400 });
   });
 
@@ -159,8 +165,7 @@ describe("the type choices", () => {
 });
 
 describe("the preview", () => {
-  const header =
-    "product_id,variant_id,Length [recharge.length_cm] (cm)\n";
+  const header = "product_id,variant_id,Length [recharge.length_cm] (cm)\n";
   const row = `gid://shopify/Product/100,gid://shopify/ProductVariant/1001,370\n`;
 
   it("stores a preview and writes nothing to Shopify", async () => {
@@ -181,7 +186,9 @@ describe("the preview", () => {
     expect(graphqlCalls).toEqual(["definitions"]);
     const stored = spy.created[0] as {
       principal: { shopDomain: string };
-      input: { plan: { counts: { set: number }; changes: Array<{ defined: boolean }> } };
+      input: {
+        plan: { counts: { set: number }; changes: Array<{ defined: boolean }> };
+      };
     };
     expect(stored.principal.shopDomain).toBe(SHOP);
     expect(stored.input.plan.counts.set).toBe(1);
@@ -197,7 +204,9 @@ describe("the preview", () => {
       actor: null,
     });
     expect(out.ok).toBe(true);
-    const stored = spy.created[0] as { input: { plan: { counts: { set: number } } } };
+    const stored = spy.created[0] as {
+      input: { plan: { counts: { set: number } } };
+    };
     expect(stored.input.plan.counts.set).toBe(1);
   });
 
@@ -221,7 +230,11 @@ describe("the preview", () => {
       ["values.csv", "caf�"],
       ["values.csv", ""],
     ] as const) {
-      const out = await previewValues(admin, principal, { name, text, actor: null });
+      const out = await previewValues(admin, principal, {
+        name,
+        text,
+        actor: null,
+      });
       expect(out.ok, `${name} ${text.slice(0, 8)}`).toBe(false);
     }
     expect(spy.created).toEqual([]);
@@ -238,7 +251,9 @@ describe("the preview", () => {
     const stored = spy.created[0] as {
       input: { plan: { fileErrors: string[]; safeToApply: boolean } };
     };
-    expect(stored.input.plan.fileErrors[0]).toContain("product_id or variant_id");
+    expect(stored.input.plan.fileErrors[0]).toContain(
+      "product_id or variant_id",
+    );
     expect(stored.input.plan.safeToApply).toBe(false);
   });
 });
@@ -279,7 +294,8 @@ describe("the CSV route", () => {
         }),
       },
     }));
-    const { loader } = await import("~/web/routes/app.product-setup.values[.csv]");
+    const { loader } =
+      await import("~/web/routes/app.product-setup.values[.csv]");
     const bad = (await loader({
       request: new Request("https://app.test/app/product-setup/values.csv"),
       params: {},
@@ -297,7 +313,9 @@ describe("the CSV route", () => {
     } as never)) as Response;
     expect(good.status).toBe(200);
     expect(good.headers.get("Content-Type")).toContain("text/csv");
-    expect(good.headers.get("Content-Disposition")).toContain("attribute-values-");
+    expect(good.headers.get("Content-Disposition")).toContain(
+      "attribute-values-",
+    );
     expect(good.headers.get("Cache-Control")).toBe("no-store");
     const bytes = new Uint8Array(await good.arrayBuffer());
     expect([...bytes.slice(0, 3)]).toEqual([0xef, 0xbb, 0xbf]);

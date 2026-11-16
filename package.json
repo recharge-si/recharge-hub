@@ -17,6 +17,8 @@
     "setup": "prisma generate && prisma migrate deploy",
     "docker-start": "npm run setup && npm run start",
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
@@ -71,6 +73,9 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "p-map": "^4.0.0"
+    "p-map": "^4.0.0",
+    "@prisma/config": {
+      "deepmerge-ts": "^8.0.2"
+    }
   }
 }

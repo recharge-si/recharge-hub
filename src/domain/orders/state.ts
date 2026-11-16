@@ -97,12 +97,7 @@ export function partyFingerprint(
 /* -------------------------------------------------------------------------- */
 
 export type LineChangeKind =
-  | "added"
-  | "removed"
-  | "quantity"
-  | "price"
-  | "discount"
-  | "sku";
+  "added" | "removed" | "quantity" | "price" | "discount" | "sku";
 
 export interface LineChange {
   shopifyLineItemId: string;
@@ -338,9 +333,7 @@ export function diffOrder(
 /* -------------------------------------------------------------------------- */
 
 export type PaymentExceptionKind =
-  | "partially_paid"
-  | "voided_payment"
-  | "refund_received";
+  "partially_paid" | "voided_payment" | "refund_received";
 
 export type PaymentAction =
   /** Nothing to do. Not every movement is an event. */
@@ -452,9 +445,13 @@ export function contentChangePolicy(input: {
   writtenDocuments: number;
   /** From the shop's sales order settings. Defaults on. */
   updatesAllowed?: boolean;
-}): { kind: "ignore" } | { kind: "reallocate" } | { kind: "resend" } | {
-  kind: "diverged";
-} {
+}):
+  | { kind: "ignore" }
+  | { kind: "reallocate" }
+  | { kind: "resend" }
+  | {
+      kind: "diverged";
+    } {
   if (!input.contentChanged) return { kind: "ignore" };
   if (input.writtenDocuments === 0) return { kind: "reallocate" };
   return (input.updatesAllowed ?? true)

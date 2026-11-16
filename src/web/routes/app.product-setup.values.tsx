@@ -160,7 +160,9 @@ export default function BulkValues() {
   const result = fetcher.data;
   const summary = current?.summary ?? null;
   const ready =
-    status === "previewed" && summary !== null && summary.fileErrors.length === 0;
+    status === "previewed" &&
+    summary !== null &&
+    summary.fileErrors.length === 0;
   const canApply = ready && summary.safeToApply;
 
   useLiveRevalidation({ active: working, idleEveryMs: null });
@@ -229,7 +231,9 @@ export default function BulkValues() {
           onClick={() => fileInput.current?.click()}
           {...(busy ? { disabled: true } : {})}
         >
-          {ready || status === "done" ? "Upload another file" : "Upload filled file"}
+          {ready || status === "done"
+            ? "Upload another file"
+            : "Upload filled file"}
         </s-button>
       ) : null}
       <input
@@ -298,8 +302,9 @@ export default function BulkValues() {
                   ["unchanged", outcomes.counts.unchanged],
                 ]
                   .filter(([, n]) => Number(n) > 0)
-                  .map(([name, n]) =>
-                    `${Number(n).toLocaleString("en")} ${RESULT_LABEL[String(name)]?.toLowerCase() ?? name}`,
+                  .map(
+                    ([name, n]) =>
+                      `${Number(n).toLocaleString("en")} ${RESULT_LABEL[String(name)]?.toLowerCase() ?? name}`,
                   )
                   .join(" · ") || "Nothing needed writing."}
               </s-text>
@@ -326,7 +331,10 @@ export default function BulkValues() {
                         .join(" · ")}
                     </s-text>
                     {outcomes.problems.map((problem) => (
-                      <s-text key={`${problem.row}-${problem.attribute}`} color="subdued">
+                      <s-text
+                        key={`${problem.row}-${problem.attribute}`}
+                        color="subdued"
+                      >
                         {`Row ${problem.row} · ${problem.attribute}: ${plainOutcome(problem.outcome)}`}
                       </s-text>
                     ))}
@@ -351,7 +359,9 @@ export default function BulkValues() {
                 >
                   <s-stack direction="block" gap="small-300">
                     {summary.errors.map((issue) => (
-                      <s-text key={`${issue.row}-${issue.column}-${issue.message}`}>
+                      <s-text
+                        key={`${issue.row}-${issue.column}-${issue.message}`}
+                      >
                         {`Row ${issue.row} · ${issue.column}: ${issue.message}`}
                       </s-text>
                     ))}
@@ -411,7 +421,9 @@ export default function BulkValues() {
                   <s-heading>By attribute</s-heading>
                   <s-table variant="auto">
                     <s-table-header-row>
-                      <s-table-header listSlot="primary">Attribute</s-table-header>
+                      <s-table-header listSlot="primary">
+                        Attribute
+                      </s-table-header>
                       {OUTCOMES.map((outcome) => (
                         <s-table-header key={outcome} listSlot="labeled">
                           {OUTCOME_LABEL[outcome]}
@@ -445,8 +457,12 @@ export default function BulkValues() {
                   </s-heading>
                   <s-table variant="auto">
                     <s-table-header-row>
-                      <s-table-header listSlot="primary">Product</s-table-header>
-                      <s-table-header listSlot="secondary">Attribute</s-table-header>
+                      <s-table-header listSlot="primary">
+                        Product
+                      </s-table-header>
+                      <s-table-header listSlot="secondary">
+                        Attribute
+                      </s-table-header>
                       <s-table-header listSlot="labeled">Before</s-table-header>
                       <s-table-header listSlot="labeled">After</s-table-header>
                       <s-table-header listSlot="labeled">Row</s-table-header>
@@ -477,7 +493,9 @@ export default function BulkValues() {
               ) : null}
 
               {summary.skipped.length > 0 ? (
-                <LearnMore label={`Skipped cells (${summary.counts.skipped.toLocaleString("en")})`}>
+                <LearnMore
+                  label={`Skipped cells (${summary.counts.skipped.toLocaleString("en")})`}
+                >
                   {summary.skipped.map((issue) => (
                     <s-paragraph key={`${issue.row}-${issue.column}`}>
                       {`Row ${issue.row} · ${issue.column}: ${issue.message}`}
@@ -515,15 +533,15 @@ export default function BulkValues() {
         <s-section heading="How to">
           <s-stack direction="block" gap="small-300">
             <s-text>
-              1. <s-link href="#values-export">Export</s-link> the product
-              types you want to fill. 2. Fill in the cells from your spec
-              sheets and save the file as CSV UTF-8. 3. Upload it here, check
-              the preview, then apply.
+              1. <s-link href="#values-export">Export</s-link> the product types
+              you want to fill. 2. Fill in the cells from your spec sheets and
+              save the file as CSV UTF-8. 3. Upload it here, check the preview,
+              then apply.
             </s-text>
             <s-text color="subdued">
-              A blank cell keeps the current value. Write [clear] to remove
-              one. Hint columns are suggestions from the product's own
-              options and title; copy one into its column to use it.
+              A blank cell keeps the current value. Write [clear] to remove one.
+              Hint columns are suggestions from the product's own options and
+              title; copy one into its column to use it.
             </s-text>
             <LearnMore label="Formats and rules">
               <s-paragraph>
@@ -532,8 +550,8 @@ export default function BulkValues() {
                 Never a range. Yes or no cells take yes, no, true or false. A
                 choice takes an option's code or its label; a multiple choice
                 takes several separated by commas. Columns are matched by the
-                key in brackets, then by name; other columns are listed and
-                not read.
+                key in brackets, then by name; other columns are listed and not
+                read.
               </s-paragraph>
               <s-paragraph>
                 {`A file holds up to ${limits.importRows.toLocaleString("en")} rows and ${limits.fileBytes / 1024 / 1024} MB. An export holds up to ${limits.exportRows.toLocaleString("en")} rows.`}

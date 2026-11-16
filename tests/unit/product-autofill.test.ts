@@ -187,7 +187,9 @@ describe("the rest", () => {
 
   it("reads a description as plain text, clipped", () => {
     expect(
-      plainText("<p>Wave&nbsp;sail</p><ul><li>5.3 m²</li></ul><script>x</script>"),
+      plainText(
+        "<p>Wave&nbsp;sail</p><ul><li>5.3 m²</li></ul><script>x</script>",
+      ),
     ).toBe("Wave sail\n5.3 m²");
     expect(plainText("a".repeat(10), 4)).toBe("aaaa");
   });

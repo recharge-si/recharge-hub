@@ -273,7 +273,9 @@ export function reconcileValue(input: {
     (input.productsExpectedMinor + expectedShipping - expectedDiscount);
 
   const representationGapMinor =
-    input.shippingMinor - expectedShipping + (input.orderDiscountMinor - expectedDiscount);
+    input.shippingMinor -
+    expectedShipping +
+    (input.orderDiscountMinor - expectedDiscount);
 
   const explainedMinor =
     input.productsExpectedMinor -
@@ -318,7 +320,9 @@ export function describeValueReconciliation(
   ];
 
   if (value.lineDiscountMinor !== 0) {
-    lines.push(`Line discounts not represented: ${money(value.lineDiscountMinor)}.`);
+    lines.push(
+      `Line discounts not represented: ${money(value.lineDiscountMinor)}.`,
+    );
   }
   if (value.orderDiscountMinor !== 0) {
     lines.push(

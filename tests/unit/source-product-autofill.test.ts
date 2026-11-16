@@ -50,9 +50,8 @@ vi.mock("~/adapters/products/autofill.server", () => ({
   },
 }));
 
-const { handleSourceProductAutofill } = await import(
-  "~/jobs/handlers/source-product-autofill"
-);
+const { handleSourceProductAutofill } =
+  await import("~/jobs/handlers/source-product-autofill");
 
 function created(tags: string) {
   return {

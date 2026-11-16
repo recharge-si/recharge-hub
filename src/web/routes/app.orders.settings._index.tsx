@@ -873,7 +873,10 @@ export default function OrderSyncSettings() {
                       : "None, so MetaKocka applies the company setting."
                   }
                   action={
-                    <s-button variant="secondary" href="/app/metakocka/locations">
+                    <s-button
+                      variant="secondary"
+                      href="/app/metakocka/locations"
+                    >
                       Manage
                     </s-button>
                   }
@@ -953,9 +956,9 @@ export default function OrderSyncSettings() {
                 {unsplit ? (
                   <s-text color="subdued">
                     Warehouses are still mapped on the{" "}
-                    <s-link href="/app/metakocka/locations">Locations</s-link> page,
-                    because that is what stock synchronization uses. They just
-                    do not appear on the sales order.
+                    <s-link href="/app/metakocka/locations">Locations</s-link>{" "}
+                    page, because that is what stock synchronization uses. They
+                    just do not appear on the sales order.
                   </s-text>
                 ) : null}
 
@@ -1451,7 +1454,10 @@ export default function OrderSyncSettings() {
                       <s-text color="subdued">
                         Which MetaKocka warehouse a Shopify location means is
                         set on the{" "}
-                        <s-link href="/app/metakocka/locations">Locations</s-link> page.
+                        <s-link href="/app/metakocka/locations">
+                          Locations
+                        </s-link>{" "}
+                        page.
                       </s-text>
 
                       <LearnMore label="How the warehouse is chosen">
