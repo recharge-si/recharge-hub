@@ -5,17 +5,23 @@ import {
   maskSecret,
 } from "~/adapters/crypto/secrets.server";
 import { getLogger } from "~/adapters/observability/logger.server";
-import { isShopOwner, shopDomainOf, type Principal } from "~/domain/types";
+import { isErpAdmin, shopDomainOf, type Principal } from "~/domain/types";
 
 /**
  * The MetaKocka secret key grants full write access to the merchant's ERP
  * (CLAUDE.md section 3). Two rules are enforced here rather than in route code:
  *
- *  - Only the shop owner, or a background job, may read or write it
- *    (section 9). A staff account gets a thrown error, not an empty form.
+ *  - Only an ERP admin (the store owner or a staff user on
+ *    `ERP_ADMIN_EMAILS`, `domain/erp-admin`), or a background job, may read
+ *    or write it (section 9). Any other staff account gets a thrown error,
+ *    not an empty form. Routes also refuse up front, with `ERP_ADMIN_ONLY`.
  *  - The plaintext key never leaves this module towards the browser
  *    (section 10). Screens get `CredentialSummary`, which carries a mask.
  */
+
+/** What a route answers a staff user who is not an ERP admin. */
+export const ERP_ADMIN_ONLY =
+  "Only ERP admins can change the MetaKocka connection.";
 
 export class NotPermittedError extends Error {
   constructor(message: string) {
@@ -27,10 +33,10 @@ export class NotPermittedError extends Error {
 function assertMayHandleSecrets(principal: Principal, action: string): void {
   // Background jobs have no session and are trusted by construction.
   if (principal.kind === "service") return;
-  if (isShopOwner(principal)) return;
+  if (isErpAdmin(principal)) return;
 
   throw new NotPermittedError(
-    `Only the store owner can ${action} the MetaKocka connection.`,
+    `Only ERP admins can ${action} the MetaKocka connection.`,
   );
 }
 
@@ -122,7 +128,7 @@ export async function getCredential(
  * background caller and the wrong one to a route: an unhandled throw in a
  * loader or an action is a 500, so a staff member pressing "Load payment
  * types" got a broken page instead of being told that the ERP key belongs to
- * the store owner (§9). The two cases are kept apart because they need
+ * an ERP admin (§9). The two cases are kept apart because they need
  * different copy — "connect MetaKocka" is advice a staff member cannot act on.
  */
 export type CredentialAccess =

@@ -5,13 +5,13 @@ import {
   maskSecret,
 } from "~/adapters/crypto/secrets.server";
 import { getLogger } from "~/adapters/observability/logger.server";
-import { isShopOwner, shopDomainOf, type Principal } from "~/domain/types";
+import { isErpAdmin, shopDomainOf, type Principal } from "~/domain/types";
 
 /**
  * The store's export portal API key (docs/sources.md § Connection).
  *
  * The same two rules as the MetaKocka credential, for the same reasons:
- * the key is written and removed by the store owner (or a job), and its
+ * the key is written and removed by an ERP admin (or a job), and its
  * plaintext never leaves this module towards the browser — screens get
  * `ExportPortalConnectionSummary`, which carries a mask.
  *
@@ -29,9 +29,9 @@ export class ExportPortalNotPermittedError extends Error {
 
 function assertMayChange(principal: Principal, action: string): void {
   if (principal.kind === "service") return;
-  if (isShopOwner(principal)) return;
+  if (isErpAdmin(principal)) return;
   throw new ExportPortalNotPermittedError(
-    `Only the store owner can ${action} the export portal connection.`,
+    `Only ERP admins can ${action} the export portal connection.`,
   );
 }
 

@@ -164,7 +164,7 @@ const admin = {} as AdminApiContext;
 const principal = {
   kind: "shop" as const,
   shopDomain: "demo.myshopify.com",
-  isShopOwner: true,
+  isErpAdmin: true,
 };
 const PRODUCT = "gid://shopify/Product/1";
 
