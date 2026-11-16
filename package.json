@@ -71,6 +71,9 @@
     "vitest": "^4.1.11"
   },
   "overrides": {
-    "p-map": "^4.0.0"
+    "p-map": "^4.0.0",
+    "@prisma/config": {
+      "deepmerge-ts": "^8.0.2"
+    }
   }
 }

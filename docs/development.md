@@ -277,7 +277,13 @@ When relevant, also run:
 ```bash
 npx prisma validate
 docker compose config --quiet
+npm audit --omit=dev          # when dependencies change
 ```
+
+`package.json` `overrides` pins two transitive versions: `p-map`, and
+`deepmerge-ts` under `@prisma/config` for a security advisory
+(docs/project-status.md, T-15). An upgrade of Prisma or of the Shopify session
+storage package should check whether each is still needed.
 
 The test suite discovers `tests/**/*.test.ts`. Unit tests live under
 `tests/unit/`; the fixture-driven vertical slice lives under
