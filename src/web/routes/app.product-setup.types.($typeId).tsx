@@ -2049,9 +2049,13 @@ export default function ProductTypes() {
             {/*
              * The one piece of styling of our own in the app: a drag handle
              * needs a grab cursor and a hover, and Polaris has no drag
-             * handle. Scoped to the class, nothing else is touched.
+             * handle. Scoped to the class, nothing else is touched. Set as
+             * HTML because React escapes text children, and `content: ""`
+             * would reach the page as `&quot;&quot;` and fail hydration.
              */}
-            <style>{`
+            <style
+              dangerouslySetInnerHTML={{
+                __html: `
               .ps-row { display: flex; align-items: stretch; border-radius: 8px; }
               .ps-row.is-target { outline: 2px solid #005bd3; outline-offset: -2px; background: #f1f6fd; }
               .ps-row.is-dragging { opacity: .45; }
@@ -2065,7 +2069,9 @@ export default function ProductTypes() {
               button.ps-twisty:disabled { cursor: default; opacity: .5; }
               .ps-drop-line { height: 0; border-top: 2px solid #005bd3; border-radius: 2px; position: relative; }
               .ps-drop-line::before { content: ""; position: absolute; left: -4px; top: -5px; width: 8px; height: 8px; border-radius: 50%; background: #005bd3; }
-            `}</style>
+            `,
+              }}
+            />
             <s-stack direction="block" gap="small-300">
               {tree.length > 6 ? (
                 <s-search-field
