@@ -27,7 +27,7 @@ export type { ChatMessage } from "~/domain/translations/types";
  */
 
 /** Bumped whenever the instructions change; recorded with every translation. */
-export const TRANSLATION_PROMPT_VERSION = "translate-v2";
+export const TRANSLATION_PROMPT_VERSION = "translate-v3";
 
 export interface TerminologyNote {
   term: string;
@@ -98,9 +98,9 @@ function systemMessage(request: TranslationRequest): string {
       "- Numbers, sizes, quantities, units, prices, dates and model identifiers stay as they are (a decimal separator may follow the target language's convention; the digits may not change).",
       "- URLs, e-mail addresses, file names and handles are copied exactly.",
       "- Placeholders such as {{name}}, {0}, %s and ${var} are copied exactly, in place.",
-      "- HTML: keep every tag, attribute, and the order and nesting of tags exactly as in the source; translate only the visible text and translatable attribute values such as alt and title. Never add or remove tags.",
+      "- HTML: keep every tag, attribute, and the order and nesting of tags exactly as in the source, even where the source markup is untidy (unclosed tags, empty spans, inline styles); translate only the visible text and translatable attribute values such as alt and title. Never add, remove, merge or tidy tags.",
       "- Rich text JSON: return the same document with only the \"value\" strings translated; every other key and value stays identical.",
-      "- Do not add explanations, notes, quotation marks or alternatives. If a field is already correct in the target language, return it unchanged.",
+      "- Do not add explanations, notes, quotation marks or alternatives. If a field is already written in the target language, return it unchanged and list its number in \"already_in_target\".",
     ].join("\n"),
   );
 
@@ -110,7 +110,7 @@ function systemMessage(request: TranslationRequest): string {
   if (request.storeContext) sections.push(`STORE CONTEXT\n${request.storeContext}`);
 
   sections.push(
-    'ANSWER FORMAT\nAnswer with a single JSON object of the form {"translations": {"1": "...", "2": "..."}} where each key is the field number given and each value is the translated field. Include every field exactly once and nothing else.',
+    'ANSWER FORMAT\nAnswer with a single JSON object of the form {"translations": {"1": "...", "2": "..."}, "already_in_target": []} where each key is the field number given and each value is the translated field. Include every field exactly once and nothing else. "already_in_target" lists the numbers of the fields you returned unchanged because their text is already written in the target language; leave it empty otherwise.',
   );
   return sections.join("\n\n");
 }
@@ -203,17 +203,23 @@ export function buildCorrectionMessages(
     { role: "assistant", content: previousAnswer },
     {
       role: "user",
-      content: `Your answer broke these rules. Correct only what is listed, keep everything else as you had it, and answer again with the complete JSON object for every field.\n\n${problems}`,
+      content: `Your answer broke these rules. Correct only what is listed, keep everything else as you had it, and answer again with the complete JSON object for every field. If a field listed as unchanged is in fact already written in ${languageName(request.targetLocale)}, return it unchanged and list its number in "already_in_target".\n\n${problems}`,
     },
   ];
 }
 
 const replySchema = z.object({
   translations: z.record(z.string(), z.string()),
+  already_in_target: z.array(z.union([z.string(), z.number()])).optional().catch(undefined),
 });
 
 export type ParsedReply =
-  | { ok: true; values: Map<string, string> }
+  | {
+      ok: true;
+      values: Map<string, string>;
+      /** Keys of the fields the model said are already in the target language. */
+      alreadyInTarget: Set<string>;
+    }
   | { ok: false; reason: string };
 
 /**
@@ -253,7 +259,13 @@ export function parseTranslationReply(
   );
   if (extra.length > 0)
     return { ok: false, reason: "The reply answered fields that were not asked." };
-  return { ok: true, values };
+  // A number that names no field is ignored: the claim only ever relaxes
+  // the unchanged rule for a field that really came back as it was.
+  const declared = new Set((parsed.data.already_in_target ?? []).map(String));
+  const alreadyInTarget = new Set(
+    fields.filter((_, index) => declared.has(String(index + 1))).map((field) => field.key),
+  );
+  return { ok: true, values, alreadyInTarget };
 }
 
 function stripCodeFence(text: string): string {

@@ -343,6 +343,19 @@ current list. The ones a person may want to decide on:
   language directly from Slovenian but its English text stays whatever is in
   the resource itself. Writing the original would be editing content, which
   this module deliberately does not do.
+- **Translation failures from supplier HTML (fixed 2026-11-16).** 226 open
+  `translation_failed` rows were `html_structure` (the model closing and
+  tidying untidy supplier markup: `<br>`/`<br />`, unclosed `<p>`/`<li>`/
+  `<td>`, empty spans) and `unchanged` (copy already in Slovenian in the
+  default-language field, which the prompt told the model to return as it
+  was and validation then refused). The skeleton is now compared as a
+  browser reads it, and the model can declare a prose field already in the
+  target language. Bumping the prompt and validation versions makes every
+  remembered failure retry on the next automatic pass, so rows that now
+  translate close themselves. After the deploy, check that the open count
+  falls after the next nightly sync; whatever is left is a real failure
+  with a current reason. "Already in the target language" rests on the
+  model's claim (docs/translations.md § Known limits).
 - **Cost is estimated, never billed.** The provider reports tokens; the price
   per token is `src/domain/translations/pricing.ts` under `PRICING_VERSION`.
   Bump the version and the table when OpenAI changes prices; rows already

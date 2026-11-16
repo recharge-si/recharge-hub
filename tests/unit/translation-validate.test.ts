@@ -7,6 +7,17 @@ import {
   type ValidationRules,
 } from "~/domain/translations/validate";
 
+import {
+  PATRIK_BACK_WING_SOURCE,
+  RPM_SPEC_ONLY,
+  UNIFIBER_RPM_ANSWER,
+  UNIFIBER_RPM_SOURCE,
+  UNIFIBER_SDM_SLOVENIAN_ANSWER,
+  UNIFIBER_SDM_SLOVENIAN_SOURCE,
+  UNIFIBER_SDM_TABLE_ANSWER,
+  UNIFIBER_SDM_TABLE_SOURCE,
+} from "../fixtures/translations/supplier-html";
+
 /**
  * Deterministic validation (docs/translations.md § Validation): what a
  * translation must not have changed, and when "unchanged" is a translation
@@ -145,6 +156,100 @@ describe("validateTranslation", () => {
     expect(codes(check([field("t", "Wing Accessories")], { t: "Wing Accessories" }))).toEqual(["t:unchanged:soft"]);
     // Between variants of one language nothing needs to change.
     expect(check([field("t", "All Products")], { t: "All Products" }, { sourceLocale: "en", targetLocale: "en-GB" })).toEqual([]);
+  });
+
+  describe("supplier HTML (the translation_failed rows of 2026-11-16)", () => {
+    const html = (value: string) => [field("body_html", value, "HTML")];
+    const sl = (value: string, answer: string, extra: Partial<ValidationRules> = {}) =>
+      codes(hardViolations(check(html(value), { body_html: answer }, extra)));
+
+    it("reads untidy markup and the model's tidied answer as the same document", () => {
+      expect(sl(UNIFIBER_RPM_SOURCE, UNIFIBER_RPM_ANSWER)).toEqual([]);
+      expect(sl(UNIFIBER_SDM_TABLE_SOURCE, UNIFIBER_SDM_TABLE_ANSWER)).toEqual([]);
+    });
+
+    it("treats spelling differences of one tag as the same tag", () => {
+      expect(sl("<p>Line one<br>Line two</p>", "<p>Vrstica ena<br />Vrstica dve</p>")).toEqual([]);
+      expect(sl("<p>Line one<BR/>Line two", "<p>Vrstica ena<br>Vrstica dve</p>")).toEqual([]);
+      expect(sl("<p><b>Light</b> and <i>stiff</i></p>", "<p><strong>Lahek</strong> in <em>tog</em></p>")).toEqual([]);
+      expect(sl("<p>Carbon<p>Aluminium", "<p>Karbon</p><p>Aluminij</p>")).toEqual([]);
+      expect(
+        sl('<p>See <a href=/rpm class="x" target=_blank>spec</a></p>', "<p>Glej <a target=\"_blank\" class='x' href=\"/rpm\">specifikacije</a></p>"),
+      ).toEqual([]);
+      // A stray end tag a browser ignores is ignored on both sides.
+      expect(sl("<p>Carbon</span></p>", "<p>Karbon</p>")).toEqual([]);
+      // A table inside a cell keeps its own rows.
+      const nested = "<table><tr><td>Size<td><table><tr><td>S<tr><td>M</table></table>";
+      expect(sl(nested, "<table><tr><td>Velikost</td><td><table><tr><td>S</td></tr><tr><td>M</td></tr></table></td></tr></table>")).toEqual([]);
+    });
+
+    it("still refuses an element, a link or an image added, dropped or moved", () => {
+      const list = "<ul><li>Carbon<li>Light</ul>";
+      expect(sl(list, "<ul><li>Karbon, lahek</li></ul>")).toEqual(["body_html:html_structure:hard"]);
+      expect(sl(list, "<p>Karbon</p><p>Lahek</p>")).toEqual(["body_html:html_structure:hard"]);
+      expect(sl('<p>See <a href="/rpm">spec</a></p>', "<p>Glej specifikacije</p>")).toEqual(["body_html:html_structure:hard"]);
+      expect(sl('<p>See <a href="/rpm">spec</a></p>', '<p>Glej <a href="/sdm">specifikacije</a></p>')).toEqual([
+        "body_html:html_structure:hard",
+      ]);
+      expect(sl('<p>Boom</p><img src="/a.jpg">', "<p>Bum</p>")).toEqual(["body_html:html_structure:hard"]);
+      expect(sl("Light and stiff.", "<p>Lahek in tog.</p>")).toEqual(["body_html:html_structure:hard"]);
+      expect(sl("<p>Light <strong>and</strong> stiff.</p>", "<p>Lahek in tog.</p>")).toEqual(["body_html:html_structure:hard"]);
+      // A cell dropped from a spec table.
+      expect(sl(UNIFIBER_SDM_TABLE_SOURCE, UNIFIBER_SDM_TABLE_ANSWER.replace("<td>460 cm</td>", ""))).toContain(
+        "body_html:html_structure:hard",
+      );
+    });
+
+    it("tells the model where the markup first differs", () => {
+      const [violation] = check(html("<ul><li>Carbon<li>Light</ul>"), { body_html: "<ul><li>Karbon, lahek</li></ul>" });
+      expect(violation?.message).toContain("the source has <li> where your answer has </ul>");
+    });
+
+    it("keeps a URL whether the source spells & as &amp; or not", () => {
+      expect(
+        sl(
+          "<p>Go to https://www.unifiber.net/rpm?size=280&amp;ref=shop now</p>",
+          "<p>Pojdite na https://www.unifiber.net/rpm?size=280&ref=shop zdaj</p>",
+        ),
+      ).toEqual([]);
+    });
+
+    it("accepts a description already in the target language when the model says so", () => {
+      // Undeclared, an unchanged Slovenian description reads as an echo.
+      expect(sl(PATRIK_BACK_WING_SOURCE, PATRIK_BACK_WING_SOURCE)).toEqual(["body_html:unchanged:hard"]);
+      const declared = { alreadyInTarget: new Set(["body_html"]) };
+      expect(sl(PATRIK_BACK_WING_SOURCE, PATRIK_BACK_WING_SOURCE, declared)).toEqual([]);
+      expect(codes(check(html(PATRIK_BACK_WING_SOURCE), { body_html: PATRIK_BACK_WING_SOURCE }, declared))).toEqual([
+        "body_html:unchanged:soft",
+      ]);
+      // Both failures at once: Slovenian already, and the markup tidied.
+      expect(sl(UNIFIBER_SDM_SLOVENIAN_SOURCE, UNIFIBER_SDM_SLOVENIAN_ANSWER)).toEqual(["body_html:unchanged:hard"]);
+      expect(sl(UNIFIBER_SDM_SLOVENIAN_SOURCE, UNIFIBER_SDM_SLOVENIAN_ANSWER, declared)).toEqual([]);
+    });
+
+    it("does not take the claim on trust for a short label, or for a field it was not made about", () => {
+      const declared = { alreadyInTarget: new Set(["t"]) };
+      expect(codes(hardViolations(check([field("t", "All Products")], { t: "All Products" }, declared)))).toEqual([
+        "t:unchanged:hard",
+      ]);
+      expect(sl(PATRIK_BACK_WING_SOURCE, PATRIK_BACK_WING_SOURCE, declared)).toEqual(["body_html:unchanged:hard"]);
+    });
+
+    it("accepts unchanged text made only of model names, abbreviations, numbers and units", () => {
+      expect(sl(RPM_SPEC_ONLY, RPM_SPEC_ONLY)).toEqual([]);
+      expect(
+        check(
+          [field("title", "Unifiber - RPM iWindsurf 280 (SL)")],
+          { title: "Unifiber - RPM iWindsurf 280 (SL)" },
+          { formStableTerms: ["Unifiber"] },
+        ),
+      ).toEqual([]);
+      expect(check([field("title", "HD SDM C75")], { title: "HD SDM C75" })).toEqual([]);
+      // A heading in capitals is still words.
+      expect(codes(hardViolations(check([field("t", "NEW SLALOM BOOMS")], { t: "NEW SLALOM BOOMS" })))).toEqual([
+        "t:unchanged:hard",
+      ]);
+    });
   });
 
   it("doubts a translation far shorter or longer than its source", () => {
