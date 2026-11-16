@@ -251,6 +251,8 @@ export interface HomeFigures {
     writtenToday: number;
     stockUpdatesToday: number;
     waiting: number;
+    /** Paid orders with no MetaKocka document; while transfer is off, held by it. */
+    paidWithoutDocument?: number;
   };
   lastMetakockaWriteAt: string | null;
   lastStockSyncAt: string | null;
@@ -363,6 +365,15 @@ export function storeOperations(input: {
     let href = "/app/orders";
     if (orders.status === "disabled") {
       lines.push({ text: "Order transfer is off" });
+      const held = figures.counts.paidWithoutDocument ?? 0;
+      if (held > 0) {
+        // A decision, not a fault, but one with a cost the merchant should
+        // see: every one of these is a paid order the ERP does not know about.
+        lines.push({
+          text: `${n(held)} paid ${held === 1 ? "order" : "orders"} waiting for transfer`,
+          tone: "caution",
+        });
+      }
       href = "/app/orders/settings";
     } else if (orders.status === "needs_attention") {
       lines.push({ text: orders.summary });

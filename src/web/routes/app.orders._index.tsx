@@ -9,6 +9,7 @@ import {
 } from "react-router";
 
 import { listOrders } from "~/adapters/db/repositories/order.server";
+import { countPaidOrdersWithoutDocument } from "~/adapters/db/repositories/order-watchdog.server";
 import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown } from "~/web/components/dropdown";
@@ -75,9 +76,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   ]);
 
   const hasNextPage = rows.length > PAGE_SIZE;
+  const transferOff = !settings.transferOrders;
 
   return {
-    transferOff: !settings.transferOrders,
+    transferOff,
+    // Only asked for when it is the answer to "why is nothing being sent".
+    heldByTransfer: transferOff
+      ? await countPaidOrdersWithoutDocument(principal)
+      : 0,
     filters: { q: search, status },
     page,
     hasNextPage,
@@ -141,8 +147,15 @@ function fulfilment(order: OrderRowData): {
 }
 
 export default function Orders() {
-  const { orders, filters, page, hasNextPage, hasPreviousPage, transferOff } =
-    useLoaderData<typeof loader>();
+  const {
+    orders,
+    filters,
+    page,
+    hasNextPage,
+    hasPreviousPage,
+    transferOff,
+    heldByTransfer,
+  } = useLoaderData<typeof loader>();
 
   /*
    * Said on the list itself, not only on the settings page that owns the
@@ -152,6 +165,9 @@ export default function Orders() {
   const transferOffBanner = transferOff ? (
     <s-banner tone="warning" heading="Order transfer is turned off">
       <s-paragraph>
+        {heldByTransfer > 0
+          ? `${heldByTransfer.toLocaleString("en")} paid ${heldByTransfer === 1 ? "order is" : "orders are"} waiting to be sent. `
+          : ""}
         Orders are received and listed, but none are sent to MetaKocka until
         transfer is turned back on in{" "}
         <s-link href="/app/orders/settings">order settings</s-link>.
