@@ -8,10 +8,11 @@ export interface ShopSession {
   readonly kind: "shop";
   readonly shopDomain: string;
   /**
-   * CLAUDE.md section 9 gates the MetaKocka credentials screen to the shop owner.
-   * Staff accounts must not read or set the ERP key.
+   * CLAUDE.md section 9 gates the MetaKocka credentials to ERP admins: the
+   * store owner, or a staff user on the `ERP_ADMIN_EMAILS` allowlist
+   * (`domain/erp-admin`). Other staff must not read or set the ERP key.
    */
-  readonly isShopOwner: boolean;
+  readonly isErpAdmin: boolean;
 }
 
 /** A background job. Has no session and no human behind it. */
@@ -31,8 +32,8 @@ export function shopDomainOf(principal: Principal): string {
   return principal.shopDomain;
 }
 
-export function isShopOwner(principal: Principal): boolean {
-  return principal.kind === "shop" && principal.isShopOwner;
+export function isErpAdmin(principal: Principal): boolean {
+  return principal.kind === "shop" && principal.isErpAdmin;
 }
 
 export function serviceToken(

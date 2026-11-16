@@ -95,7 +95,7 @@ const admin = {} as AdminApiContext;
 const principal = {
   kind: "shop" as const,
   shopDomain: SHOP,
-  isShopOwner: true,
+  isErpAdmin: true,
 };
 
 beforeEach(() => {

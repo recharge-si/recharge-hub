@@ -14,6 +14,7 @@ import { z } from "zod";
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import {
+  ERP_ADMIN_ONLY,
   NotPermittedError,
   getCredential,
   getCredentialSummary,
@@ -97,7 +98,7 @@ import {
 } from "~/web/lib/order-reference-fields";
 import { gatewayLabel } from "~/web/lib/payment-gateways";
 import {
-  isOwnershipKnown,
+  isUserKnown,
   principalFromSession,
 } from "~/web/lib/principal.server";
 
@@ -180,14 +181,20 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     stepCount: STEPS.length,
     stepTitle: STEP_TITLE[step],
     alreadyCompleted: saved.completedAt !== null,
-    isShopOwner: principal.isShopOwner,
-    ownershipKnown: isOwnershipKnown(session),
+    isErpAdmin: principal.isErpAdmin,
+    userKnown: isUserKnown(session),
   };
 
   if (step === "connect") {
     return {
       ...common,
-      connect: await getCredentialSummary(principal),
+      /*
+       * Only an ERP admin sees what is stored, even masked: everyone else
+       * gets the closed step, and an empty summary keeps the shape.
+       */
+      connect: principal.isErpAdmin
+        ? await getCredentialSummary(principal)
+        : { companyId: null, secretKeyMask: null, apiUserEmail: null },
       stock: null,
       orders: null,
       review: null,
@@ -446,6 +453,11 @@ export const action = async ({ request }: ActionFunctionArgs) => {
   /* ---------------------------------------------------------------------- */
 
   if (intent === "connect") {
+    // Refused before anything is read or written; the repository refuses too.
+    if (!principal.isErpAdmin) {
+      return { ok: false, message: ERP_ADMIN_ONLY } satisfies StepResult;
+    }
+
     const parsed = connectSchema.safeParse({
       companyId: formData.get("companyId") ?? "",
       secretKey: formData.get("secretKey") ?? "",
@@ -1072,8 +1084,8 @@ export default function Setup() {
         {step === "connect" && data.connect ? (
           <ConnectStep
             summary={data.connect}
-            allowed={data.isShopOwner}
-            ownershipKnown={data.ownershipKnown}
+            allowed={data.isErpAdmin}
+            userKnown={data.userKnown}
             result={result}
             busy={busy}
           />
@@ -1189,7 +1201,7 @@ function WelcomeStep({ busy }: { busy: boolean }) {
 function ConnectStep({
   summary,
   allowed,
-  ownershipKnown,
+  userKnown,
   result,
   busy,
 }: {
@@ -1199,18 +1211,18 @@ function ConnectStep({
     apiUserEmail: string | null;
   };
   allowed: boolean;
-  ownershipKnown: boolean;
+  userKnown: boolean;
   result: StepResult | undefined;
   busy: boolean;
 }) {
   if (!allowed) {
     return (
-      <s-section heading="Store owner only">
+      <s-section heading="ERP admins only">
         <s-banner tone="warning">
           <s-paragraph>
-            {ownershipKnown
-              ? "Only the store owner can connect MetaKocka, because the secret key gives full access to the ERP. Ask them to finish this step."
-              : "Shopify did not confirm which user you are, so this step stays closed. Open the app again from the Shopify admin, and if this keeps happening, sign in as the store owner."}
+            {userKnown
+              ? "Only ERP admins can change the MetaKocka connection. The secret key gives full access to the ERP, so this step is limited to the store owner and the staff named as ERP admins. Ask one of them to finish it."
+              : "Shopify did not confirm which user you are, so this step stays closed. Open the app again from the Shopify admin, and if this keeps happening, sign in as the store owner or an ERP admin."}
           </s-paragraph>
         </s-banner>
       </s-section>

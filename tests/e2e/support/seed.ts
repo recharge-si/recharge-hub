@@ -23,7 +23,7 @@ import type { TestShop } from "./test";
  */
 
 export function ownerOf(shop: TestShop): ShopSession {
-  return { kind: "shop", shopDomain: shop.domain, isShopOwner: true };
+  return { kind: "shop", shopDomain: shop.domain, isErpAdmin: true };
 }
 
 export interface ConnectedShopOptions {

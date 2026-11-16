@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { parseErpAdminEmails } from "~/domain/erp-admin";
+
 /**
  * Every external boundary is parsed with Zod (CLAUDE.md section 4), and the process
  * environment is a boundary. Reading `process.env` directly anywhere else is a bug:
@@ -96,6 +98,15 @@ const envSchema = z.object({
   /** Per IP hash. The live rig calls build on every answer, so these are generous; explain has its own, tighter limits. */
   RIG_BUILD_PER_MINUTE: blankToDefault(60),
   RIG_BUILD_PER_HOUR: blankToDefault(600),
+
+  /**
+   * Staff emails, comma separated, that may view and change the MetaKocka
+   * connection in addition to the store owner (docs/development.md
+   * § Environment variables). Matched case-insensitively against the Shopify
+   * staff user's email. Unset means the store owner only: the credentials
+   * screens stay locked for everyone else.
+   */
+  ERP_ADMIN_EMAILS: z.string().optional().transform(parseErpAdminEmails),
 
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().default("development"),
