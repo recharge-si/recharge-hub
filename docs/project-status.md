@@ -659,20 +659,21 @@ the target rule that tenant filtering lives in repositories. Migrate one
 subsystem at a time, then forbid importing the Prisma client outside
 `src/adapters/db/` with ESLint.
 
-### T-15 — Prisma's config dependency has an open security advisory
+### T-15 — Prisma's config dependency is pinned by an override
 
-`npm audit --omit=dev` reports
 [GHSA-ggr8-5vv4-36mx](https://github.com/advisories/GHSA-ggr8-5vv4-36mx)
-against `deepmerge-ts` 7.1.5 through Prisma 6.19.3's `@prisma/config`. The flaw
-requires recursive in-memory object graphs; the application does not pass
-request payloads into Prisma configuration, so no exposed request path is
-currently known. The audit nevertheless remains red, and the Prisma CLI ships
-in the production image because the migration service uses it.
+(`deepmerge-ts` < 8) reached the production image through Prisma 6.19.3's
+`@prisma/config`. No Prisma 6 release fixes it; Prisma 7.10.1 does, but
+`@shopify/shopify-app-session-storage-prisma` (latest 11.x included) requires
+Prisma `^6.19.0`, and Prisma 7 also changes the client generator, the config
+file and the database driver. So `package.json` `overrides` pins
+`@prisma/config` → `deepmerge-ts` `^8.0.2`, the version Prisma 7 itself ships.
+`@prisma/config` uses it only as the merger when it loads a `prisma.config.*`
+file, which this app does not have; 8.0's breaking changes are in
+`deepmergeInto`, type names and Map merging, none of which that path uses.
 
-Do not accept npm's forced Prisma version change or add a transitive override
-without compatibility testing. Adopt a compatible upstream fix, or validate an
-upgrade/override separately against generation, all migrations, the test suite,
-and both runtime images.
+Remove the override when moving to Prisma 7, once the session storage package
+allows it.
 
 ### UI coherence pass (PRD 3): what was not done, and what no browser has seen
 
