@@ -739,7 +739,7 @@ shop.
 
 - every 5 minutes: inventory sync;
 - every 15 minutes: warehouse refresh, Shopify order reconciliation, exception
-  re-check, due merchant-scheduled catalogue work, the catalogue snapshot
+  re-check, the order watchdog, due merchant-scheduled catalogue work, the catalogue snapshot
   for shops with a scheduled or dynamic sale campaign, and giving up on
   translation syncs whose job died;
 - hourly: MetaKocka document read-back;
@@ -760,6 +760,43 @@ idempotency table (`docs/project-status.md` T-24).
 
 Jobs that exhaust retries generally dead-letter into a merchant-visible
 exception. Schedule/register jobs rely on the next cadence and Sentry instead.
+
+**The order watchdog** (`jobs/handlers/watch-orders.ts`, rule in
+`domain/orders/watchdog.ts`) is the shop-wide sweep for orders nothing reacted
+to. Per shop, every quarter-hour, it judges each live order received in the
+last 30 days that is not both fully written and verified (`sync_state` other
+than `pending`), plus every order it has already flagged:
+
+- overdue, it raises `order_not_transferred` (deduped `order:<id>`), shown on
+  Needs attention and the order page. Overdue means transfer is allowed
+  (`decideOrderTransfer`), setup is finished, no other exception is open on
+  the order, and it has waited longer than `ORDER_WATCHDOG_THRESHOLD_MINUTES`
+  (default 120), counted from the latest of arrival, `setup_completed_at` and
+  the last change to order settings — so turning transfer back on with its
+  backlog gives the backlog the same grace;
+- once the order is written and verified, cancelled, deleted, redacted, or
+  held by the switch (`transfer_off`, `received_while_off`), it closes the row
+  as `app`. An order held by the switch is never raised.
+
+Retry and `recheck-exceptions` reconcile a flagged order; the re-check closes
+it once it is written and verified. While transfer is off, Home's Orders tile
+and the Orders banner count the paid orders with no document instead.
+
+## Operator alerts
+
+`ALERT_SLACK_WEBHOOK_URL` set, `raiseException` queues `notify-exception` for
+each newly opened row of `order_not_transferred`, `job_failed`,
+`stock_sync_failed` or `sync_inconsistent` (`domain/alerts.ts`). Updating an
+open row queues nothing. The job claims `exception.alerted_at` with a
+conditional update, so a row is announced at most once; a condition (shop,
+kind, dedupe key) already announced in the last 24 hours, or a shop with 20
+announcements in the last hour, is marked and skipped. The message is the
+kind, the shop domain, the order number (or a dead job's queue) and a link to
+the order page in the Shopify admin (or Needs attention) — never the
+exception's message or detail, which can quote customer data. A failed post
+gives the claim back and retries three times; the queue is deliberately not
+dead-lettered, because a dead job would raise `job_failed` and announce
+itself. Unset, nothing is queued and a queued job does nothing.
 
 ## Persistence map
 

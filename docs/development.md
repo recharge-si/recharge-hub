@@ -110,6 +110,8 @@ HMAC verification and can look like an application regression.
 | `RIG_AI_MODEL`, `RIG_AI_MAX_CONCURRENT`, `RIG_AI_DAILY_CALLS`, `RIG_AI_TIMEOUT_MS` |       no | The rig builder's model calls through claude-pool (docs/rig-builder.md): model alias (default `sonnet`), concurrent calls (3), calls per shop per UTC day (500), time budget of one explain in ms (20000). Blank means the default; without the pool the builder works in plain mode |
 | `RIG_BUILD_PER_MINUTE`, `RIG_BUILD_PER_HOUR`         |       no | Rate limit of the public `build` and `verify` routes per caller (60 and 600) |
 | `CLAUDE_POOL_DIR_HOST`                              |  Compose | Host directory of claude-pool accounts, mounted read-only into `web` at `/run/claude-pool` (default `./data/claude-pool`). `CLAUDE_POOL_*` themselves are set in `docker-compose.yml` |
+| `ORDER_WATCHDOG_THRESHOLD_MINUTES`                  |       no | Minutes an order may go without reaching MetaKocka before the watchdog raises `order_not_transferred` (default 120; docs/architecture.md § Schedules and recovery) |
+| `ALERT_SLACK_WEBHOOK_URL`                           |       no | Slack incoming-webhook URL for operator alerts on newly opened severe exceptions (docs/architecture.md § Operator alerts). A secret: never commit or log it. Blank disables alerting; nothing is queued |
 | `SENTRY_DSN`                                        |       no | Error reporting; blank disables Sentry                               |
 | `SENTRY_ENVIRONMENT`                                |       no | Environment label sent to Sentry                                     |
 | `LOG_LEVEL`                                         |       no | pino level; defaults to `info`                                       |
