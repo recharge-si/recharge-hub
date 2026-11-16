@@ -139,10 +139,7 @@ function SwitchRow({
           gap="small-300"
           alignItems="start"
         >
-          <s-icon
-            type={on ? "check-circle-filled" : "circle"}
-            tone="neutral"
-          />
+          <s-icon type={on ? "check-circle-filled" : "circle"} tone="neutral" />
           <s-stack direction="block" gap="small-500">
             <s-text>
               {field.label}

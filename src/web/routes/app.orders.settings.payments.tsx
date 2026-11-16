@@ -624,10 +624,10 @@ export default function PaymentTypes() {
               borderColor="subdued"
             >
               {/*
-                * Stacks below 500px so the label keeps a readable width at
-                * 375px (section 2.6). A container query, because this box is
-                * narrower than the viewport.
-                */}
+               * Stacks below 500px so the label keeps a readable width at
+               * 375px (section 2.6). A container query, because this box is
+               * narrower than the viewport.
+               */}
               <s-grid
                 gridTemplateColumns="@container (inline-size <= 500px) 1fr, 1fr 260px"
                 gap="base"

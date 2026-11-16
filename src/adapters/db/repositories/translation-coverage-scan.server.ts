@@ -37,17 +37,23 @@ export interface CoverageScan {
   finishedAt: Date | null;
 }
 
-function toScan(row: Prisma.TranslationCoverageScanGetPayload<object>): CoverageScan {
+function toScan(
+  row: Prisma.TranslationCoverageScanGetPayload<object>,
+): CoverageScan {
   const unread = Array.isArray(row.unread)
     ? (row.unread as unknown[]).flatMap((entry) =>
-        entry && typeof entry === "object" && "type" in entry && "reason" in entry
+        entry &&
+        typeof entry === "object" &&
+        "type" in entry &&
+        "reason" in entry
           ? [{ type: String(entry.type), reason: String(entry.reason) }]
           : [],
       )
     : [];
   return {
     runId: row.runId,
-    status: row.status === "done" || row.status === "failed" ? row.status : "running",
+    status:
+      row.status === "done" || row.status === "failed" ? row.status : "running",
     typesTotal: row.typesTotal,
     typesDone: row.typesDone,
     currentType: row.currentType,
@@ -69,7 +75,9 @@ async function shopIdFor(principal: Principal): Promise<string | null> {
   return shop?.id ?? null;
 }
 
-export async function getCoverageScan(principal: Principal): Promise<CoverageScan | null> {
+export async function getCoverageScan(
+  principal: Principal,
+): Promise<CoverageScan | null> {
   const row = await prisma.translationCoverageScan.findFirst({
     where: { shop: { domain: shopDomainOf(principal) } },
   });
@@ -88,7 +96,11 @@ export function isScanActive(scan: CoverageScan | null, now: Date): boolean {
 /** Starts (or restarts) the shop's count under a new run id. */
 export async function startCoverageScan(
   principal: Principal,
-  input: { runId: string; typesTotal: number; expectedResources: number | null },
+  input: {
+    runId: string;
+    typesTotal: number;
+    expectedResources: number | null;
+  },
   now: Date,
 ): Promise<void> {
   const shopId = await shopIdFor(principal);
@@ -139,7 +151,10 @@ export async function recordScanProgress(
       resourcesRead: progress.resourcesRead,
       unread:
         progress.unread.length > 0
-          ? progress.unread.map((entry) => ({ type: entry.type, reason: entry.reason }))
+          ? progress.unread.map((entry) => ({
+              type: entry.type,
+              reason: entry.reason,
+            }))
           : Prisma.DbNull,
       heartbeatAt: now,
     },

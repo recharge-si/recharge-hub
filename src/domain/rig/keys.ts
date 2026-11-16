@@ -27,7 +27,10 @@ export type RigRole = (typeof RIG_ROLES)[number];
  * with extension_min_cm.
  */
 export const ROLE_TYPE_NAMES: Readonly<
-  Record<"board" | "sail" | "mast" | "boom" | "base" | "extension" | "fin", readonly string[]>
+  Record<
+    "board" | "sail" | "mast" | "boom" | "base" | "extension" | "fin",
+    readonly string[]
+  >
 > = {
   board: ["Boards"],
   sail: ["Sails"],
@@ -229,5 +232,7 @@ export function roleWord(role: RigRole): string {
 
 /** Every key the engine reads for any role, for "does the plan already cover it". */
 export const ENGINE_KEYS: readonly string[] = [
-  ...new Set(Object.values(ROLE_FIELDS).flatMap((fields) => fields.map((s) => s.key))),
+  ...new Set(
+    Object.values(ROLE_FIELDS).flatMap((fields) => fields.map((s) => s.key)),
+  ),
 ].sort();

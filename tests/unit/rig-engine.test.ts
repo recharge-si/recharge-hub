@@ -230,7 +230,9 @@ describe("strict: a rule without its data is unchecked, never passed or failed",
       expect(ids).not.toContain(unchecked);
       expect(rig?.unchecked.map((u) => u.id)).toContain(unchecked);
     }
-    expect(rig?.unchecked.find((u) => u.id === "sail-boom-range")?.missing).toEqual([
+    expect(
+      rig?.unchecked.find((u) => u.id === "sail-boom-range")?.missing,
+    ).toEqual([
       { role: "sail", key: "boom_min_cm" },
       { role: "sail", key: "boom_max_cm" },
     ]);
@@ -248,7 +250,10 @@ describe("strict: a rule without its data is unchecked, never passed or failed",
 
   it("does not let a missing value fail a check either", () => {
     const report = checkReport(
-      { sail: part("sail", { areaM2: 5.8 }), boom: part("boom", { boomMinCm: 150, boomMaxCm: 190 }) },
+      {
+        sail: part("sail", { areaM2: 5.8 }),
+        boom: part("boom", { boomMinCm: 150, boomMaxCm: 190 }),
+      },
       context(),
     );
     expect(report.checks.map((check) => check.id)).toEqual(["sail-fit"]);
@@ -271,29 +276,51 @@ describe("strict: a rule without its data is unchecked, never passed or failed",
       },
       context(),
     );
-    expect(report.checks.map((check) => check.id)).not.toContain("sail-mast-length");
+    expect(report.checks.map((check) => check.id)).not.toContain(
+      "sail-mast-length",
+    );
     expect(report.unchecked).toEqual([
-      { id: "sail-mast-diameter", missing: [{ role: "mast", key: "mast_diameter" }] },
+      {
+        id: "sail-mast-diameter",
+        missing: [{ role: "mast", key: "mast_diameter" }],
+      },
       { id: "sail-mast-length", missing: [{ role: "mast", key: "length_cm" }] },
     ]);
   });
 
   it("checks the board against the rider only when the board states the riders it takes", () => {
-    const heavy = resolveFit(profileOf({ ...REFERENCE, weightKg: 110 }), rules).context;
-    const stated = checkRig({ board: part("board", { volumeL: 130, riderMinKg: 70, riderMaxKg: 95 }) }, heavy);
+    const heavy = resolveFit(
+      profileOf({ ...REFERENCE, weightKg: 110 }),
+      rules,
+    ).context;
+    const stated = checkRig(
+      {
+        board: part("board", { volumeL: 130, riderMinKg: 70, riderMaxKg: 95 }),
+      },
+      heavy,
+    );
     expect(stated.find((c) => c.id === "rider-fit")?.ok).toBe(false);
     const silent = checkRig({ board: part("board", { volumeL: 130 }) }, heavy);
     expect(silent.find((c) => c.id === "rider-fit")).toBeUndefined();
   });
 
   it("leaves board fit unchecked for a board with a sail range but no volume", () => {
-    const board = part("board", { sailMinM2: 5, sailMaxM2: 6.5, finBoxTypes: ["tuttle"] });
-    const report = checkReport({ board, sail: part("sail", { areaM2: 5.8 }) }, context());
+    const board = part("board", {
+      sailMinM2: 5,
+      sailMaxM2: 6.5,
+      finBoxTypes: ["tuttle"],
+    });
+    const report = checkReport(
+      { board, sail: part("sail", { areaM2: 5.8 }) },
+      context(),
+    );
     expect(report.unchecked).toContainEqual({
       id: "board-fit",
       missing: [{ role: "board", key: "volume_l" }],
     });
-    expect(report.checks.find((c) => c.id === "board-sail-range")?.ok).toBe(true);
+    expect(report.checks.find((c) => c.id === "board-sail-range")?.ok).toBe(
+      true,
+    );
   });
 
   it("can still build with a board that has only a sail range, saying board fit is unchecked", () => {
@@ -303,7 +330,9 @@ describe("strict: a rule without its data is unchecked, never passed or failed",
     const result = build(REFERENCE, pool);
     expect(item(result, "board")?.title).toBe("Range Only Board");
     expect(result.rigs[0]?.unchecked.map((u) => u.id)).toContain("board-fit");
-    expect(result.warnings.map((w) => w.code)).toContain("unchecked_board_volume_l");
+    expect(result.warnings.map((w) => w.code)).toContain(
+      "unchecked_board_volume_l",
+    );
     expect(result.checks.find((c) => c.id === "board-fit")).toBeUndefined();
   });
 });
@@ -324,24 +353,50 @@ describe("mast", () => {
     const short = checkRig({ sail: sail(), mast: hd(430) }, context());
     expect(short.find((c) => c.id === "sail-mast-length")?.ok).toBe(false);
 
-    const sdm = byTitle("Unifiber - Elite SDM C100 Constant FL Curve Incl. Mastbag");
+    const sdm = byTitle(
+      "Unifiber - Elite SDM C100 Constant FL Curve Incl. Mastbag",
+    );
     const wrong = checkRig({ sail: sail(), mast: sdm }, context());
     expect(wrong.find((c) => c.id === "sail-mast-diameter")?.ok).toBe(false);
   });
 
   it("takes the sail list of compatible diameters as well as its recommended one", () => {
     const mastSdm = part("mast", { lengthCm: 460, mastDiameter: "sdm" });
-    const both = part("sail", { areaM2: 5.8, mastCm: 460, mastDiameter: "rdm", compatibleDiameters: ["rdm", "sdm"] });
-    expect(checkRig({ sail: both, mast: mastSdm }, context()).find((c) => c.id === "sail-mast-diameter")?.ok).toBe(true);
-    const rdmOnly = part("sail", { areaM2: 5.8, mastCm: 460, mastDiameter: "rdm" });
-    expect(checkRig({ sail: rdmOnly, mast: mastSdm }, context()).find((c) => c.id === "sail-mast-diameter")?.ok).toBe(false);
+    const both = part("sail", {
+      areaM2: 5.8,
+      mastCm: 460,
+      mastDiameter: "rdm",
+      compatibleDiameters: ["rdm", "sdm"],
+    });
+    expect(
+      checkRig({ sail: both, mast: mastSdm }, context()).find(
+        (c) => c.id === "sail-mast-diameter",
+      )?.ok,
+    ).toBe(true);
+    const rdmOnly = part("sail", {
+      areaM2: 5.8,
+      mastCm: 460,
+      mastDiameter: "rdm",
+    });
+    expect(
+      checkRig({ sail: rdmOnly, mast: mastSdm }, context()).find(
+        (c) => c.id === "sail-mast-diameter",
+      )?.ok,
+    ).toBe(false);
   });
 
   it("compares IMCS only when both sides state it", () => {
     const sail = part("sail", { areaM2: 5.8, mastImcs: 21 });
     const find = (mastImcs?: number) =>
       checkRig(
-        { sail, mast: part("mast", { lengthCm: 460, mastDiameter: "rdm", ...(mastImcs ? { mastImcs } : {}) }) },
+        {
+          sail,
+          mast: part("mast", {
+            lengthCm: 460,
+            mastDiameter: "rdm",
+            ...(mastImcs ? { mastImcs } : {}),
+          }),
+        },
         context(),
       ).find((c) => c.id === "sail-mast-imcs");
     expect(find(21)?.ok).toBe(true);
@@ -351,21 +406,37 @@ describe("mast", () => {
 
   it("stretches a short mast with an extension range, and fails one that still falls short", () => {
     const ext = byTitle("Unifiber Extension RDM 25");
-    const ok = checkRig({ sail: sail(), mast: hd(430), extension: ext }, context());
+    const ok = checkRig(
+      { sail: sail(), mast: hd(430), extension: ext },
+      context(),
+    );
     expect(ok.find((c) => c.id === "sail-mast-length")?.ok).toBe(true);
     expect(ok.find((c) => c.id === "mast-extension-diameter")?.ok).toBe(true);
-    const still = checkRig({ sail: sail(), mast: hd(400), extension: ext }, context());
+    const still = checkRig(
+      { sail: sail(), mast: hd(400), extension: ext },
+      context(),
+    );
     expect(still.find((c) => c.id === "sail-mast-length")?.ok).toBe(false);
     const sdmExt = byTitle("Unifiber Extension SDM 25");
-    const wrong = checkRig({ sail: sail(), mast: hd(430), extension: sdmExt }, context());
-    expect(wrong.find((c) => c.id === "mast-extension-diameter")?.ok).toBe(false);
+    const wrong = checkRig(
+      { sail: sail(), mast: hd(430), extension: sdmExt },
+      context(),
+    );
+    expect(wrong.find((c) => c.id === "mast-extension-diameter")?.ok).toBe(
+      false,
+    );
   });
 
   it("leaves the length unchecked when the extension states no range", () => {
     const ext = part("extension", { mastDiameter: "rdm" });
-    const report = checkReport({ sail: sail(), mast: hd(430), extension: ext }, context());
+    const report = checkReport(
+      { sail: sail(), mast: hd(430), extension: ext },
+      context(),
+    );
     expect(report.checks.map((c) => c.id)).not.toContain("sail-mast-length");
-    expect(report.unchecked.find((u) => u.id === "sail-mast-length")?.missing).toEqual([
+    expect(
+      report.unchecked.find((u) => u.id === "sail-mast-length")?.missing,
+    ).toEqual([
       { role: "extension", key: "extension_min_cm" },
       { role: "extension", key: "extension_max_cm" },
     ]);
@@ -381,12 +452,19 @@ describe("mast", () => {
     expect(result.checks.every((check) => check.ok)).toBe(true);
     // The extension fits the base by its connection, and the engine used that.
     expect(item(result, "base")?.title).toBe("Euro Pin Base");
-    expect(result.checks.find((c) => c.id === "extension-base-connection")?.ok).toBe(true);
+    expect(
+      result.checks.find((c) => c.id === "extension-base-connection")?.ok,
+    ).toBe(true);
   });
 
   it("tries the next sail size when the best one has no mast that reaches it", () => {
     const pool = candidates().filter(
-      (c) => !(c.role === "mast" && c.specs.mastDiameter === "rdm" && c.specs.lengthCm === 460) && c.role !== "extension",
+      (c) =>
+        !(
+          c.role === "mast" &&
+          c.specs.mastDiameter === "rdm" &&
+          c.specs.lengthCm === 460
+        ) && c.role !== "extension",
     );
     const result = build(REFERENCE, pool);
     expect(result.unmet).toEqual([]);
@@ -395,9 +473,14 @@ describe("mast", () => {
   });
 
   it("reports no mast when the catalogue holds none", () => {
-    const pool = candidates(without(loadCatalogue(), (p) => p.productType === "Masts"));
+    const pool = candidates(
+      without(loadCatalogue(), (p) => p.productType === "Masts"),
+    );
     const result = build(REFERENCE, pool);
-    expect(result.unmet).toContainEqual({ role: "mast", reason: "no_compatible_in_stock" });
+    expect(result.unmet).toContainEqual({
+      role: "mast",
+      reason: "no_compatible_in_stock",
+    });
     expect(item(result, "mast")).toBeUndefined();
   });
 
@@ -414,12 +497,22 @@ describe("boom", () => {
   const part2 = (role: RigRole, specs: Specs) => part(role, specs);
 
   it("must cover the whole range the sail asks for", () => {
-    const sail165 = part2("sail", { areaM2: 5.8, boomMinCm: 165, boomMaxCm: 175 });
-    const sail160 = part2("sail", { areaM2: 5.8, boomMinCm: 160, boomMaxCm: 170 });
+    const sail165 = part2("sail", {
+      areaM2: 5.8,
+      boomMinCm: 165,
+      boomMaxCm: 175,
+    });
+    const sail160 = part2("sail", {
+      areaM2: 5.8,
+      boomMinCm: 160,
+      boomMaxCm: 170,
+    });
     const boom = (min: number, max: number) =>
       part2("boom", { boomMinCm: min, boomMaxCm: max });
     const ok = (sail: RigCandidate, b: RigCandidate) =>
-      checkRig({ sail, boom: b }, context()).find((c) => c.id === "sail-boom-range")?.ok;
+      checkRig({ sail, boom: b }, context()).find(
+        (c) => c.id === "sail-boom-range",
+      )?.ok;
     expect(ok(sail165, boom(150, 190))).toBe(true);
     expect(ok(sail160, boom(170, 210))).toBe(false);
     expect(ok(sail165, boom(130, 170))).toBe(false);
@@ -428,16 +521,20 @@ describe("boom", () => {
   it("falls back to the sail recommended boom length, which the boom must contain", () => {
     const sail = part2("sail", { areaM2: 5.8, recommendedBoomCm: 180 });
     const find = (min: number, max: number) =>
-      checkRig({ sail, boom: part2("boom", { boomMinCm: min, boomMaxCm: max }) }, context()).find(
-        (c) => c.id === "sail-boom-range",
-      )?.ok;
+      checkRig(
+        { sail, boom: part2("boom", { boomMinCm: min, boomMaxCm: max }) },
+        context(),
+      ).find((c) => c.id === "sail-boom-range")?.ok;
     expect(find(150, 190)).toBe(true);
     expect(find(190, 230)).toBe(false);
   });
 
   it("is unchecked on the sail side when it has neither range nor recommendation, and on the boom side when it has no range", () => {
     const boom = part2("boom", { boomMinCm: 150 });
-    const report = checkReport({ sail: part2("sail", { areaM2: 5.8 }), boom }, context());
+    const report = checkReport(
+      { sail: part2("sail", { areaM2: 5.8 }), boom },
+      context(),
+    );
     expect(report.unchecked[0]?.missing).toEqual([
       { role: "sail", key: "boom_min_cm" },
       { role: "sail", key: "boom_max_cm" },
@@ -448,9 +545,23 @@ describe("boom", () => {
   it("checks the boom against the mast diameter only when the boom lists some", () => {
     const sail = part2("sail", { areaM2: 5.8, boomMinCm: 170, boomMaxCm: 190 });
     const mast = part2("mast", { lengthCm: 460, mastDiameter: "sdm" });
-    const listed = checkRig({ sail, mast, boom: part2("boom", { boomMinCm: 150, boomMaxCm: 190, compatibleDiameters: ["rdm"] }) }, context());
+    const listed = checkRig(
+      {
+        sail,
+        mast,
+        boom: part2("boom", {
+          boomMinCm: 150,
+          boomMaxCm: 190,
+          compatibleDiameters: ["rdm"],
+        }),
+      },
+      context(),
+    );
     expect(listed.find((c) => c.id === "mast-boom-diameter")?.ok).toBe(false);
-    const silent = checkRig({ sail, mast, boom: part2("boom", { boomMinCm: 150, boomMaxCm: 190 }) }, context());
+    const silent = checkRig(
+      { sail, mast, boom: part2("boom", { boomMinCm: 150, boomMaxCm: 190 }) },
+      context(),
+    );
     expect(silent.find((c) => c.id === "mast-boom-diameter")).toBeUndefined();
   });
 
@@ -471,21 +582,39 @@ describe("base", () => {
     const none = byTitle("Base no data");
     const check = (base: RigCandidate | undefined) =>
       checkReport({ extension: ext, base }, context());
-    expect(check(euro).checks.find((c) => c.id === "extension-base-connection")?.ok).toBe(true);
-    expect(check(tendon).checks.find((c) => c.id === "extension-base-connection")?.ok).toBe(false);
+    expect(
+      check(euro).checks.find((c) => c.id === "extension-base-connection")?.ok,
+    ).toBe(true);
+    expect(
+      check(tendon).checks.find((c) => c.id === "extension-base-connection")
+        ?.ok,
+    ).toBe(false);
     expect(check(none).unchecked).toEqual([
-      { id: "extension-base-connection", missing: [{ role: "base", key: "base_connection" }] },
+      {
+        id: "extension-base-connection",
+        missing: [{ role: "base", key: "base_connection" }],
+      },
     ]);
   });
 
   it("reports no compatible base when none is in stock", () => {
     const products = loadCatalogue().map((p) =>
       p.productType === "Mast bases"
-        ? { ...p, variants: p.variants.map((v) => ({ ...v, inventoryQuantity: 0, availableForSale: false })) }
+        ? {
+            ...p,
+            variants: p.variants.map((v) => ({
+              ...v,
+              inventoryQuantity: 0,
+              availableForSale: false,
+            })),
+          }
         : p,
     );
     const result = build(REFERENCE, candidates(products));
-    expect(result.unmet).toContainEqual({ role: "base", reason: "no_compatible_in_stock" });
+    expect(result.unmet).toContainEqual({
+      role: "base",
+      reason: "no_compatible_in_stock",
+    });
     expect(item(result, "base")).toBeUndefined();
     expect(item(result, "mast")).toBeDefined();
   });
@@ -513,7 +642,9 @@ describe("fin", () => {
 
   it("uses the board own fin range, and the fin length derived from millimetres", () => {
     const board = byTitle("Free Board 105");
-    const patrik = candidates().filter((c) => c.title === "Patrik FIN P-RIDE (TUTTLE)");
+    const patrik = candidates().filter(
+      (c) => c.title === "Patrik FIN P-RIDE (TUTTLE)",
+    );
     expect(patrik.map((c) => c.specs.finLengthCm)).toEqual([44, 46, 48]);
     expect(patrik.every((c) => c.derived.includes("finLengthCm"))).toBe(true);
     // Free Board 105 takes 32 to 40 cm: 44 does not fit.
@@ -525,11 +656,21 @@ describe("fin", () => {
   it("falls back to the placeholder length table by volume, then to unchecked", () => {
     const fin = part("fin", { finBox: "tuttle", finLengthCm: 36 });
     const withVolume = part("board", { volumeL: 105, finBoxTypes: ["tuttle"] });
-    expect(checkRig({ board: withVolume, fin }, context()).find((c) => c.id === "fin-length")?.ok).toBe(true);
-    const bare = part("board", { sailMinM2: 5, sailMaxM2: 6, finBoxTypes: ["tuttle"] });
+    expect(
+      checkRig({ board: withVolume, fin }, context()).find(
+        (c) => c.id === "fin-length",
+      )?.ok,
+    ).toBe(true);
+    const bare = part("board", {
+      sailMinM2: 5,
+      sailMaxM2: 6,
+      finBoxTypes: ["tuttle"],
+    });
     const report = checkReport({ board: bare, fin }, context());
     expect(report.checks.map((c) => c.id)).not.toContain("fin-length");
-    expect(report.unchecked.find((u) => u.id === "fin-length")?.missing).toEqual([
+    expect(
+      report.unchecked.find((u) => u.id === "fin-length")?.missing,
+    ).toEqual([
       { role: "board", key: "board_fin_min_cm" },
       { role: "board", key: "board_fin_max_cm" },
     ]);
@@ -563,24 +704,43 @@ describe("owned gear", () => {
   it("leaves an owned boom out and says it was not checked without its range", () => {
     const result = build({ ...REFERENCE, owns: ["boom"] });
     expect(item(result, "boom")).toBeUndefined();
-    expect(result.warnings.map((w) => w.code)).toContain("owned_boom_unchecked");
+    expect(result.warnings.map((w) => w.code)).toContain(
+      "owned_boom_unchecked",
+    );
     expect(result.checks.find((c) => c.id === "owned-boom")).toBeUndefined();
     expect(result.rigs[0]?.items).toHaveLength(5);
   });
 
   it("checks an owned boom whose range the buyer gave", () => {
-    const fits = build({ ...REFERENCE, owns: ["boom"], ownedBoomMinCm: 150, ownedBoomMaxCm: 190 });
-    expect(fits.checks.find((c) => c.id === "owned-boom")).toEqual({ id: "owned-boom", ok: true });
-    const tooShort = build({ ...REFERENCE, owns: ["boom"], ownedBoomMinCm: 130, ownedBoomMaxCm: 170 });
+    const fits = build({
+      ...REFERENCE,
+      owns: ["boom"],
+      ownedBoomMinCm: 150,
+      ownedBoomMaxCm: 190,
+    });
+    expect(fits.checks.find((c) => c.id === "owned-boom")).toEqual({
+      id: "owned-boom",
+      ok: true,
+    });
+    const tooShort = build({
+      ...REFERENCE,
+      owns: ["boom"],
+      ownedBoomMinCm: 130,
+      ownedBoomMaxCm: 170,
+    });
     expect(tooShort.checks.find((c) => c.id === "owned-boom")?.ok).toBe(false);
-    expect(tooShort.warnings.map((w) => w.code)).not.toContain("owned_boom_unchecked");
+    expect(tooShort.warnings.map((w) => w.code)).not.toContain(
+      "owned_boom_unchecked",
+    );
   });
 
   it("does not claim checks about gear it does not know", () => {
     const result = build({ ...REFERENCE, owns: ["board"] });
     expect(item(result, "board")).toBeUndefined();
     expect(result.checks.map((c) => c.id)).not.toContain("board-fit");
-    expect(result.warnings.map((w) => w.code)).toContain("owned_board_unchecked");
+    expect(result.warnings.map((w) => w.code)).toContain(
+      "owned_board_unchecked",
+    );
   });
 });
 
@@ -607,8 +767,15 @@ describe("budget", () => {
   it("returns the cheapest rig with the amount over when nothing fits", () => {
     const result = build({ ...REFERENCE, budgetEur: 1 });
     const over = (cheapest.rigs[0]?.totalMinor ?? 0) - 100;
-    expect(result.unmet).toContainEqual({ role: "budget", reason: "over_budget", overMinor: over });
-    expect(result.warnings).toContainEqual({ code: "over_budget", detail: { overMinor: over } });
+    expect(result.unmet).toContainEqual({
+      role: "budget",
+      reason: "over_budget",
+      overMinor: over,
+    });
+    expect(result.warnings).toContainEqual({
+      code: "over_budget",
+      detail: { overMinor: over },
+    });
     expect(result.checks.every((check) => check.ok)).toBe(true);
   });
 });
@@ -632,13 +799,20 @@ describe("stock, status and shop", () => {
     const allNull = candidates(
       loadCatalogue().map((p) => ({
         ...p,
-        variants: p.variants.map((v) => ({ ...v, inventoryQuantity: null, availableForSale: true })),
+        variants: p.variants.map((v) => ({
+          ...v,
+          inventoryQuantity: null,
+          availableForSale: true,
+        })),
       })),
     );
     const result = build(REFERENCE, allNull);
     expect(result.rigs).toEqual([]);
     expect(result.warnings.map((w) => w.code)).toContain("stock_not_read");
-    expect(result.unmet).toContainEqual({ role: "sail", reason: "no_compatible_in_stock" });
+    expect(result.unmet).toContainEqual({
+      role: "sail",
+      reason: "no_compatible_in_stock",
+    });
   });
 
   it("moves to the next closest size when 5.8 is out, and then names what it could not check", () => {
@@ -647,7 +821,9 @@ describe("stock, status and shop", () => {
         ? {
             ...p,
             variants: p.variants.map((v) =>
-              v.title === "5.8 m2 / Orange" ? { ...v, inventoryQuantity: 0, availableForSale: false } : v,
+              v.title === "5.8 m2 / Orange"
+                ? { ...v, inventoryQuantity: 0, availableForSale: false }
+                : v,
             ),
           }
         : p,
@@ -662,12 +838,20 @@ describe("stock, status and shop", () => {
     const draft = byTitle("Draft Board 105");
     expect(draft?.status).toBe("DRAFT");
     const result = build();
-    expect(result.rigs[0]?.items.some((entry) => entry.variantId === draft?.variantId)).toBe(false);
+    expect(
+      result.rigs[0]?.items.some(
+        (entry) => entry.variantId === draft?.variantId,
+      ),
+    ).toBe(false);
   });
 
   it("never returns another shop's product, however cheap", () => {
     const result = build();
-    const foreign = new Set(candidates().filter((c) => c.shopId !== SHOP_A).map((c) => c.variantId));
+    const foreign = new Set(
+      candidates()
+        .filter((c) => c.shopId !== SHOP_A)
+        .map((c) => c.variantId),
+    );
     expect(foreign.size).toBeGreaterThan(0);
     for (const entry of result.rigs[0]?.items ?? []) {
       expect(foreign.has(entry.variantId)).toBe(false);
@@ -680,7 +864,9 @@ describe("missing attributes", () => {
     const pool = candidates();
     const result = buildRig(profileOf(), pool, rules, ctx);
     expect(result.missingAttributes["canopy_area"]).toBe(1);
-    const missingIds = new Set(pool.filter((c) => c.missing.length > 0).map((c) => c.variantId));
+    const missingIds = new Set(
+      pool.filter((c) => c.missing.length > 0).map((c) => c.variantId),
+    );
     for (const entry of result.rigs[0]?.items ?? []) {
       expect(missingIds.has(entry.variantId)).toBe(false);
     }
@@ -692,7 +878,10 @@ describe("nothing in stock", () => {
     const pool = candidates().map((c) => ({ ...c, inStock: false }));
     const result = build(REFERENCE, pool);
     expect(result.rigs).toEqual([]);
-    expect(result.unmet).toContainEqual({ role: "sail", reason: "no_compatible_in_stock" });
+    expect(result.unmet).toContainEqual({
+      role: "sail",
+      reason: "no_compatible_in_stock",
+    });
   });
 });
 
@@ -706,7 +895,8 @@ describe("property: 200 generated profiles against the fixture catalogue", () =>
     };
   }
   const random = lcg(20261028);
-  const pick = <T,>(list: readonly T[]): T => list[Math.floor(random() * list.length)] as T;
+  const pick = <T>(list: readonly T[]): T =>
+    list[Math.floor(random() * list.length)] as T;
   const pool = candidates();
   const byVariant = new Map(pool.map((c) => [c.variantId, c]));
 
@@ -719,8 +909,12 @@ describe("property: 200 generated profiles against the fixture catalogue", () =>
       boardKind: pick(["freeride", "wave"] as const),
       windMinKn: windMin,
       windMaxKn: windMin + Math.floor(random() * 20),
-      ...(random() < 0.4 ? { budgetEur: 500 + Math.floor(random() * 4000) } : {}),
-      ...(random() < 0.3 ? { owns: [pick(["boom", "fin", "mast"] as const)] } : {}),
+      ...(random() < 0.4
+        ? { budgetEur: 500 + Math.floor(random() * 4000) }
+        : {}),
+      ...(random() < 0.3
+        ? { owns: [pick(["boom", "fin", "mast"] as const)] }
+        : {}),
     };
 
     it(`profile ${index} gives only sound rigs`, () => {
@@ -732,7 +926,8 @@ describe("property: 200 generated profiles against the fixture catalogue", () =>
         }
         // No check is both run and unchecked.
         const ran = new Set(rig.checks.map((check) => check.id));
-        for (const unchecked of rig.unchecked) expect(ran.has(unchecked.id)).toBe(false);
+        for (const unchecked of rig.unchecked)
+          expect(ran.has(unchecked.id)).toBe(false);
         const ids = rig.items.map((entry) => entry.variantId);
         expect(new Set(ids).size).toBe(ids.length);
         for (const entry of rig.items) {
@@ -750,13 +945,25 @@ describe("property: 200 generated profiles against the fixture catalogue", () =>
 describe("roles from the plan", () => {
   it("does not take a Wing board for a windsurf board", () => {
     expect(
-      classifyProduct(rigPlan(), { productType: null, categoryName: null, chosenTypeId: "wing-boards" }),
+      classifyProduct(rigPlan(), {
+        productType: null,
+        categoryName: null,
+        chosenTypeId: "wing-boards",
+      }),
     ).toBeNull();
     expect(
-      classifyProduct(rigPlan(), { productType: "Freeride boards", categoryName: null, chosenTypeId: null }),
+      classifyProduct(rigPlan(), {
+        productType: "Freeride boards",
+        categoryName: null,
+        chosenTypeId: null,
+      }),
     ).toEqual({ role: "board", category: "freeride", combined: false });
     expect(
-      classifyProduct(rigPlan(), { productType: "Masts", categoryName: null, chosenTypeId: null }),
+      classifyProduct(rigPlan(), {
+        productType: "Masts",
+        categoryName: null,
+        chosenTypeId: null,
+      }),
     ).toEqual({ role: "mast", category: null, combined: false });
   });
 });
@@ -776,7 +983,9 @@ describe("rigReadiness", () => {
       inStock: 5,
       stockUnknown: 1,
     });
-    expect(readiness.roles.sail.missing).toEqual([{ key: "canopy_area", count: 1 }]);
+    expect(readiness.roles.sail.missing).toEqual([
+      { key: "canopy_area", count: 1 },
+    ]);
     expect(readiness.roles.sail.derived).toEqual({ areaM2: 3 });
     // Masts: the one with no diameter or length is incomplete; the others derive both.
     expect(readiness.roles.mast).toMatchObject({ products: 5, complete: 4 });
@@ -787,7 +996,9 @@ describe("rigReadiness", () => {
     expect(readiness.roles.mast.derived.mastDiameter).toBe(3);
     // The draft board is not counted.
     expect(readiness.roles.board.products).toBe(11);
-    expect(readiness.roles.board.missing).toEqual([{ key: "fin_box_types", count: 1 }]);
+    expect(readiness.roles.board.missing).toEqual([
+      { key: "fin_box_types", count: 1 },
+    ]);
     expect(readiness.roles.fin.missing).toEqual([{ key: "fin_box", count: 1 }]);
   });
 
@@ -821,7 +1032,9 @@ describe("rigReadiness", () => {
     const pool = candidates();
     const dacron = pool.filter((c) => c.title.startsWith("XO Sails"));
     expect(dacron.map((c) => c.specs.areaM2)).toEqual([4, 5, 5.7]);
-    expect(dacron.every((c) => c.derived.length === 1 && c.derived[0] === "areaM2")).toBe(true);
+    expect(
+      dacron.every((c) => c.derived.length === 1 && c.derived[0] === "areaM2"),
+    ).toBe(true);
     const epoxy = byTitle("Unifiber - Mast Epoxy SDM", pool);
     expect(epoxy?.specs).toMatchObject({ lengthCm: 472, mastDiameter: "sdm" });
     expect(epoxy?.derived).toEqual(["lengthCm"]);

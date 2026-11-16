@@ -18,7 +18,10 @@ import {
 const NOW = Date.parse("2026-10-06T12:00:00Z");
 const ago = (ms: number) => new Date(NOW - ms).toISOString();
 
-const run = (status: "queued" | "running" | "completed", startedAt: string | null) => ({
+const run = (
+  status: "queued" | "running" | "completed",
+  startedAt: string | null,
+) => ({
   id: "r1",
   sourceId: "sc_1",
   status,
@@ -36,7 +39,9 @@ describe("a run that stopped responding", () => {
   });
 
   it("is never stale when it finished, or when the portal gave no time", () => {
-    expect(isRunStale(run("completed", ago(RUN_STALE_MS * 3)), NOW)).toBe(false);
+    expect(isRunStale(run("completed", ago(RUN_STALE_MS * 3)), NOW)).toBe(
+      false,
+    );
     expect(isRunStale(run("running", null), NOW)).toBe(false);
     expect(isRunActive(run("running", null), NOW)).toBe(true);
   });

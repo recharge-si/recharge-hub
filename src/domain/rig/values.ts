@@ -27,7 +27,12 @@ const UNITS: Readonly<Record<Quantity, Readonly<Record<string, number>>>> = {
   },
   kg: { KILOGRAMS: 1, GRAMS: 0.001, POUNDS: 0.45359237, OUNCES: 0.0283495231 },
   m2: { SQUARE_METERS: 1, SQUARE_CENTIMETERS: 0.0001, SQUARE_FEET: 0.09290304 },
-  l: { LITERS: 1, MILLILITERS: 0.001, CENTILITERS: 0.01, US_GALLONS: 3.785411784 },
+  l: {
+    LITERS: 1,
+    MILLILITERS: 0.001,
+    CENTILITERS: 0.01,
+    US_GALLONS: 3.785411784,
+  },
 };
 
 function round(value: number): number {

@@ -109,7 +109,11 @@ export async function handleTranslationSync(job: Job<unknown>): Promise<void> {
   }
   const primary = locales.locales.find((locale) => locale.primary);
   if (!primary) {
-    await fail(principal, sync, "Shopify reports no primary locale for the store.");
+    await fail(
+      principal,
+      sync,
+      "Shopify reports no primary locale for the store.",
+    );
     return;
   }
   if (sync.sourceLocale === "") await setSyncSource(syncId, primary.locale);
@@ -186,7 +190,9 @@ export async function handleTranslationSync(job: Job<unknown>): Promise<void> {
   const [overrides, ownership] = await Promise.all([
     listSourceOverrides(principal, ids),
     listOwnership(principal, ids),
-    intelligence.contexts.prime(ids.map((resourceId) => ({ resourceId, type }))),
+    intelligence.contexts.prime(
+      ids.map((resourceId) => ({ resourceId, type })),
+    ),
   ]);
 
   const counts: PassCounts = {
@@ -316,7 +322,13 @@ async function noteFailures(
   }
   if (outcome.translated + outcome.copied === 0) return;
   if ((await listFailures(principal, resourceId)).size > 0) return;
-  await resolveExceptionByKey(principal, "translation_failed", key, "app", new Date());
+  await resolveExceptionByKey(
+    principal,
+    "translation_failed",
+    key,
+    "app",
+    new Date(),
+  );
 }
 
 async function fail(

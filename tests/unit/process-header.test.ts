@@ -54,7 +54,9 @@ describe("ProcessHeader", () => {
               now,
             };
             const text = describeProcess(props, now);
-            expect(text).toMatch(/^(Healthy|Needs attention|Never run|Off) · .*/);
+            expect(text).toMatch(
+              /^(Healthy|Needs attention|Never run|Off) · .*/,
+            );
             expect(text.includes("next in 3 h")).toBe(
               mode === "automatic" && health !== "off" && withNext,
             );

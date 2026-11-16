@@ -18,7 +18,10 @@ import {
   describeUnread,
   readCoverageChunk,
 } from "~/adapters/translations/coverage.server";
-import { ALL_RESOURCE_TYPES, isResourceType } from "~/domain/translations/types";
+import {
+  ALL_RESOURCE_TYPES,
+  isResourceType,
+} from "~/domain/translations/types";
 import { serviceToken } from "~/domain/types";
 
 const rowSchema = z.object({
@@ -42,7 +45,9 @@ export const translationCoverageJobSchema = z.object({
   /** The current type's counts so far, carried from pass to pass. */
   carried: z.array(rowSchema).default([]),
   resourcesRead: z.number().int().min(0).default(0),
-  unread: z.array(z.object({ type: z.string(), reason: z.string() })).default([]),
+  unread: z
+    .array(z.object({ type: z.string(), reason: z.string() }))
+    .default([]),
 });
 
 /** Pages of `PAGE` resources per pass: a few hundred resources, well inside the job's expiry. */
@@ -89,7 +94,9 @@ export async function handleTranslationCoverage(
   const locales = await listShopLocales(admin);
   if (locales.kind === "unavailable") {
     // Retried by the queue; a count that keeps failing stops and says why.
-    throw new Error(`The store's languages could not be read. ${locales.reason}`);
+    throw new Error(
+      `The store's languages could not be read. ${locales.reason}`,
+    );
   }
   const targets = locales.locales
     .filter((locale) => !locale.primary)
@@ -113,7 +120,9 @@ export async function handleTranslationCoverage(
       after: data.after,
       locales: targets,
       carried: data.carried,
-      keepOriginal: new Map(settings.map((row) => [row.locale, row.keepOriginal])),
+      keepOriginal: new Map(
+        settings.map((row) => [row.locale, row.keepOriginal]),
+      ),
       maxPages: PAGES_PER_PASS,
       pageSize: PAGE,
     });
@@ -122,7 +131,11 @@ export async function handleTranslationCoverage(
       await replaceCoverageForType(principal, type, chunk.rows, new Date());
       next = { typeIndex: data.typeIndex + 1, after: null, carried: [] };
     } else {
-      next = { typeIndex: data.typeIndex, after: chunk.after, carried: chunk.rows };
+      next = {
+        typeIndex: data.typeIndex,
+        after: chunk.after,
+        carried: chunk.rows,
+      };
     }
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
@@ -148,7 +161,12 @@ export async function handleTranslationCoverage(
   if (next.typeIndex >= types.length) {
     await finish(principal, runId, unread, types.length);
     log.info(
-      { shop: shopDomain, locales: targets.length, resources: resourcesRead, unread: unread.map((u) => u.type) },
+      {
+        shop: shopDomain,
+        locales: targets.length,
+        resources: resourcesRead,
+        unread: unread.map((u) => u.type),
+      },
       "Translation coverage counted",
     );
     return;
@@ -176,7 +194,9 @@ async function finish(
         unread.length > 0
           ? `${nothing ? "Nothing" : "Some content"} could not be read from Shopify. ${describeUnread(
               unread.flatMap((entry) =>
-                isResourceType(entry.type) ? [{ type: entry.type, reason: entry.reason }] : [],
+                isResourceType(entry.type)
+                  ? [{ type: entry.type, reason: entry.reason }]
+                  : [],
               ),
             )}`
           : null,

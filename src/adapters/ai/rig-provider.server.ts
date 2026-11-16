@@ -98,7 +98,8 @@ export class ClaudePoolProvider implements RigAiProvider {
       maxWaiting: 0,
       ...(this.options.command ? { command: this.options.command } : {}),
       cwd:
-        this.options.workDir ?? emptyDir(join(tmpdir(), "recharge-hub-rig-work")),
+        this.options.workDir ??
+        emptyDir(join(tmpdir(), "recharge-hub-rig-work")),
       env: {
         HOME:
           this.options.homeDir ??

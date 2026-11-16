@@ -16,16 +16,18 @@ import {
 describe("sanitizeHtml", () => {
   it("keeps the markup a description is made of", () => {
     const html =
-      '<p>Our line of <strong>SUPs</strong> covers <em>inflatable</em> boards.</p><ul><li>Former windsurfer</li></ul><h4>Our team</h4>';
+      "<p>Our line of <strong>SUPs</strong> covers <em>inflatable</em> boards.</p><ul><li>Former windsurfer</li></ul><h4>Our team</h4>";
     expect(sanitizeHtml(html)).toBe(html);
   });
 
   it("drops what could run, and its content with it", () => {
-    expect(sanitizeHtml("<p>Before</p><script>alert(1)</script><p>After</p>")).toBe(
-      "<p>Before</p><p>After</p>",
-    );
     expect(
-      sanitizeHtml('<p>A</p><iframe src="https://youtube.com/embed/x"></iframe><p>B</p>'),
+      sanitizeHtml("<p>Before</p><script>alert(1)</script><p>After</p>"),
+    ).toBe("<p>Before</p><p>After</p>");
+    expect(
+      sanitizeHtml(
+        '<p>A</p><iframe src="https://youtube.com/embed/x"></iframe><p>B</p>',
+      ),
     ).toBe("<p>A</p><p>B</p>");
     expect(sanitizeHtml("<style>p{display:none}</style><p>Visible</p>")).toBe(
       "<p>Visible</p>",
@@ -40,17 +42,19 @@ describe("sanitizeHtml", () => {
     expect(sanitizeHtml('<p onclick="steal()" class="x">Text</p>')).toBe(
       "<p>Text</p>",
     );
-    expect(sanitizeHtml('<a href="https://recharge.si" title="Shop">Go</a>')).toBe(
-      '<a href="https://recharge.si" title="Shop">Go</a>',
-    );
+    expect(
+      sanitizeHtml('<a href="https://recharge.si" title="Shop">Go</a>'),
+    ).toBe('<a href="https://recharge.si" title="Shop">Go</a>');
     expect(sanitizeHtml('<a href="/collections/sup">Go</a>')).toBe(
       '<a href="/collections/sup">Go</a>',
     );
     // A link that would run something keeps its words and loses its address.
-    expect(sanitizeHtml('<a href="javascript:alert(1)">Go</a>')).toBe("<a>Go</a>");
-    expect(sanitizeHtml('<img src="https://cdn/x.png" alt="Board" onerror="x">')).toBe(
-      '<img src="https://cdn/x.png" alt="Board" />',
+    expect(sanitizeHtml('<a href="javascript:alert(1)">Go</a>')).toBe(
+      "<a>Go</a>",
     );
+    expect(
+      sanitizeHtml('<img src="https://cdn/x.png" alt="Board" onerror="x">'),
+    ).toBe('<img src="https://cdn/x.png" alt="Board" />');
   });
 
   it("keeps the words of a tag it does not know, and drops comments", () => {
@@ -68,7 +72,9 @@ describe("what has to stay HTML", () => {
   it("names the content rich text editing would mangle", () => {
     expect(needsSourceEditing('<p>x</p><iframe src="y"></iframe>')).toBe(true);
     expect(needsSourceEditing("<table><tr><td>1</td></tr></table>")).toBe(true);
-    expect(needsSourceEditing("<p>Plain <strong>prose</strong></p>")).toBe(false);
+    expect(needsSourceEditing("<p>Plain <strong>prose</strong></p>")).toBe(
+      false,
+    );
   });
 });
 
@@ -82,7 +88,9 @@ describe("reading HTML as text", () => {
 
   it("reads a description as one line", () => {
     expect(
-      htmlToText("<h4>Our team</h4><ul><li>A windsurfer</li><li>A coach</li></ul>"),
+      htmlToText(
+        "<h4>Our team</h4><ul><li>A windsurfer</li><li>A coach</li></ul>",
+      ),
     ).toBe("Our team A windsurfer A coach");
   });
 });

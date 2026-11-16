@@ -7,7 +7,10 @@ import {
   type StoredMemory,
 } from "~/adapters/db/repositories/translation-intelligence.server";
 import { getLogger } from "~/adapters/observability/logger.server";
-import { ContextSource, type ResourceContexts } from "~/adapters/translations/context.server";
+import {
+  ContextSource,
+  type ResourceContexts,
+} from "~/adapters/translations/context.server";
 import { ensureStoreProfile } from "~/adapters/translations/profile.server";
 import { localeChain } from "~/domain/translations/locale";
 import { memoryKey, type MemoryOrigin } from "~/domain/translations/memory";
@@ -44,7 +47,11 @@ export interface Intelligence {
    * pair. The target locale's chain is consulted (`de-AT`, then `de`) and
    * an entry for the exact locale shadows the language's.
    */
-  memoryFor(sourceLocale: string, targetLocale: string, fields: readonly SourceField[]): Promise<StoredMemory[]>;
+  memoryFor(
+    sourceLocale: string,
+    targetLocale: string,
+    fields: readonly SourceField[],
+  ): Promise<StoredMemory[]>;
   remember(
     input: {
       sourceLocale: string;
@@ -85,13 +92,20 @@ export async function loadIntelligence(
   admin: AdminApiContext,
   input: { primaryLocale: string; storeName: string | null },
 ): Promise<Intelligence> {
-  const ensured = await ensureStoreProfile(principal, admin, { primaryLocale: input.primaryLocale });
+  const ensured = await ensureStoreProfile(principal, admin, {
+    primaryLocale: input.primaryLocale,
+  });
   const stored = ensured.profile;
   if (ensured.kind === "failed")
-    getLogger().warn({ shop: principal.shopDomain, reason: ensured.reason }, "Translating without a store profile");
+    getLogger().warn(
+      { shop: principal.shopDomain, reason: ensured.reason },
+      "Translating without a store profile",
+    );
 
   const storeContext =
-    stored.useStoreContext && stored.profile ? renderStoreContext(stored.profile, input.storeName) : null;
+    stored.useStoreContext && stored.profile
+      ? renderStoreContext(stored.profile, input.storeName)
+      : null;
   const termCache = new Map<string, Promise<StoredTerm[]>>();
 
   return {
@@ -112,12 +126,20 @@ export async function loadIntelligence(
       const keys = lookupKeys(fields);
       if (keys.length === 0) return [];
       const chain = localeChain(targetLocale);
-      const rows = await lookupMemory(principal, { sourceLocale, targetLocales: chain, keys });
+      const rows = await lookupMemory(principal, {
+        sourceLocale,
+        targetLocales: chain,
+        keys,
+      });
       // The most specific locale wins per source key.
       const best = new Map<string, StoredMemory>();
       for (const row of rows) {
         const current = best.get(row.sourceKey);
-        if (!current || chain.indexOf(row.targetLocale) < chain.indexOf(current.targetLocale)) best.set(row.sourceKey, row);
+        if (
+          !current ||
+          chain.indexOf(row.targetLocale) < chain.indexOf(current.targetLocale)
+        )
+          best.set(row.sourceKey, row);
       }
       return [...best.values()];
     },

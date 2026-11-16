@@ -53,7 +53,12 @@ export async function startSync(
   input: StartSyncInput,
 ): Promise<Sync> {
   const sync = await createSync(principal, input);
-  await recordLanguageSync(principal, input.targetLocales, "started", new Date());
+  await recordLanguageSync(
+    principal,
+    input.targetLocales,
+    "started",
+    new Date(),
+  );
   await enqueue(
     QUEUES.translationSync,
     { shopDomain: principal.shopDomain, syncId: sync.id },
@@ -113,7 +118,12 @@ export async function collectChangedResource(
     resourceIds: [input.resourceId],
     requestedBy: null,
   });
-  await recordLanguageSync(principal, input.targetLocales, "started", new Date());
+  await recordLanguageSync(
+    principal,
+    input.targetLocales,
+    "started",
+    new Date(),
+  );
   await enqueue(
     QUEUES.translationSync,
     { shopDomain: principal.shopDomain, syncId: sync.id },
@@ -157,7 +167,10 @@ export async function requestCoverageRefresh(
   const coverage = await getCoverage(principal);
   const perType = new Map<string, number>();
   for (const row of coverage.rows)
-    perType.set(row.resourceType, Math.max(perType.get(row.resourceType) ?? 0, row.resources));
+    perType.set(
+      row.resourceType,
+      Math.max(perType.get(row.resourceType) ?? 0, row.resources),
+    );
   const expected = [...perType.values()].reduce((a, b) => a + b, 0);
 
   const runId = randomUUID();
@@ -173,7 +186,9 @@ export async function requestCoverageRefresh(
   await enqueue(
     QUEUES.translationCoverage,
     { shopDomain: principal.shopDomain, runId },
-    { singletonKey: `${translationCoverageKey(principal.shopDomain)}:${runId}` },
+    {
+      singletonKey: `${translationCoverageKey(principal.shopDomain)}:${runId}`,
+    },
   );
   return runId;
 }
@@ -229,7 +244,8 @@ export function describeCoverageScan(
       scan.expectedResources && scan.expectedResources > 0
         ? (scan.resourcesRead / scan.expectedResources) * 100
         : null;
-    const byTypes = scan.typesTotal > 0 ? (scan.typesDone / scan.typesTotal) * 100 : 0;
+    const byTypes =
+      scan.typesTotal > 0 ? (scan.typesDone / scan.typesTotal) * 100 : 0;
     return {
       state: "counting",
       ...base,
@@ -241,7 +257,9 @@ export function describeCoverageScan(
   return { state: "idle", ...base };
 }
 
-export async function coverageProgress(principal: Principal): Promise<CoverageProgress> {
+export async function coverageProgress(
+  principal: Principal,
+): Promise<CoverageProgress> {
   return describeCoverageScan(await getCoverageScan(principal), new Date());
 }
 
@@ -250,7 +268,9 @@ export async function coverageProgress(principal: Principal): Promise<CoveragePr
  * (docs/translations.md § Store profile); null when a rebuild is already
  * waiting.
  */
-export async function requestProfileRebuild(principal: Principal): Promise<string | null> {
+export async function requestProfileRebuild(
+  principal: Principal,
+): Promise<string | null> {
   return enqueueThrottled(
     QUEUES.translationProfile,
     { shopDomain: principal.shopDomain },

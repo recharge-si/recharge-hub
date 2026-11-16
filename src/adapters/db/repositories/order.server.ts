@@ -93,12 +93,15 @@ export async function saveIncomingOrder(
      * refused as already claimed. Falling back to the default template for the
      * collision keeps both orders sendable and keeps the reference meaningful.
      */
-    const rendered = orderReferenceFor(effectiveCustomerOrderTemplate(settings), {
-      name: parsed.orderName,
-      number: parsed.orderNumber,
-      id: parsed.shopifyOrderId,
-      customerEmail: parsed.customerEmail,
-    });
+    const rendered = orderReferenceFor(
+      effectiveCustomerOrderTemplate(settings),
+      {
+        name: parsed.orderName,
+        number: parsed.orderNumber,
+        id: parsed.shopifyOrderId,
+        customerEmail: parsed.customerEmail,
+      },
+    );
 
     const taken = await tx.order.findFirst({
       where: { shopId, customerOrderRef: rendered.reference },
@@ -184,7 +187,11 @@ export async function saveIncomingOrder(
       await enqueueInTransaction(
         tx,
         QUEUES.reconcileOrder,
-        { shopDomain: shopDomainOf(principal), orderId: order.id, reason: "intake" },
+        {
+          shopDomain: shopDomainOf(principal),
+          orderId: order.id,
+          reason: "intake",
+        },
         { singletonKey: `reconcile:${order.id}:intake` },
       );
     }
@@ -693,7 +700,6 @@ export async function recordDocumentResult(
   });
 }
 
-
 /* -------------------------------------------------------------------------- */
 /* Keeping an order in step with Shopify                                      */
 /* -------------------------------------------------------------------------- */
@@ -1171,9 +1177,7 @@ export interface ManualAllocationInput {
  */
 export class UnknownSupplySourceError extends Error {
   constructor(readonly supplySourceIds: string[]) {
-    super(
-      `Unknown supply source: ${supplySourceIds.join(", ")}`,
-    );
+    super(`Unknown supply source: ${supplySourceIds.join(", ")}`);
     this.name = "UnknownSupplySourceError";
   }
 }
@@ -1434,7 +1438,11 @@ export async function applyPrimaryDocument(
     ...(primarySourceId
       ? [
           prisma.metakockaDocument.updateMany({
-            where: { orderId, supplySourceId: primarySourceId, isPrimary: false },
+            where: {
+              orderId,
+              supplySourceId: primarySourceId,
+              isPrimary: false,
+            },
             data: { isPrimary: true },
           }),
         ]
@@ -1511,7 +1519,8 @@ export async function releaseOrderReconciliation(
   });
 }
 
-export type OrderSyncVerdict = "pending" | "in_sync" | "inconsistent" | "blocked";
+export type OrderSyncVerdict =
+  "pending" | "in_sync" | "inconsistent" | "blocked";
 
 /** Records what the verification pass concluded, with the numbers behind it. */
 export async function recordSyncVerdict(

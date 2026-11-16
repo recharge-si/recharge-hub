@@ -176,8 +176,7 @@ export async function exportValues(
 /* -------------------------------------------------------------------------- */
 
 export type PreviewOutcome =
-  | { ok: true; importId: string }
-  | { ok: false; message: string };
+  { ok: true; importId: string } | { ok: false; message: string };
 
 /** Why a text is not a CSV a person made, or null. */
 export function refuseFile(name: string, text: string): string | null {
@@ -237,9 +236,7 @@ const CLAIM_MESSAGE = {
   nothing: "There is nothing to apply in that preview.",
 } as const;
 
-export type ApplyOutcome =
-  | { ok: true }
-  | { ok: false; message: string };
+export type ApplyOutcome = { ok: true } | { ok: false; message: string };
 
 export async function applyValues(
   principal: Principal,
@@ -256,7 +253,10 @@ export async function applyValues(
       { singletonKey: bulkValuesKey(importId) },
     );
   } catch (error) {
-    getLogger().error({ err: error, shop: shopDomain }, "Bulk values not queued");
+    getLogger().error(
+      { err: error, shop: shopDomain },
+      "Bulk values not queued",
+    );
     // Claimed a moment ago: without the job it would stay queued.
     await finishRun(shopDomain, importId, {
       status: "failed",

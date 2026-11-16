@@ -97,20 +97,34 @@ describe("glossaryConflict", () => {
 
 describe("opening the overrides dialog from Store context", () => {
   it("round-trips a term, its translation and its language through the address", () => {
-    const url = glossaryUrl({ sourceTerm: "Foil", targetTerm: "Hidrokrilo", targetLocale: "sl" });
-    expect(url).toBe("/app/translations/glossary?term=Foil&translation=Hidrokrilo&locale=sl");
-    expect(glossaryPrefill(new URL(`https://x.test${url}`).searchParams)).toEqual({
+    const url = glossaryUrl({
       sourceTerm: "Foil",
       targetTerm: "Hidrokrilo",
       targetLocale: "sl",
     });
-    expect(glossaryUrl({ sourceTerm: "Wing" })).toBe("/app/translations/glossary?term=Wing");
+    expect(url).toBe(
+      "/app/translations/glossary?term=Foil&translation=Hidrokrilo&locale=sl",
+    );
+    expect(
+      glossaryPrefill(new URL(`https://x.test${url}`).searchParams),
+    ).toEqual({
+      sourceTerm: "Foil",
+      targetTerm: "Hidrokrilo",
+      targetLocale: "sl",
+    });
+    expect(glossaryUrl({ sourceTerm: "Wing" })).toBe(
+      "/app/translations/glossary?term=Wing",
+    );
   });
 
   it("opens nothing without a term, and drops a locale that is not one", () => {
     expect(glossaryPrefill(new URLSearchParams(""))).toBeNull();
-    expect(glossaryPrefill(new URLSearchParams("translation=x&locale=sl"))).toBeNull();
-    expect(glossaryPrefill(new URLSearchParams("term=Foil&locale=not%20a%20locale"))).toEqual({
+    expect(
+      glossaryPrefill(new URLSearchParams("translation=x&locale=sl")),
+    ).toBeNull();
+    expect(
+      glossaryPrefill(new URLSearchParams("term=Foil&locale=not%20a%20locale")),
+    ).toEqual({
       sourceTerm: "Foil",
       targetTerm: "",
       targetLocale: "",

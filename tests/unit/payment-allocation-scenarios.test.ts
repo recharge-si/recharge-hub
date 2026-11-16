@@ -48,8 +48,18 @@ const SOURCE_B = "src-b";
 function shares(aMinor: number, bMinor: number, orderTotalMinor: number) {
   return splitOrderMoney({
     perSource: [
-      { sourceId: SOURCE_A, sourceCode: "A", kind: "own", lineTotalMinor: aMinor },
-      { sourceId: SOURCE_B, sourceCode: "B", kind: "own", lineTotalMinor: bMinor },
+      {
+        sourceId: SOURCE_A,
+        sourceCode: "A",
+        kind: "own",
+        lineTotalMinor: aMinor,
+      },
+      {
+        sourceId: SOURCE_B,
+        sourceCode: "B",
+        kind: "own",
+        lineTotalMinor: bMinor,
+      },
     ],
     orderTotalMinor,
     shippingMinor: 0,
@@ -71,7 +81,10 @@ function payable(
 }
 
 let sequence = 0;
-function capture(amountMinor: number, at = "2026-01-05T09:00:00Z"): OrderTransaction {
+function capture(
+  amountMinor: number,
+  at = "2026-01-05T09:00:00Z",
+): OrderTransaction {
   sequence += 1;
   return {
     shopifyTransactionId: `t${sequence}`,
@@ -85,7 +98,10 @@ function capture(amountMinor: number, at = "2026-01-05T09:00:00Z"): OrderTransac
   };
 }
 
-function refund(amountMinor: number, at = "2026-02-01T09:00:00Z"): OrderTransaction {
+function refund(
+  amountMinor: number,
+  at = "2026-02-01T09:00:00Z",
+): OrderTransaction {
   sequence += 1;
   return {
     shopifyTransactionId: `t${sequence}`,
@@ -136,7 +152,12 @@ function markPaidFor(
     currencyCode: "EUR",
     partner: { customer: "Ana Novak" },
     lines: [
-      { code: "SKU-A", amount: 1, priceWithTaxMinor: 10_000, taxFactor: "0.22" },
+      {
+        code: "SKU-A",
+        amount: 1,
+        priceWithTaxMinor: 10_000,
+        taxFactor: "0.22",
+      },
     ],
     payments: result.entries
       .filter((entry) => entry.documentKey === documentKey)
@@ -273,9 +294,9 @@ describe("a second partial payment arriving later", () => {
   it("is unchanged by reconciling again with the same ledger", () => {
     // Idempotence at the level that matters: identical bytes mean the write
     // path compares them equal and sends nothing.
-    expect(JSON.stringify(markPaidFor(documents, [first, second], SOURCE_A))).toBe(
+    expect(
       JSON.stringify(markPaidFor(documents, [first, second], SOURCE_A)),
-    );
+    ).toBe(JSON.stringify(markPaidFor(documents, [first, second], SOURCE_A)));
   });
 });
 
@@ -329,14 +350,16 @@ describe("warehouse redistribution after the money arrived", () => {
 
   it("moves the whole payment when the whole order moves", () => {
     const before = shares(30_000, 0, 30_000).map((share) => payable(share));
-    expect(allocatedTotalFor(
-      allocatePayments({
-        documents: before,
-        receipts: receiptsOf(paid),
-        strategy: "proportional",
-      }).entries,
-      SOURCE_A,
-    )).toBe(30_000);
+    expect(
+      allocatedTotalFor(
+        allocatePayments({
+          documents: before,
+          receipts: receiptsOf(paid),
+          strategy: "proportional",
+        }).entries,
+        SOURCE_A,
+      ),
+    ).toBe(30_000);
 
     // A now holds nothing and is retired; B holds everything.
     const after = [

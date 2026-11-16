@@ -26,12 +26,7 @@ export const TRANSLATION_ROUTES = {
 } as const;
 
 export type TranslationsSection =
-  | "languages"
-  | "editor"
-  | "syncs"
-  | "context"
-  | "glossary"
-  | "usage";
+  "languages" | "editor" | "syncs" | "context" | "glossary" | "usage";
 
 export const TRANSLATIONS_SECTIONS: ReadonlyArray<{
   key: TranslationsSection;
@@ -139,7 +134,9 @@ export interface GlossaryPrefill {
  * dialog with those values so the merchant only confirms. Values are
  * clipped; a locale that is not a locale code is dropped.
  */
-export function glossaryPrefill(search: URLSearchParams): GlossaryPrefill | null {
+export function glossaryPrefill(
+  search: URLSearchParams,
+): GlossaryPrefill | null {
   const sourceTerm = (search.get("term") ?? "").trim().slice(0, 200);
   if (sourceTerm === "") return null;
   const locale = (search.get("locale") ?? "").trim();
@@ -151,7 +148,9 @@ export function glossaryPrefill(search: URLSearchParams): GlossaryPrefill | null
 }
 
 /** The address that opens the overrides dialog prefilled. */
-export function glossaryUrl(prefill: Partial<GlossaryPrefill> & { sourceTerm: string }): string {
+export function glossaryUrl(
+  prefill: Partial<GlossaryPrefill> & { sourceTerm: string },
+): string {
   const search = new URLSearchParams();
   search.set("term", prefill.sourceTerm);
   if (prefill.targetTerm) search.set("translation", prefill.targetTerm);

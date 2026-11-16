@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import { SALES_ORDER_DEFAULTS } from "~/adapters/db/repositories/sales-order-setting.server";
-import { classifyQuantities, type CanonicalLine } from "~/domain/orders/canonical";
+import {
+  classifyQuantities,
+  type CanonicalLine,
+} from "~/domain/orders/canonical";
 import { splitOrderMoney } from "~/domain/money/split";
 import {
   planDocuments,
@@ -157,9 +160,7 @@ describe("a shop that turns the split back on", () => {
         { supplySourceId: "main", lines: [{ sku: "A", quantity: 2 }] },
         { supplySourceId: "spare", lines: [{ sku: "B", quantity: 1 }] },
       ],
-      existing: [
-        existing({ supplySourceId: null, countCode: "SH-1050" }),
-      ],
+      existing: [existing({ supplySourceId: null, countCode: "SH-1050" })],
     });
 
     expect(kinds(actions)).toEqual([

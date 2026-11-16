@@ -156,7 +156,8 @@ export async function handleReconcileOrders(job: Job<unknown>): Promise<void> {
       const updatedAt = payload.updated_at;
       if (typeof updatedAt === "string") {
         const at = new Date(updatedAt);
-        if (!lastSeenUpdatedAt || at > lastSeenUpdatedAt) lastSeenUpdatedAt = at;
+        if (!lastSeenUpdatedAt || at > lastSeenUpdatedAt)
+          lastSeenUpdatedAt = at;
       }
 
       /*
@@ -287,7 +288,9 @@ async function recoverStuckOrders(
       shopifyDeletedAt: null,
       updatedAt: { lt: new Date(Date.now() - STUCK_AFTER_MS) },
       documents: { none: {} },
-      lines: { some: { allocations: { some: { supplySourceId: { not: null } } } } },
+      lines: {
+        some: { allocations: { some: { supplySourceId: { not: null } } } },
+      },
     },
     select: {
       id: true,
@@ -321,7 +324,11 @@ async function recoverStuckOrders(
      */
     await enqueue(
       QUEUES.reconcileOrder,
-      { shopDomain: principal.shopDomain, orderId: order.id, reason: "recovery" },
+      {
+        shopDomain: principal.shopDomain,
+        orderId: order.id,
+        reason: "recovery",
+      },
       { singletonKey: `reconcile:${order.id}:recover` },
     );
 
@@ -336,7 +343,11 @@ async function recoverStuckOrders(
     });
 
     log.warn(
-      { shop: principal.shopDomain, orderId: order.id, sources: sourceIds.length },
+      {
+        shop: principal.shopDomain,
+        orderId: order.id,
+        sources: sourceIds.length,
+      },
       "Re-queued an allocated order with nothing written",
     );
   }

@@ -27,7 +27,9 @@ export function newCoverage(): CoverageAccumulator {
 }
 
 /** An accumulator carrying on from rows counted so far, e.g. by an earlier pass. */
-export function coverageFrom(rows: readonly CoverageRow[]): CoverageAccumulator {
+export function coverageFrom(
+  rows: readonly CoverageRow[],
+): CoverageAccumulator {
   return new Map(
     rows.map((row) => [keyOf(row.locale, row.resourceType), { ...row }]),
   );

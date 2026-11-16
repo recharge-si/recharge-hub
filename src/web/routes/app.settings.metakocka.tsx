@@ -31,10 +31,7 @@ import {
 import { listWarehouses } from "~/adapters/metakocka/warehouses";
 import { getEnv } from "~/adapters/config/env.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
-import {
-  isUserKnown,
-  principalFromSession,
-} from "~/web/lib/principal.server";
+import { isUserKnown, principalFromSession } from "~/web/lib/principal.server";
 
 /**
  * The MetaKocka connection screen (CLAUDE.md section 13, M2).
@@ -412,11 +409,11 @@ export default function MetakockaSettings() {
                 </s-paragraph>
 
                 {/*
-                  * The URL, shown so it can be copied.
-                  *
-                  * Read-only rather than a link: it is not something to open,
-                  * it is something to paste into MetaKocka.
-                  */}
+                 * The URL, shown so it can be copied.
+                 *
+                 * Read-only rather than a link: it is not something to open,
+                 * it is something to paste into MetaKocka.
+                 */}
                 <s-box maxInlineSize="640px">
                   <s-text-field
                     label="Webhook URL for MetaKocka"
@@ -450,7 +447,11 @@ export default function MetakockaSettings() {
         <s-section heading="Connection status">
           <s-stack direction="block" gap="base">
             <s-stack direction="inline" gap="base" alignItems="center">
-              <s-badge {...(summary?.lastVerifiedAt ? {} : { tone: "caution" as const })}>
+              <s-badge
+                {...(summary?.lastVerifiedAt
+                  ? {}
+                  : { tone: "caution" as const })}
+              >
                 {summary?.lastVerifiedAt ? "Verified" : "Not verified"}
               </s-badge>
               <s-text>
@@ -467,7 +468,6 @@ export default function MetakockaSettings() {
                   Test connection
                 </s-button>
               </Form>
-
             </s-stack>
           </s-stack>
         </s-section>
@@ -476,11 +476,11 @@ export default function MetakockaSettings() {
           <s-section heading="Disconnect">
             <s-stack direction="block" gap="base">
               <s-paragraph>
-                Disconnecting erases everything this app holds for this
-                store: the connection, the warehouse and location mappings
-                and their stock directions, profit centres, payment mappings,
-                the product register, order history and the activity log.
-                Setup starts again from the first step.
+                Disconnecting erases everything this app holds for this store:
+                the connection, the warehouse and location mappings and their
+                stock directions, profit centres, payment mappings, the product
+                register, order history and the activity log. Setup starts again
+                from the first step.
               </s-paragraph>
 
               <s-paragraph>

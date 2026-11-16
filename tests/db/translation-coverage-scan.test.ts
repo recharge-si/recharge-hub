@@ -46,23 +46,68 @@ describeDatabase("coverage count", () => {
   });
 
   it("moves only the current run, and ends it", async () => {
-    await startCoverageScan(tenant.principal, { runId: "a", typesTotal: 12, expectedResources: null }, now);
-    await startCoverageScan(tenant.principal, { runId: "b", typesTotal: 12, expectedResources: 40 }, now);
-    const progress = { typesDone: 1, currentType: "COLLECTION", resourcesRead: 10, unread: [] };
-    expect(await recordScanProgress(tenant.principal, "a", progress, now)).toBe(false);
-    expect(await recordScanProgress(tenant.principal, "b", progress, now)).toBe(true);
+    await startCoverageScan(
+      tenant.principal,
+      { runId: "a", typesTotal: 12, expectedResources: null },
+      now,
+    );
+    await startCoverageScan(
+      tenant.principal,
+      { runId: "b", typesTotal: 12, expectedResources: 40 },
+      now,
+    );
+    const progress = {
+      typesDone: 1,
+      currentType: "COLLECTION",
+      resourcesRead: 10,
+      unread: [],
+    };
+    expect(await recordScanProgress(tenant.principal, "a", progress, now)).toBe(
+      false,
+    );
+    expect(await recordScanProgress(tenant.principal, "b", progress, now)).toBe(
+      true,
+    );
     const running = await getCoverageScan(tenant.principal);
-    expect(running).toMatchObject({ runId: "b", status: "running", typesDone: 1, resourcesRead: 10, expectedResources: 40 });
+    expect(running).toMatchObject({
+      runId: "b",
+      status: "running",
+      typesDone: 1,
+      resourcesRead: 10,
+      expectedResources: 40,
+    });
     expect(isScanActive(running, now)).toBe(true);
 
-    await finishCoverageScan(tenant.principal, "b", { status: "done", error: null }, now);
-    expect(isScanActive(await getCoverageScan(tenant.principal), now)).toBe(false);
+    await finishCoverageScan(
+      tenant.principal,
+      "b",
+      { status: "done", error: null },
+      now,
+    );
+    expect(isScanActive(await getCoverageScan(tenant.principal), now)).toBe(
+      false,
+    );
   });
 
   it("replaces one type's rows and leaves the others", async () => {
-    await replaceCoverageForType(tenant.principal, "PRODUCT", [row("PRODUCT", 5)], now);
-    await replaceCoverageForType(tenant.principal, "PAGE", [row("PAGE", 2)], now);
-    await replaceCoverageForType(tenant.principal, "PRODUCT", [row("PRODUCT", 9)], now);
+    await replaceCoverageForType(
+      tenant.principal,
+      "PRODUCT",
+      [row("PRODUCT", 5)],
+      now,
+    );
+    await replaceCoverageForType(
+      tenant.principal,
+      "PAGE",
+      [row("PAGE", 2)],
+      now,
+    );
+    await replaceCoverageForType(
+      tenant.principal,
+      "PRODUCT",
+      [row("PRODUCT", 9)],
+      now,
+    );
     const coverage = await getCoverage(tenant.principal);
     expect(
       coverage.rows.map((r) => [r.resourceType, r.translated]).sort(),

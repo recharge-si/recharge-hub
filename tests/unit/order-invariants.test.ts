@@ -139,12 +139,12 @@ describe("the quantity invariant", () => {
 
 describe("the value invariant", () => {
   it("allows a cent of rounding and nothing more", () => {
-    expect(
-      verifyValue({ expectedMinor: 20_900, actualMinor: 20_901 }).ok,
-    ).toBe(true);
-    expect(
-      verifyValue({ expectedMinor: 20_900, actualMinor: 20_902 }).ok,
-    ).toBe(false);
+    expect(verifyValue({ expectedMinor: 20_900, actualMinor: 20_901 }).ok).toBe(
+      true,
+    );
+    expect(verifyValue({ expectedMinor: 20_900, actualMinor: 20_902 }).ok).toBe(
+      false,
+    );
     expect(DEFAULT_VALUE_TOLERANCE_MINOR).toBe(1);
   });
 

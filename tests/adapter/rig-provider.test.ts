@@ -47,7 +47,11 @@ describe("ClaudePoolProvider", () => {
   it("returns the parsed reply with the model and a latency", async () => {
     script(scripted(0, envelope('{"a":1}')));
     const result = await provider().complete("hi", ANY, { timeoutMs: 5000 });
-    expect(result).toMatchObject({ ok: true, value: { a: 1 }, model: "claude-sonnet-fake" });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { a: 1 },
+      model: "claude-sonnet-fake",
+    });
   });
 
   it("spawns with an argument array, tools off and no extra directories", async () => {
@@ -80,12 +84,16 @@ describe("ClaudePoolProvider", () => {
 
   it("maps exit 75 to exhausted and any other failure to error", async () => {
     script(scripted(75));
-    expect(await provider().complete("hi", ANY, { timeoutMs: 5000 })).toMatchObject({
+    expect(
+      await provider().complete("hi", ANY, { timeoutMs: 5000 }),
+    ).toMatchObject({
       ok: false,
       reason: "exhausted",
     });
     script(scripted(1));
-    expect(await provider().complete("hi", ANY, { timeoutMs: 5000 })).toMatchObject({
+    expect(
+      await provider().complete("hi", ANY, { timeoutMs: 5000 }),
+    ).toMatchObject({
       ok: false,
       reason: "error",
     });

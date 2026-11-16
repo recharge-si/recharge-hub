@@ -116,8 +116,9 @@ export class ExportPortalClient {
   async categorize(
     input: CategorizeRequest,
   ): Promise<z.infer<typeof replies.categorize>["results"]> {
-    return (await this.call("POST", "/ai/categorize", input, replies.categorize))
-      .results;
+    return (
+      await this.call("POST", "/ai/categorize", input, replies.categorize)
+    ).results;
   }
 
   /** Values for the attributes described, read from one product's data. */

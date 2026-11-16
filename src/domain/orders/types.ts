@@ -42,11 +42,7 @@ export const FINANCIAL_STATUSES: readonly FinancialStatus[] = [
  * when it left the building last week.
  */
 export type FulfillmentState =
-  | "unfulfilled"
-  | "partial"
-  | "fulfilled"
-  | "restocked"
-  | "other";
+  "unfulfilled" | "partial" | "fulfilled" | "restocked" | "other";
 
 export interface OrderLineSnapshot {
   shopifyLineItemId: string;

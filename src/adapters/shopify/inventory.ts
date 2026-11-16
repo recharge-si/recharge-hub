@@ -304,9 +304,7 @@ function assertOneLocation(
 ): void {
   const other = [
     ...new Set(
-      items
-        .map((item) => item.locationId)
-        .filter((id) => id !== locationId),
+      items.map((item) => item.locationId).filter((id) => id !== locationId),
     ),
   ];
   if (other.length > 0) {

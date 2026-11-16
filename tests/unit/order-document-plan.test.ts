@@ -114,7 +114,10 @@ describe("an order edited in Shopify (§4, §5, §6)", () => {
         ]),
       ],
       existing: [
-        existing({ supplySourceId: "a", lines: [{ sku: "SKU-A", quantity: 1 }] }),
+        existing({
+          supplySourceId: "a",
+          lines: [{ sku: "SKU-A", quantity: 1 }],
+        }),
       ],
     });
 
@@ -126,7 +129,10 @@ describe("an order edited in Shopify (§4, §5, §6)", () => {
     const actions = planDocuments({
       desired: [desired("a", [{ sku: "SKU-A", quantity: 5 }])],
       existing: [
-        existing({ supplySourceId: "a", lines: [{ sku: "SKU-A", quantity: 2 }] }),
+        existing({
+          supplySourceId: "a",
+          lines: [{ sku: "SKU-A", quantity: 2 }],
+        }),
       ],
     });
 
@@ -161,7 +167,10 @@ describe("a line moving between locations (§7)", () => {
     const actions = planDocuments({
       desired: [desired("b", [{ sku: "SKU-A", quantity: 2 }])],
       existing: [
-        existing({ supplySourceId: "a", lines: [{ sku: "SKU-A", quantity: 2 }] }),
+        existing({
+          supplySourceId: "a",
+          lines: [{ sku: "SKU-A", quantity: 2 }],
+        }),
       ],
     });
 
@@ -179,7 +188,10 @@ describe("a line moving between locations (§7)", () => {
           retired: true,
           lines: [{ sku: "SKU-A", quantity: 2 }],
         }),
-        existing({ supplySourceId: "b", lines: [{ sku: "SKU-A", quantity: 2 }] }),
+        existing({
+          supplySourceId: "b",
+          lines: [{ sku: "SKU-A", quantity: 2 }],
+        }),
       ],
     });
 
@@ -197,7 +209,10 @@ describe("a partial move between locations (§8)", () => {
         desired("b", [{ sku: "SKU-A", quantity: 3 }]),
       ],
       existing: [
-        existing({ supplySourceId: "a", lines: [{ sku: "SKU-A", quantity: 5 }] }),
+        existing({
+          supplySourceId: "a",
+          lines: [{ sku: "SKU-A", quantity: 5 }],
+        }),
       ],
     });
 
@@ -237,8 +252,14 @@ describe("splitting and merging (§9)", () => {
         ]),
       ],
       existing: [
-        existing({ supplySourceId: "a", lines: [{ sku: "SKU-A", quantity: 1 }] }),
-        existing({ supplySourceId: "b", lines: [{ sku: "SKU-B", quantity: 1 }] }),
+        existing({
+          supplySourceId: "a",
+          lines: [{ sku: "SKU-A", quantity: 1 }],
+        }),
+        existing({
+          supplySourceId: "b",
+          lines: [{ sku: "SKU-B", quantity: 1 }],
+        }),
       ],
     });
 
@@ -297,10 +318,13 @@ describe("comparing lines", () => {
 
   it("ignores zero-quantity lines", () => {
     expect(
-      sameLines([{ sku: "A", quantity: 2 }], [
-        { sku: "A", quantity: 2 },
-        { sku: "B", quantity: 0 },
-      ]),
+      sameLines(
+        [{ sku: "A", quantity: 2 }],
+        [
+          { sku: "A", quantity: 2 },
+          { sku: "B", quantity: 0 },
+        ],
+      ),
     ).toBe(true);
   });
 

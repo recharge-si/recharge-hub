@@ -154,7 +154,10 @@ export function planDocuments(input: {
     // A source can only have one document; if history left more than one, the
     // written one is authoritative and the rest are retired below.
     const current = existingBySource.get(document.supplySourceId);
-    if (!current || (document.status === "written" && current.status !== "written")) {
+    if (
+      !current ||
+      (document.status === "written" && current.status !== "written")
+    ) {
       existingBySource.set(document.supplySourceId, document);
     }
   }
@@ -223,7 +226,9 @@ export function planDocuments(input: {
         !document.supplySourceId ||
         !desiredSources.has(document.supplySourceId),
     )
-    .sort((a, b) => (a.countCode < b.countCode ? -1 : a.countCode > b.countCode ? 1 : 0));
+    .sort((a, b) =>
+      a.countCode < b.countCode ? -1 : a.countCode > b.countCode ? 1 : 0,
+    );
 
   for (const document of retiring) {
     actions.push({

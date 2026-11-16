@@ -47,7 +47,11 @@ export function wordsOf(value: string): string[] {
 }
 
 export function isAllCaps(word: string): boolean {
-  return /\p{Lu}/u.test(word) && word === word.toUpperCase() && /^[\p{Lu}\p{N}&.-]+$/u.test(word);
+  return (
+    /\p{Lu}/u.test(word) &&
+    word === word.toUpperCase() &&
+    /^[\p{Lu}\p{N}&.-]+$/u.test(word)
+  );
 }
 
 export function isCapitalised(word: string): boolean {
@@ -69,7 +73,11 @@ export function looksLikeCode(word: string): boolean {
   const hasLetter = /\p{L}/u.test(word);
   const hasDigit = /\p{N}/u.test(word);
   if (hasLetter && hasDigit)
-    return /\p{Lu}/u.test(word) || /[-./:]/.test(word) || (word.match(/\p{N}+/gu) ?? []).length >= 2;
+    return (
+      /\p{Lu}/u.test(word) ||
+      /[-./:]/.test(word) ||
+      (word.match(/\p{N}+/gu) ?? []).length >= 2
+    );
   // A token like "RS:X" or "V8" style abbreviations with punctuation inside.
   return /^[\p{Lu}]{1,4}[:./-][\p{Lu}\p{N}]{1,4}$/u.test(word);
 }
@@ -88,29 +96,72 @@ export function numbersOf(value: string): string[] {
 /** Placeholders a template engine would fill: `{{name}}`, `{0}`, `%s`, `%1$d`, `${x}`, `[[x]]`. */
 export function placeholdersOf(value: string): string[] {
   const matches =
-    value.match(/\{\{\s*[^{}]+?\s*\}\}|\$\{[^}]+\}|\{[A-Za-z0-9_.]+\}|\[\[[^\]]+\]\]|%(?:\d+\$)?[sdif]/g) ??
-    [];
+    value.match(
+      /\{\{\s*[^{}]+?\s*\}\}|\$\{[^}]+\}|\{[A-Za-z0-9_.]+\}|\[\[[^\]]+\]\]|%(?:\d+\$)?[sdif]/g,
+    ) ?? [];
   return matches.map((token) => token.replace(/\s+/g, "")).sort();
 }
 
 /** URLs and e-mail addresses, which are never translated. */
 export function urlsOf(value: string): string[] {
   const matches =
-    value.match(/https?:\/\/[^\s"'<>)]+|mailto:[^\s"'<>)]+|[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? [];
+    value.match(
+      /https?:\/\/[^\s"'<>)]+|mailto:[^\s"'<>)]+|[\w.+-]+@[\w-]+\.[\w.-]+/g,
+    ) ?? [];
   // `&amp;` in a link's query is how HTML spells `&`; either way is the same URL.
-  return matches.map((token) => token.replace(/&amp;/gi, "&").replace(/[.,;:]+$/, "")).sort();
+  return matches
+    .map((token) => token.replace(/&amp;/gi, "&").replace(/[.,;:]+$/, ""))
+    .sort();
 }
 
 /** Elements that never have children; `<br>`, `<br/>` and `<br />` are one tag. */
 const VOID_ELEMENTS: ReadonlySet<string> = new Set([
-  "area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr",
+  "area",
+  "base",
+  "br",
+  "col",
+  "embed",
+  "hr",
+  "img",
+  "input",
+  "link",
+  "meta",
+  "param",
+  "source",
+  "track",
+  "wbr",
 ]);
 
 /** What a shopper sees even without text: never dropped as an empty element. */
 const CONTENT_ELEMENTS: ReadonlySet<string> = new Set([
-  "img", "iframe", "video", "audio", "source", "embed", "object", "picture", "svg", "input", "hr", "track",
-  "table", "thead", "tbody", "tfoot", "tr", "td", "th", "caption", "colgroup", "col",
-  "ul", "ol", "li", "dl", "dt", "dd",
+  "img",
+  "iframe",
+  "video",
+  "audio",
+  "source",
+  "embed",
+  "object",
+  "picture",
+  "svg",
+  "input",
+  "hr",
+  "track",
+  "table",
+  "thead",
+  "tbody",
+  "tfoot",
+  "tr",
+  "td",
+  "th",
+  "caption",
+  "colgroup",
+  "col",
+  "ul",
+  "ol",
+  "li",
+  "dl",
+  "dt",
+  "dd",
 ]);
 
 /** Spellings of one element that render the same. */
@@ -118,9 +169,34 @@ const SAME_ELEMENT: Readonly<Record<string, string>> = { b: "strong", i: "em" };
 
 /** A start tag of one of these closes an open `<p>`, as a browser does. */
 const CLOSES_P: ReadonlySet<string> = new Set([
-  "address", "article", "aside", "blockquote", "details", "div", "dl", "fieldset", "figcaption", "figure",
-  "footer", "form", "h1", "h2", "h3", "h4", "h5", "h6", "header", "hr", "main", "nav", "ol", "p", "pre",
-  "section", "table", "ul",
+  "address",
+  "article",
+  "aside",
+  "blockquote",
+  "details",
+  "div",
+  "dl",
+  "fieldset",
+  "figcaption",
+  "figure",
+  "footer",
+  "form",
+  "h1",
+  "h2",
+  "h3",
+  "h4",
+  "h5",
+  "h6",
+  "header",
+  "hr",
+  "main",
+  "nav",
+  "ol",
+  "p",
+  "pre",
+  "section",
+  "table",
+  "ul",
 ]);
 
 /**
@@ -129,21 +205,43 @@ const CLOSES_P: ReadonlySet<string> = new Set([
  * the previous row and its cell. Supplier HTML leaves these unclosed and a
  * model writing the answer closes them; both are the same document.
  */
-const IMPLIED_END: Readonly<Record<string, { closes: readonly string[]; within: readonly string[] }>> = {
+const IMPLIED_END: Readonly<
+  Record<string, { closes: readonly string[]; within: readonly string[] }>
+> = {
   li: { closes: ["li"], within: ["ul", "ol"] },
   dt: { closes: ["dt", "dd"], within: ["dl"] },
   dd: { closes: ["dt", "dd"], within: ["dl"] },
-  tr: { closes: ["tr", "td", "th"], within: ["table", "thead", "tbody", "tfoot"] },
+  tr: {
+    closes: ["tr", "td", "th"],
+    within: ["table", "thead", "tbody", "tfoot"],
+  },
   td: { closes: ["td", "th"], within: ["tr", "table"] },
   th: { closes: ["td", "th"], within: ["tr", "table"] },
-  thead: { closes: ["thead", "tbody", "tfoot", "tr", "td", "th"], within: ["table"] },
-  tbody: { closes: ["thead", "tbody", "tfoot", "tr", "td", "th"], within: ["table"] },
-  tfoot: { closes: ["thead", "tbody", "tfoot", "tr", "td", "th"], within: ["table"] },
+  thead: {
+    closes: ["thead", "tbody", "tfoot", "tr", "td", "th"],
+    within: ["table"],
+  },
+  tbody: {
+    closes: ["thead", "tbody", "tfoot", "tr", "td", "th"],
+    within: ["table"],
+  },
+  tfoot: {
+    closes: ["thead", "tbody", "tfoot", "tr", "td", "th"],
+    within: ["table"],
+  },
   option: { closes: ["option"], within: ["select", "datalist"] },
 };
 
 /** Where an open `<p>` stops being reachable (the HTML "button scope"). */
-const P_SCOPE: ReadonlySet<string> = new Set(["button", "caption", "object", "table", "td", "th", "template"]);
+const P_SCOPE: ReadonlySet<string> = new Set([
+  "button",
+  "caption",
+  "object",
+  "table",
+  "td",
+  "th",
+  "template",
+]);
 
 const NO_BOUNDARY: ReadonlySet<string> = new Set();
 
@@ -168,7 +266,12 @@ function htmlTree(value: string): HtmlNode {
     .replace(/<!--[\s\S]*?(?:-->|$)/g, "")
     .replace(/<![^>]*>|<\?[^>]*>/g, "")
     .replace(/(<(script|style)\b[^>]*>)[\s\S]*?(<\/\2\s*>)/gi, "$1$3");
-  const root: HtmlNode = { name: "#root", attrs: "", children: [], text: false };
+  const root: HtmlNode = {
+    name: "#root",
+    attrs: "",
+    children: [],
+    text: false,
+  };
   const stack: HtmlNode[] = [root];
   const top = () => stack[stack.length - 1]!;
   const markText = (text: string) => {
@@ -179,7 +282,11 @@ function htmlTree(value: string): HtmlNode {
    * or -1: the innermost one, or with `outermost` the outermost, so a `<tr>`
    * closes the open row and not only its cell.
    */
-  const openIndex = (names: readonly string[], boundary: ReadonlySet<string>, outermost = false) => {
+  const openIndex = (
+    names: readonly string[],
+    boundary: ReadonlySet<string>,
+    outermost = false,
+  ) => {
     let found = -1;
     for (let i = stack.length - 1; i > 0; i -= 1) {
       const node = stack[i]!;
@@ -220,7 +327,12 @@ function htmlTree(value: string): HtmlNode {
       if (index > 0) stack.length = index;
     }
 
-    const node: HtmlNode = { name, attrs: meaningfulAttributes(rest), children: [], text: false };
+    const node: HtmlNode = {
+      name,
+      attrs: meaningfulAttributes(rest),
+      children: [],
+      text: false,
+    };
     top().children.push(node);
     if (!VOID_ELEMENTS.has(name) && !/\/\s*$/.test(rest)) stack.push(node);
   }
@@ -231,7 +343,9 @@ function htmlTree(value: string): HtmlNode {
 /** `href` and `src`, entities decoded and quotes dropped, in a fixed order. */
 function meaningfulAttributes(raw: string): string {
   const attrs: string[] = [];
-  for (const attr of raw.matchAll(/(?:^|\s)(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi)) {
+  for (const attr of raw.matchAll(
+    /(?:^|\s)(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
+  )) {
     const value = (attr[2] ?? "")
       .replace(/^["']|["']$/g, "")
       .replace(/&amp;|&#0*38;/gi, "&")
@@ -248,9 +362,12 @@ function meaningfulAttributes(raw: string): string {
  * keeping them is not what a shopper would notice.
  */
 function prune(node: HtmlNode): HtmlNode | null {
-  const children = node.children.map(prune).filter((child): child is HtmlNode => child !== null);
+  const children = node.children
+    .map(prune)
+    .filter((child): child is HtmlNode => child !== null);
   const kept = { ...node, children };
-  if (node.name === "#root" || node.text || CONTENT_ELEMENTS.has(node.name)) return kept;
+  if (node.name === "#root" || node.text || CONTENT_ELEMENTS.has(node.name))
+    return kept;
   if (node.name === "a" && node.attrs !== "") return kept;
   if (children.some((child) => child.name !== "br")) return kept;
   return null;
@@ -288,7 +405,10 @@ export function htmlSkeleton(value: string): string[] {
  * Where two skeletons first part, for the correction request: the model
  * is told which tag it dropped or added rather than only that one moved.
  */
-export function skeletonDifference(before: readonly string[], after: readonly string[]): string | null {
+export function skeletonDifference(
+  before: readonly string[],
+  after: readonly string[],
+): string | null {
   const length = Math.max(before.length, after.length);
   for (let i = 0; i < length; i += 1) {
     if (before[i] === after[i]) continue;
@@ -320,7 +440,8 @@ function blankText(node: unknown): unknown {
   if (node && typeof node === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(node)) {
-      out[key] = key === "value" && typeof child === "string" ? "" : blankText(child);
+      out[key] =
+        key === "value" && typeof child === "string" ? "" : blankText(child);
     }
     return out;
   }
@@ -355,8 +476,13 @@ export function containsTerm(text: string, term: string): boolean {
   if (needle === "") return false;
   const haystack = normaliseTerm(text);
   if (haystack === needle) return true;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[\s-]+/g, "[\\s-]+");
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u").test(haystack);
+  const escaped = needle
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/[\s-]+/g, "[\\s-]+");
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`,
+    "u",
+  ).test(haystack);
 }
 
 /** Whether `term` occurs in `text` spelt exactly as given (case-sensitive), as whole words. */
@@ -364,11 +490,17 @@ export function containsExact(text: string, term: string): boolean {
   const needle = term.trim();
   if (needle === "") return false;
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u").test(text);
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`,
+    "u",
+  ).test(text);
 }
 
 /** Multiset difference: what is in `a` and not in `b`, counting repeats. */
-export function missingFrom(a: readonly string[], b: readonly string[]): string[] {
+export function missingFrom(
+  a: readonly string[],
+  b: readonly string[],
+): string[] {
   const counts = new Map<string, number>();
   for (const item of b) counts.set(item, (counts.get(item) ?? 0) + 1);
   const missing: string[] = [];

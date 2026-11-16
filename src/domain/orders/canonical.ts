@@ -180,7 +180,9 @@ export function classifyQuantities(
       external: totals.external,
       // Whatever the allocations called unresolved, plus whatever they did not
       // mention at all, plus the magnitude of any over-assignment.
-      unresolved: totals.unresolved + Math.abs(line.quantity - placed - totals.unresolved),
+      unresolved:
+        totals.unresolved +
+        Math.abs(line.quantity - placed - totals.unresolved),
     };
   });
 
@@ -336,14 +338,20 @@ export function groupBySupplySource(
   allocations: readonly CanonicalAllocation[],
 ): {
   bySource: Map<string, CanonicalAllocationLine[]>;
-  unmappedLocations: { shopifyLocationId: string; lines: CanonicalAllocationLine[] }[];
+  unmappedLocations: {
+    shopifyLocationId: string;
+    lines: CanonicalAllocationLine[];
+  }[];
   unassigned: CanonicalAllocationLine[];
 } {
   const bySource = new Map<string, CanonicalAllocationLine[]>();
   const unmapped = new Map<string, CanonicalAllocationLine[]>();
   const unassigned: CanonicalAllocationLine[] = [];
 
-  const add = (target: CanonicalAllocationLine[], line: CanonicalAllocationLine) => {
+  const add = (
+    target: CanonicalAllocationLine[],
+    line: CanonicalAllocationLine,
+  ) => {
     const existing = target.find(
       (entry) => entry.shopifyLineItemId === line.shopifyLineItemId,
     );

@@ -59,7 +59,9 @@ export function SourcesSummary({ headline }: { headline: SourcesHeadline }) {
                     : "never_run"
             }
             lastRun={
-              headline.lastRunAt ? { at: headline.lastRunAt, outcome: "" } : null
+              headline.lastRunAt
+                ? { at: headline.lastRunAt, outcome: "" }
+                : null
             }
             mode={headline.automatic ? "automatic" : "manual"}
             nextRunAt={headline.nextRunAt}

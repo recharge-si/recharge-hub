@@ -436,7 +436,9 @@ export default function ProductSetupSettings() {
                   {rig.enabled ? "Turn off" : "Turn on"}
                 </s-button>
               </CardHeader>
-              <s-text>{rig.enabled ? "The builder is on." : "The builder is off."}</s-text>
+              <s-text>
+                {rig.enabled ? "The builder is on." : "The builder is off."}
+              </s-text>
               {rig.roles.map((row) => (
                 <s-text key={row.role}>
                   {`${roleWord(row.role)}: ${row.complete} complete of ${row.products}, ${row.inStock} in stock${row.missing.length > 0 ? ` (missing ${row.missing.map((m) => `${m.key} x${m.count}`).join(", ")})` : ""}`}

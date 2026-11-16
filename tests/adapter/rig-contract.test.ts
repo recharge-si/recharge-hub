@@ -5,13 +5,7 @@ import { describe, expect, it } from "vitest";
 import { z } from "zod";
 
 import { RateLimiter } from "~/adapters/rig/rate-limit";
-import {
-  fail,
-  goodModel,
-  post,
-  read,
-  setup,
-} from "../support/rig-api-harness";
+import { fail, goodModel, post, read, setup } from "../support/rig-api-harness";
 import { FIXTURES, REFERENCE } from "../support/rig-fixtures";
 
 /**
@@ -50,8 +44,14 @@ const part = z.object({
   variantTitle: z.string().nullable(),
   url: z.string().nullable(),
   image: z.string().nullable(),
-  productUrl: z.string().regex(/^\/products\/[^/]+$/).nullable(),
-  imageUrl: z.string().regex(/^https:\/\//).nullable(),
+  productUrl: z
+    .string()
+    .regex(/^\/products\/[^/]+$/)
+    .nullable(),
+  imageUrl: z
+    .string()
+    .regex(/^https:\/\//)
+    .nullable(),
   vendor: z.string().nullable(),
   facts: z.array(
     z.object({
@@ -66,12 +66,18 @@ const part = z.object({
   available: z.boolean(),
   quantity: z.literal(1),
   why: z.string(),
-  specs: z.record(z.string(), z.union([z.string(), z.number(), z.array(z.string())])),
+  specs: z.record(
+    z.string(),
+    z.union([z.string(), z.number(), z.array(z.string())]),
+  ),
   derived: z.array(z.string()).optional(),
 });
 
 const buildResponse = z.object({
-  requestId: z.string().regex(/^rb_[0-9a-f]{24}$/).optional(),
+  requestId: z
+    .string()
+    .regex(/^rb_[0-9a-f]{24}$/)
+    .optional(),
   profile: z.record(z.string(), z.unknown()),
   needs: z.array(z.string()),
   rigs: z.array(
@@ -100,16 +106,23 @@ const buildResponse = z.object({
           currency: z.string(),
           why: z.string(),
           productUrl: z.string().nullable(),
-          imageUrl: z.string().regex(/^https:\/\//).nullable(),
+          imageUrl: z
+            .string()
+            .regex(/^https:\/\//)
+            .nullable(),
           vendor: z.string().nullable(),
           specs: z.record(z.string(), z.unknown()),
-          facts: z.array(z.object({ label: z.string(), value: z.string() }).passthrough()),
+          facts: z.array(
+            z.object({ label: z.string(), value: z.string() }).passthrough(),
+          ),
           derived: z.array(z.string()).optional(),
         }),
       ),
     }),
   ),
-  unmet: z.array(z.object({ role: z.string(), reason: z.string() }).passthrough()),
+  unmet: z.array(
+    z.object({ role: z.string(), reason: z.string() }).passthrough(),
+  ),
   warnings: z.array(z.object({ code: z.string(), message: z.string() })),
   mode: z.enum(["ai", "plain"]),
   snapshotAgeMinutes: z.number().nullable(),
@@ -130,7 +143,12 @@ describe("contract examples for the theme", () => {
     const { api } = setup();
     const request = {
       text: "82 kg, third season, freeride at 15 to 25 knots, I already own a boom",
-      answers: { ...REFERENCE, owns: ["boom"], ownedBoomMinCm: 150, ownedBoomMaxCm: 190 },
+      answers: {
+        ...REFERENCE,
+        owns: ["boom"],
+        ownedBoomMinCm: 150,
+        ownedBoomMaxCm: 190,
+      },
       locale: "en",
     };
     const response = await api.build(post(request));
@@ -152,15 +170,33 @@ describe("contract examples for the theme", () => {
     check("build-request-exclude", rebuildRequest);
     check("build-response-exclude", rebuilt);
 
-    check("error-invalid-body", await read(await api.build(post({ answers: { weightKg: 0 } }))));
-    check("error-text-too-long", await read(await api.build(post({ text: "x".repeat(1001) }))));
-    check("error-unauthorized", await read(await setup({ authenticate: async () => null }).api.build(post({ answers: REFERENCE }))));
+    check(
+      "error-invalid-body",
+      await read(await api.build(post({ answers: { weightKg: 0 } }))),
+    );
+    check(
+      "error-text-too-long",
+      await read(await api.build(post({ text: "x".repeat(1001) }))),
+    );
+    check(
+      "error-unauthorized",
+      await read(
+        await setup({ authenticate: async () => null }).api.build(
+          post({ answers: REFERENCE }),
+        ),
+      ),
+    );
 
     const off = setup();
     off.store.enabled = false;
-    check("error-not-ready", await read(await off.api.build(post({ answers: REFERENCE }))));
+    check(
+      "error-not-ready",
+      await read(await off.api.build(post({ answers: REFERENCE }))),
+    );
 
-    const limited = setup({ buildLimiter: new RateLimiter([{ ms: 60_000, limit: 1 }]) });
+    const limited = setup({
+      buildLimiter: new RateLimiter([{ ms: 60_000, limit: 1 }]),
+    });
     await limited.api.build(post({ answers: REFERENCE }));
     const refused = await limited.api.build(post({ answers: REFERENCE }));
     expect(refused.headers.get("Retry-After")).toBe("60");
@@ -168,7 +204,10 @@ describe("contract examples for the theme", () => {
   });
 
   it("explain: ai and plain", async () => {
-    const request = { text: "82 kg, intermediate, 15 to 25 knots", answers: { discipline: "windsurf" } };
+    const request = {
+      text: "82 kg, intermediate, 15 to 25 knots",
+      answers: { discipline: "windsurf" },
+    };
     const ai = setup({ script: goodModel() });
     const aiBody = await read(await ai.api.explain(post(request)));
     expect(explainResponse.parse(aiBody)).toBeTruthy();
@@ -176,7 +215,9 @@ describe("contract examples for the theme", () => {
     check("explain-response-ai", aiBody);
 
     const plain = setup({ script: () => fail("exhausted") });
-    const plainBody = await read(await plain.api.explain(post({ answers: REFERENCE })));
+    const plainBody = await read(
+      await plain.api.explain(post({ answers: REFERENCE })),
+    );
     expect(explainResponse.parse(plainBody)).toBeTruthy();
     check("explain-response-plain", plainBody);
   });
@@ -185,7 +226,9 @@ describe("contract examples for the theme", () => {
     const { api } = setup();
     const built = await read(await api.build(post({ answers: REFERENCE })));
     const request = {
-      variantIds: built["rigs"][0].items.map((item: { variantId: number }) => item.variantId),
+      variantIds: built["rigs"][0].items.map(
+        (item: { variantId: number }) => item.variantId,
+      ),
       answers: REFERENCE,
     };
     check("verify-request", request);
@@ -193,6 +236,9 @@ describe("contract examples for the theme", () => {
 
     const refused = { ...request, excludeVariantIds: [request.variantIds[0]] };
     check("verify-request-exclude", refused);
-    check("verify-response-exclude", await read(await api.verify(post(refused))));
+    check(
+      "verify-response-exclude",
+      await read(await api.verify(post(refused))),
+    );
   });
 });

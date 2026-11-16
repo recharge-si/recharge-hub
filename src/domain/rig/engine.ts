@@ -167,17 +167,26 @@ export function resolveFit(profile: Profile, rules: RigRules): Resolved {
 
 export type Selection = Partial<Record<RigRole, RigCandidate>>;
 
-function num(candidate: RigCandidate | undefined, field: SpecField): number | null {
+function num(
+  candidate: RigCandidate | undefined,
+  field: SpecField,
+): number | null {
   const value = candidate?.specs[field];
   return typeof value === "number" ? value : null;
 }
 
-function code(candidate: RigCandidate | undefined, field: SpecField): string | null {
+function code(
+  candidate: RigCandidate | undefined,
+  field: SpecField,
+): string | null {
   const value = candidate?.specs[field];
   return typeof value === "string" ? value : null;
 }
 
-function list(candidate: RigCandidate | undefined, field: SpecField): string[] | null {
+function list(
+  candidate: RigCandidate | undefined,
+  field: SpecField,
+): string[] | null {
   const value = candidate?.specs[field];
   return Array.isArray(value) ? value : null;
 }
@@ -237,14 +246,18 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
     const band = context.sailBand;
     add(
       "sail-fit",
-      decide([{ part: sail, field: "areaM2" }], () => inBand(num(sail, "areaM2") ?? 0, band)),
+      decide([{ part: sail, field: "areaM2" }], () =>
+        inBand(num(sail, "areaM2") ?? 0, band),
+      ),
     );
   }
   if (free("board") && context.boardBand) {
     const band = context.boardBand;
     add(
       "board-fit",
-      decide([{ part: board, field: "volumeL" }], () => inBand(num(board, "volumeL") ?? 0, band)),
+      decide([{ part: board, field: "volumeL" }], () =>
+        inBand(num(board, "volumeL") ?? 0, band),
+      ),
     );
   }
   if (free("board", "sail")) {
@@ -284,7 +297,9 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
     // The mast diameter the sail takes: its recommended one and/or its list.
     const accepted = [
       ...(list(sail, "compatibleDiameters") ?? []),
-      ...(code(sail, "mastDiameter") ? [code(sail, "mastDiameter") as string] : []),
+      ...(code(sail, "mastDiameter")
+        ? [code(sail, "mastDiameter") as string]
+        : []),
     ];
     if (accepted.length === 0 || mast?.specs.mastDiameter === undefined) {
       const missing: Unchecked["missing"] = [];
@@ -296,7 +311,10 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
       }
       add("sail-mast-diameter", { kind: "unchecked", missing });
     } else {
-      add("sail-mast-diameter", ran(accepted.includes(code(mast, "mastDiameter") ?? "")));
+      add(
+        "sail-mast-diameter",
+        ran(accepted.includes(code(mast, "mastDiameter") ?? "")),
+      );
     }
 
     // Length: the mast, stretched by the extension when there is one, must
@@ -316,9 +334,14 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
       decide(needs, () => {
         const wanted = num(sail, "mastCm") ?? 0;
         const length = num(mast, "lengthCm") ?? 0;
-        const low = length + (extension ? (num(extension, "extensionMinCm") ?? 0) : 0);
-        const high = length + (extension ? (num(extension, "extensionMaxCm") ?? 0) : 0);
-        return high >= wanted - tol.mastLengthCm - EPS && low <= wanted + tol.mastLengthCm + EPS;
+        const low =
+          length + (extension ? (num(extension, "extensionMinCm") ?? 0) : 0);
+        const high =
+          length + (extension ? (num(extension, "extensionMaxCm") ?? 0) : 0);
+        return (
+          high >= wanted - tol.mastLengthCm - EPS &&
+          low <= wanted + tol.mastLengthCm + EPS
+        );
       }),
     );
 
@@ -326,7 +349,10 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
     const sailImcs = num(sail, "mastImcs");
     const mastImcs = num(mast, "mastImcs");
     if (sailImcs !== null && mastImcs !== null) {
-      add("sail-mast-imcs", ran(Math.abs(sailImcs - mastImcs) <= tol.imcs + EPS));
+      add(
+        "sail-mast-imcs",
+        ran(Math.abs(sailImcs - mastImcs) <= tol.imcs + EPS),
+      );
     }
   }
   if (free("mast", "boom")) {
@@ -363,8 +389,10 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
       add(
         "sail-boom-range",
         ran(
-          (num(boom, "boomMinCm") ?? Number.POSITIVE_INFINITY) <= (sailLow ?? 0) + EPS &&
-            (num(boom, "boomMaxCm") ?? Number.NEGATIVE_INFINITY) >= (sailHigh ?? 0) - EPS,
+          (num(boom, "boomMinCm") ?? Number.POSITIVE_INFINITY) <=
+            (sailLow ?? 0) + EPS &&
+            (num(boom, "boomMaxCm") ?? Number.NEGATIVE_INFINITY) >=
+              (sailHigh ?? 0) - EPS,
         ),
       );
     }
@@ -389,7 +417,8 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
           { part: extension, field: "baseConnection" },
           { part: base, field: "baseConnection" },
         ],
-        () => code(extension, "baseConnection") === code(base, "baseConnection"),
+        () =>
+          code(extension, "baseConnection") === code(base, "baseConnection"),
       ),
     );
   }
@@ -401,7 +430,10 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
           { part: board, field: "finBoxTypes" },
           { part: fin, field: "finBox" },
         ],
-        () => (list(board, "finBoxTypes") ?? []).includes(code(fin, "finBox") ?? ""),
+        () =>
+          (list(board, "finBoxTypes") ?? []).includes(
+            code(fin, "finBox") ?? "",
+          ),
       ),
     );
     // The board's own fin range when it states one; the (placeholder) rules
@@ -420,11 +452,15 @@ function rules(selection: Selection, context: FitContext): RuleResult[] {
       add(
         "fin-length",
         ran(
-          (low === null || length >= low - EPS) && (high === null || length <= high + EPS),
+          (low === null || length >= low - EPS) &&
+            (high === null || length <= high + EPS),
         ),
       );
     } else if (bandFromVolume) {
-      add("fin-length", ran(inBand(num(fin, "finLengthCm") ?? 0, bandFromVolume)));
+      add(
+        "fin-length",
+        ran(inBand(num(fin, "finLengthCm") ?? 0, bandFromVolume)),
+      );
     } else {
       add("fin-length", {
         kind: "unchecked",
@@ -466,7 +502,10 @@ export interface CheckReport {
  * buyer owns is not computed (we do not know that part), except the owned
  * boom when its range was supplied. Order is fixed.
  */
-export function checkReport(selection: Selection, context: FitContext): CheckReport {
+export function checkReport(
+  selection: Selection,
+  context: FitContext,
+): CheckReport {
   const checks: Check[] = [];
   const unchecked: Unchecked[] = [];
   for (const { id, outcome } of rules(selection, context)) {
@@ -482,7 +521,9 @@ export function checkRig(selection: Selection, context: FitContext): Check[] {
 }
 
 /** The warnings that name what a rig was not checked for, one per missing key. */
-export function uncheckedWarnings(unchecked: readonly Unchecked[]): EngineWarning[] {
+export function uncheckedWarnings(
+  unchecked: readonly Unchecked[],
+): EngineWarning[] {
   const seen = new Set<string>();
   const out: EngineWarning[] = [];
   for (const entry of unchecked) {
@@ -507,13 +548,16 @@ function conflicts(
   // drop a sail for which nothing is known.
   return rules(selection, context).some(
     ({ id, outcome }) =>
-      outcome.kind === "ran" && !outcome.ok && !(selecting && id === "owned-boom"),
+      outcome.kind === "ran" &&
+      !outcome.ok &&
+      !(selecting && id === "owned-boom"),
   );
 }
 
 function uncheckedCount(selection: Selection, context: FitContext): number {
-  return rules(selection, context).filter(({ outcome }) => outcome.kind === "unchecked")
-    .length;
+  return rules(selection, context).filter(
+    ({ outcome }) => outcome.kind === "unchecked",
+  ).length;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -545,7 +589,10 @@ function round(value: number): number {
 }
 
 /** Median by price: the lower middle, so a pair gives the cheaper one. */
-function choose(options: readonly RigCandidate[], strategy: Strategy): RigCandidate | undefined {
+function choose(
+  options: readonly RigCandidate[],
+  strategy: Strategy,
+): RigCandidate | undefined {
   if (options.length === 0) return undefined;
   const sorted = [...options].sort(byPrice);
   return strategy === "cheapest"
@@ -598,9 +645,7 @@ function closestTo(
     const db = distance(b);
     // Equally close: the one with more stored data, so more of its fit is checked.
     return (
-      round(da) - round(db) ||
-      storedFacts(b) - storedFacts(a) ||
-      byPrice(a, b)
+      round(da) - round(db) || storedFacts(b) - storedFacts(a) || byPrice(a, b)
     );
   });
 }
@@ -622,7 +667,9 @@ const KIND_CATEGORIES: Readonly<Record<string, readonly string[]>> = {
 function categoryServes(candidate: RigCandidate, kind: string): boolean {
   if (candidate.category === null) return true;
   const served = KIND_CATEGORIES[kind];
-  return served ? served.includes(candidate.category) : candidate.category === kind;
+  return served
+    ? served.includes(candidate.category)
+    : candidate.category === kind;
 }
 
 /** One attempt at a rig around `sail`; the roles it cannot fill are `unmet`. */
@@ -719,7 +766,8 @@ function assemble(
         );
   const finsFor = (board: RigCandidate) =>
     compatible(poolOf("fin", pool), "fin", { board }, context);
-  const board = boards.find((candidate) => finsFor(candidate).length > 0) ?? boards[0];
+  const board =
+    boards.find((candidate) => finsFor(candidate).length > 0) ?? boards[0];
   if (board) {
     selection.board = board;
     const fin = choose(finsFor(board), strategy);
@@ -875,7 +923,8 @@ export function buildRig(
   const considered: Partial<Record<RigRole, number>> = {};
   const pool: Pool = { byRole: new Map() };
   const ordered = [...candidates].sort(
-    (a, b) => a.variantId - b.variantId || (a.variantGid < b.variantGid ? -1 : 1),
+    (a, b) =>
+      a.variantId - b.variantId || (a.variantGid < b.variantGid ? -1 : 1),
   );
   const seen = new Set<string>();
   let stockUnknown = 0;
@@ -907,7 +956,10 @@ export function buildRig(
     considered,
     warnings:
       stockUnknown > 0
-        ? [...fit.warnings, { code: "stock_not_read", detail: { parts: stockUnknown } }]
+        ? [
+            ...fit.warnings,
+            { code: "stock_not_read", detail: { parts: stockUnknown } },
+          ]
         : fit.warnings,
   });
   const sailBand = fit.context.sailBand;
@@ -916,15 +968,16 @@ export function buildRig(
   const fitting = poolOf("sail", pool).filter((sail) => {
     const area = num(sail, "areaM2");
     return (
-      categoryServes(sail, fit.kind) &&
-      area !== null &&
-      inBand(area, sailBand)
+      categoryServes(sail, fit.kind) && area !== null && inBand(area, sailBand)
     );
   });
   if (fitting.length === 0) {
     return {
       ...base,
-      unmet: [...base.unmet, { role: "sail", reason: "no_compatible_in_stock" }],
+      unmet: [
+        ...base.unmet,
+        { role: "sail", reason: "no_compatible_in_stock" },
+      ],
     };
   }
 

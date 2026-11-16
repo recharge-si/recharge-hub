@@ -131,9 +131,9 @@ describe("a document paid more than once (§18)", () => {
      * build would rewrite every document on every reconciliation.
      */
     const payments = [payment(10_000), payment(20_000, "CARD")];
-    expect(
+    expect(JSON.stringify(buildSalesOrderBody({ ...BASE, payments }))).toBe(
       JSON.stringify(buildSalesOrderBody({ ...BASE, payments })),
-    ).toBe(JSON.stringify(buildSalesOrderBody({ ...BASE, payments })));
+    );
   });
 });
 
@@ -177,8 +177,9 @@ describe("a document that should carry no payment", () => {
   it("refuses to invent a payment type when the body names none", () => {
     // §8.7: a payment type is a value from the merchant's own register and is
     // never guessed. The caller raises instead of clearing.
-    expect(clearedPayments(buildSalesOrderBody(BASE) as Record<string, unknown>))
-      .toBeNull();
+    expect(
+      clearedPayments(buildSalesOrderBody(BASE) as Record<string, unknown>),
+    ).toBeNull();
   });
 });
 

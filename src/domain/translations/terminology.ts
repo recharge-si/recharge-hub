@@ -1,6 +1,12 @@
 import { compareCodepoints } from "~/domain/types";
-import type { StoreProfile, TermClassification } from "~/domain/translations/profile";
-import { flattenMenu, type StoreSnapshot } from "~/domain/translations/snapshot";
+import type {
+  StoreProfile,
+  TermClassification,
+} from "~/domain/translations/profile";
+import {
+  flattenMenu,
+  type StoreSnapshot,
+} from "~/domain/translations/snapshot";
 import {
   isAllCaps,
   isCapitalised,
@@ -69,18 +75,33 @@ const MAX_TITLE_SHARE = 0.6;
 /** Caps the stored vocabulary; the least supported candidates fall off. */
 export const MAX_TERMS = 600;
 
-function saturate(base: number, count: number, perCount: number, cap: number): number {
+function saturate(
+  base: number,
+  count: number,
+  perCount: number,
+  cap: number,
+): number {
   return Math.min(cap, base + count * perCount);
 }
 
 class Candidates {
-  private readonly byKey = new Map<string, TermCandidate & { spellings: Map<string, number> }>();
+  private readonly byKey = new Map<
+    string,
+    TermCandidate & { spellings: Map<string, number> }
+  >();
 
-  add(term: string, classification: TermClassification, confidence: number, source: string, count = 1): void {
+  add(
+    term: string,
+    classification: TermClassification,
+    confidence: number,
+    source: string,
+    count = 1,
+  ): void {
     const display = term.trim();
     const key = normaliseTerm(display);
     // A bare number or a size ("5.0", "12,5") is a value, not a term.
-    if (key === "" || key.length < 2 || /^\p{N}+([.,]\p{N}+)*$/u.test(key)) return;
+    if (key === "" || key.length < 2 || /^\p{N}+([.,]\p{N}+)*$/u.test(key))
+      return;
     const existing = this.byKey.get(key);
     if (!existing) {
       this.byKey.set(key, {
@@ -96,7 +117,10 @@ class Candidates {
     }
     existing.evidence[source] = (existing.evidence[source] ?? 0) + count;
     existing.occurrences += count;
-    existing.spellings.set(display, (existing.spellings.get(display) ?? 0) + count);
+    existing.spellings.set(
+      display,
+      (existing.spellings.get(display) ?? 0) + count,
+    );
     // Corroboration: a second kind of evidence lifts confidence; the most
     // confident classification names the term.
     if (confidence > existing.confidence) {
@@ -116,7 +140,10 @@ class Candidates {
         let best = entry.term;
         let bestCount = -1;
         for (const [spelling, count] of entry.spellings) {
-          if (count > bestCount || (count === bestCount && compareCodepoints(spelling, best) < 0)) {
+          if (
+            count > bestCount ||
+            (count === bestCount && compareCodepoints(spelling, best) < 0)
+          ) {
             best = spelling;
             bestCount = count;
           }
@@ -141,7 +168,10 @@ class Candidates {
 }
 
 /** The classification a profile's list implies for the words in it. */
-const PROFILE_LISTS: Array<{ key: "likelyBrands" | "productFamilies" | "technicalVocabulary"; classification: TermClassification }> = [
+const PROFILE_LISTS: Array<{
+  key: "likelyBrands" | "productFamilies" | "technicalVocabulary";
+  classification: TermClassification;
+}> = [
   { key: "likelyBrands", classification: "brand" },
   { key: "productFamilies", classification: "product_family" },
   { key: "technicalVocabulary", classification: "technical" },
@@ -153,10 +183,19 @@ const PROFILE_LISTS: Array<{ key: "likelyBrands" | "productFamilies" | "technica
  * the deterministic evidence and the model's agree on most terms and the
  * agreement is what lifts them to near-certainty.
  */
-export function discoverTerminology(snapshot: StoreSnapshot, profile: StoreProfile | null): TermCandidate[] {
+export function discoverTerminology(
+  snapshot: StoreSnapshot,
+  profile: StoreProfile | null,
+): TermCandidate[] {
   const candidates = new Candidates();
 
-  if (snapshot.shopName) candidates.add(snapshot.shopName, "brand", CONFIDENCE.vendorSeveral, "shop");
+  if (snapshot.shopName)
+    candidates.add(
+      snapshot.shopName,
+      "brand",
+      CONFIDENCE.vendorSeveral,
+      "shop",
+    );
 
   const vendorCounts = new Map<string, number>();
   const typeCounts = new Map<string, number>();
@@ -164,23 +203,43 @@ export function discoverTerminology(snapshot: StoreSnapshot, profile: StoreProfi
   const optionValueCounts = new Map<string, { value: string; count: number }>();
   const optionNames = new Map<string, { value: string; count: number }>();
   for (const product of snapshot.products) {
-    if (product.vendor?.trim()) vendorCounts.set(product.vendor.trim(), (vendorCounts.get(product.vendor.trim()) ?? 0) + 1);
+    if (product.vendor?.trim())
+      vendorCounts.set(
+        product.vendor.trim(),
+        (vendorCounts.get(product.vendor.trim()) ?? 0) + 1,
+      );
     if (product.productType?.trim())
-      typeCounts.set(product.productType.trim(), (typeCounts.get(product.productType.trim()) ?? 0) + 1);
-    for (const tag of new Set(product.tags.map((t) => t.trim()).filter((t) => t !== ""))) {
-      const entry = tagCounts.get(normaliseTerm(tag)) ?? { value: tag, count: 0 };
+      typeCounts.set(
+        product.productType.trim(),
+        (typeCounts.get(product.productType.trim()) ?? 0) + 1,
+      );
+    for (const tag of new Set(
+      product.tags.map((t) => t.trim()).filter((t) => t !== ""),
+    )) {
+      const entry = tagCounts.get(normaliseTerm(tag)) ?? {
+        value: tag,
+        count: 0,
+      };
       entry.count += 1;
       tagCounts.set(normaliseTerm(tag), entry);
     }
     for (const option of product.options) {
       const nameKey = normaliseTerm(option.name);
       if (nameKey !== "") {
-        const entry = optionNames.get(nameKey) ?? { value: option.name.trim(), count: 0 };
+        const entry = optionNames.get(nameKey) ?? {
+          value: option.name.trim(),
+          count: 0,
+        };
         entry.count += 1;
         optionNames.set(nameKey, entry);
       }
-      for (const value of new Set(option.values.map((v) => v.trim()).filter((v) => v !== ""))) {
-        const entry = optionValueCounts.get(normaliseTerm(value)) ?? { value, count: 0 };
+      for (const value of new Set(
+        option.values.map((v) => v.trim()).filter((v) => v !== ""),
+      )) {
+        const entry = optionValueCounts.get(normaliseTerm(value)) ?? {
+          value,
+          count: 0,
+        };
         entry.count += 1;
         optionValueCounts.set(normaliseTerm(value), entry);
       }
@@ -188,42 +247,98 @@ export function discoverTerminology(snapshot: StoreSnapshot, profile: StoreProfi
   }
 
   for (const [vendor, count] of vendorCounts)
-    candidates.add(vendor, "brand", count > 1 ? CONFIDENCE.vendorSeveral : CONFIDENCE.vendorOne, "vendor", count);
+    candidates.add(
+      vendor,
+      "brand",
+      count > 1 ? CONFIDENCE.vendorSeveral : CONFIDENCE.vendorOne,
+      "vendor",
+      count,
+    );
   for (const [type, count] of typeCounts)
-    candidates.add(type, "product_family", saturate(CONFIDENCE.productType, count, 0.0005, 0.98), "productType", count);
+    candidates.add(
+      type,
+      "product_family",
+      saturate(CONFIDENCE.productType, count, 0.0005, 0.98),
+      "productType",
+      count,
+    );
 
   for (const menu of snapshot.menus) {
     for (const item of flattenMenu(menu.items)) {
       const key = normaliseTerm(item.title);
       const corroborated = typeCounts.has(item.title) || tagCounts.has(key);
-      candidates.add(item.title, "category", CONFIDENCE.menuLabel + (corroborated ? 0.04 : 0), "menu");
+      candidates.add(
+        item.title,
+        "category",
+        CONFIDENCE.menuLabel + (corroborated ? 0.04 : 0),
+        "menu",
+      );
     }
   }
   for (const collection of snapshot.collections) {
     if (collection.title.trim() === "") continue;
     const lift = Math.min(0.05, (collection.productsCount ?? 0) / 500);
-    candidates.add(collection.title, "category", CONFIDENCE.collectionTitle + lift, "collection");
+    candidates.add(
+      collection.title,
+      "category",
+      CONFIDENCE.collectionTitle + lift,
+      "collection",
+    );
   }
   for (const tag of tagCounts.values()) {
     if (tag.count < 2) continue;
-    candidates.add(tag.value, "attribute", saturate(CONFIDENCE.tag, tag.count, 0.002, 0.9), "tag", tag.count);
+    candidates.add(
+      tag.value,
+      "attribute",
+      saturate(CONFIDENCE.tag, tag.count, 0.002, 0.9),
+      "tag",
+      tag.count,
+    );
   }
   for (const option of optionNames.values())
-    candidates.add(option.value, "generic", CONFIDENCE.optionName, "optionName", option.count);
+    candidates.add(
+      option.value,
+      "generic",
+      CONFIDENCE.optionName,
+      "optionName",
+      option.count,
+    );
   for (const value of optionValueCounts.values()) {
     if (value.count < 3) continue;
-    candidates.add(value.value, "attribute", saturate(CONFIDENCE.optionValue, value.count, 0.005, 0.85), "optionValue", value.count);
+    candidates.add(
+      value.value,
+      "attribute",
+      saturate(CONFIDENCE.optionValue, value.count, 0.005, 0.85),
+      "optionValue",
+      value.count,
+    );
   }
 
   addTitleTokens(snapshot, candidates, optionValueCounts);
 
   if (profile) {
     for (const entry of profile.importantTerminology)
-      candidates.add(entry.term, entry.classification, CONFIDENCE.profileTerm, "profile");
+      candidates.add(
+        entry.term,
+        entry.classification,
+        CONFIDENCE.profileTerm,
+        "profile",
+      );
     for (const list of PROFILE_LISTS)
-      for (const term of profile[list.key]) candidates.add(term, list.classification, CONFIDENCE.profileList, "profile");
+      for (const term of profile[list.key])
+        candidates.add(
+          term,
+          list.classification,
+          CONFIDENCE.profileList,
+          "profile",
+        );
     for (const abbreviation of profile.commonAbbreviations)
-      candidates.add(abbreviation.abbreviation, "abbreviation", CONFIDENCE.profileTerm, "profile");
+      candidates.add(
+        abbreviation.abbreviation,
+        "abbreviation",
+        CONFIDENCE.profileTerm,
+        "profile",
+      );
   }
 
   return candidates.list();
@@ -240,7 +355,9 @@ function addTitleTokens(
   candidates: Candidates,
   optionValues: ReadonlyMap<string, { value: string; count: number }>,
 ): void {
-  const titles = snapshot.products.map((p) => stripHtml(p.title)).filter((t) => t !== "");
+  const titles = snapshot.products
+    .map((p) => stripHtml(p.title))
+    .filter((t) => t !== "");
   if (titles.length === 0) return;
   const documents = new Map<string, { value: string; count: number }>();
   for (const title of titles) {
@@ -258,7 +375,13 @@ function addTitleTokens(
       if (!isNotable(word)) return;
       note(word);
       const next = words[index + 1];
-      if (next && isNotable(next) && !looksLikeCode(word) && !looksLikeCode(next)) note(`${word} ${next}`);
+      if (
+        next &&
+        isNotable(next) &&
+        !looksLikeCode(word) &&
+        !looksLikeCode(next)
+      )
+        note(`${word} ${next}`);
     });
   }
   for (const [key, entry] of documents) {
@@ -270,15 +393,40 @@ function addTitleTokens(
       continue;
     }
     if (optionValues.has(key)) {
-      candidates.add(entry.value, "attribute", saturate(CONFIDENCE.optionValue, entry.count, 0.01, 0.85), "productTitle", entry.count);
+      candidates.add(
+        entry.value,
+        "attribute",
+        saturate(CONFIDENCE.optionValue, entry.count, 0.01, 0.85),
+        "productTitle",
+        entry.count,
+      );
       continue;
     }
     const token = entry.value;
     if (!token.includes(" ") && looksLikeCode(token))
-      candidates.add(token, "model", saturate(0.85, entry.count, 0.005, 0.98), "productTitle", entry.count);
+      candidates.add(
+        token,
+        "model",
+        saturate(0.85, entry.count, 0.005, 0.98),
+        "productTitle",
+        entry.count,
+      );
     else if (!token.includes(" ") && isAllCaps(token) && token.length <= 5)
-      candidates.add(token, "abbreviation", saturate(0.8, entry.count, 0.01, 0.96), "productTitle", entry.count);
-    else candidates.add(token, "technical", saturate(CONFIDENCE.titleToken, entry.count, 0.025, 0.96), "productTitle", entry.count);
+      candidates.add(
+        token,
+        "abbreviation",
+        saturate(0.8, entry.count, 0.01, 0.96),
+        "productTitle",
+        entry.count,
+      );
+    else
+      candidates.add(
+        token,
+        "technical",
+        saturate(CONFIDENCE.titleToken, entry.count, 0.025, 0.96),
+        "productTitle",
+        entry.count,
+      );
   }
 }
 
@@ -297,11 +445,9 @@ function isNotable(word: string): boolean {
  * mentioned inside a description, and within each rank confidence decides.
  * Capped, because the point is a compact block, not the whole vocabulary.
  */
-export function relevantTerms<T extends Pick<StoredTerm, "normalised" | "confidence">>(
-  fields: readonly SourceField[],
-  terms: readonly T[],
-  cap = 40,
-): T[] {
+export function relevantTerms<
+  T extends Pick<StoredTerm, "normalised" | "confidence">,
+>(fields: readonly SourceField[], terms: readonly T[], cap = 40): T[] {
   if (terms.length === 0 || fields.length === 0) return [];
   const byKey = new Map<string, T>();
   for (const term of terms) byKey.set(term.normalised, term);
@@ -337,8 +483,5 @@ export function relevantTerms<T extends Pick<StoredTerm, "normalised" | "confide
  * judge an unchanged translation, never to forbid a change: a target market
  * may still have its own established form, and the model decides that.
  */
-export const FORM_STABLE_CLASSIFICATIONS: ReadonlySet<TermClassification> = new Set([
-  "brand",
-  "model",
-  "abbreviation",
-]);
+export const FORM_STABLE_CLASSIFICATIONS: ReadonlySet<TermClassification> =
+  new Set(["brand", "model", "abbreviation"]);

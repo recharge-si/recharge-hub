@@ -254,9 +254,9 @@ describeDatabase("no duplicate MetaKocka document under concurrency", () => {
     expect(outcomes.filter((outcome) => outcome === "worked")).toHaveLength(1);
     expect(outcomes.filter((outcome) => outcome === "skipped")).toHaveLength(7);
 
-    expect(
-      await prisma.metakockaDocument.count({ where: { orderId } }),
-    ).toBe(1);
+    expect(await prisma.metakockaDocument.count({ where: { orderId } })).toBe(
+      1,
+    );
   });
 
   it("keeps two supply sources of one order as two documents, not four", async () => {
@@ -296,9 +296,9 @@ describeDatabase("no duplicate MetaKocka document under concurrency", () => {
       ),
     ]);
 
-    expect(
-      await prisma.metakockaDocument.count({ where: { orderId } }),
-    ).toBe(2);
+    expect(await prisma.metakockaDocument.count({ where: { orderId } })).toBe(
+      2,
+    );
   });
 });
 

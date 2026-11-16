@@ -72,7 +72,9 @@ describe("portal field tokens", () => {
   });
 
   it("previews the sample product the way the MetaKocka name does", () => {
-    expect(tokenPreview(FIELD, "{vendor} -")).toBe("UF-1: Dakine - Seeker Vest");
+    expect(tokenPreview(FIELD, "{vendor} -")).toBe(
+      "UF-1: Dakine - Seeker Vest",
+    );
     expect(tokenPreview(FIELD, "")).toBeNull();
     const { sample: _sample, ...withoutSample } = FIELD;
     expect(tokenPreview(withoutSample, "{vendor} -")).toBeNull();

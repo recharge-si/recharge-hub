@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-import { renderStoreSample, type StoreSample } from "~/domain/translations/snapshot";
+import {
+  renderStoreSample,
+  type StoreSample,
+} from "~/domain/translations/snapshot";
 import { clip } from "~/domain/translations/text";
 import type { ChatMessage } from "~/domain/translations/types";
 
@@ -64,7 +67,12 @@ export const storeProfileSchema = z.object({
   productFamilies: z.array(shortText).max(60).default([]),
   technicalVocabulary: z.array(shortText).max(80).default([]),
   commonAbbreviations: z
-    .array(z.object({ abbreviation: shortText, meaning: z.string().trim().max(200).default("") }))
+    .array(
+      z.object({
+        abbreviation: shortText,
+        meaning: z.string().trim().max(200).default(""),
+      }),
+    )
     .max(40)
     .default([]),
   localisationNotes: z.string().trim().max(600).optional().default(""),
@@ -92,7 +100,8 @@ export function buildProfileMessages(sample: StoreSample): ChatMessage[] {
   ];
 }
 
-export type ParsedProfile = { ok: true; profile: StoreProfile } | { ok: false; reason: string };
+export type ParsedProfile =
+  { ok: true; profile: StoreProfile } | { ok: false; reason: string };
 
 export function parseProfileReply(text: string): ParsedProfile {
   let json: unknown;
@@ -102,7 +111,11 @@ export function parseProfileReply(text: string): ParsedProfile {
     return { ok: false, reason: "The profile reply was not JSON." };
   }
   const parsed = storeProfileSchema.safeParse(json);
-  if (!parsed.success) return { ok: false, reason: "The profile reply did not have the expected shape." };
+  if (!parsed.success)
+    return {
+      ok: false,
+      reason: "The profile reply did not have the expected shape.",
+    };
   return { ok: true, profile: dedupe(parsed.data) };
 }
 
@@ -134,42 +147,74 @@ function dedupe(profile: StoreProfile): StoreProfile {
 
 /** "Watersports · Windsurfing · Wing foiling · SUP", for a status line. */
 export function profileSummary(profile: StoreProfile): string {
-  return profile.industries.slice(0, 5).join(" · ") || clip(profile.storeDescription, 80);
+  return (
+    profile.industries.slice(0, 5).join(" · ") ||
+    clip(profile.storeDescription, 80)
+  );
 }
 
 /** Limits on what the translation prompt carries; the whole block stays a few hundred tokens. */
-const CONTEXT_LIMITS = { brands: 30, families: 30, abbreviations: 25, terminology: 40, technical: 40 } as const;
+const CONTEXT_LIMITS = {
+  brands: 30,
+  families: 30,
+  abbreviations: 25,
+  terminology: 40,
+  technical: 40,
+} as const;
 
 /**
  * The profile as the translation model reads it with every request: the
  * store in a sentence, its industries, and the vocabulary that matters. The
  * same text for every request of a shop, so the provider can cache it.
  */
-export function renderStoreContext(profile: StoreProfile, storeName: string | null): string {
+export function renderStoreContext(
+  profile: StoreProfile,
+  storeName: string | null,
+): string {
   const lines: string[] = [];
-  lines.push(`${storeName ? `"${storeName}" — ` : ""}${profile.storeDescription}`);
-  if (profile.industries.length > 0) lines.push(`Industries: ${profile.industries.join(", ")}.`);
+  lines.push(
+    `${storeName ? `"${storeName}" — ` : ""}${profile.storeDescription}`,
+  );
+  if (profile.industries.length > 0)
+    lines.push(`Industries: ${profile.industries.join(", ")}.`);
   if (profile.audience) lines.push(`Audience: ${profile.audience}`);
   if (profile.likelyBrands.length > 0)
-    lines.push(`Brands sold here (never translated): ${profile.likelyBrands.slice(0, CONTEXT_LIMITS.brands).join(", ")}.`);
+    lines.push(
+      `Brands sold here (never translated): ${profile.likelyBrands.slice(0, CONTEXT_LIMITS.brands).join(", ")}.`,
+    );
   if (profile.productFamilies.length > 0)
-    lines.push(`Product families: ${profile.productFamilies.slice(0, CONTEXT_LIMITS.families).join(", ")}.`);
+    lines.push(
+      `Product families: ${profile.productFamilies.slice(0, CONTEXT_LIMITS.families).join(", ")}.`,
+    );
   if (profile.commonAbbreviations.length > 0)
     lines.push(
       `Abbreviations: ${profile.commonAbbreviations
         .slice(0, CONTEXT_LIMITS.abbreviations)
-        .map((entry) => (entry.meaning ? `${entry.abbreviation} = ${entry.meaning}` : entry.abbreviation))
+        .map((entry) =>
+          entry.meaning
+            ? `${entry.abbreviation} = ${entry.meaning}`
+            : entry.abbreviation,
+        )
         .join("; ")}.`,
     );
   if (profile.importantTerminology.length > 0) {
     lines.push("Terminology with a specialised meaning in this store:");
-    for (const entry of profile.importantTerminology.slice(0, CONTEXT_LIMITS.terminology)) {
-      const label = TERM_CLASSIFICATION_LABEL[entry.classification].toLowerCase();
-      lines.push(`- ${entry.term} (${label})${entry.meaning ? `: ${entry.meaning}` : ""}`);
+    for (const entry of profile.importantTerminology.slice(
+      0,
+      CONTEXT_LIMITS.terminology,
+    )) {
+      const label =
+        TERM_CLASSIFICATION_LABEL[entry.classification].toLowerCase();
+      lines.push(
+        `- ${entry.term} (${label})${entry.meaning ? `: ${entry.meaning}` : ""}`,
+      );
     }
   }
   if (profile.technicalVocabulary.length > 0)
-    lines.push(`Other technical vocabulary: ${profile.technicalVocabulary.slice(0, CONTEXT_LIMITS.technical).join(", ")}.`);
-  if (profile.localisationNotes) lines.push(`Localisation notes: ${profile.localisationNotes}`);
+    lines.push(
+      `Other technical vocabulary: ${profile.technicalVocabulary.slice(0, CONTEXT_LIMITS.technical).join(", ")}.`,
+    );
+  if (profile.localisationNotes)
+    lines.push(`Localisation notes: ${profile.localisationNotes}`);
   return lines.join("\n");
 }

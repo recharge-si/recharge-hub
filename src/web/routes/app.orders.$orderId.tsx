@@ -36,7 +36,10 @@ import { enqueue } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { Dropdown } from "~/web/components/dropdown";
-import { OrderTaxCard, type OrderTaxView } from "~/web/components/order-tax-card";
+import {
+  OrderTaxCard,
+  type OrderTaxView,
+} from "~/web/components/order-tax-card";
 import { formatDateTime } from "~/web/lib/datetime";
 import { describeExceptionKind } from "~/web/lib/exceptions";
 import { formatMoney } from "~/web/lib/money";
@@ -70,42 +73,45 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
   // Both only exist so the two things that used to be impossible on this page
   // are possible: choosing a source by hand, and giving MetaKocka a customer
   // for an order Shopify has no address on.
-  const [settings, sources, stock, products, ledger, taxSnapshot] = await Promise.all([
-    getSalesOrderSettings(principal),
-    listAllocatableSources(principal),
-    stockForOrder(principal, order.id),
-    /*
-     * The picture and the MetaKocka match for the SKUs on this order.
-     *
-     * The registry already holds them from the catalogue read, and this is
-     * where they earn their place: a line that cannot be sent because MetaKocka
-     * has no product with that code is the commonest reason an order stops, and
-     * "P04200014480" tells nobody which product that is.
-     */
-    productsForSkus(
-      principal,
-      order.lines.map((line) => line.sku),
-    ),
-    /*
-     * The payment ledger.
-     *
-     * Read here rather than derived from `financial_status`, because the
-     * question this section answers — how much has actually arrived, and when —
-     * is one that status cannot answer. An order that is half paid and an order
-     * that is paid look identical in a badge.
-     */
-    listLedger(principal, order.id),
-    /*
-     * The VAT decision, as recorded. Nothing on this page re-derives a rate:
-     * the snapshot is the answer to "why did this order receive this VAT",
-     * and it stays the answer after the settings change.
-     */
-    getTaxSnapshot(principal, order.id),
-  ]);
+  const [settings, sources, stock, products, ledger, taxSnapshot] =
+    await Promise.all([
+      getSalesOrderSettings(principal),
+      listAllocatableSources(principal),
+      stockForOrder(principal, order.id),
+      /*
+       * The picture and the MetaKocka match for the SKUs on this order.
+       *
+       * The registry already holds them from the catalogue read, and this is
+       * where they earn their place: a line that cannot be sent because MetaKocka
+       * has no product with that code is the commonest reason an order stops, and
+       * "P04200014480" tells nobody which product that is.
+       */
+      productsForSkus(
+        principal,
+        order.lines.map((line) => line.sku),
+      ),
+      /*
+       * The payment ledger.
+       *
+       * Read here rather than derived from `financial_status`, because the
+       * question this section answers — how much has actually arrived, and when —
+       * is one that status cannot answer. An order that is half paid and an order
+       * that is paid look identical in a badge.
+       */
+      listLedger(principal, order.id),
+      /*
+       * The VAT decision, as recorded. Nothing on this page re-derives a rate:
+       * the snapshot is the answer to "why did this order receive this VAT",
+       * and it stays the answer after the settings change.
+       */
+      getTaxSnapshot(principal, order.id),
+    ]);
 
   const override = parsePartnerOverride(order.partnerOverride);
 
-  const titleBySku = new Map(order.lines.map((line) => [line.shopifyLineItemId, line.title]));
+  const titleBySku = new Map(
+    order.lines.map((line) => [line.shopifyLineItemId, line.title]),
+  );
   const tax: OrderTaxView | null = taxSnapshot
     ? {
         decidedAt: taxSnapshot.decidedAt.toISOString(),
@@ -192,9 +198,7 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
     payments,
     tax,
     /** Whether Shopify gave us anything to file the order against at all. */
-    hasShopifyAddress: Boolean(
-      shopifyParty?.partner ?? shopifyParty?.receiver,
-    ),
+    hasShopifyAddress: Boolean(shopifyParty?.partner ?? shopifyParty?.receiver),
     order: {
       id: order.id,
       number: order.shopifyOrderNumber,
@@ -221,7 +225,11 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
        * will assume the ERP holds the whole order.
        */
       syncDetail: order.syncDetail as {
-        classification?: { managed: number; external: number; unresolved: number };
+        classification?: {
+          managed: number;
+          external: number;
+          unresolved: number;
+        };
         value?: {
           representedShippingMinor?: number;
           representedDiscountMinor?: number;
@@ -306,7 +314,9 @@ export const loader = async ({ request, params }: LoaderFunctionArgs) => {
         // A link straight to the document in MetaKocka's own interface, so
         // "let me look at the actual thing" does not mean copying a reference
         // and searching for it.
-        metakockaUrl: document.mkId ? metakockaDocumentUrl(document.mkId) : null,
+        metakockaUrl: document.mkId
+          ? metakockaDocumentUrl(document.mkId)
+          : null,
         mkDocNumber: document.mkDocNumber,
         mkCheckedAt: document.mkCheckedAt?.toISOString() ?? null,
         paymentMarkedAt: document.paymentMarkedAt?.toISOString() ?? null,
@@ -710,15 +720,15 @@ export default function OrderDetail() {
             </s-text>
 
             {/*
-              * What the last reconciliation concluded.
-              *
-              * Deliberately a sentence rather than a badge: the two badges
-              * above are the order's progress and its payment, and a third pill
-              * saying "in sync" would be colour for a normal state, which the
-              * UI conventions rule out. When it is *not* in step there is an
-              * exception banner at the top of this page already saying so with
-              * the numbers.
-              */}
+             * What the last reconciliation concluded.
+             *
+             * Deliberately a sentence rather than a badge: the two badges
+             * above are the order's progress and its payment, and a third pill
+             * saying "in sync" would be colour for a normal state, which the
+             * UI conventions rule out. When it is *not* in step there is an
+             * exception banner at the top of this page already saying so with
+             * the numbers.
+             */}
             <s-text color="subdued">
               {order.reconciledAt
                 ? `${describeSyncState(order.syncState)} Last reconciled ${formatDateTime(order.reconciledAt)}.`
@@ -726,13 +736,13 @@ export default function OrderDetail() {
             </s-text>
 
             {/*
-              * Goods MetaKocka does not hold, said plainly.
-              *
-              * This is the one thing a merchant cannot discover by looking at
-              * the ERP: the sales order looks complete, because what is missing
-              * is missing. Saying it here is what stops "MetaKocka has my
-              * order" being assumed.
-              */}
+             * Goods MetaKocka does not hold, said plainly.
+             *
+             * This is the one thing a merchant cannot discover by looking at
+             * the ERP: the sales order looks complete, because what is missing
+             * is missing. Saying it here is what stops "MetaKocka has my
+             * order" being assumed.
+             */}
             {order.syncDetail?.classification &&
             order.syncDetail.classification.external > 0 ? (
               <s-banner
@@ -745,11 +755,17 @@ export default function OrderDetail() {
                       ? "item is"
                       : "items are"
                   } being fulfilled through a service this app does not manage, so ${
-                    order.syncDetail.classification.external === 1 ? "it is" : "they are"
+                    order.syncDetail.classification.external === 1
+                      ? "it is"
+                      : "they are"
                   } deliberately not on the MetaKocka sales order. No warehouse was guessed. Add ${
-                    order.syncDetail.classification.external === 1 ? "it" : "them"
+                    order.syncDetail.classification.external === 1
+                      ? "it"
+                      : "them"
                   } in MetaKocka by hand if your books need ${
-                    order.syncDetail.classification.external === 1 ? "it" : "them"
+                    order.syncDetail.classification.external === 1
+                      ? "it"
+                      : "them"
                   }.`}
                 </s-paragraph>
               </s-banner>
@@ -757,23 +773,28 @@ export default function OrderDetail() {
 
             {order.syncDetail?.classification &&
             order.syncDetail.classification.unresolved > 0 ? (
-              <s-banner tone="critical" heading="Some of this order is unaccounted for">
+              <s-banner
+                tone="critical"
+                heading="Some of this order is unaccounted for"
+              >
                 <s-paragraph>
                   {`${order.syncDetail.classification.unresolved} ${
-                    order.syncDetail.classification.unresolved === 1 ? "item" : "items"
+                    order.syncDetail.classification.unresolved === 1
+                      ? "item"
+                      : "items"
                   } could not be placed in any warehouse. The exceptions above say which.`}
                 </s-paragraph>
               </s-banner>
             ) : null}
 
             {/*
-              * Where the payment state came from and when it was last checked.
-              *
-              * Shopify webhooks are best-effort, so "this app believes the
-              * order is unpaid" and "the order is unpaid" are different
-              * statements. Saying when the two were last compared is what makes
-              * the first one trustworthy.
-              */}
+             * Where the payment state came from and when it was last checked.
+             *
+             * Shopify webhooks are best-effort, so "this app believes the
+             * order is unpaid" and "the order is unpaid" are different
+             * statements. Saying when the two were last compared is what makes
+             * the first one trustworthy.
+             */}
             <s-text color="subdued">
               {[
                 order.paymentGateway
@@ -818,33 +839,33 @@ export default function OrderDetail() {
         </s-section>
 
         {/*
-          * The lines, as a table.
-          *
-          * This was a stack of cards, each with a full-width grey block under
-          * it spelling out which rule fired. On a four-line order that read as
-          * thorough; on a hundred-line order it was three hundred lines of page
-          * and the order itself became unreadable.
-          *
-          * `variant="auto"` is what makes a table safe here: Polaris turns the
-          * columns into a labelled list at 375px rather than letting the page
-          * scroll sideways (§2.6).
-          */}
+         * The lines, as a table.
+         *
+         * This was a stack of cards, each with a full-width grey block under
+         * it spelling out which rule fired. On a four-line order that read as
+         * thorough; on a hundred-line order it was three hundred lines of page
+         * and the order itself became unreadable.
+         *
+         * `variant="auto"` is what makes a table safe here: Polaris turns the
+         * columns into a labelled list at 375px rather than letting the page
+         * scroll sideways (§2.6).
+         */}
         {/*
-          * The lines, and where each one comes from — one table, two modes.
-          *
-          * Choosing a source by hand used to be a second section below this
-          * one: every line listed again, each with a labelled dropdown and a
-          * quantity field. That is the whole order printed twice, and on an
-          * order with a hundred lines it is unusable in both halves.
-          *
-          * So the picker lives in the column that already shows the answer.
-          * Reading and changing are the same table, the merchant never loses
-          * their place, and the page does not grow when they decide to edit.
-          *
-          * `variant="auto"` is what makes a table safe here: Polaris turns the
-          * columns into a labelled list at 375px rather than letting the page
-          * scroll sideways (§2.6).
-          */}
+         * The lines, and where each one comes from — one table, two modes.
+         *
+         * Choosing a source by hand used to be a second section below this
+         * one: every line listed again, each with a labelled dropdown and a
+         * quantity field. That is the whole order printed twice, and on an
+         * order with a hundred lines it is unusable in both halves.
+         *
+         * So the picker lives in the column that already shows the answer.
+         * Reading and changing are the same table, the merchant never loses
+         * their place, and the page does not grow when they decide to edit.
+         *
+         * `variant="auto"` is what makes a table safe here: Polaris turns the
+         * columns into a labelled list at 375px rather than letting the page
+         * scroll sideways (§2.6).
+         */}
         <s-section
           heading={
             unsplit ? "Lines" : "Lines and where they are fulfilled from"
@@ -866,63 +887,59 @@ export default function OrderDetail() {
                   warehouse on it, so nothing here is allocated to a warehouse.
                 </s-text>
               ) : (
-              <s-stack
-                direction="inline"
-                gap="base"
-                alignItems="center"
-                justifyContent="space-between"
-              >
-                <s-text color="subdued">
-                  {editingSources
-                    ? "Set the source for a line yourself. Use this when the stock figures are wrong or out of date — the app does not check them here."
-                    : order.allocationLockedAt
-                      ? `Chosen by hand ${formatDateTime(order.allocationLockedAt)}. The app will not change these on its own.`
-                      : "Chosen automatically from stock and priority."}
-                </s-text>
+                <s-stack
+                  direction="inline"
+                  gap="base"
+                  alignItems="center"
+                  justifyContent="space-between"
+                >
+                  <s-text color="subdued">
+                    {editingSources
+                      ? "Set the source for a line yourself. Use this when the stock figures are wrong or out of date — the app does not check them here."
+                      : order.allocationLockedAt
+                        ? `Chosen by hand ${formatDateTime(order.allocationLockedAt)}. The app will not change these on its own.`
+                        : "Chosen automatically from stock and priority."}
+                  </s-text>
 
-                {editingSources ? (
-                  <s-stack direction="inline" gap="small-300">
+                  {editingSources ? (
+                    <s-stack direction="inline" gap="small-300">
+                      <s-button
+                        type="button"
+                        variant="tertiary"
+                        onClick={() => setEditingSources(false)}
+                      >
+                        Cancel
+                      </s-button>
+                      <s-button
+                        type="submit"
+                        variant="primary"
+                        {...(busy ? { disabled: true } : {})}
+                      >
+                        Set sources and send
+                      </s-button>
+                    </s-stack>
+                  ) : (
                     <s-button
                       type="button"
-                      variant="tertiary"
-                      onClick={() => setEditingSources(false)}
+                      variant="secondary"
+                      onClick={() => setEditingSources(true)}
                     >
-                      Cancel
+                      Change sources
                     </s-button>
-                    <s-button
-                      type="submit"
-                      variant="primary"
-                      {...(busy ? { disabled: true } : {})}
-                    >
-                      Set sources and send
-                    </s-button>
-                  </s-stack>
-                ) : (
-                  <s-button
-                    type="button"
-                    variant="secondary"
-                    onClick={() => setEditingSources(true)}
-                  >
-                    Change sources
-                  </s-button>
-                )}
-              </s-stack>
+                  )}
+                </s-stack>
               )}
 
               {/*
-                * One choice for the whole order.
-                *
-                * The overwhelming case is every line coming from the same
-                * place, and on a hundred-line order picking it a hundred times
-                * is asking the merchant to do the app's typing. Only offered
-                * when there is more than one line to apply it to.
-                */}
+               * One choice for the whole order.
+               *
+               * The overwhelming case is every line coming from the same
+               * place, and on a hundred-line order picking it a hundred times
+               * is asking the merchant to do the app's typing. Only offered
+               * when there is more than one line to apply it to.
+               */}
               {editingSources && order.lines.length > 1 ? (
-                <s-stack
-                  direction="inline"
-                  gap="small-300"
-                  alignItems="end"
-                >
+                <s-stack direction="inline" gap="small-300" alignItems="end">
                   <s-box minInlineSize="260px">
                     <Dropdown
                       name="apply-all"
@@ -969,13 +986,13 @@ export default function OrderDetail() {
                           alignItems="center"
                         >
                           {/*
-                            * The box holds the space, the image fills it.
-                            * `s-image` takes only `fill` or `auto` for its
-                            * inline size, and `auto` would let a 2000px product
-                            * photo decide the column width. Sized either way so
-                            * a hundred rows with mixed imagery do not shift the
-                            * page as they load (§2.5).
-                            */}
+                           * The box holds the space, the image fills it.
+                           * `s-image` takes only `fill` or `auto` for its
+                           * inline size, and `auto` would let a 2000px product
+                           * photo decide the column width. Sized either way so
+                           * a hundred rows with mixed imagery do not shift the
+                           * page as they load (§2.5).
+                           */}
                           <s-box inlineSize="40px" blockSize="40px">
                             {line.imageUrl ? (
                               <s-image
@@ -991,10 +1008,10 @@ export default function OrderDetail() {
                           <s-stack direction="block" gap="small-500">
                             <s-text>{line.productTitle}</s-text>
                             {/*
-                              * The option values, on their own line. What it
-                              * is, then which one of it — the order a merchant
-                              * reads a line in.
-                              */}
+                             * The option values, on their own line. What it
+                             * is, then which one of it — the order a merchant
+                             * reads a line in.
+                             */}
                             {line.variantTitle ? (
                               <s-text color="subdued">
                                 {line.variantTitle}
@@ -1013,111 +1030,114 @@ export default function OrderDetail() {
 
                       <s-table-cell>
                         {/*
-                          * A rate, not a factor. "0.22" is the number sent to
-                          * MetaKocka; 22% is the number the merchant knows.
-                          */}
+                         * A rate, not a factor. "0.22" is the number sent to
+                         * MetaKocka; 22% is the number the merchant knows.
+                         */}
                         <s-text>{formatTaxRate(line.taxFactor)}</s-text>
                       </s-table-cell>
 
                       {unsplit ? null : (
-                      <s-table-cell>
-                        {editingSources ? (
-                          <s-stack
-                            direction="inline"
-                            gap="small-500"
-                            alignItems="end"
-                          >
-                            <s-box minInlineSize="200px">
-                              <Dropdown
-                                name={`source:${line.id}`}
-                                label="Supply source"
-                                hideLabel
-                                placeholder="Leave to the app"
-                                value={picked[line.id] ?? ""}
-                                onChange={(value) =>
-                                  setPicked((current) => ({
-                                    ...current,
-                                    [line.id]: value,
-                                  }))
-                                }
-                                options={[
-                                  { value: "", label: "Leave to the app" },
-                                  ...sources.map((source) => {
-                                    const free =
-                                      line.stock.find(
-                                        (entry) => entry.sourceId === source.id,
-                                      )?.free ?? 0;
-                                    return {
-                                      value: source.id,
-                                      // The stock is in the label because it is
-                                      // the fact the decision turns on, and a
-                                      // merchant should not have to open
-                                      // another page to see that the source
-                                      // they are about to pick has none.
-                                      label: `${source.name} — ${free} free`,
-                                    };
-                                  }),
-                                ]}
-                              />
-                            </s-box>
-
-                            {/*
-                              * A quantity field only where it can mean
-                              * something. A line of one cannot be split, and a
-                              * box reading "1" that will always read "1" is a
-                              * field to skip past on every row.
-                              */}
-                            {line.quantity > 1 ? (
-                              <s-box inlineSize="90px">
-                                <s-number-field
-                                  name={`quantity:${line.id}`}
-                                  label="Quantity"
-                                  labelAccessibilityVisibility="exclusive"
-                                  min={1}
-                                  max={line.quantity}
-                                  value={String(
-                                    quantities[line.id] ?? line.quantity,
-                                  )}
-                                  onChange={(event) =>
-                                    setQuantities((current) => ({
+                        <s-table-cell>
+                          {editingSources ? (
+                            <s-stack
+                              direction="inline"
+                              gap="small-500"
+                              alignItems="end"
+                            >
+                              <s-box minInlineSize="200px">
+                                <Dropdown
+                                  name={`source:${line.id}`}
+                                  label="Supply source"
+                                  hideLabel
+                                  placeholder="Leave to the app"
+                                  value={picked[line.id] ?? ""}
+                                  onChange={(value) =>
+                                    setPicked((current) => ({
                                       ...current,
-                                      [line.id]: Number(
-                                        event.currentTarget.value,
-                                      ),
+                                      [line.id]: value,
                                     }))
                                   }
+                                  options={[
+                                    { value: "", label: "Leave to the app" },
+                                    ...sources.map((source) => {
+                                      const free =
+                                        line.stock.find(
+                                          (entry) =>
+                                            entry.sourceId === source.id,
+                                        )?.free ?? 0;
+                                      return {
+                                        value: source.id,
+                                        // The stock is in the label because it is
+                                        // the fact the decision turns on, and a
+                                        // merchant should not have to open
+                                        // another page to see that the source
+                                        // they are about to pick has none.
+                                        label: `${source.name} — ${free} free`,
+                                      };
+                                    }),
+                                  ]}
                                 />
                               </s-box>
-                            ) : null}
-                          </s-stack>
-                        ) : line.allocations.length === 0 ? (
-                          <s-badge tone="warning">Not allocated</s-badge>
-                        ) : (
-                          <s-stack
-                            direction="inline"
-                            gap="small-500"
-                            alignItems="center"
-                          >
-                            {line.allocations.map((allocation) => (
-                              <s-badge
-                                key={allocation.id}
-                                tone={
-                                  allocation.sourceName ? "neutral" : "critical"
-                                }
-                              >
-                                {allocation.sourceName
-                                  ? // The count only when it is not the whole
-                                    // line: "Glavno 2" says something, "Glavno
-                                    // 1 of 1" says it twice.
-                                    allocation.quantity === line.quantity
-                                    ? allocation.sourceName
-                                    : `${allocation.sourceName} ${allocation.quantity}`
-                                  : `Needs a decision (${allocation.quantity})`}
-                              </s-badge>
-                            ))}
-                          </s-stack>
-                        )}
-                      </s-table-cell>
+
+                              {/*
+                               * A quantity field only where it can mean
+                               * something. A line of one cannot be split, and a
+                               * box reading "1" that will always read "1" is a
+                               * field to skip past on every row.
+                               */}
+                              {line.quantity > 1 ? (
+                                <s-box inlineSize="90px">
+                                  <s-number-field
+                                    name={`quantity:${line.id}`}
+                                    label="Quantity"
+                                    labelAccessibilityVisibility="exclusive"
+                                    min={1}
+                                    max={line.quantity}
+                                    value={String(
+                                      quantities[line.id] ?? line.quantity,
+                                    )}
+                                    onChange={(event) =>
+                                      setQuantities((current) => ({
+                                        ...current,
+                                        [line.id]: Number(
+                                          event.currentTarget.value,
+                                        ),
+                                      }))
+                                    }
+                                  />
+                                </s-box>
+                              ) : null}
+                            </s-stack>
+                          ) : line.allocations.length === 0 ? (
+                            <s-badge tone="warning">Not allocated</s-badge>
+                          ) : (
+                            <s-stack
+                              direction="inline"
+                              gap="small-500"
+                              alignItems="center"
+                            >
+                              {line.allocations.map((allocation) => (
+                                <s-badge
+                                  key={allocation.id}
+                                  tone={
+                                    allocation.sourceName
+                                      ? "neutral"
+                                      : "critical"
+                                  }
+                                >
+                                  {allocation.sourceName
+                                    ? // The count only when it is not the whole
+                                      // line: "Glavno 2" says something, "Glavno
+                                      // 1 of 1" says it twice.
+                                      allocation.quantity === line.quantity
+                                      ? allocation.sourceName
+                                      : `${allocation.sourceName} ${allocation.quantity}`
+                                    : `Needs a decision (${allocation.quantity})`}
+                                </s-badge>
+                              ))}
+                            </s-stack>
+                          )}
+                        </s-table-cell>
                       )}
 
                       <s-table-cell>{String(line.quantity)}</s-table-cell>
@@ -1134,14 +1154,14 @@ export default function OrderDetail() {
               </s-table>
 
               {/*
-                * The decision trail, only where it is not obvious.
-                *
-                * §13 asks this page to explain why a line went where it went,
-                * and it does — for the lines where that is a question. A line
-                * taken whole from the one warehouse that had it needs no
-                * explanation, and printing one for every such line is what
-                * buried the ones that do.
-                */}
+               * The decision trail, only where it is not obvious.
+               *
+               * §13 asks this page to explain why a line went where it went,
+               * and it does — for the lines where that is a question. A line
+               * taken whole from the one warehouse that had it needs no
+               * explanation, and printing one for every such line is what
+               * buried the ones that do.
+               */}
               {!unsplit && !editingSources && splitLines.length > 0 ? (
                 <s-stack direction="block" gap="small-400">
                   <s-text type="strong">Why these lines were split</s-text>
@@ -1162,20 +1182,19 @@ export default function OrderDetail() {
           </Form>
         </s-section>
 
-
         {/*
-          * Customer details, for an order Shopify has no address on.
-          *
-          * Point-of-sale orders, digital goods and some draft orders arrive
-          * with neither a billing nor a shipping address, and MetaKocka refuses
-          * a sales order without a partner. The only thing this app could say
-          * was "add the address in Shopify and retry", which is sometimes
-          * impossible and always slower than typing it here.
-          *
-          * Shown when it is needed or when it has been used, and stays out of
-          * the way otherwise: most orders have an address and this section
-          * would be one more thing to read past.
-          */}
+         * Customer details, for an order Shopify has no address on.
+         *
+         * Point-of-sale orders, digital goods and some draft orders arrive
+         * with neither a billing nor a shipping address, and MetaKocka refuses
+         * a sales order without a partner. The only thing this app could say
+         * was "add the address in Shopify and retry", which is sometimes
+         * impossible and always slower than typing it here.
+         *
+         * Shown when it is needed or when it has been used, and stays out of
+         * the way otherwise: most orders have an address and this section
+         * would be one more thing to read past.
+         */}
         {!hasShopifyAddress || partnerOverride ? (
           <s-section heading="Customer details for MetaKocka">
             <s-stack direction="block" gap="base">
@@ -1285,14 +1304,14 @@ export default function OrderDetail() {
         ) : null}
 
         {/*
-          * The payment ledger.
-          *
-          * The one thing a payment badge cannot say: how much has arrived, on
-          * what, and when. §8.7 records individual Shopify transactions
-          * precisely so this question has an answer for an order paid twice, an
-          * order half paid, and an order refunded — none of which
-          * `financial_status` can distinguish.
-          */}
+         * The payment ledger.
+         *
+         * The one thing a payment badge cannot say: how much has arrived, on
+         * what, and when. §8.7 records individual Shopify transactions
+         * precisely so this question has an answer for an order paid twice, an
+         * order half paid, and an order refunded — none of which
+         * `financial_status` can distinguish.
+         */}
         <s-section heading="Payments">
           <s-stack direction="block" gap="base">
             <s-grid gridTemplateColumns="1fr 1fr 1fr" gap="base">
@@ -1350,10 +1369,10 @@ export default function OrderDetail() {
                       </s-text>
                     </s-stack>
                     {/*
-                      * Only a failure is coloured. §UI: colour marks
-                      * exceptions, never "normal" — a successful payment is
-                      * the expected case and gets no pill at all.
-                      */}
+                     * Only a failure is coloured. §UI: colour marks
+                     * exceptions, never "normal" — a successful payment is
+                     * the expected case and gets no pill at all.
+                     */}
                     {payment.status === "success" ? null : (
                       <s-badge
                         tone={
@@ -1371,8 +1390,7 @@ export default function OrderDetail() {
               </s-stack>
             )}
 
-            {order.grossReceivedMinor > 0 &&
-            order.refundedMinor > 0 ? (
+            {order.grossReceivedMinor > 0 && order.refundedMinor > 0 ? (
               <s-text color="subdued">
                 Refunds are never written onto a MetaKocka sales order: the
                 payment already recorded there is what was actually received,
@@ -1433,13 +1451,13 @@ export default function OrderDetail() {
                     </s-text>
 
                     {/*
-                      * The way out to the ERP.
-                      *
-                      * `target="_blank"` because this app is an iframe inside
-                      * admin.shopify.com: without it MetaKocka would try to
-                      * load inside the frame, which it will not do, and the
-                      * link would simply appear broken.
-                      */}
+                     * The way out to the ERP.
+                     *
+                     * `target="_blank"` because this app is an iframe inside
+                     * admin.shopify.com: without it MetaKocka would try to
+                     * load inside the frame, which it will not do, and the
+                     * link would simply appear broken.
+                     */}
                     {document.metakockaUrl ? (
                       <s-link href={document.metakockaUrl} target="_blank">
                         Open in MetaKocka
@@ -1447,12 +1465,12 @@ export default function OrderDetail() {
                     ) : null}
                   </s-stack>
                   {/*
-                    * Two facts, not one: what this app did, and what MetaKocka
-                    * has done since. A document that was written last Tuesday
-                    * and delivered on Thursday used to read as "written"
-                    * forever, because nothing ever asked (§3: MetaKocka pushes
-                    * nothing but stock).
-                    */}
+                   * Two facts, not one: what this app did, and what MetaKocka
+                   * has done since. A document that was written last Tuesday
+                   * and delivered on Thursday used to read as "written"
+                   * forever, because nothing ever asked (§3: MetaKocka pushes
+                   * nothing but stock).
+                   */}
                   <s-stack direction="block" gap="small-500">
                     <s-badge
                       tone={
@@ -1540,9 +1558,9 @@ export default function OrderDetail() {
               <Form method="post">
                 <input type="hidden" name="intent" value="accept-shopify" />
                 {/*
-                  * Named for what it does, not for what a merchant wishes it
-                  * did. It records a decision; it does not send anything.
-                  */}
+                 * Named for what it does, not for what a merchant wishes it
+                 * did. It records a decision; it does not send anything.
+                 */}
                 <s-button
                   type="submit"
                   variant="secondary"

@@ -71,7 +71,9 @@ describe("readiness lines", () => {
       href: null,
       stockNotRead: false,
     };
-    expect(readinessText(done)).toBe("All 4 products have the data the rig builder needs");
+    expect(readinessText(done)).toBe(
+      "All 4 products have the data the rig builder needs",
+    );
     const only = lines(products().filter((p) => p.productType === "Masts"));
     expect(only.map((l) => l.type)).toEqual(["masts"]);
   });

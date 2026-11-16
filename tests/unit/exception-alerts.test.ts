@@ -12,7 +12,8 @@ import { alertLink, formatAlert, isAlertKind } from "~/domain/alerts";
  */
 
 const state = vi.hoisted(() => ({
-  webhook: "https://hooks.slack.test/services/T000/B000/secret" as string | undefined,
+  webhook: "https://hooks.slack.test/services/T000/B000/secret" as
+    string | undefined,
   claim: null as AlertClaimResult | null,
   claims: 0,
   released: [] as string[],
@@ -36,13 +37,19 @@ vi.mock("~/adapters/db/repositories/exception.server", () => ({
   },
 }));
 
-const { handleNotifyException } = await import("~/jobs/handlers/notify-exception");
+const { handleNotifyException } =
+  await import("~/jobs/handlers/notify-exception");
 
 const job = {
   data: { shopDomain: "recharge-test.myshopify.com", exceptionId: "exc_1" },
 } as Job<unknown>;
 
-function recorder(response: { ok: boolean; status: number; body?: string } = { ok: true, status: 200 }) {
+function recorder(
+  response: { ok: boolean; status: number; body?: string } = {
+    ok: true,
+    status: 200,
+  },
+) {
   const calls: Array<{ url: string; body: string }> = [];
   const fetchImpl = async (url: string, init: { body: string }) => {
     calls.push({ url, body: init.body });
@@ -82,11 +89,23 @@ describe("alert kinds and wording", () => {
 
   it("links to the order inside the Shopify admin, or to Needs attention", () => {
     expect(
-      alertLink({ shopDomain: "recharge-test.myshopify.com", apiKey: "k", orderId: "ord_1" }),
-    ).toBe("https://admin.shopify.com/store/recharge-test/apps/k/app/orders/ord_1");
+      alertLink({
+        shopDomain: "recharge-test.myshopify.com",
+        apiKey: "k",
+        orderId: "ord_1",
+      }),
+    ).toBe(
+      "https://admin.shopify.com/store/recharge-test/apps/k/app/orders/ord_1",
+    );
     expect(
-      alertLink({ shopDomain: "recharge-test.myshopify.com", apiKey: "k", orderId: null }),
-    ).toBe("https://admin.shopify.com/store/recharge-test/apps/k/app/exceptions");
+      alertLink({
+        shopDomain: "recharge-test.myshopify.com",
+        apiKey: "k",
+        orderId: null,
+      }),
+    ).toBe(
+      "https://admin.shopify.com/store/recharge-test/apps/k/app/exceptions",
+    );
   });
 
   it("says the kind, the shop and the order number, and escapes what Slack reads", () => {
@@ -139,7 +158,11 @@ describe("handleNotifyException", () => {
   });
 
   it("gives the claim back and throws when Slack refuses, so the retry can send it", async () => {
-    const { fetchImpl } = recorder({ ok: false, status: 500, body: "server error" });
+    const { fetchImpl } = recorder({
+      ok: false,
+      status: 500,
+      body: "server error",
+    });
 
     await expect(handleNotifyException(job, { fetchImpl })).rejects.toThrow(
       "Slack refused the alert: HTTP 500",
@@ -148,9 +171,15 @@ describe("handleNotifyException", () => {
   });
 
   it("never repeats the webhook URL in an error", async () => {
-    const { fetchImpl } = recorder({ ok: false, status: 404, body: "no_service" });
+    const { fetchImpl } = recorder({
+      ok: false,
+      status: 404,
+      body: "no_service",
+    });
 
-    const error = await handleNotifyException(job, { fetchImpl }).catch((e: unknown) => e);
+    const error = await handleNotifyException(job, { fetchImpl }).catch(
+      (e: unknown) => e,
+    );
     expect(String(error)).not.toContain("secret");
   });
 });

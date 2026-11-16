@@ -2,7 +2,11 @@ import { createHash } from "node:crypto";
 
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
-import { correctFields, translateFields, type TranslateOutcome } from "~/adapters/ai/openai.server";
+import {
+  correctFields,
+  translateFields,
+  type TranslateOutcome,
+} from "~/adapters/ai/openai.server";
 import {
   clearFailure,
   isBackingOff,
@@ -43,7 +47,10 @@ import {
   type TerminologyNote,
   type TranslationRequest,
 } from "~/domain/translations/prompt";
-import { resolveSourceLocale, type SourceResolution } from "~/domain/translations/source";
+import {
+  resolveSourceLocale,
+  type SourceResolution,
+} from "~/domain/translations/source";
 import {
   FORM_STABLE_CLASSIFICATIONS,
   relevantTerms,
@@ -125,7 +132,9 @@ export async function loadGlossaries(
   locales: readonly string[],
 ): Promise<Map<string, GlossaryTerm[]>> {
   const entries = await Promise.all(
-    locales.map(async (locale) => [locale, await glossaryFor(principal, locale)] as const),
+    locales.map(
+      async (locale) => [locale, await glossaryFor(principal, locale)] as const,
+    ),
   );
   return new Map(entries);
 }
@@ -220,7 +229,9 @@ export function sourceKeyOf(fields: readonly SourceField[]): string {
       TRANSLATION_PROMPT_VERSION,
       VALIDATION_VERSION,
       ...fields
-        .map((field) => `${field.key}:${field.digest ?? hashValue(field.value)}`)
+        .map(
+          (field) => `${field.key}:${field.digest ?? hashValue(field.value)}`,
+        )
         .sort(),
     ].join("|"),
   );
@@ -250,7 +261,8 @@ function planLocale(input: {
   return {
     decisions,
     toTranslate: decisions.filter(
-      (d): d is Extract<FieldDecision, { kind: "translate" }> => d.kind === "translate",
+      (d): d is Extract<FieldDecision, { kind: "translate" }> =>
+        d.kind === "translate",
     ),
     toCopy: decisions.filter(
       (d): d is Extract<FieldDecision, { kind: "copy_source" }> =>
@@ -298,7 +310,10 @@ export function automaticWorkFor(input: {
   );
 }
 
-async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Promise<LocaleResult> {
+async function translateIntoLocale(
+  ctx: EngineContext,
+  input: LocaleInput,
+): Promise<LocaleResult> {
   const settings =
     ctx.settings.get(input.locale) ?? defaultLanguageSettings(input.locale);
   const { decisions, toTranslate, toCopy } = planLocale({
@@ -317,7 +332,10 @@ async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Prom
     locale: input.locale,
     title: input.title,
   };
-  const skippedCount = Object.values(summary.skipped).reduce((a, b) => a + b, 0);
+  const skippedCount = Object.values(summary.skipped).reduce(
+    (a, b) => a + b,
+    0,
+  );
 
   if (toTranslate.length === 0 && toCopy.length === 0) {
     return {
@@ -358,7 +376,10 @@ async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Prom
         status: "skipped",
         fields: 0,
         detail: {
-          skipped: { ...summary.skipped, failed_before: toTranslate.length + toCopy.length },
+          skipped: {
+            ...summary.skipped,
+            failed_before: toTranslate.length + toCopy.length,
+          },
           lastError: input.failure?.lastError ?? null,
         },
       },
@@ -370,7 +391,11 @@ async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Prom
   }
 
   if (toTranslate.length > 0) {
-    const answer = await answerFields(ctx, input, toTranslate.map((d) => d.field));
+    const answer = await answerFields(
+      ctx,
+      input,
+      toTranslate.map((d) => d.field),
+    );
     trace = answer.trace;
     if (answer.kind === "failed") {
       await recordFailure(
@@ -417,7 +442,15 @@ async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Prom
         value,
         digest: decision.field.digest,
       });
-      records.push(ownershipFor(ctx, input, decision.field.key, value, decision.field.digest));
+      records.push(
+        ownershipFor(
+          ctx,
+          input,
+          decision.field.key,
+          value,
+          decision.field.digest,
+        ),
+      );
       translatedCount += 1;
     }
     learned = answer.learned;
@@ -432,7 +465,13 @@ async function translateIntoLocale(ctx: EngineContext, input: LocaleInput): Prom
       digest: decision.field.digest,
     });
     records.push(
-      ownershipFor(ctx, input, decision.field.key, decision.field.value, decision.field.digest),
+      ownershipFor(
+        ctx,
+        input,
+        decision.field.key,
+        decision.field.value,
+        decision.field.digest,
+      ),
     );
   }
 
@@ -531,7 +570,11 @@ async function answerFields(
   const [terms, memory, context] = await Promise.all([
     intelligence.termsFor(input.source.locale),
     intelligence.memoryFor(input.source.locale, input.locale, fields),
-    intelligence.contexts.contextFor(input.resource.resourceId, input.resourceType, input.title),
+    intelligence.contexts.contextFor(
+      input.resource.resourceId,
+      input.resourceType,
+      input.title,
+    ),
   ]);
   const relevant = relevantTerms(fields, terms);
   const trace: TranslationTrace = {
@@ -547,7 +590,9 @@ async function answerFields(
     reusedKeys: [],
     memoryHitIds: [],
     glossaryHits: input.glossary.filter((term) =>
-      fields.some((field) => normaliseTerm(field.value).includes(normaliseTerm(term.sourceTerm))),
+      fields.some((field) =>
+        normaliseTerm(field.value).includes(normaliseTerm(term.sourceTerm)),
+      ),
     ).length,
     termIds: relevant.map((term) => term.id).slice(0, 40),
     validation: [],
@@ -577,7 +622,12 @@ async function answerFields(
       continue;
     }
     if (verdict === "hint") {
-      exactHints.push({ id: entry.id, sourceText: entry.sourceText, targetText: entry.targetText, origin: entry.origin });
+      exactHints.push({
+        id: entry.id,
+        sourceText: entry.sourceText,
+        targetText: entry.targetText,
+        origin: entry.origin,
+      });
       usedIds.add(entry.id);
     }
     remaining.push(field);
@@ -588,7 +638,10 @@ async function answerFields(
     return { kind: "ok", values, trace, learned: [] };
   }
 
-  const hints = [...exactHints, ...selectMemoryHints(remaining, memory, usedIds)];
+  const hints = [
+    ...exactHints,
+    ...selectMemoryHints(remaining, memory, usedIds),
+  ];
   for (const hint of hints) usedIds.add(hint.id);
   trace.memoryHitIds = [...usedIds].slice(0, 40);
 
@@ -617,11 +670,16 @@ async function answerFields(
     resourceType: input.resourceType,
   };
 
-  let answer: TranslateOutcome = await translateFields(ctx.principal, request, usage);
+  let answer: TranslateOutcome = await translateFields(
+    ctx.principal,
+    request,
+    usage,
+  );
   trace.attempts = 1;
   let violations: Violation[] = [];
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    if (answer.kind === "failed") return { kind: "failed", message: answer.message, trace };
+    if (answer.kind === "failed")
+      return { kind: "failed", message: answer.message, trace };
     trace.model = answer.model;
     violations = validateTranslation(remaining, answer.values, {
       ...rules,
@@ -629,7 +687,11 @@ async function answerFields(
     });
     trace.validation.push({
       attempt,
-      violations: violations.map((v) => ({ key: v.key, code: v.code, severity: v.severity })),
+      violations: violations.map((v) => ({
+        key: v.key,
+        code: v.code,
+        severity: v.severity,
+      })),
     });
     const hard = hardViolations(violations);
     if (hard.length === 0) break;
@@ -639,10 +701,17 @@ async function answerFields(
         message: `The translation broke a rule and could not be corrected: ${describeViolations(hard)}.`,
         trace,
       };
-    answer = await correctFields(ctx.principal, request, answer.text, hard, usage);
+    answer = await correctFields(
+      ctx.principal,
+      request,
+      answer.text,
+      hard,
+      usage,
+    );
     trace.attempts += 1;
   }
-  if (answer.kind === "failed") return { kind: "failed", message: answer.message, trace };
+  if (answer.kind === "failed")
+    return { kind: "failed", message: answer.message, trace };
 
   for (const [key, value] of answer.values) values.set(key, value);
   return {
@@ -673,7 +742,9 @@ function terminologyNote(term: StoredTerm): TerminologyNote {
     .sort((a, b) => b[1] - a[1])
     .slice(0, 3)
     .map(([source, count]) =>
-      source === "productTitle" ? `${count} product titles` : sources[source] ?? source,
+      source === "productTitle"
+        ? `${count} product titles`
+        : (sources[source] ?? source),
     );
   return {
     term: term.term,
@@ -695,10 +766,14 @@ function formStableTerms(
   storeName: string | null,
 ): string[] {
   const stable = new Set<string>();
-  for (const term of terms) if (FORM_STABLE_CLASSIFICATIONS.has(term.classification)) stable.add(term.term);
+  for (const term of terms)
+    if (FORM_STABLE_CLASSIFICATIONS.has(term.classification))
+      stable.add(term.term);
   for (const entry of memory) {
-    const kept = normaliseTerm(entry.sourceText) === normaliseTerm(entry.targetText);
-    if (kept && (entry.origin === "manual" || entry.usageCount >= 2)) stable.add(entry.sourceText);
+    const kept =
+      normaliseTerm(entry.sourceText) === normaliseTerm(entry.targetText);
+    if (kept && (entry.origin === "manual" || entry.usageCount >= 2))
+      stable.add(entry.sourceText);
   }
   if (storeName) stable.add(storeName);
   return [...stable];
@@ -706,7 +781,11 @@ function formStableTerms(
 
 function ownershipFor(
   ctx: EngineContext,
-  input: { resource: TranslatableResource; resourceType: ResourceType; locale: string },
+  input: {
+    resource: TranslatableResource;
+    resourceType: ResourceType;
+    locale: string;
+  },
   key: string,
   value: string,
   digest: string,

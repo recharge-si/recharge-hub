@@ -44,18 +44,28 @@ describeDatabase("rig_request", () => {
     expect(names).toEqual(
       expect.arrayContaining(["profile", "rig_variant_ids", "ip_hash"]),
     );
-    expect(names.filter((name) => /text|message|customer|email/.test(name))).toEqual([]);
+    expect(
+      names.filter((name) => /text|message|customer|email/.test(name)),
+    ).toEqual([]);
   });
 
   it("stores the variant ids as int8 and updates an existing row in place", async () => {
     const tenant = await createTenant("rig-save");
     tenants.push(tenant);
-    await saveRigRequest(write(tenant.shopId, "rb_aaaaaaaaaaaaaaaaaaaaaaaa"), false);
     await saveRigRequest(
-      { ...write(tenant.shopId, "rb_aaaaaaaaaaaaaaaaaaaaaaaa"), variantIds: [45500000009] },
+      write(tenant.shopId, "rb_aaaaaaaaaaaaaaaaaaaaaaaa"),
+      false,
+    );
+    await saveRigRequest(
+      {
+        ...write(tenant.shopId, "rb_aaaaaaaaaaaaaaaaaaaaaaaa"),
+        variantIds: [45500000009],
+      },
       true,
     );
-    const rows = await prisma.rigRequest.findMany({ where: { shopId: tenant.shopId } });
+    const rows = await prisma.rigRequest.findMany({
+      where: { shopId: tenant.shopId },
+    });
     expect(rows).toHaveLength(1);
     expect(rows[0]?.rigVariantIds).toEqual([45500000009n]);
   });
@@ -88,13 +98,23 @@ describeDatabase("rig_request", () => {
   it("counts plain mode over the last 50 explained requests", async () => {
     const tenant = await createTenant("rig-plain");
     tenants.push(tenant);
-    await saveRigRequest(write(tenant.shopId, "rb_111111111111111111111111"), false);
     await saveRigRequest(
-      { ...write(tenant.shopId, "rb_222222222222222222222222"), mode: "ai", explainedAt: new Date() },
+      write(tenant.shopId, "rb_111111111111111111111111"),
       false,
     );
     await saveRigRequest(
-      { ...write(tenant.shopId, "rb_333333333333333333333333"), explainedAt: new Date() },
+      {
+        ...write(tenant.shopId, "rb_222222222222222222222222"),
+        mode: "ai",
+        explainedAt: new Date(),
+      },
+      false,
+    );
+    await saveRigRequest(
+      {
+        ...write(tenant.shopId, "rb_333333333333333333333333"),
+        explainedAt: new Date(),
+      },
       false,
     );
     expect(await recentPlainShare(tenant.shopId)).toEqual({ plain: 1, of: 2 });

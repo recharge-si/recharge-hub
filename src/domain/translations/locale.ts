@@ -18,7 +18,8 @@ export function languageOf(locale: string): string {
 export function localeChain(locale: string): string[] {
   const parts = locale.split("-");
   const chain: string[] = [];
-  for (let end = parts.length; end >= 1; end -= 1) chain.push(parts.slice(0, end).join("-"));
+  for (let end = parts.length; end >= 1; end -= 1)
+    chain.push(parts.slice(0, end).join("-"));
   return chain;
 }
 

@@ -13,7 +13,8 @@ export interface Window {
   limit: number;
 }
 
-export type LimitResult = { ok: true } | { ok: false; retryAfterSeconds: number };
+export type LimitResult =
+  { ok: true } | { ok: false; retryAfterSeconds: number };
 
 const MAX_KEYS = 20_000;
 

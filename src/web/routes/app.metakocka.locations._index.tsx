@@ -358,15 +358,13 @@ const STATUS_LABEL: Record<LocationStatus, string> = {
  * `caution` is this component set's amber tone, which is what Polaris React
  * calls `attention`. There is no `attention` on `s-badge`.
  */
-const STATUS_TONE: Record<
-  LocationStatus,
-  "caution" | "neutral" | "critical"
-> = {
-  not_connected: "caution",
-  syncing: "neutral",
-  paused: "neutral",
-  error: "critical",
-};
+const STATUS_TONE: Record<LocationStatus, "caution" | "neutral" | "critical"> =
+  {
+    not_connected: "caution",
+    syncing: "neutral",
+    paused: "neutral",
+    error: "critical",
+  };
 
 /** "25 Aug, 00:36". A caption, not a sentence. */
 function shortDateTime(iso: string): string {

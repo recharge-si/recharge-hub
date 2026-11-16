@@ -38,21 +38,10 @@
  * is `other`, which is likewise carried and not counted.
  */
 export type TransactionKind =
-  | "authorization"
-  | "capture"
-  | "sale"
-  | "void"
-  | "refund"
-  | "change"
-  | "other";
+  "authorization" | "capture" | "sale" | "void" | "refund" | "change" | "other";
 
 export type TransactionStatus =
-  | "success"
-  | "pending"
-  | "failure"
-  | "error"
-  | "awaiting_response"
-  | "unknown";
+  "success" | "pending" | "failure" | "error" | "awaiting_response" | "unknown";
 
 export interface OrderTransaction {
   /** Shopify's own transaction id. The ledger's identity (§8.7). */

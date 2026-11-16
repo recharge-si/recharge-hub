@@ -517,11 +517,15 @@ function withMembers(
   setId: string,
   memberIds: string[] | undefined,
 ): { ok: true; attributes: Attribute[] } | { ok: false; message: string } {
-  if (memberIds === undefined) return { ok: true, attributes: schema.attributes };
+  if (memberIds === undefined)
+    return { ok: true, attributes: schema.attributes };
   const members = new Set(memberIds);
   for (const id of members) {
     if (!schema.attributes.some((a) => a.id === id))
-      return { ok: false, message: "One of those attributes no longer exists." };
+      return {
+        ok: false,
+        message: "One of those attributes no longer exists.",
+      };
   }
   return {
     ok: true,
@@ -550,7 +554,10 @@ export function addSet(
   return done(
     {
       ...schema,
-      sets: [...schema.sets, { id, name, description: input.description.trim() }],
+      sets: [
+        ...schema.sets,
+        { id, name, description: input.description.trim() },
+      ],
       attributes: members.attributes,
     },
     "Attribute set created.",

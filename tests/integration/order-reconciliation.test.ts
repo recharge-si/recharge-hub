@@ -22,7 +22,10 @@ import {
   type PayableDocument,
   type PaymentAllocationStrategy,
 } from "~/domain/payments/allocation";
-import { summarisePayments, type OrderTransaction } from "~/domain/payments/transactions";
+import {
+  summarisePayments,
+  type OrderTransaction,
+} from "~/domain/payments/transactions";
 
 /**
  * The reconciliation loop, driven through every scenario the brief lists
@@ -61,7 +64,10 @@ interface ShopifyLine {
 }
 
 /** Where Shopify says each line ships from, as fulfilment orders report it. */
-type Assignment = { locationId: string; lines: { lineId: string; quantity: number }[] };
+type Assignment = {
+  locationId: string;
+  lines: { lineId: string; quantity: number }[];
+};
 
 interface ShopifyOrder {
   lines: ShopifyLine[];
@@ -131,9 +137,9 @@ class Connector {
 
     // Shopify must account for the whole order; anything it does not is the
     // caller's problem and never silently dropped.
-    expect(allocationShortfalls(canonicalLines, allocations).shortfalls).toEqual(
-      [],
-    );
+    expect(
+      allocationShortfalls(canonicalLines, allocations).shortfalls,
+    ).toEqual([]);
 
     const grouped = groupBySupplySource(allocations);
     const skuOf = new Map(
@@ -190,9 +196,8 @@ class Connector {
       }
 
       const lines =
-        desired.find(
-          (entry) => entry.supplySourceId === action.supplySourceId,
-        )?.lines ?? [];
+        desired.find((entry) => entry.supplySourceId === action.supplySourceId)
+          ?.lines ?? [];
 
       if (action.kind === "create") {
         const countCode = `SH-1050-${action.supplySourceId.toUpperCase()}`;
@@ -371,7 +376,9 @@ function sale(
   };
 }
 
-function order(input: Partial<ShopifyOrder> & Pick<ShopifyOrder, "lines" | "assignments">): ShopifyOrder {
+function order(
+  input: Partial<ShopifyOrder> & Pick<ShopifyOrder, "lines" | "assignments">,
+): ShopifyOrder {
   return {
     transactions: [],
     totalMinor: input.lines.reduce(
@@ -392,7 +399,11 @@ describe("an order arriving, and arriving again", () => {
 
     const result = connector.run(
       order({
-        lines: [line("l1", "SKU-A", 2), line("l2", "SKU-B", 1), line("l3", "SKU-C", 3)],
+        lines: [
+          line("l1", "SKU-A", 2),
+          line("l2", "SKU-B", 1),
+          line("l3", "SKU-C", 3),
+        ],
         assignments: [
           {
             locationId: "loc-a",
@@ -416,7 +427,9 @@ describe("an order arriving, and arriving again", () => {
     const connector = new Connector(MAPPING);
     const state = order({
       lines: [line("l1", "SKU-A", 2)],
-      assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] }],
+      assignments: [
+        { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] },
+      ],
     });
 
     connector.run(state);
@@ -443,7 +456,9 @@ describe("an order arriving, and arriving again", () => {
     const connector = new Connector(MAPPING);
     const current = order({
       lines: [line("l1", "SKU-A", 5)],
-      assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 5 }] }],
+      assignments: [
+        { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 5 }] },
+      ],
     });
 
     connector.run(current);
@@ -460,7 +475,9 @@ describe("editing the order", () => {
     connector.run(
       order({
         lines: [line("l1", "SKU-A", 1)],
-        assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 1 }] }],
+        assignments: [
+          { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 1 }] },
+        ],
       }),
     );
 
@@ -525,7 +542,9 @@ describe("editing the order", () => {
     const after = connector.run(
       order({
         lines: [line("l1", "SKU-A", 2)],
-        assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] }],
+        assignments: [
+          { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] },
+        ],
       }),
     );
 
@@ -540,14 +559,18 @@ describe("moving between locations (§7, §8)", () => {
     connector.run(
       order({
         lines: [line("l1", "SKU-A", 2)],
-        assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] }],
+        assignments: [
+          { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] },
+        ],
       }),
     );
 
     const moved = connector.run(
       order({
         lines: [line("l1", "SKU-A", 2)],
-        assignments: [{ locationId: "loc-b", lines: [{ lineId: "l1", quantity: 2 }] }],
+        assignments: [
+          { locationId: "loc-b", lines: [{ lineId: "l1", quantity: 2 }] },
+        ],
       }),
     );
 
@@ -564,7 +587,9 @@ describe("moving between locations (§7, §8)", () => {
     connector.run(
       order({
         lines: [line("l1", "SKU-A", 5)],
-        assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 5 }] }],
+        assignments: [
+          { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 5 }] },
+        ],
       }),
     );
 
@@ -682,14 +707,18 @@ describe("splitting and merging (§9)", () => {
     connector.run(
       order({
         lines: [line("l1", "SKU-A", 2)],
-        assignments: [{ locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] }],
+        assignments: [
+          { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 2 }] },
+        ],
       }),
     );
 
     const moved = connector.run(
       order({
         lines: [line("l1", "SKU-A", 2)],
-        assignments: [{ locationId: "loc-b", lines: [{ lineId: "l1", quantity: 2 }] }],
+        assignments: [
+          { locationId: "loc-b", lines: [{ lineId: "l1", quantity: 2 }] },
+        ],
       }),
     );
 
@@ -731,7 +760,9 @@ describe("payments across the whole story (§20, §21)", () => {
       { locationId: "loc-a", lines: [{ lineId: "l1", quantity: 1 }] },
     ];
 
-    connector.run(order({ lines, assignments, transactions: [sale("t1", 10_000)] }));
+    connector.run(
+      order({ lines, assignments, transactions: [sale("t1", 10_000)] }),
+    );
     expect(connector.paidAt("src-a")).toBe(10_000);
 
     const after = connector.run(
@@ -863,13 +894,26 @@ describe("an unmapped location", () => {
     // The lines are still visible as unmapped, so the exception can name the
     // location instead of saying "part of this order could not be allocated".
     const grouped = groupBySupplySource([
-      { shopifyLocationId: "loc-a", supplySourceId: "src-a", disposition: "managed" as const, lines: [{ shopifyLineItemId: "l1", quantity: 1 }] },
-      { shopifyLocationId: "loc-z", supplySourceId: null, disposition: "unresolved" as const, lines: [{ shopifyLineItemId: "l2", quantity: 2 }] },
+      {
+        shopifyLocationId: "loc-a",
+        supplySourceId: "src-a",
+        disposition: "managed" as const,
+        lines: [{ shopifyLineItemId: "l1", quantity: 1 }],
+      },
+      {
+        shopifyLocationId: "loc-z",
+        supplySourceId: null,
+        disposition: "unresolved" as const,
+        lines: [{ shopifyLineItemId: "l2", quantity: 2 }],
+      },
     ]);
 
     expect([...grouped.bySource.keys()]).toEqual(["src-a"]);
     expect(grouped.unmappedLocations).toEqual([
-      { shopifyLocationId: "loc-z", lines: [{ shopifyLineItemId: "l2", quantity: 2 }] },
+      {
+        shopifyLocationId: "loc-z",
+        lines: [{ shopifyLineItemId: "l2", quantity: 2 }],
+      },
     ]);
   });
 
@@ -880,8 +924,18 @@ describe("an unmapped location", () => {
      * warehouse is document-level (§3).
      */
     const grouped = groupBySupplySource([
-      { shopifyLocationId: "loc-a", supplySourceId: "src-a", disposition: "managed" as const, lines: [{ shopifyLineItemId: "l1", quantity: 1 }] },
-      { shopifyLocationId: "loc-a2", supplySourceId: "src-a", disposition: "managed" as const, lines: [{ shopifyLineItemId: "l1", quantity: 2 }] },
+      {
+        shopifyLocationId: "loc-a",
+        supplySourceId: "src-a",
+        disposition: "managed" as const,
+        lines: [{ shopifyLineItemId: "l1", quantity: 1 }],
+      },
+      {
+        shopifyLocationId: "loc-a2",
+        supplySourceId: "src-a",
+        disposition: "managed" as const,
+        lines: [{ shopifyLineItemId: "l1", quantity: 2 }],
+      },
     ]);
 
     expect(grouped.bySource.get("src-a")).toEqual([

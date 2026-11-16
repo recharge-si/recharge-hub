@@ -30,8 +30,7 @@ export const LIMITS = {
 
 const OWNABLE = RIG_ROLES.filter((role) => role !== "extension");
 
-const num = (min: number, max: number) =>
-  z.number().finite().min(min).max(max);
+const num = (min: number, max: number) => z.number().finite().min(min).max(max);
 
 /** The `answers` of a request. Unknown keys are refused. */
 export const answersSchema = z
@@ -43,7 +42,10 @@ export const answersSchema = z
     windMinKn: num(LIMITS.windKn.min, LIMITS.windKn.max).optional(),
     windMaxKn: num(LIMITS.windKn.min, LIMITS.windKn.max).optional(),
     budgetEur: num(LIMITS.budgetEur.min, LIMITS.budgetEur.max).optional(),
-    owns: z.array(z.enum(OWNABLE as [RigRole, ...RigRole[]])).max(6).optional(),
+    owns: z
+      .array(z.enum(OWNABLE as [RigRole, ...RigRole[]]))
+      .max(6)
+      .optional(),
     boardKind: z.enum(BOARD_KINDS).optional(),
     ownedBoomMinCm: num(LIMITS.boomCm.min, LIMITS.boomCm.max).optional(),
     ownedBoomMaxCm: num(LIMITS.boomCm.min, LIMITS.boomCm.max).optional(),
@@ -170,7 +172,12 @@ export function parseProfile(output: unknown): ParsedModelProfile {
     }
   }
 
-  let weight = ranged("weightKg", raw["weightKg"], LIMITS.weightKg.min, LIMITS.weightKg.max);
+  let weight = ranged(
+    "weightKg",
+    raw["weightKg"],
+    LIMITS.weightKg.min,
+    LIMITS.weightKg.max,
+  );
   if (weight === undefined && !result.invalid.includes("weightKg")) {
     const pounds = numeric(raw["weightLb"]);
     if (pounds !== null) {
@@ -181,7 +188,12 @@ export function parseProfile(output: unknown): ParsedModelProfile {
   }
   if (weight !== undefined) result.weightKg = weight;
 
-  let height = ranged("heightCm", raw["heightCm"], LIMITS.heightCm.min, LIMITS.heightCm.max);
+  let height = ranged(
+    "heightCm",
+    raw["heightCm"],
+    LIMITS.heightCm.min,
+    LIMITS.heightCm.max,
+  );
   if (height === undefined && !result.invalid.includes("heightCm")) {
     const inches = numeric(raw["heightIn"]);
     if (inches !== null) {
@@ -200,8 +212,18 @@ export function parseProfile(output: unknown): ParsedModelProfile {
     else result.invalid.push("skill");
   }
 
-  let windMin = ranged("windMinKn", raw["windMinKn"], LIMITS.windKn.min, LIMITS.windKn.max);
-  let windMax = ranged("windMaxKn", raw["windMaxKn"], LIMITS.windKn.min, LIMITS.windKn.max);
+  let windMin = ranged(
+    "windMinKn",
+    raw["windMinKn"],
+    LIMITS.windKn.min,
+    LIMITS.windKn.max,
+  );
+  let windMax = ranged(
+    "windMaxKn",
+    raw["windMaxKn"],
+    LIMITS.windKn.min,
+    LIMITS.windKn.max,
+  );
   const forceLow = numeric(raw["windBeaufortMin"]);
   const forceHigh = numeric(raw["windBeaufortMax"] ?? raw["windBeaufortMin"]);
   if (
@@ -234,7 +256,12 @@ export function parseProfile(output: unknown): ParsedModelProfile {
   if (windMin !== undefined) result.windMinKn = windMin;
   if (windMax !== undefined) result.windMaxKn = windMax;
 
-  const budget = ranged("budgetEur", raw["budgetEur"], LIMITS.budgetEur.min, LIMITS.budgetEur.max);
+  const budget = ranged(
+    "budgetEur",
+    raw["budgetEur"],
+    LIMITS.budgetEur.min,
+    LIMITS.budgetEur.max,
+  );
   if (budget !== undefined) result.budgetEur = budget;
 
   if (Array.isArray(raw["owns"])) {

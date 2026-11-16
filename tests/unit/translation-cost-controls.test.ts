@@ -5,7 +5,10 @@ import {
   nextRetry,
   type StoredFailure,
 } from "~/adapters/db/repositories/translation-failures.server";
-import { accumulateResource, newCoverage } from "~/domain/translations/coverage";
+import {
+  accumulateResource,
+  newCoverage,
+} from "~/domain/translations/coverage";
 import { planResource } from "~/domain/translations/plan";
 import { keptKeys, type SourceField } from "~/domain/translations/types";
 

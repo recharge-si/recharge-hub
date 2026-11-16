@@ -113,7 +113,7 @@ describe("the export", () => {
 
   it("guards a cell that starts like a formula", () => {
     const risky = valuesCatalogue();
-    risky[0]!.title = "=HYPERLINK(\"http://x\")";
+    risky[0]!.title = '=HYPERLINK("http://x")';
     const { text } = buildExport({
       schema: plan,
       definitions,
@@ -126,16 +126,22 @@ describe("the export", () => {
   });
 
   it("counts rows before reading, and stops at the cap", () => {
-    const light = products.map((p) => ({ ...p, variantCount: p.variants.length }));
+    const light = products.map((p) => ({
+      ...p,
+      variantCount: p.variants.length,
+    }));
     expect(countExportRows(plan, ["freeride-sails"], light)).toBe(3);
     const many = valuesCatalogue();
-    many[0]!.variants = Array.from({ length: LIMITS.exportRows + 5 }, (_, i) => ({
-      variantId: `gid://shopify/ProductVariant/${9000 + i}`,
-      sku: null,
-      title: String(i),
-      options: [String(i)],
-      metafields: {},
-    }));
+    many[0]!.variants = Array.from(
+      { length: LIMITS.exportRows + 5 },
+      (_, i) => ({
+        variantId: `gid://shopify/ProductVariant/${9000 + i}`,
+        sku: null,
+        title: String(i),
+        options: [String(i)],
+        metafields: {},
+      }),
+    );
     const result = buildExport({
       schema: plan,
       definitions,
@@ -204,13 +210,19 @@ describe("the import preview", () => {
 
   it("keeps the current value for a blank cell", () => {
     const result = run(rows);
-    expect(result.counts.set + result.counts.change + result.counts.clear).toBe(0);
+    expect(result.counts.set + result.counts.change + result.counts.clear).toBe(
+      0,
+    );
   });
 
   it("reads a select by label, a multi-select, and a number with a comma", () => {
     const edited = fill(rows, [
       { variant: "1003", column: "Mast diameter", value: "SDM" },
-      { variant: "2003", column: "Compatible mast diameters", value: "RDM, SDM" },
+      {
+        variant: "2003",
+        column: "Compatible mast diameters",
+        value: "RDM, SDM",
+      },
       { variant: "2003", column: "Boom min", value: "170,5" },
     ]);
     const result = run(edited);
@@ -220,7 +232,9 @@ describe("the import preview", () => {
     );
     expect(byKey["mast_diameter@1003"]).toBe("sdm");
     expect(byKey["compatible_mast_diameters@2003"]).toBe('["rdm","sdm"]');
-    expect(byKey["boom_min_cm@2003"]).toBe('{"value":170.5,"unit":"CENTIMETERS"}');
+    expect(byKey["boom_min_cm@2003"]).toBe(
+      '{"value":170.5,"unit":"CENTIMETERS"}',
+    );
   });
 
   it("lists errors with the row, the column and the reason, and is not safe to apply", () => {
@@ -254,19 +268,33 @@ describe("the import preview", () => {
 
   it("makes an unknown id a row error", () => {
     const edited = rows.map((row) => [...row]);
-    edited.push(["gid://shopify/Product/1", "gid://shopify/ProductVariant/9", "", "", "", "", "", "", "430"]);
+    edited.push([
+      "gid://shopify/Product/1",
+      "gid://shopify/ProductVariant/9",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "",
+      "430",
+    ]);
     const result = run(edited);
     expect(result.errors.at(-1)).toMatchObject({ column: "variant_id" });
     expect(result.errors.at(-1)?.message).toContain("Unknown variant");
   });
 
   it("rejects a variant that belongs to another product", () => {
-    const edited = fill(rows, [{ variant: "1001", column: "Length", value: "370" }]);
+    const edited = fill(rows, [
+      { variant: "1001", column: "Length", value: "370" },
+    ]);
     const productCol = column(edited, "product_id");
     const variantCol = column(edited, "variant_id");
     const row = edited.find((r) => r[variantCol]?.endsWith("/1001"))!;
     row[productCol] = "gid://shopify/Product/200";
-    expect(run(edited).errors[0]?.message).toContain("belongs to another product");
+    expect(run(edited).errors[0]?.message).toContain(
+      "belongs to another product",
+    );
   });
 
   it("applies a product-scoped value once, and refuses two values for one product", () => {
@@ -276,8 +304,13 @@ describe("the import preview", () => {
       { variant: "1003", column: "Carbon percent", value: "90" },
     ]);
     const ok = run(same);
-    expect(ok.changes.filter((c) => c.key === "carbon_percent")).toHaveLength(1);
-    expect(ok.changes[0]).toMatchObject({ ownerId: "gid://shopify/Product/100", scope: "product" });
+    expect(ok.changes.filter((c) => c.key === "carbon_percent")).toHaveLength(
+      1,
+    );
+    expect(ok.changes[0]).toMatchObject({
+      ownerId: "gid://shopify/Product/100",
+      scope: "product",
+    });
 
     const clash = fill(rows, [
       { variant: "1001", column: "Carbon percent", value: "90" },
@@ -300,12 +333,11 @@ describe("the import preview", () => {
   });
 
   it("lists unknown columns, ignores hint columns and info columns", () => {
-    const edited = rows.map((row, i) => [
-      ...row,
-      i === 0 ? "Colour" : "red",
-    ]);
+    const edited = rows.map((row, i) => [...row, i === 0 ? "Colour" : "red"]);
     const result = run(
-      fill(edited, [{ variant: "1001", column: "hint_length_cm", value: "999" }]),
+      fill(edited, [
+        { variant: "1001", column: "hint_length_cm", value: "999" },
+      ]),
     );
     expect(result.unknownColumns).toEqual(["Colour"]);
     expect(result.hintColumns).toContain("hint_length_cm");
@@ -313,7 +345,9 @@ describe("the import preview", () => {
   });
 
   it("imports a hint only when it is copied into the real column", () => {
-    const edited = fill(rows, [{ variant: "1001", column: "Length", value: "370" }]);
+    const edited = fill(rows, [
+      { variant: "1001", column: "Length", value: "370" },
+    ]);
     expect(run(edited).changes).toHaveLength(1);
   });
 
@@ -343,17 +377,31 @@ describe("the import preview", () => {
   });
 
   it("notes the attributes with no metafield definition as untyped", () => {
-    const edited = fill(rows, [{ variant: "1001", column: "Length", value: "370" }]);
+    const edited = fill(rows, [
+      { variant: "1001", column: "Length", value: "370" },
+    ]);
     expect(run(edited).untyped).toEqual(["Length"]);
-    const defined = new Map([["PRODUCTVARIANT|recharge.length_cm", "dimension"]]);
+    const defined = new Map([
+      ["PRODUCTVARIANT|recharge.length_cm", "dimension"],
+    ]);
     const typed = run(edited, defined);
     expect(typed.untyped).toEqual([]);
-    expect(typed.changes[0]).toMatchObject({ defined: true, shopifyType: "dimension" });
+    expect(typed.changes[0]).toMatchObject({
+      defined: true,
+      shopifyType: "dimension",
+    });
   });
 
   it("refuses a file with no id column, no attribute columns, or too many rows", () => {
-    expect(run([["Length [recharge.length_cm]"], ["1"]]).fileErrors[0]).toContain("product_id or variant_id");
-    expect(run([["product_id", "colour"], ["x", "red"]]).fileErrors[0]).toContain("No column");
+    expect(
+      run([["Length [recharge.length_cm]"], ["1"]]).fileErrors[0],
+    ).toContain("product_id or variant_id");
+    expect(
+      run([
+        ["product_id", "colour"],
+        ["x", "red"],
+      ]).fileErrors[0],
+    ).toContain("No column");
     const big = [rows[0] ?? []];
     for (let i = 0; i < LIMITS.importRows + 1; i++) big.push([]);
     expect(run(big).fileErrors[0]).toContain("more than 5,000 rows");
@@ -361,7 +409,8 @@ describe("the import preview", () => {
   });
 
   it("keeps row numbers across blank lines", () => {
-    const text = "product_id,variant_id,Length [recharge.length_cm]\n\n,gid://shopify/ProductVariant/1001,abc\n";
+    const text =
+      "product_id,variant_id,Length [recharge.length_cm]\n\n,gid://shopify/ProductVariant/1001,abc\n";
     const result = planImport({
       rows: parseCsvRows(text, { keepEmptyRows: true }),
       schema: plan,
@@ -397,7 +446,10 @@ describe("the fixture spreadsheet for masts and sails", () => {
       unchanged: 1,
       error: 1,
     });
-    expect(result.errors[0]).toMatchObject({ row: 8, message: expect.stringContaining("not one number") });
+    expect(result.errors[0]).toMatchObject({
+      row: 8,
+      message: expect.stringContaining("not one number"),
+    });
     expect(result.unknownColumns).toEqual(["Colour"]);
   });
 });

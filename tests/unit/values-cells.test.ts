@@ -49,7 +49,15 @@ describe("reading a cell", () => {
       ok: true,
       value: '{"value":37.5,"unit":"CENTIMETERS"}',
     });
-    for (const bad of ["4-5", "4,2-4,8", "4 to 5", "37 cm", "1,234.5", "4..5", "abc"])
+    for (const bad of [
+      "4-5",
+      "4,2-4,8",
+      "4 to 5",
+      "37 cm",
+      "1,234.5",
+      "4..5",
+      "abc",
+    ])
       expect(parseCell(decimal, bad).ok, bad).toBe(false);
   });
 
@@ -102,7 +110,10 @@ describe("reading a cell", () => {
 
   it("refuses a field the product page cannot write", () => {
     const outcome = parseCell(
-      { kind: "blocked", reason: "A link to another record is chosen in Shopify." },
+      {
+        kind: "blocked",
+        reason: "A link to another record is chosen in Shopify.",
+      },
       "x",
     );
     expect(outcome).toEqual({
@@ -123,19 +134,27 @@ describe("a stored value as a cell", () => {
   });
 
   it("shows a decimal plainly and a list comma separated", () => {
-    expect(cellFromStored(decimal, { type: "number_decimal", value: "5.0" })).toBe("5");
+    expect(
+      cellFromStored(decimal, { type: "number_decimal", value: "5.0" }),
+    ).toBe("5");
     expect(
       cellFromStored(choices, {
         type: "list.single_line_text_field",
         value: '["rdm","sdm"]',
       }),
     ).toBe("rdm, sdm");
-    expect(cellFromStored(flag, { type: "boolean", value: "true" })).toBe("yes");
+    expect(cellFromStored(flag, { type: "boolean", value: "true" })).toBe(
+      "yes",
+    );
   });
 
   it("compares two spellings of one value as equal", () => {
-    expect(canonicalStored("decimal", "5.0")).toBe(canonicalStored("decimal", "5"));
-    expect(canonicalStored("measurement", '{"value":37.0,"unit":"CENTIMETERS"}')).toBe("37");
+    expect(canonicalStored("decimal", "5.0")).toBe(
+      canonicalStored("decimal", "5"),
+    );
+    expect(
+      canonicalStored("measurement", '{"value":37.0,"unit":"CENTIMETERS"}'),
+    ).toBe("37");
     expect(canonicalStored("choices", '["sdm","rdm"]')).toBe(
       canonicalStored("choices", '["rdm","sdm"]'),
     );
@@ -145,7 +164,14 @@ describe("a stored value as a cell", () => {
 
 describe("formula injection", () => {
   it("guards a cell that starts like a formula and reads it back", () => {
-    for (const cell of ["=1+1", "+5", "-5", "@SUM(A1)", "\tx", "=HYPERLINK(\"x\")"]) {
+    for (const cell of [
+      "=1+1",
+      "+5",
+      "-5",
+      "@SUM(A1)",
+      "\tx",
+      '=HYPERLINK("x")',
+    ]) {
       const guarded = guardCell(cell);
       expect(guarded.startsWith("'")).toBe(true);
       expect(unguardCell(guarded)).toBe(cell);

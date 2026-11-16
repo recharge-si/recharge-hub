@@ -55,7 +55,12 @@ export function webLines(): Line[] {
           text = (text.slice(0, start) + " " + text.slice(end + 2)).trim();
         }
         if (text === "") return;
-        lines.push({ file, line: index + 1, text, indent: raw.length - raw.trimStart().length });
+        lines.push({
+          file,
+          line: index + 1,
+          text,
+          indent: raw.length - raw.trimStart().length,
+        });
       });
   }
   return lines;

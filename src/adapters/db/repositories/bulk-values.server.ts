@@ -187,11 +187,7 @@ export type ChangeOutcome =
 const outcomesSchema = z.array(z.string().nullable());
 
 export type ImportStatus =
-  | "previewed"
-  | "queued"
-  | "running"
-  | "done"
-  | "failed";
+  "previewed" | "queued" | "running" | "done" | "failed";
 
 /** The plan without its changes: what the page shows. */
 export type ImportSummary = Omit<ImportPlan, "changes">;
@@ -343,10 +339,7 @@ export async function latestImport(
   const row = await prisma.bulkValueImport.findFirst({
     where: {
       shopId,
-      OR: [
-        { status: { not: "previewed" } },
-        { expiresAt: { gt: new Date() } },
-      ],
+      OR: [{ status: { not: "previewed" } }, { expiresAt: { gt: new Date() } }],
     },
     orderBy: { createdAt: "desc" },
     select: SELECT,
@@ -389,7 +382,11 @@ export async function claimApply(
     select: { status: true, expiresAt: true, total: true, summary: true },
   });
   if (!row) return { ok: false, reason: "unknown" };
-  if (row.status === "queued" || row.status === "running" || row.status === "done")
+  if (
+    row.status === "queued" ||
+    row.status === "running" ||
+    row.status === "done"
+  )
     return { ok: false, reason: "already" };
   if (row.status === "previewed" && row.expiresAt < new Date())
     return { ok: false, reason: "expired" };

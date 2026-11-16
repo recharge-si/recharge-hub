@@ -64,10 +64,7 @@ function presentmentAmount(
   flat: string | null | undefined,
 ): string {
   return (
-    set?.presentment_money?.amount ??
-    set?.shop_money?.amount ??
-    flat ??
-    "0"
+    set?.presentment_money?.amount ?? set?.shop_money?.amount ?? flat ?? "0"
   );
 }
 
@@ -509,7 +506,8 @@ function toTaxLines(lines: z.infer<typeof taxLineSchema>[]): TaxLineInput[] {
  * accounts, so apps and themes put it in a note attribute. Matching the usual
  * names finds it; nothing about tax treatment follows from its presence alone.
  */
-const VAT_ATTRIBUTE = /^(vat[\s_-]*(id|number|no|nr)?|tax[\s_-]*(id|number)|davcna|davčna|ddv|id[\s_-]*za[\s_-]*ddv)$/i;
+const VAT_ATTRIBUTE =
+  /^(vat[\s_-]*(id|number|no|nr)?|tax[\s_-]*(id|number)|davcna|davčna|ddv|id[\s_-]*za[\s_-]*ddv)$/i;
 
 function vatNumberOf(order: OrderPayload): string | null {
   for (const attribute of order.note_attributes) {
@@ -545,7 +543,9 @@ function toShipping(order: OrderPayload): ShippingTaxInput | null {
 
   return {
     amountMinor: amountMinor > 0 ? amountMinor : shippingMinor,
-    taxLines: toTaxLines(order.shipping_lines.flatMap((line) => line.tax_lines)),
+    taxLines: toTaxLines(
+      order.shipping_lines.flatMap((line) => line.tax_lines),
+    ),
   };
 }
 
@@ -570,13 +570,16 @@ function toNormalizedTax(
     customer: {
       isBusiness: company || vatNumber !== null,
       vatNumber,
-      taxExempt: order.tax_exempt === true || order.customer?.tax_exempt === true,
+      taxExempt:
+        order.tax_exempt === true || order.customer?.tax_exempt === true,
     },
     lines: order.line_items.map((line) => ({
       lineId: line.id,
       sku: line.sku?.trim() ?? "",
       quantity: line.quantity,
-      unitPriceMinor: toMinorUnits(presentmentAmount(line.price_set, line.price)),
+      unitPriceMinor: toMinorUnits(
+        presentmentAmount(line.price_set, line.price),
+      ),
       discountMinor: toMinorUnits(
         presentmentAmount(line.total_discount_set, line.total_discount),
       ),
@@ -609,14 +612,19 @@ function toRefunds(order: OrderPayload): RefundInput[] {
     for (const adjustment of refund.order_adjustments) {
       if ((adjustment.kind ?? "") !== "shipping_refund") continue;
       shippingMinor += Math.abs(
-        toMinorUnits(presentmentAmount(adjustment.amount_set, adjustment.amount)),
+        toMinorUnits(
+          presentmentAmount(adjustment.amount_set, adjustment.amount),
+        ),
       );
       if (adjustment.tax_amount_set || adjustment.tax_amount) {
         shippingTaxMinor =
           (shippingTaxMinor ?? 0) +
           Math.abs(
             toMinorUnits(
-              presentmentAmount(adjustment.tax_amount_set, adjustment.tax_amount),
+              presentmentAmount(
+                adjustment.tax_amount_set,
+                adjustment.tax_amount,
+              ),
             ),
           );
       }
@@ -626,9 +634,13 @@ function toRefunds(order: OrderPayload): RefundInput[] {
       refundId: refund.id,
       createdAt: refund.created_at ?? null,
       totalRefundedMinor:
-        lines.reduce((sum, line) => sum + (line.subtotalMinor ?? 0), 0) + shippingMinor,
+        lines.reduce((sum, line) => sum + (line.subtotalMinor ?? 0), 0) +
+        shippingMinor,
       lines,
-      shipping: shippingMinor > 0 ? { amountMinor: shippingMinor, taxMinor: shippingTaxMinor } : null,
+      shipping:
+        shippingMinor > 0
+          ? { amountMinor: shippingMinor, taxMinor: shippingTaxMinor }
+          : null,
     };
   });
 }

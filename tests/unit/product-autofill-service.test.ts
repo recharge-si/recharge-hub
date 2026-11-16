@@ -105,7 +105,11 @@ vi.mock("~/adapters/export-portal/service.server", () => ({
             },
           },
         }
-      : { ok: false, reason: "not_connected", message: "Connect the export portal first." },
+      : {
+          ok: false,
+          reason: "not_connected",
+          message: "Connect the export portal first.",
+        },
 }));
 
 const FIELDS: AttributeField[] = [
@@ -171,7 +175,9 @@ function product(id: string, productType = "") {
     category: null,
     hasOnlyDefaultVariant: true,
     options: [],
-    variants: [{ variantId: `${id}-v`, title: "Default", sku: null, options: [] }],
+    variants: [
+      { variantId: `${id}-v`, title: "Default", sku: null, options: [] },
+    ],
     metafields: {},
   };
 }
@@ -184,9 +190,8 @@ vi.mock("~/adapters/shopify/product-workspace", () => ({
   },
 }));
 
-const { applyAutofill, suggestAutofill } = await import(
-  "~/adapters/products/autofill.server"
-);
+const { applyAutofill, suggestAutofill } =
+  await import("~/adapters/products/autofill.server");
 const { ExportPortalError } = await import("~/adapters/export-portal/errors");
 
 const admin = {} as AdminApiContext;
@@ -415,13 +420,24 @@ describe("applying", () => {
       keepValues: null,
     });
     expect(state.typeChoices).toEqual([
-      expect.objectContaining({ productId: "p1", typeId: "wave", chosenBy: "staff" }),
+      expect.objectContaining({
+        productId: "p1",
+        typeId: "wave",
+        chosenBy: "staff",
+      }),
     ]);
     expect(state.writes).toEqual([
-      expect.objectContaining({ ownerId: "p1", key: "brand", value: "Point-7" }),
+      expect.objectContaining({
+        ownerId: "p1",
+        key: "brand",
+        value: "Point-7",
+      }),
     ]);
     expect(state.decided).toEqual(["applied"]);
-    expect(outcome).toEqual({ ok: true, message: "Applied: type set, 1 value filled." });
+    expect(outcome).toEqual({
+      ok: true,
+      message: "Applied: type set, 1 value filled.",
+    });
   });
 
   it("writes no values for a type the product does not have", async () => {

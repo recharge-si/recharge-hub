@@ -22,8 +22,12 @@ describe("excludeVariantIds", () => {
   it("build: the rig and its alternatives leave the variant out", async () => {
     const { body } = await built();
     const sail = body.rigs[0].items.find((i: Json) => i.role === "sail");
-    const swap = body.rigs[0].alternatives.find((a: Json) => a.role === "board");
-    const again = await built({ excludeVariantIds: [sail.variantId, swap.variantId] });
+    const swap = body.rigs[0].alternatives.find(
+      (a: Json) => a.role === "board",
+    );
+    const again = await built({
+      excludeVariantIds: [sail.variantId, swap.variantId],
+    });
     const ids = [
       ...again.body.rigs[0].items,
       ...again.body.rigs[0].alternatives,
@@ -52,7 +56,11 @@ describe("excludeVariantIds", () => {
     const target = ids[0] as number;
     const verdict = await read(
       await api.verify(
-        post({ variantIds: ids, answers: REFERENCE, excludeVariantIds: [target] }),
+        post({
+          variantIds: ids,
+          answers: REFERENCE,
+          excludeVariantIds: [target],
+        }),
       ),
     );
     expect(verdict.ok).toBe(false);
@@ -73,7 +81,10 @@ describe("excludeVariantIds", () => {
   it("is checked: at most 50 positive integers", async () => {
     const { api } = setup();
     const many = await api.build(
-      post({ answers: REFERENCE, excludeVariantIds: Array.from({ length: 51 }, (_, i) => i + 1) }),
+      post({
+        answers: REFERENCE,
+        excludeVariantIds: Array.from({ length: 51 }, (_, i) => i + 1),
+      }),
     );
     expect(many.status).toBe(400);
     const bad = await api.verify(
@@ -98,14 +109,20 @@ describe("display fields", () => {
       expect(item).toHaveProperty("vendor");
       expect(item.facts.length).toBeGreaterThan(0);
       expect(item.facts[0]).toEqual(
-        expect.objectContaining({ label: expect.any(String), value: expect.any(String) }),
+        expect.objectContaining({
+          label: expect.any(String),
+          value: expect.any(String),
+        }),
       );
       expect(item.price).toMatch(/^\d+\.\d{2}$/);
       expect(item.currency).not.toBe("");
     }
     const sail = body.rigs[0].items.find((i: Json) => i.role === "sail");
     expect(sail.facts).toContainEqual(
-      expect.objectContaining({ label: "Sail area", value: expect.stringMatching(/ m²$/) }),
+      expect.objectContaining({
+        label: "Sail area",
+        value: expect.stringMatching(/ m²$/),
+      }),
     );
   });
 
@@ -161,10 +178,16 @@ describe("breadcrumbs", () => {
       ["verify", 200],
     ]);
     expect(crumbs[0]).toEqual(
-      expect.objectContaining({ requestId: body.requestId, mode: "plain", parts: 6 }),
+      expect.objectContaining({
+        requestId: body.requestId,
+        mode: "plain",
+        parts: 6,
+      }),
     );
     expect(crumbs[1]?.mode).toMatch(/^(ai|plain)$/);
-    expect(crumbs[2]).toEqual(expect.objectContaining({ parts: 6, failedChecks: 0 }));
+    expect(crumbs[2]).toEqual(
+      expect.objectContaining({ parts: 6, failedChecks: 0 }),
+    );
     expect(typeof crumbs[0]?.latencyMs).toBe("number");
   });
 
@@ -181,7 +204,10 @@ describe("breadcrumbs", () => {
   it("never carries the buyer's text or address", async () => {
     const { api, crumbs } = withCrumbs();
     await api.explain(
-      post({ text: "I am Marta Novak, 82 kg, 15 to 25 knots" }, { "X-Forwarded-For": "198.51.100.7" }),
+      post(
+        { text: "I am Marta Novak, 82 kg, 15 to 25 knots" },
+        { "X-Forwarded-For": "198.51.100.7" },
+      ),
     );
     const text = JSON.stringify(crumbs);
     expect(text).not.toMatch(/Marta|198\.51|82 kg/);

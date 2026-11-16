@@ -14,9 +14,7 @@ import { isErpAdminUser, parseErpAdminEmails } from "~/domain/erp-admin";
 const SHOP = "erp-admin-test.myshopify.com";
 
 const spy = vi.hoisted(() => ({
-  user: undefined as
-    | { email: string; account_owner: boolean }
-    | undefined,
+  user: undefined as { email: string; account_owner: boolean } | undefined,
   calls: [] as string[],
 }));
 
@@ -113,36 +111,67 @@ describe("isErpAdminUser", () => {
   const allowlist = parseErpAdminEmails("ana@example.com");
 
   it("lets the store owner in, with or without an allowlist", () => {
-    expect(isErpAdminUser({ email: "o@x.si", account_owner: true }, [])).toBe(true);
-    expect(isErpAdminUser({ email: "", account_owner: true }, allowlist)).toBe(true);
+    expect(isErpAdminUser({ email: "o@x.si", account_owner: true }, [])).toBe(
+      true,
+    );
+    expect(isErpAdminUser({ email: "", account_owner: true }, allowlist)).toBe(
+      true,
+    );
   });
 
   it("matches a listed email regardless of case and surrounding space", () => {
-    for (const email of ["ana@example.com", "ANA@Example.COM", "  ana@example.com "]) {
-      expect(isErpAdminUser({ email, account_owner: false }, allowlist), email).toBe(true);
+    for (const email of [
+      "ana@example.com",
+      "ANA@Example.COM",
+      "  ana@example.com ",
+    ]) {
+      expect(
+        isErpAdminUser({ email, account_owner: false }, allowlist),
+        email,
+      ).toBe(true);
     }
   });
 
   it("matches an allowlist that was not normalized", () => {
     expect(
-      isErpAdminUser({ email: "ana@example.com", account_owner: false }, [" Ana@Example.com "]),
+      isErpAdminUser({ email: "ana@example.com", account_owner: false }, [
+        " Ana@Example.com ",
+      ]),
     ).toBe(true);
   });
 
   it("refuses a staff user who is not listed", () => {
-    expect(isErpAdminUser({ email: "bor@example.com", account_owner: false }, allowlist)).toBe(false);
-    expect(isErpAdminUser({ email: "ana@example.com.evil", account_owner: false }, allowlist)).toBe(false);
+    expect(
+      isErpAdminUser(
+        { email: "bor@example.com", account_owner: false },
+        allowlist,
+      ),
+    ).toBe(false);
+    expect(
+      isErpAdminUser(
+        { email: "ana@example.com.evil", account_owner: false },
+        allowlist,
+      ),
+    ).toBe(false);
   });
 
   it("refuses a staff user with an empty or missing email", () => {
-    expect(isErpAdminUser({ email: "", account_owner: false }, allowlist)).toBe(false);
-    expect(isErpAdminUser({ email: "   ", account_owner: false }, allowlist)).toBe(false);
-    expect(isErpAdminUser({ email: null, account_owner: false }, allowlist)).toBe(false);
+    expect(isErpAdminUser({ email: "", account_owner: false }, allowlist)).toBe(
+      false,
+    );
+    expect(
+      isErpAdminUser({ email: "   ", account_owner: false }, allowlist),
+    ).toBe(false);
+    expect(
+      isErpAdminUser({ email: null, account_owner: false }, allowlist),
+    ).toBe(false);
     expect(isErpAdminUser({ account_owner: false }, allowlist)).toBe(false);
   });
 
   it("stays locked for a non-owner when the allowlist is empty", () => {
-    expect(isErpAdminUser({ email: "ana@example.com", account_owner: false }, [])).toBe(false);
+    expect(
+      isErpAdminUser({ email: "ana@example.com", account_owner: false }, []),
+    ).toBe(false);
   });
 
   it("refuses when Shopify gave no user", () => {
@@ -155,19 +184,26 @@ describe("principalFromSession", () => {
   it("reads the online session's associated user", async () => {
     const { principalFromSession } = await import("~/web/lib/principal.server");
     const session = (user: unknown) =>
-      ({ shop: SHOP, onlineAccessInfo: user ? { associated_user: user } : undefined }) as never;
+      ({
+        shop: SHOP,
+        onlineAccessInfo: user ? { associated_user: user } : undefined,
+      }) as never;
 
     expect(
-      principalFromSession(session({ email: "Ana@example.com", account_owner: false }), [
-        "ana@example.com",
-      ]).isErpAdmin,
+      principalFromSession(
+        session({ email: "Ana@example.com", account_owner: false }),
+        ["ana@example.com"],
+      ).isErpAdmin,
     ).toBe(true);
     expect(
-      principalFromSession(session({ email: "bor@example.com", account_owner: false }), [
-        "ana@example.com",
-      ]).isErpAdmin,
+      principalFromSession(
+        session({ email: "bor@example.com", account_owner: false }),
+        ["ana@example.com"],
+      ).isErpAdmin,
     ).toBe(false);
-    expect(principalFromSession(session(undefined), ["ana@example.com"]).isErpAdmin).toBe(false);
+    expect(
+      principalFromSession(session(undefined), ["ana@example.com"]).isErpAdmin,
+    ).toBe(false);
   });
 
   it("uses an empty allowlist when ERP_ADMIN_EMAILS is unset", async () => {
@@ -198,7 +234,11 @@ describe("the MetaKocka settings route", () => {
       params: {},
       context: {},
     } as never);
-    expect(data).toMatchObject({ allowed: false, userKnown: true, summary: null });
+    expect(data).toMatchObject({
+      allowed: false,
+      userKnown: true,
+      summary: null,
+    });
     expect(spy.calls).toEqual([]);
   });
 
@@ -227,7 +267,9 @@ describe("the MetaKocka settings route", () => {
 
   it("refuses a request with no online user", async () => {
     const { action } = await import("~/web/routes/app.settings.metakocka");
-    const out = await action(post("/app/settings/metakocka", { intent: "save", companyId: "1" }));
+    const out = await action(
+      post("/app/settings/metakocka", { intent: "save", companyId: "1" }),
+    );
     expect(out).toMatchObject({ ok: false });
     expect(spy.calls).toEqual([]);
   });
@@ -259,7 +301,9 @@ describe("the export portal connection route", () => {
     spy.user = STAFF;
     const { action } = await import("~/web/routes/app.sources.connection");
     for (const intent of ["save", "test", "disconnect"] as const) {
-      const out = await action(post("/app/sources/connection", { intent, apiKey: "key" }));
+      const out = await action(
+        post("/app/sources/connection", { intent, apiKey: "key" }),
+      );
       expect(out, intent).toEqual({
         ok: false,
         intent,

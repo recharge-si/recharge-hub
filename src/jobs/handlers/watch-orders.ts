@@ -63,7 +63,8 @@ const CLEARED: Partial<Record<WatchFine, string>> = {
   over: "The order was cancelled, deleted or redacted.",
   not_activated: "Setup is not finished, so nothing is sent yet.",
   held_transfer_off: "Order transfer was turned off.",
-  held_received_while_off: "The order was received while order transfer was off.",
+  held_received_while_off:
+    "The order was received while order transfer was off.",
 };
 
 export async function handleWatchOrders(

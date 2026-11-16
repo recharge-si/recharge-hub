@@ -10,16 +10,14 @@ import type {
   RigSource,
   RigUsageWrite,
 } from "~/adapters/db/repositories/rig.server";
-import { createRigApi, type RigCall, type RigStore } from "~/adapters/rig/api.server";
+import {
+  createRigApi,
+  type RigCall,
+  type RigStore,
+} from "~/adapters/rig/api.server";
 import { RateLimiter } from "~/adapters/rig/rate-limit";
 
-import {
-  SHOP_A,
-  SHOP_B,
-  loadCatalogue,
-  rigPlan,
-  rules,
-} from "./rig-fixtures";
+import { SHOP_A, SHOP_B, loadCatalogue, rigPlan, rules } from "./rig-fixtures";
 
 /* ------------------------------ test doubles ------------------------------ */
 
@@ -99,24 +97,35 @@ export const fail = (
 export function goodModel(extra: Record<string, string> = {}): Script {
   return (prompt) => {
     if (prompt.includes("<buyer_text>")) {
-      return ok({ weightKg: 82, skill: "intermediate", windMinKn: 15, windMaxKn: 25 });
+      return ok({
+        weightKg: 82,
+        skill: "intermediate",
+        windMinKn: 15,
+        windMaxKn: 25,
+      });
     }
-    const ids = [...prompt.matchAll(/^- id (\d+):/gm)].map((m) => m[1] as string);
+    const ids = [...prompt.matchAll(/^- id (\d+):/gm)].map(
+      (m) => m[1] as string,
+    );
     return ok({
-      whys: Object.fromEntries(ids.map((id) => [id, extra[id] ?? `Reason ${id}.`])),
+      whys: Object.fromEntries(
+        ids.map((id) => [id, extra[id] ?? `Reason ${id}.`]),
+      ),
     });
   };
 }
 
-export function setup(options: {
-  script?: Script;
-  authenticate?: (request: Request) => Promise<string | null>;
-  explainLimiter?: RateLimiter;
-  buildLimiter?: RateLimiter;
-  dailyCalls?: number;
-  logError?: (fields: Record<string, unknown>, message: string) => void;
-  breadcrumb?: (call: RigCall) => void;
-} = {}) {
+export function setup(
+  options: {
+    script?: Script;
+    authenticate?: (request: Request) => Promise<string | null>;
+    explainLimiter?: RateLimiter;
+    buildLimiter?: RateLimiter;
+    dailyCalls?: number;
+    logError?: (fields: Record<string, unknown>, message: string) => void;
+    breadcrumb?: (call: RigCall) => void;
+  } = {},
+) {
   const store = new FakeStore();
   const provider = new FakeProvider(options.script ?? goodModel());
   const clock = { ms: Date.parse("2026-10-28T12:10:00Z") };
@@ -125,7 +134,8 @@ export function setup(options: {
     store,
     provider,
     rules,
-    buildLimiter: options.buildLimiter ?? new RateLimiter([{ ms: 60_000, limit: 100 }]),
+    buildLimiter:
+      options.buildLimiter ?? new RateLimiter([{ ms: 60_000, limit: 100 }]),
     explainLimiter:
       options.explainLimiter ??
       new RateLimiter([
@@ -146,12 +156,22 @@ export function setup(options: {
   return { api, store, provider, clock };
 }
 
-export function post(body: unknown, headers: Record<string, string> = {}): Request {
-  return new Request("https://hub.test/proxy/rig/build?shop=a.myshopify.com&signature=x", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "X-Forwarded-For": "203.0.113.9", ...headers },
-    body: typeof body === "string" ? body : JSON.stringify(body),
-  });
+export function post(
+  body: unknown,
+  headers: Record<string, string> = {},
+): Request {
+  return new Request(
+    "https://hub.test/proxy/rig/build?shop=a.myshopify.com&signature=x",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Forwarded-For": "203.0.113.9",
+        ...headers,
+      },
+      body: typeof body === "string" ? body : JSON.stringify(body),
+    },
+  );
 }
 
 // A response body the tests index freely; the shapes are asserted by the tests.
@@ -161,4 +181,3 @@ export type Json = any;
 export async function read(response: Response): Promise<Json> {
   return (await response.json()) as Json;
 }
-

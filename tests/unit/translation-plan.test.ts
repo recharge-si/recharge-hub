@@ -41,7 +41,10 @@ function aiRecord(key: string, value: string, locale = "de"): OwnershipRecord {
 
 function plan(overrides: Partial<PlanInput>): ReturnType<typeof planResource> {
   return planResource({
-    fields: [field("title", "Boom"), field("body_html", "<p>A boom.</p>", "HTML")],
+    fields: [
+      field("title", "Boom"),
+      field("body_html", "<p>A boom.</p>", "HTML"),
+    ],
     translations: [],
     ownership: [],
     hash,
@@ -76,7 +79,11 @@ describe("classifyField", () => {
       "existing",
     );
     expect(
-      classifyField(translation("title", "Baum"), aiRecord("title", "Baum"), hash),
+      classifyField(
+        translation("title", "Baum"),
+        aiRecord("title", "Baum"),
+        hash,
+      ),
     ).toBe("ai");
   });
 
@@ -210,11 +217,9 @@ describe("planResource", () => {
         field("value", "https://x", "URI"),
       ],
     });
-    expect(decisions.map((d) => (d.kind === "skip" ? d.reason : d.kind))).toEqual([
-      "identifier",
-      "empty_source",
-      "not_translatable",
-    ]);
+    expect(
+      decisions.map((d) => (d.kind === "skip" ? d.reason : d.kind)),
+    ).toEqual(["identifier", "empty_source", "not_translatable"]);
     expect(isTranslatableField(field("title", "Boom"))).toBe(true);
     expect(isTranslatableField(field("handle", "boom"))).toBe(false);
   });
@@ -235,10 +240,14 @@ describe("planResource", () => {
 
 describe("resourceTypeOfId", () => {
   it("reads the kind out of a Shopify id, and refuses anything else", () => {
-    expect(resourceTypeOfId("gid://shopify/Product/15968997376330")).toBe("PRODUCT");
+    expect(resourceTypeOfId("gid://shopify/Product/15968997376330")).toBe(
+      "PRODUCT",
+    );
     expect(resourceTypeOfId("gid://shopify/Menu/1")).toBe("MENU");
     expect(resourceTypeOfId("gid://shopify/Link/42")).toBe("LINK");
-    expect(resourceTypeOfId("gid://shopify/OnlineStoreArticle/9")).toBe("ARTICLE");
+    expect(resourceTypeOfId("gid://shopify/OnlineStoreArticle/9")).toBe(
+      "ARTICLE",
+    );
     // A kind this app does not translate, and something that is not an id.
     expect(resourceTypeOfId("gid://shopify/Customer/1")).toBeNull();
     expect(resourceTypeOfId("Patrik Micro-X")).toBeNull();

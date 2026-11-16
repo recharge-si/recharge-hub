@@ -59,6 +59,8 @@ describe("decideOrderTransfer", () => {
 
   it("describes every hold in words a log line can carry", () => {
     expect(describeTransferHold("transfer_off")).toMatch(/turned off/);
-    expect(describeTransferHold("received_while_off")).toMatch(/received while/);
+    expect(describeTransferHold("received_while_off")).toMatch(
+      /received while/,
+    );
   });
 });

@@ -86,7 +86,11 @@ export function ReferencePatternsModal({
                       <s-text color="subdued">{produced}</s-text>
                     ) : null}
                   </s-stack>
-                  {inUse ? <s-icon type="check" /> : <s-box inlineSize="20px" />}
+                  {inUse ? (
+                    <s-icon type="check" />
+                  ) : (
+                    <s-box inlineSize="20px" />
+                  )}
                 </s-grid>
               </s-clickable>
             </s-stack>

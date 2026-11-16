@@ -3,12 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildRig } from "~/domain/rig/engine";
 import { factsOf } from "~/domain/rig/facts";
 
-import {
-  SHOP_A,
-  candidates,
-  profileOf,
-  rules,
-} from "../support/rig-fixtures";
+import { SHOP_A, candidates, profileOf, rules } from "../support/rig-fixtures";
 
 /**
  * Follow-ups to the real-keys engine: a variant the cart refused is never
@@ -130,9 +125,11 @@ describe("factsOf", () => {
 
   it("joins lists, drops decimals past two, and says when one bound is missing", () => {
     expect(
-      factsOf({ finBoxTypes: ["power_box", "us_box"], volumeL: 101.456 }, [], "en").map(
-        (f) => f.value,
-      ),
+      factsOf(
+        { finBoxTypes: ["power_box", "us_box"], volumeL: 101.456 },
+        [],
+        "en",
+      ).map((f) => f.value),
     ).toEqual(["101.46 L", "power box, us box"]);
     expect(factsOf({ boomMaxCm: 190 }, [], "en")).toEqual([
       { field: "boomMaxCm", label: "Boom range (max)", value: "190 cm" },

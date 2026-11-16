@@ -7,12 +7,17 @@ import { rigTile, storeOperations, type HomeFigures } from "~/web/lib/home";
  * no tone unless something is wrong, nothing at all while the builder is off.
  */
 const now = new Date("2026-10-29T12:00:00Z");
-const hoursAgo = (h: number) => new Date(now.getTime() - h * 3_600_000).toISOString();
+const hoursAgo = (h: number) =>
+  new Date(now.getTime() - h * 3_600_000).toISOString();
 
 describe("rigTile", () => {
   it("states builds, plain share and the last exhaustion", () => {
     const tile = rigTile(
-      { buildsToday: 12, plain: { plain: 12, of: 50 }, lastExhaustedAt: hoursAgo(3) },
+      {
+        buildsToday: 12,
+        plain: { plain: 12, of: 50 },
+        lastExhaustedAt: hoursAgo(3),
+      },
       now,
     );
     expect(tile.key).toBe("rig");
@@ -34,7 +39,11 @@ describe("rigTile", () => {
 
   it("says one build in the singular and an old exhaustion without a tone", () => {
     const tile = rigTile(
-      { buildsToday: 1, plain: { plain: 0, of: 8 }, lastExhaustedAt: hoursAgo(72) },
+      {
+        buildsToday: 1,
+        plain: { plain: 0, of: 8 },
+        lastExhaustedAt: hoursAgo(72),
+      },
       now,
     );
     expect(tile.lines).toEqual([
@@ -47,7 +56,12 @@ describe("rigTile", () => {
 
 describe("storeOperations with the rig builder", () => {
   const figures: HomeFigures = {
-    counts: { receivedToday: 0, writtenToday: 0, stockUpdatesToday: 0, waiting: 0 },
+    counts: {
+      receivedToday: 0,
+      writtenToday: 0,
+      stockUpdatesToday: 0,
+      waiting: 0,
+    },
     lastMetakockaWriteAt: null,
     lastStockSyncAt: null,
     lastStockSyncOk: null,
@@ -65,13 +79,22 @@ describe("storeOperations with the rig builder", () => {
       syncing: false,
       lastSyncAt: null,
     },
-    sales: { active: [], next: null, onSale: 0, needsDecision: 0, failed: 0, total: 0 },
+    sales: {
+      active: [],
+      next: null,
+      onSale: 0,
+      needsDecision: 0,
+      failed: 0,
+      total: 0,
+    },
     timeZone: "UTC",
     formatDate: () => "",
     now,
   };
   const keys = (rig?: Parameters<typeof rigTile>[0] | null) =>
-    storeOperations({ ...base, ...(rig !== undefined ? { rig } : {}) }).map((t) => t.key);
+    storeOperations({ ...base, ...(rig !== undefined ? { rig } : {}) }).map(
+      (t) => t.key,
+    );
 
   it("has no rig tile when the builder is off or unmentioned", () => {
     expect(keys(null)).not.toContain("rig");
@@ -80,7 +103,11 @@ describe("storeOperations with the rig builder", () => {
 
   it("adds one when the builder is on", () => {
     expect(
-      keys({ buildsToday: 2, plain: { plain: 0, of: 0 }, lastExhaustedAt: null }),
+      keys({
+        buildsToday: 2,
+        plain: { plain: 0, of: 0 },
+        lastExhaustedAt: null,
+      }),
     ).toContain("rig");
   });
 });

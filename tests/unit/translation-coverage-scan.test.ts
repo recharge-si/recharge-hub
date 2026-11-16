@@ -167,7 +167,14 @@ describe("readCoverageChunk", () => {
     });
     expect(second).toMatchObject({ read: 1, done: true, after: null });
     expect(second.rows).toEqual([
-      expect.objectContaining({ locale: "sl", resourceType: "PRODUCT", resources: 3, fields: 3, translated: 1, missing: 2 }),
+      expect.objectContaining({
+        locale: "sl",
+        resourceType: "PRODUCT",
+        resources: 3,
+        fields: 3,
+        translated: 1,
+        missing: 2,
+      }),
     ]);
   });
 });

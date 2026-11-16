@@ -65,10 +65,7 @@ vi.mock("~/adapters/products/type-menu-updates.server", () => ({
   },
 }));
 vi.mock("~/adapters/shopify/product-workspace", () => ({
-  writeMetafields: async (
-    _: unknown,
-    writes: Array<{ ownerId: string }>,
-  ) => {
+  writeMetafields: async (_: unknown, writes: Array<{ ownerId: string }>) => {
     // Shopify refuses a whole call naming a deleted product.
     if (writes.some((w) => w.ownerId.startsWith("gone")))
       return {
