@@ -553,6 +553,27 @@ async function verdictFor(
           };
 
     /*
+     * Raised by the order watchdog for an order that went quiet.
+     *
+     * Closed here once every document is written and a reconciliation has
+     * recorded a verdict; otherwise reconciled again, which is the only thing
+     * that writes what is missing and verifies it. The watchdog itself closes
+     * it when the order stops being owed (cancelled, held by the switch).
+     */
+    case "order_not_transferred": {
+      const written =
+        order.documents.length > 0 &&
+        order.documents.every((document) => document.status === "written");
+      return written && order.syncState !== "pending"
+        ? FIXED("The order is in MetaKocka and verified.")
+        : {
+            kind: "unblocked",
+            note: "Reconciling the order again so it reaches MetaKocka.",
+            retry: "reconcile",
+          };
+    }
+
+    /*
      * Money that could not be placed on any document.
      *
      * Two things fix it and both are somebody else's work: a gateway getting a

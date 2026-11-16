@@ -151,6 +151,12 @@ export const TARGET_FOR_KIND: Record<ExceptionKind, RedriveTarget> = {
   tax_reconciliation_failed: "reconcile",
   tax_data_insufficient: "reconcile",
   vat_registration_configuration_error: "reconcile",
+  /*
+   * Nothing sent, or sent and never verified, with nothing else open to say
+   * why. Reconciling is the whole pipeline for one order, and the only thing
+   * that both writes what is missing and records the verdict.
+   */
+  order_not_transferred: "reconcile",
 };
 
 export interface RedriveResult {

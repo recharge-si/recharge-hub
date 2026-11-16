@@ -30,6 +30,10 @@ export const QUEUES = {
   markMetakockaPaid: "mark-metakocka-paid",
   reconcileOrders: "reconcile-orders",
   recheckExceptions: "recheck-exceptions",
+  // Orders that should be in MetaKocka and quietly are not (T-11).
+  watchOrders: "watch-orders",
+  // Operator alerts for severe exceptions (ALERT_SLACK_WEBHOOK_URL).
+  notifyException: "notify-exception",
   pollMetakockaDocuments: "poll-metakocka-documents",
   redactOldOrders: "redact-old-orders",
   // The rig builder's 90-day retention (docs/rig-builder.md).
@@ -529,6 +533,28 @@ export const QUEUE_DEFINITIONS: Record<QueueName, QueueOptions> = {
     retryDelay: 30,
     retryBackoff: true,
     expireInSeconds: 300,
+  },
+  // The order watchdog: database reads and exception rows only, and the next
+  // quarter-hour sees the same state, so a dropped run costs nothing.
+  [QUEUES.watchOrders]: {
+    retryLimit: 2,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 600,
+  },
+  /*
+   * One Slack message for one exception. Deliberately not dead-lettered: a
+   * dead job raises `job_failed`, which is itself announced, so a Slack that
+   * is down would announce its own failure to itself for ever. A message that
+   * cannot be sent after a few tries is dropped; the exception is still on
+   * the Needs attention page.
+   */
+  [QUEUES.notifyException]: {
+    retryLimit: 3,
+    retryDelay: 60,
+    retryBackoff: true,
+    expireInSeconds: 120,
+    retentionSeconds: 60 * 60 * 24 * 7,
   },
   // A retention promise, so it retries like the other compliance work rather
   // than being dropped after a couple of attempts.

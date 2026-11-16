@@ -1,4 +1,5 @@
 import { prisma } from "~/adapters/db/client.server";
+import { countPaidOrdersWithoutDocument } from "~/adapters/db/repositories/order-watchdog.server";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -26,6 +27,11 @@ export interface DashboardCounts {
   stockUpdatesToday: number;
   /** Orders received or allocated and not yet sent, whenever they arrived. */
   waiting: number;
+  /**
+   * Paid orders with no MetaKocka document. While order transfer is off,
+   * these are the ones waiting on the switch.
+   */
+  paidWithoutDocument: number;
 }
 
 export interface DashboardData {
@@ -80,6 +86,7 @@ export async function getDashboard(
     ordersAwaitingPayment,
     paymentsToday,
     stockEventsToday,
+    paidWithoutDocument,
   ] = await Promise.all([
     prisma.order.count({
       where: {
@@ -190,6 +197,8 @@ export async function getDashboard(
       },
       select: { detail: true },
     }),
+
+    countPaidOrdersWithoutDocument(principal),
   ]);
 
   const stockUpdatesToday = stockEventsToday.reduce((sum, event) => {
@@ -210,6 +219,7 @@ export async function getDashboard(
       paymentsToday,
       stockUpdatesToday,
       waiting,
+      paidWithoutDocument,
     },
     openExceptionsByKind: exceptionGroups.map((group) => ({
       kind: group.kind,

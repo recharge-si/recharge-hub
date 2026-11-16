@@ -1,6 +1,11 @@
 import { Prisma, type ExceptionKind } from "@prisma/client";
 
+import { getEnv } from "~/adapters/config/env.server";
 import { prisma } from "~/adapters/db/client.server";
+import { getLogger } from "~/adapters/observability/logger.server";
+import { enqueue } from "~/adapters/queue/boss.server";
+import { QUEUES } from "~/adapters/queue/queues";
+import { isAlertKind } from "~/domain/alerts";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**
@@ -53,6 +58,34 @@ export function deriveDedupeKey(
   return null;
 }
 
+/**
+ * Asks for the operator alert of a row that has just opened, when alerting is
+ * configured and the kind is one worth it (`domain/alerts`).
+ *
+ * Only ever a queued job: the Slack call happens in `notify-exception`, never
+ * in whatever raised the exception, which may be a request. A failure to queue
+ * is logged and swallowed — the exception row is the thing that matters, and
+ * it is already written.
+ */
+async function requestAlert(
+  domain: string,
+  exception: { id: string; kind: ExceptionKind },
+): Promise<void> {
+  if (!isAlertKind(exception.kind)) return;
+  if (!getEnv().ALERT_SLACK_WEBHOOK_URL) return;
+  try {
+    await enqueue(QUEUES.notifyException, {
+      shopDomain: domain,
+      exceptionId: exception.id,
+    });
+  } catch (error) {
+    getLogger().warn(
+      { err: error, shop: domain, kind: exception.kind },
+      "Could not queue the alert for a new exception",
+    );
+  }
+}
+
 export async function raiseException(
   principal: Principal,
   input: RaiseExceptionInput,
@@ -73,7 +106,7 @@ export async function raiseException(
   if (!dedupeKey) {
     // No identity to dedupe against — the pre-dedupe-key behaviour: raising
     // always creates a row.
-    await prisma.exception.create({
+    const created = await prisma.exception.create({
       data: {
         shopId: shop.id,
         orderId: input.orderId ?? null,
@@ -81,7 +114,9 @@ export async function raiseException(
         dedupeKey: null,
         ...data,
       },
+      select: { id: true, kind: true },
     });
+    await requestAlert(domain, created);
     return;
   }
 
@@ -97,8 +132,9 @@ export async function raiseException(
     return;
   }
 
+  let created: { id: string; kind: ExceptionKind };
   try {
-    await prisma.exception.create({
+    created = await prisma.exception.create({
       data: {
         shopId: shop.id,
         orderId: input.orderId ?? null,
@@ -106,6 +142,7 @@ export async function raiseException(
         dedupeKey,
         ...data,
       },
+      select: { id: true, kind: true },
     });
   } catch (error) {
     // Another caller raised the same condition between the findFirst above
@@ -124,6 +161,9 @@ export async function raiseException(
     }
     throw error;
   }
+  // Only a row that has just opened: an update of an open one is the same
+  // condition, and its alert (if any) has already been asked for.
+  await requestAlert(domain, created);
 }
 
 export async function listExceptions(
@@ -282,5 +322,138 @@ export async function resolveExceptionByKey(
       status: "open",
     },
     data: { status: "resolved", resolvedBy: by, resolvedAt: now },
+  });
+}
+
+/* -------------------------------------------------------------------------- */
+/* Operator alerts                                                            */
+/* -------------------------------------------------------------------------- */
+
+/** What an alert may say about an exception: never its message or detail. */
+export interface AlertClaim {
+  kind: ExceptionKind;
+  orderId: string | null;
+  orderNumber: string | null;
+  /** The dead job's queue, for `job_failed`. */
+  queue: string | null;
+}
+
+export type AlertClaimResult =
+  | { claimed: true; alert: AlertClaim }
+  | {
+      claimed: false;
+      why: "gone" | "closed" | "already_alerted" | "repeat" | "shop_limit";
+    };
+
+/**
+ * Takes the right to announce one exception, at most once.
+ *
+ * The claim is `alerted_at` going from null to now in one conditional update,
+ * so two deliveries of the same job send one message. Before claiming:
+ *
+ *  - a row that is no longer open is not announced — it fixed itself first;
+ *  - a condition (same shop, kind and dedupe key) announced within
+ *    `repeatWindowMs` is not announced again, so one that flaps open and
+ *    closed is one message, not one per quarter-hour;
+ *  - a shop that has had `perShopHourly` announcements in the last hour gets
+ *    no more until it drops, so a first sweep that finds forty stale orders
+ *    is not forty messages. The rest are on the Needs attention page.
+ *
+ * A skipped row is marked too, so it is never reconsidered.
+ */
+export async function claimExceptionAlert(
+  principal: Principal,
+  exceptionId: string,
+  options: { now: Date; repeatWindowMs: number; perShopHourly: number },
+): Promise<AlertClaimResult> {
+  const domain = shopDomainOf(principal);
+  const row = await prisma.exception.findFirst({
+    where: { id: exceptionId, shop: { domain } },
+    select: {
+      id: true,
+      shopId: true,
+      kind: true,
+      dedupeKey: true,
+      status: true,
+      alertedAt: true,
+      detail: true,
+      orderId: true,
+      order: { select: { shopifyOrderNumber: true } },
+    },
+  });
+  if (!row) return { claimed: false, why: "gone" };
+  if (row.alertedAt) return { claimed: false, why: "already_alerted" };
+  if (row.status !== "open") return { claimed: false, why: "closed" };
+
+  const { now } = options;
+  const markSkipped = () =>
+    prisma.exception.updateMany({
+      where: { id: row.id, alertedAt: null },
+      data: { alertedAt: now },
+    });
+
+  if (row.dedupeKey) {
+    const recent = await prisma.exception.findFirst({
+      where: {
+        shopId: row.shopId,
+        kind: row.kind,
+        dedupeKey: row.dedupeKey,
+        id: { not: row.id },
+        alertedAt: { gte: new Date(now.getTime() - options.repeatWindowMs) },
+      },
+      select: { id: true },
+    });
+    if (recent) {
+      await markSkipped();
+      return { claimed: false, why: "repeat" };
+    }
+  }
+
+  const lastHour = await prisma.exception.count({
+    where: {
+      shopId: row.shopId,
+      id: { not: row.id },
+      alertedAt: { gte: new Date(now.getTime() - 60 * 60_000) },
+    },
+  });
+  if (lastHour >= options.perShopHourly) {
+    await markSkipped();
+    return { claimed: false, why: "shop_limit" };
+  }
+
+  const { count } = await prisma.exception.updateMany({
+    where: { id: row.id, alertedAt: null },
+    data: { alertedAt: now },
+  });
+  if (count === 0) return { claimed: false, why: "already_alerted" };
+
+  const detail = row.detail;
+  const queue =
+    detail !== null &&
+    typeof detail === "object" &&
+    !Array.isArray(detail) &&
+    typeof detail.queue === "string"
+      ? detail.queue
+      : null;
+
+  return {
+    claimed: true,
+    alert: {
+      kind: row.kind,
+      orderId: row.orderId,
+      orderNumber: row.order?.shopifyOrderNumber ?? null,
+      queue,
+    },
+  };
+}
+
+/** Gives a claim back after the message could not be sent, so a retry can. */
+export async function releaseExceptionAlert(
+  principal: Principal,
+  exceptionId: string,
+): Promise<void> {
+  await prisma.exception.updateMany({
+    where: { id: exceptionId, shop: { domain: shopDomainOf(principal) } },
+    data: { alertedAt: null },
   });
 }

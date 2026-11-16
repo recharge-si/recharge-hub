@@ -14,6 +14,7 @@ import { handleDeadJob } from "~/jobs/handlers/dead-job";
 import { handleCustomersRedact } from "~/jobs/handlers/customers-redact";
 import { handleAllocateOrder } from "~/jobs/handlers/allocate-order";
 import { handleMarkMetakockaPaid } from "~/jobs/handlers/mark-metakocka-paid";
+import { handleNotifyException } from "~/jobs/handlers/notify-exception";
 import { handleOrdersEvent } from "~/jobs/handlers/orders-event";
 import { handlePollMetakockaDocuments } from "~/jobs/handlers/poll-metakocka-documents";
 import { handleRecheckExceptions } from "~/jobs/handlers/recheck-exceptions";
@@ -44,6 +45,7 @@ import { handleSourceProductAutofill } from "~/jobs/handlers/source-product-auto
 import { handleTypeMenuSync } from "~/jobs/handlers/type-menu-sync";
 import { handleTranslationResourceEvent } from "~/jobs/handlers/translation-resource-event";
 import { handleTranslationSync } from "~/jobs/handlers/translation-sync";
+import { handleWatchOrders } from "~/jobs/handlers/watch-orders";
 import { withIdempotency } from "~/jobs/with-idempotency";
 
 /**
@@ -153,6 +155,14 @@ async function main(): Promise<void> {
   // moment somebody fixes what it describes, and nothing announces that.
   await boss.work(QUEUES.recheckExceptions, async (jobs) => {
     for (const job of jobs) await handleRecheckExceptions(job);
+  });
+  // Orders that should be in MetaKocka and quietly are not (T-11).
+  await boss.work(QUEUES.watchOrders, async (jobs) => {
+    for (const job of jobs) await handleWatchOrders(job);
+  });
+  // Operator alerts; a no-op without ALERT_SLACK_WEBHOOK_URL.
+  await boss.work(QUEUES.notifyException, async (jobs) => {
+    for (const job of jobs) await handleNotifyException(job);
   });
   await boss.work(QUEUES.pollMetakockaDocuments, async (jobs) => {
     for (const job of jobs) await handlePollMetakockaDocuments(job);

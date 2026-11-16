@@ -221,6 +221,23 @@ describe("storeOperations", () => {
     expect(orders?.href).toBe("/app/orders/settings");
   });
 
+  it("counts the paid orders waiting while order transfer is off", () => {
+    const tiles = build({
+      components: ready.map((entry) =>
+        entry.key === "orders" ? component("orders", "disabled") : entry,
+      ),
+      figures: {
+        ...figures,
+        counts: { ...figures.counts, paidWithoutDocument: 7 },
+      },
+    });
+    const orders = tiles.find((tile) => tile.key === "orders");
+    expect(orders?.lines).toEqual([
+      { text: "Order transfer is off" },
+      { text: "7 paid orders waiting for transfer", tone: "caution" },
+    ]);
+  });
+
   it("colours only a line that states a problem", () => {
     const tiles = build({
       figures: { ...figures, lastStockSyncOk: false, ordersAwaitingPayment: 4 },

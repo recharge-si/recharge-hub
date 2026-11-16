@@ -369,6 +369,19 @@ async function fanOutForShop(
     );
 
     /*
+     * The order watchdog (T-11): orders that should be in MetaKocka by now
+     * and are not, with nothing open that says why. The re-check above can
+     * only re-judge an exception that exists; this is what raises one for
+     * the order nothing reacted to.
+     */
+    await enqueueThrottled(
+      QUEUES.watchOrders,
+      { shopDomain: domain },
+      `watch-orders:${domain}`,
+      14 * 60,
+    );
+
+    /*
      * The catalogue, on the merchant's own schedule.
      *
      * A registry that is only as fresh as the last time somebody pressed a

@@ -31,6 +31,9 @@ Completed work belongs in Git history, not in this file.
   `sync_stock` safeguards
 - Scheduled Shopify reconciliation, exception re-check, PII retention, dead-job
   visibility, dashboard, orders, and exceptions UI
+- A shop-wide order watchdog (`order_not_transferred`) and optional Slack
+  alerts for severe exceptions (`docs/architecture.md` § Schedules and
+  recovery, § Operator alerts)
 - Six-area information architecture with settings under the thing they
   configure, and redirects from the three routes that moved
 - The app's name in the admin nav opens Home: `/app` is the named home route
@@ -463,12 +466,16 @@ re-check, and MetaKocka document presence/content. Missing cross-checks are:
 - MetaKocka `free_amount` versus Shopify available stock.
 
 Document count, allocation-to-fulfilment correspondence and document totals
-versus the Shopify total are now checked per order by the reconciliation loop
+versus the Shopify total are checked per order by the reconciliation loop
 (`domain/orders/invariants`), which records `order.sync_state` and raises
-`sync_inconsistent`. What is still missing is a *shop-wide* sweep of orders that
-have not been reconciled recently, rather than only those something touched.
+`sync_inconsistent`. The shop-wide sweep is the order watchdog
+(`watch-orders`), which raises `order_not_transferred` for an order that has
+no written document or was never verified; it looks back 30 days only, and it
+does not re-verify an order already `in_sync` whose MetaKocka document may
+have drifted since (the hourly document read-back covers deletion and edits).
 
-These require new exception/dashboard states rather than silent log lines.
+The stock cross-check requires a new exception/dashboard state rather than a
+silent log line.
 
 ### Configurable allocation rules and returns remain future work
 
