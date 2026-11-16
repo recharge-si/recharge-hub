@@ -64,6 +64,7 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npm run typecheck
       - run: npm run lint
+      - run: npm run format:check
       - run: npx prisma migrate deploy
       - run: npm test
       # The same build the Dockerfile runs, so a broken build fails the pull

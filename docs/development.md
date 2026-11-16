@@ -136,6 +136,8 @@ normally injected rather than stored in `.env`.
 | `npm run start:worker` | Run built worker                                      |
 | `npm run typecheck`    | Generate route types and run TypeScript               |
 | `npm run lint`         | ESLint, including architecture boundaries             |
+| `npm run format`       | Prettier: rewrite every file it covers                |
+| `npm run format:check` | Prettier: fail on any file that is not formatted      |
 | `npm test`             | Full Vitest suite once                                |
 | `npm run test:watch`   | Vitest watch mode                                     |
 | `npm run build:e2e`    | Build the e2e app and worker into `build-e2e/`        |
@@ -271,9 +273,15 @@ For every code change:
 ```bash
 npm run typecheck
 npm run lint
+npm run format:check
 npx vitest run
 npm run build
 ```
+
+`format:check` runs Prettier (`.prettierrc.json`) over the code and config.
+`npm run format` fixes what it reports. `.prettierignore` leaves out Markdown,
+because Prettier rewrites emphasis and re-indents wrapped code spans in prose,
+and `tests/fixtures/`, which holds recorded payloads byte for byte.
 
 When relevant, also run:
 
@@ -433,7 +441,8 @@ has no `build:` for that reason; `APP_IMAGE` in `.env` overrides the tag.
 `deploy` → `verify`.
 
 `check` runs on every pull request and every push to `main`: `npm ci`,
-`npm run typecheck`, `npm run lint`, `npx prisma migrate deploy` against a
+`npm run typecheck`, `npm run lint`, `npm run format:check`,
+`npx prisma migrate deploy` against a
 throwaway PostgreSQL service, `npm test` (including `tests/db/`), and
 `npm run build`. A newer push to a pull request cancels its running check.
 Runs on `main` are queued rather than cancelled, so pushes are checked and

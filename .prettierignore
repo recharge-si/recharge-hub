@@ -2,3 +2,9 @@ build
 node_modules
 .react-router
 prisma/migrations
+
+# Recorded external payloads stay byte-for-byte as recorded.
+tests/fixtures
+
+# Prose: Prettier rewrites emphasis and re-indents wrapped code spans.
+*.md

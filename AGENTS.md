@@ -98,6 +98,7 @@ The standard code-change validation is:
 ```bash
 npm run typecheck
 npm run lint
+npm run format:check
 npx vitest run
 npm run build
 ```

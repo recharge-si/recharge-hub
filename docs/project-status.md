@@ -726,13 +726,6 @@ tested, so a cosmetic split would create churn. Extract server operations,
 presentation helpers, or form sections only when a concrete change establishes
 a stable boundary.
 
-### Formatting and CI are not enforced
-
-ESLint, typecheck, tests, and builds are documented but no CI workflow is
-tracked. Prettier is configured but the existing repository does not pass a
-whole-tree `prettier --check`; avoid a giant formatting-only rewrite and adopt
-enforcement deliberately in a separate change.
-
 ## MetaKocka probes still outstanding
 
 All require explicit approval and the designated test company:
