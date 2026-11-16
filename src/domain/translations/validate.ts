@@ -3,6 +3,7 @@ import {
   containsExact,
   containsTerm,
   htmlSkeleton,
+  isAllCaps,
   isCapitalised,
   looksLikeCode,
   missingFrom,
@@ -10,6 +11,7 @@ import {
   numbersOf,
   placeholdersOf,
   richTextSkeleton,
+  skeletonDifference,
   stripHtml,
   urlsOf,
   wordsOf,
@@ -62,7 +64,21 @@ export interface ValidationRules {
    * as they were. Used only to judge whether "unchanged" is plausible.
    */
   formStableTerms: readonly string[];
+  /**
+   * Fields the model said are already written in the target language and
+   * returned as they are (`already_in_target` in its reply). An unchanged
+   * answer for one of these is accepted when the field is prose, not a
+   * short label (§ Unchanged text).
+   */
+  alreadyInTarget?: ReadonlySet<string>;
 }
+
+/**
+ * Bumped whenever a rule here changes what is accepted. Part of the key a
+ * remembered failure is matched on, so a resource that failed under the
+ * old rules is tried again by the next automatic sync (§ Failures).
+ */
+export const VALIDATION_VERSION = "validate-v2";
 
 const HTML_TYPES: ReadonlySet<string> = new Set(["HTML", "MULTI_LINE_TEXT_FIELD_HTML"]);
 
@@ -109,7 +125,12 @@ function checkField(field: SourceField, target: string, rules: ValidationRules):
       push(
         "html_structure",
         "hard",
-        "Keep every HTML tag, in the same order and nesting, with the same href and src attributes. Translate only the visible text.",
+        [
+          "Keep every HTML tag of the source, in the same order and nesting, with the same href and src attributes; do not add, drop, merge or move elements. Translate only the visible text.",
+          skeletonDifference(before, after),
+        ]
+          .filter(Boolean)
+          .join(" "),
       );
   }
 
@@ -193,7 +214,11 @@ function checkUnchanged(field: SourceField, sourceText: string, targetText: stri
   if (letterWords.length === 0) return [];
 
   const stable = new Set(rules.formStableTerms.map(normaliseTerm));
-  const isStable = (word: string) => stable.has(normaliseTerm(word));
+  // In a heading written all in capitals ("ALL NEW BOARDS") capitals say
+  // nothing about a word; "HD SDM C75" is a string of abbreviations.
+  const shouting =
+    sourceText === sourceText.toUpperCase() && letterWords.some((word) => /\p{L}{6,}/u.test(word));
+  const isStable = (word: string) => stable.has(normaliseTerm(word)) || stableByShape(word, shouting);
   if (stable.has(normaliseTerm(sourceText))) return [];
   const ordinary = letterWords.filter((word) => !isStable(word));
   if (ordinary.length === 0) return [];
@@ -207,6 +232,20 @@ function checkUnchanged(field: SourceField, sourceText: string, targetText: stri
   // One capitalised word beside a code in a string of established terms is
   // a model name ("Duotone Wing Unit 4.0"), not a word that went untranslated.
   const anchored = words.some(looksLikeCode);
+  // The model said this text is already in the target language: a store
+  // whose default-language field holds copy written in the target language
+  // (a Slovenian description in an English store). Accepted for prose,
+  // where the claim is a statement about the text rather than a lazy echo;
+  // a short label like "All Products" is still held to the rule.
+  if (rules.alreadyInTarget?.has(field.key) && letterWords.length >= MIN_PROSE_WORDS)
+    return [
+      {
+        key: field.key,
+        code: "unchanged",
+        severity: "soft",
+        message: "Kept as it was: the model reported the text is already in the target language.",
+      },
+    ];
   if (uncovered.length === 1 && anchored && letterWords.length > 1 && isCapitalised(uncovered[0]!)) return [];
   if (uncovered.length === 1 && letterWords.length === 1)
     return [
@@ -225,6 +264,31 @@ function checkUnchanged(field: SourceField, sourceText: string, targetText: stri
       message: `"${sourceText}" came back unchanged. It contains ordinary words (${uncovered.slice(0, 4).join(", ")}) that must be translated; keep only brands, codes and established terms as they are.`,
     },
   ];
+}
+
+/** Below this many words a field is a label, and "already in the target language" is not taken on trust. */
+const MIN_PROSE_WORDS = 4;
+
+/**
+ * Unit symbols shared across languages (SI and the trade's usual ones),
+ * which a specification table keeps whatever language it is in.
+ */
+const UNIT_SYMBOLS: ReadonlySet<string> = new Set([
+  "mm", "cm", "dm", "m", "km", "m2", "m²", "m3", "m³", "cm2", "cm²", "cm3", "cm³", "g", "kg", "t", "l", "ml", "cl",
+  "dl", "h", "min", "s", "ms", "w", "kw", "v", "mah", "ah", "wh", "kwh", "psi", "bar", "kn", "kts", "lb", "lbs",
+  "oz", "ft",
+]);
+
+/**
+ * A word whose shape says it is a name or a symbol, not prose: a short
+ * all-caps abbreviation (`RPM`, `SL`, `HD`, `SDM`), a word with a capital
+ * after a lower-case letter (`iWindsurf`, `FreeRide`), a unit symbol.
+ * Capitals count only when the text is not written all in capitals.
+ */
+function stableByShape(word: string, shouting: boolean): boolean {
+  if (!shouting && isAllCaps(word) && word.length <= 5) return true;
+  if (/\p{Ll}\p{Lu}/u.test(word)) return true;
+  return UNIT_SYMBOLS.has(word.toLowerCase());
 }
 
 function codeKey(value: string): string {

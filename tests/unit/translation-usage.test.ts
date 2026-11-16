@@ -256,6 +256,25 @@ describe("prompt", () => {
     expect(parseTranslationReply("not json", fields).ok).toBe(false);
   });
 
+  it("reads which fields the model said are already in the target language", () => {
+    const declared = parseTranslationReply(
+      '{"translations":{"1":"Gabelbaum","2":"<p>Ein Gabelbaum.</p>"},"already_in_target":["2", 7]}',
+      fields,
+    );
+    expect(declared.ok).toBe(true);
+    if (declared.ok) expect([...declared.alreadyInTarget]).toEqual(["body_html"]);
+
+    // Absent, or not a list, declares nothing and fails nothing.
+    for (const text of [
+      '{"translations":{"1":"A","2":"B"}}',
+      '{"translations":{"1":"A","2":"B"},"already_in_target":"2"}',
+    ]) {
+      const reply = parseTranslationReply(text, fields);
+      expect(reply.ok).toBe(true);
+      if (reply.ok) expect(reply.alreadyInTarget.size).toBe(0);
+    }
+  });
+
   it("reads a detection reply and caps its confidence by the sample's length", () => {
     const long = "Deska za jadranje na deski je pripravljena za novo sezono na obali.";
     expect(parseDetectionReply('{"locale":"SL","confidence":0.9}', long)).toMatchObject({

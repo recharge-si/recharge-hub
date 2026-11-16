@@ -66,6 +66,7 @@ import {
   describeViolations,
   hardViolations,
   validateTranslation,
+  VALIDATION_VERSION,
   type Violation,
 } from "~/domain/translations/validate";
 import type { Principal } from "~/domain/types";
@@ -208,14 +209,20 @@ interface LocaleInput {
 
 /**
  * The identity of what is sent to the provider: the fields and the digests
- * of their source. A remembered failure applies while this is unchanged.
+ * of their source, and the versions of the prompt and the validation rules
+ * they were judged by. A remembered failure applies while this is
+ * unchanged, so a release that changes either tries every remembered
+ * failure once more (docs/translations.md § Failures).
  */
-function sourceKeyOf(fields: readonly SourceField[]): string {
+export function sourceKeyOf(fields: readonly SourceField[]): string {
   return hashValue(
-    fields
-      .map((field) => `${field.key}:${field.digest ?? hashValue(field.value)}`)
-      .sort()
-      .join("|"),
+    [
+      TRANSLATION_PROMPT_VERSION,
+      VALIDATION_VERSION,
+      ...fields
+        .map((field) => `${field.key}:${field.digest ?? hashValue(field.value)}`)
+        .sort(),
+    ].join("|"),
   );
 }
 
@@ -616,7 +623,10 @@ async function answerFields(
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
     if (answer.kind === "failed") return { kind: "failed", message: answer.message, trace };
     trace.model = answer.model;
-    violations = validateTranslation(remaining, answer.values, rules);
+    violations = validateTranslation(remaining, answer.values, {
+      ...rules,
+      alreadyInTarget: answer.alreadyInTarget,
+    });
     trace.validation.push({
       attempt,
       violations: violations.map((v) => ({ key: v.key, code: v.code, severity: v.severity })),
