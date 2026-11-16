@@ -35,7 +35,10 @@ services:
       - "127.0.0.1:5432:5432"
     healthcheck:
       test:
-        ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-recharge_hub} -d ${POSTGRES_DB:-recharge_hub}"]
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-recharge_hub} -d ${POSTGRES_DB:-recharge_hub}",
+        ]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -77,7 +80,12 @@ services:
         condition: service_completed_successfully
     healthcheck:
       test:
-        ["CMD", "node", "-e", "fetch('http://localhost:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000/healthz').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
       interval: 15s
       timeout: 5s
       retries: 5

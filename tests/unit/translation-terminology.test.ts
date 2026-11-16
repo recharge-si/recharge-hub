@@ -44,7 +44,9 @@ describe("terminology discovery", () => {
       expect(term!.classification, word).toBe("category");
       expect(term!.confidence, word).toBeGreaterThanOrEqual(0.9);
       // Corroborated by more than one kind of evidence.
-      expect(Object.keys(term!.evidence).length, word).toBeGreaterThanOrEqual(2);
+      expect(Object.keys(term!.evidence).length, word).toBeGreaterThanOrEqual(
+        2,
+      );
     }
   });
 
@@ -57,7 +59,9 @@ describe("terminology discovery", () => {
     // "RDM" recurs across mast titles: an abbreviation of the trade.
     expect(terms.get("rdm")?.classification).toBe("abbreviation");
     // "Freeride" recurs in titles and tags: a term of the trade, not filler.
-    expect(["technical", "attribute"]).toContain(terms.get("freeride")?.classification);
+    expect(["technical", "attribute"]).toContain(
+      terms.get("freeride")?.classification,
+    );
     expect(terms.get("freeride")!.confidence).toBeGreaterThan(0.6);
   });
 
@@ -76,8 +80,14 @@ describe("terminology discovery", () => {
 
     // "Wing" is a category in both the watersports and the aviation store —
     // each from its own menu and collection — and absent from the kitchen.
-    expect(water.get("wing")?.evidence).toMatchObject({ menu: 1, collection: 1 });
-    expect(aviation.get("wing")?.evidence).toMatchObject({ menu: 1, collection: 1 });
+    expect(water.get("wing")?.evidence).toMatchObject({
+      menu: 1,
+      collection: 1,
+    });
+    expect(aviation.get("wing")?.evidence).toMatchObject({
+      menu: 1,
+      collection: 1,
+    });
     expect(kitchen.has("wing")).toBe(false);
 
     // "Foil" is a watersports category; the kitchen knows "Foil & Film" and
@@ -99,25 +109,46 @@ describe("terminology discovery", () => {
         industries: ["windsurfing", "wing foiling"],
         audience: "",
         importantTerminology: [
-          { term: "Wing", meaning: "wing foiling discipline", classification: "discipline" },
-          { term: "Boom", meaning: "windsurf component", classification: "technical" },
+          {
+            term: "Wing",
+            meaning: "wing foiling discipline",
+            classification: "discipline",
+          },
+          {
+            term: "Boom",
+            meaning: "windsurf component",
+            classification: "technical",
+          },
         ],
         likelyBrands: ["Duotone", "Neil Pryde"],
         productFamilies: [],
         technicalVocabulary: ["camber"],
-        commonAbbreviations: [{ abbreviation: "SDM", meaning: "standard diameter mast" }],
+        commonAbbreviations: [
+          { abbreviation: "SDM", meaning: "standard diameter mast" },
+        ],
         localisationNotes: "",
       }),
     );
     // Corroboration lifts a term the data already knew.
     const without = byTerm(discoverTerminology(watersportsStore(), null));
-    expect(withProfile.get("wing")!.confidence).toBeGreaterThanOrEqual(without.get("wing")!.confidence);
+    expect(withProfile.get("wing")!.confidence).toBeGreaterThanOrEqual(
+      without.get("wing")!.confidence,
+    );
     expect(withProfile.get("wing")!.evidence.profile).toBe(1);
-    expect(withProfile.get("wing")!.occurrences).toBe(without.get("wing")!.occurrences + 1);
+    expect(withProfile.get("wing")!.occurrences).toBe(
+      without.get("wing")!.occurrences + 1,
+    );
     // A term only the profile named arrives with the profile's confidence.
-    expect(withProfile.get("boom")).toMatchObject({ classification: "technical", confidence: 0.8 });
-    expect(withProfile.get("neil pryde")).toMatchObject({ classification: "brand" });
-    expect(withProfile.get("sdm")).toMatchObject({ classification: "abbreviation" });
+    expect(withProfile.get("boom")).toMatchObject({
+      classification: "technical",
+      confidence: 0.8,
+    });
+    expect(withProfile.get("neil pryde")).toMatchObject({
+      classification: "brand",
+    });
+    expect(withProfile.get("sdm")).toMatchObject({
+      classification: "abbreviation",
+    });
   });
 
   it("is deterministic", () => {
@@ -128,15 +159,20 @@ describe("terminology discovery", () => {
 });
 
 describe("relevant terms", () => {
-  const terms = discoverTerminology(watersportsStore(), null).map((term, index) => ({
-    ...term,
-    id: `t${index}`,
-  }));
+  const terms = discoverTerminology(watersportsStore(), null).map(
+    (term, index) => ({
+      ...term,
+      id: `t${index}`,
+    }),
+  );
 
   it("finds the terms in a field, a whole-field match first", () => {
     const relevant = relevantTerms([field("Wing")], terms);
     expect(relevant[0]?.normalised).toBe("wing");
-    const inTitle = relevantTerms([field("Duotone Wing Unit 4.0 D/LAB with Carbon Mast")], terms);
+    const inTitle = relevantTerms(
+      [field("Duotone Wing Unit 4.0 D/LAB with Carbon Mast")],
+      terms,
+    );
     const names = inTitle.map((term) => term.normalised);
     expect(names).toContain("duotone");
     expect(names).toContain("wing");
@@ -144,9 +180,18 @@ describe("relevant terms", () => {
   });
 
   it("finds nothing for text the store has no words for, and respects the cap", () => {
-    expect(relevantTerms([field("Free shipping on every order")], terms)).toEqual([]);
+    expect(
+      relevantTerms([field("Free shipping on every order")], terms),
+    ).toEqual([]);
     const many = relevantTerms(
-      [field(terms.slice(0, 60).map((term) => term.term).join(" "))],
+      [
+        field(
+          terms
+            .slice(0, 60)
+            .map((term) => term.term)
+            .join(" "),
+        ),
+      ],
       terms,
       10,
     );
@@ -192,9 +237,21 @@ describe("store sample", () => {
   it("measures how much a store has changed by its vocabulary", () => {
     const before = sampleVocabulary(buildStoreSample(watersportsStore()));
     expect(vocabularyOverlap(before, before)).toBe(1);
-    expect(vocabularyOverlap(before, sampleVocabulary(buildStoreSample(kitchenStore())))).toBeLessThan(0.1);
+    expect(
+      vocabularyOverlap(
+        before,
+        sampleVocabulary(buildStoreSample(kitchenStore())),
+      ),
+    ).toBeLessThan(0.1);
     const grown = watersportsStore();
-    grown.collections.push({ id: "gid://shopify/Collection/999", title: "Sale", description: null, productsCount: 3 });
-    expect(vocabularyOverlap(before, sampleVocabulary(buildStoreSample(grown)))).toBeGreaterThan(0.9);
+    grown.collections.push({
+      id: "gid://shopify/Collection/999",
+      title: "Sale",
+      description: null,
+      productsCount: 3,
+    });
+    expect(
+      vocabularyOverlap(before, sampleVocabulary(buildStoreSample(grown))),
+    ).toBeGreaterThan(0.9);
   });
 });

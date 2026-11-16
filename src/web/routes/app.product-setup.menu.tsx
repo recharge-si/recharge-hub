@@ -417,8 +417,8 @@ export default function StoreMenu() {
               <s-paragraph>
                 The first time, Shopify asks you to approve managing menus and
                 publishing collections. After that the menu updates itself when
-                the tree or a product&apos;s type changes; the button is there to
-                update it now.
+                the tree or a product&apos;s type changes; the button is there
+                to update it now.
               </s-paragraph>
             </LearnMore>
           </s-stack>

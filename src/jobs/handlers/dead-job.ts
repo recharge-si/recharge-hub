@@ -92,7 +92,11 @@ export async function handleDeadJob(
       await prisma.exception.update({
         where: { id: open.id },
         data: {
-          detail: { queue, jobId: job.id, ...(summary ? { failure: summary } : {}) },
+          detail: {
+            queue,
+            jobId: job.id,
+            ...(summary ? { failure: summary } : {}),
+          },
         },
       });
       return;

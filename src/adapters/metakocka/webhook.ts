@@ -21,8 +21,13 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 export const METAKOCKA_SIGNATURE_HEADER = "x-metakocka-signature";
 export const METAKOCKA_EVENT_HEADER = "x-metakocka-id";
 
-export function signMetakockaBody(rawBody: string, clientSecret: string): string {
-  return createHmac("sha1", clientSecret).update(rawBody, "utf8").digest("base64");
+export function signMetakockaBody(
+  rawBody: string,
+  clientSecret: string,
+): string {
+  return createHmac("sha1", clientSecret)
+    .update(rawBody, "utf8")
+    .digest("base64");
 }
 
 /**

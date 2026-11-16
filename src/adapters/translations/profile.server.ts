@@ -1,6 +1,9 @@
 import type { AdminApiContext } from "@shopify/shopify-app-react-router/server";
 
-import { generateStoreProfile, isConfigured } from "~/adapters/ai/openai.server";
+import {
+  generateStoreProfile,
+  isConfigured,
+} from "~/adapters/ai/openai.server";
 import {
   claimProfileBuild,
   ensureProfileRow,
@@ -76,11 +79,14 @@ export async function ensureStoreProfile(
   options: EnsureOptions,
 ): Promise<EnsureOutcome> {
   const now = options.now ?? new Date();
-  const stored = (await getStoreProfile(principal)) ?? (await ensureProfileRow(principal));
+  const stored =
+    (await getStoreProfile(principal)) ?? (await ensureProfileRow(principal));
   const interval = stored.profile ? CHECK_INTERVAL_MS : RETRY_INTERVAL_MS;
   const checkedRecently =
-    stored.checkedAt !== null && now.getTime() - stored.checkedAt.getTime() < interval;
-  if (!options.force && checkedRecently) return { kind: "current", profile: stored };
+    stored.checkedAt !== null &&
+    now.getTime() - stored.checkedAt.getTime() < interval;
+  if (!options.force && checkedRecently)
+    return { kind: "current", profile: stored };
 
   const claimed = await claimProfileBuild(principal, now, LEASE_MS);
   if (!claimed) return { kind: "busy", profile: stored };
@@ -90,7 +96,8 @@ export async function ensureStoreProfile(
     const snapshot = await readStoreSnapshot(admin, options.primaryLocale);
     const sample = buildStoreSample(snapshot);
     const vocabulary = sampleVocabulary(sample);
-    const stale = options.force || isStale(stored, vocabulary, sample.totals.products, now);
+    const stale =
+      options.force || isStale(stored, vocabulary, sample.totals.products, now);
 
     let profile = stored.profile;
     let rebuilt = false;
@@ -98,11 +105,23 @@ export async function ensureStoreProfile(
       const outcome = await generateStoreProfile(principal, sample);
       if (outcome.kind === "failed") {
         await releaseProfileBuild(principal, outcome.message, now);
-        log.warn({ shop: principal.shopDomain, reason: outcome.message }, "Store profile not built");
+        log.warn(
+          { shop: principal.shopDomain, reason: outcome.message },
+          "Store profile not built",
+        );
         // The old profile, if any, still serves; terminology still learns.
-        const terms = await learnTerms(principal, options.primaryLocale, snapshot, profile, stored.learnTerminology, now);
+        const terms = await learnTerms(
+          principal,
+          options.primaryLocale,
+          snapshot,
+          profile,
+          stored.learnTerminology,
+          now,
+        );
         const after = (await getStoreProfile(principal)) ?? stored;
-        return profile ? { kind: "checked", profile: after, terms } : { kind: "failed", profile: after, reason: outcome.message };
+        return profile
+          ? { kind: "checked", profile: after, terms }
+          : { kind: "failed", profile: after, reason: outcome.message };
       }
       profile = outcome.profile;
       rebuilt = true;
@@ -130,17 +149,34 @@ export async function ensureStoreProfile(
       await releaseProfileBuild(principal, null, now);
     }
 
-    const terms = await learnTerms(principal, options.primaryLocale, snapshot, profile, stored.learnTerminology, now);
+    const terms = await learnTerms(
+      principal,
+      options.primaryLocale,
+      snapshot,
+      profile,
+      stored.learnTerminology,
+      now,
+    );
     const after = (await getStoreProfile(principal)) ?? stored;
     log.info(
-      { shop: principal.shopDomain, rebuilt, terms, products: sample.totals.products },
+      {
+        shop: principal.shopDomain,
+        rebuilt,
+        terms,
+        products: sample.totals.products,
+      },
       "Store profile checked",
     );
-    return rebuilt ? { kind: "rebuilt", profile: after, terms } : { kind: "checked", profile: after, terms };
+    return rebuilt
+      ? { kind: "rebuilt", profile: after, terms }
+      : { kind: "checked", profile: after, terms };
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     await releaseProfileBuild(principal, reason, now);
-    log.warn({ shop: principal.shopDomain, reason }, "Store profile check failed");
+    log.warn(
+      { shop: principal.shopDomain, reason },
+      "Store profile check failed",
+    );
     return { kind: "failed", profile: stored, reason };
   }
 }
@@ -154,7 +190,8 @@ function isStale(
   if (!stored.profile || !stored.generatedAt) return true;
   if (stored.promptVersion !== PROFILE_PROMPT_VERSION) return true;
   if (now.getTime() - stored.generatedAt.getTime() > MAX_AGE_MS) return true;
-  if (vocabularyOverlap(stored.vocabulary, vocabulary) < MIN_OVERLAP) return true;
+  if (vocabularyOverlap(stored.vocabulary, vocabulary) < MIN_OVERLAP)
+    return true;
   const before = stored.sampleStats?.products ?? 0;
   if (before > 0 && Math.abs(products - before) / before > 0.25) return true;
   return false;

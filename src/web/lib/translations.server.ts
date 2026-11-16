@@ -21,10 +21,7 @@ import {
   coveragePercent,
   type CoverageRow,
 } from "~/domain/translations/estimate";
-import {
-  typesForGroups,
-  type ShopLocale,
-} from "~/domain/translations/types";
+import { typesForGroups, type ShopLocale } from "~/domain/translations/types";
 import type { Principal } from "~/domain/types";
 
 /**
@@ -90,7 +87,9 @@ export async function loadLanguagesOverview(
   if (locales.kind === "unavailable")
     return { kind: "unavailable", reason: locales.reason, ai };
   const count = await coverageProgress(principal);
-  const primaryLocale = locales.locales.find((locale) => locale.primary)?.locale;
+  const primaryLocale = locales.locales.find(
+    (locale) => locale.primary,
+  )?.locale;
   const terms = primaryLocale ? await countTerms(principal, primaryLocale) : 0;
 
   const byLocale = new Map(settings.map((row) => [row.locale, row]));
@@ -100,7 +99,9 @@ export async function loadLanguagesOverview(
     const stored = byLocale.get(locale.locale) ?? null;
     // Content out of an AI language's scope is left alone, not owed: it does
     // not count as missing or outdated (docs/translations.md § Coverage).
-    const scope = stored?.aiEnabled ? typesForGroups(stored.contentScope) : null;
+    const scope = stored?.aiEnabled
+      ? typesForGroups(stored.contentScope)
+      : null;
     const totals = totalsFor(coverage.rows, locale.locale, scope);
     return {
       locale: locale.locale,
@@ -115,9 +116,7 @@ export async function loadLanguagesOverview(
         ),
       ],
       settings: stored,
-      coverage: locale.primary
-        ? 100
-        : coveragePercent([totals]),
+      coverage: locale.primary ? 100 : coveragePercent([totals]),
       missing: totals.missing,
       outdated: totals.outdated,
       fields: totals.fields,
@@ -139,7 +138,8 @@ export async function loadLanguagesOverview(
     intelligence: {
       summary: profile?.profile ? profile.summary : null,
       terms,
-      building: profile?.generatingAt !== null && profile?.generatingAt !== undefined,
+      building:
+        profile?.generatingAt !== null && profile?.generatingAt !== undefined,
     },
   };
 }

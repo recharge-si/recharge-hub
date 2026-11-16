@@ -119,7 +119,10 @@ export function typeMenuAutoKey(shopDomain: string): string {
   return `type-menu-auto:${shopDomain}`;
 }
 
-export function translationRemoveKey(shopDomain: string, locale: string): string {
+export function translationRemoveKey(
+  shopDomain: string,
+  locale: string,
+): string {
   return `translation-remove:${shopDomain}:${locale}`;
 }
 

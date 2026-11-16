@@ -454,7 +454,8 @@ export function sourceProcess(source: SourceSummary): {
             : "ok";
   return {
     health,
-    lastRun: run && at ? { at, outcome: runStatusLabel(run).toLowerCase() } : null,
+    lastRun:
+      run && at ? { at, outcome: runStatusLabel(run).toLowerCase() } : null,
     mode: describeSchedule(source.schedule).mode,
     nextRunAt: source.schedule.nextRunAt ?? null,
     running: isRunActive(run),

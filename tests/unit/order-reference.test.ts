@@ -63,9 +63,9 @@ describe("the customer's order reference", () => {
   it("produces the historical reference by default", () => {
     // Every order written before this setting existed carries `SH-<number>`.
     // Changing the default would orphan them.
-    expect(
-      renderOrderReference(DEFAULT_CUSTOMER_ORDER_TEMPLATE, CONTEXT),
-    ).toBe("SH-1050");
+    expect(renderOrderReference(DEFAULT_CUSTOMER_ORDER_TEMPLATE, CONTEXT)).toBe(
+      "SH-1050",
+    );
   });
 
   it("leaves an unknown field alone rather than blanking it", () => {
@@ -130,7 +130,9 @@ describe("falling back when a pattern produces nothing", () => {
   describe("both brace styles", () => {
     it("renders a single-braced field", () => {
       expect(renderOrderReference("{order.number}", CONTEXT)).toBe("1050");
-      expect(renderOrderReference("SH-{order.number}", CONTEXT)).toBe("SH-1050");
+      expect(renderOrderReference("SH-{order.number}", CONTEXT)).toBe(
+        "SH-1050",
+      );
       expect(renderOrderReference("{ order.number }", CONTEXT)).toBe("1050");
     });
 
@@ -141,7 +143,9 @@ describe("falling back when a pattern produces nothing", () => {
     });
 
     it("leaves an unknown field of either style alone, and reports it", () => {
-      expect(renderOrderReference("{order.tags}", CONTEXT)).toBe("{order.tags}");
+      expect(renderOrderReference("{order.tags}", CONTEXT)).toBe(
+        "{order.tags}",
+      );
       expect(unknownPlaceholders("{order.tags}-{order.number}")).toEqual([
         "order.tags",
       ]);

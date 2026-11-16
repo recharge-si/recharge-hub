@@ -78,11 +78,7 @@ export async function reconcileLedger(
     now: Date;
   },
 ): Promise<LedgerState> {
-  const synced = await syncLedger(
-    principal,
-    input.orderId,
-    input.transactions,
-  );
+  const synced = await syncLedger(principal, input.orderId, input.transactions);
 
   const summary = summarisePayments(
     synced.rows.map(toDomainTransaction),
@@ -155,7 +151,11 @@ export interface DocumentPaymentPlan {
 export interface PaymentPlan {
   bySource: Map<string, DocumentPaymentPlan>;
   /** Money that could be placed nowhere. Always reported (§11). */
-  unallocated: { shopifyTransactionId: string; amountMinor: number; reason: string }[];
+  unallocated: {
+    shopifyTransactionId: string;
+    amountMinor: number;
+    reason: string;
+  }[];
   /**
    * Gateways with no MetaKocka payment type and no fallback.
    *
@@ -277,7 +277,10 @@ export async function planPayments(
    * reasonable. So the arithmetic is checked rather than trusted, and a failure
    * refuses to write anything rather than writing part of it.
    */
-  const preserved = allocationPreservesReceipts({ receipts, result: allocation });
+  const preserved = allocationPreservesReceipts({
+    receipts,
+    result: allocation,
+  });
   if (!preserved.ok) {
     throw new Error(
       `Payment allocation did not preserve every receipt: ${preserved.drift
@@ -393,12 +396,19 @@ function aggregate(entries: readonly PaymentPlanEntry[]): DocumentPayment[] {
  * against the last one sent to decide whether anything needs writing — so an
  * unstable order would rewrite every document on every pass.
  */
-function byTransactionThenDocument(a: AllocatedEntry, b: AllocatedEntry): number {
+function byTransactionThenDocument(
+  a: AllocatedEntry,
+  b: AllocatedEntry,
+): number {
   const at = a.processedAt?.getTime() ?? 0;
   const bt = b.processedAt?.getTime() ?? 0;
   if (at !== bt) return at - bt;
   if (a.shopifyTransactionId !== b.shopifyTransactionId) {
     return a.shopifyTransactionId < b.shopifyTransactionId ? -1 : 1;
   }
-  return a.documentKey < b.documentKey ? -1 : a.documentKey > b.documentKey ? 1 : 0;
+  return a.documentKey < b.documentKey
+    ? -1
+    : a.documentKey > b.documentKey
+      ? 1
+      : 0;
 }

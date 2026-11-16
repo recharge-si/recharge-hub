@@ -57,7 +57,10 @@ export async function convertLegacyTranslationExceptions(
     const failed = await listSyncItems(principal, syncId, { status: "failed" });
     const byResource = new Map<string, typeof failed>();
     for (const item of failed)
-      byResource.set(item.resourceId, [...(byResource.get(item.resourceId) ?? []), item]);
+      byResource.set(item.resourceId, [
+        ...(byResource.get(item.resourceId) ?? []),
+        item,
+      ]);
 
     for (const [resourceId, items] of byResource) {
       if ((await listFailures(principal, resourceId)).size === 0) continue;

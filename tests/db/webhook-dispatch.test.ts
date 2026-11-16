@@ -7,7 +7,14 @@ import { reconcileOrderJobSchema } from "~/jobs/handlers/reconcile-order";
 import { syncOrderStateJobSchema } from "~/jobs/handlers/sync-order-state";
 import { ordersEventJobSchema } from "~/jobs/handlers/orders-event";
 import { withIdempotency } from "~/jobs/with-idempotency";
-import { createOrder, createTenant, describeDatabase, destroyTenant, prisma, type TestTenant } from "./harness";
+import {
+  createOrder,
+  createTenant,
+  describeDatabase,
+  destroyTenant,
+  prisma,
+  type TestTenant,
+} from "./harness";
 
 /**
  * The path a Shopify webhook actually takes, end to end through pg-boss.

@@ -43,8 +43,12 @@ describe("describeCoverageScan", () => {
   });
 
   it("falls back to kinds of content on a first count, and never claims 100% before it ends", () => {
-    expect(describeCoverageScan(scan({ expectedResources: null }), NOW).percent).toBe(25);
-    expect(describeCoverageScan(scan({ resourcesRead: 5000 }), NOW).percent).toBe(99);
+    expect(
+      describeCoverageScan(scan({ expectedResources: null }), NOW).percent,
+    ).toBe(25);
+    expect(
+      describeCoverageScan(scan({ resourcesRead: 5000 }), NOW).percent,
+    ).toBe(99);
   });
 
   it("calls a count with no pass for a quarter of an hour stopped", () => {
@@ -59,10 +63,15 @@ describe("describeCoverageScan", () => {
   it("reports what a finished count could not read", () => {
     expect(
       describeCoverageScan(
-        scan({ status: "done", error: "Some content could not be read from Shopify." }),
+        scan({
+          status: "done",
+          error: "Some content could not be read from Shopify.",
+        }),
         NOW,
       ),
     ).toMatchObject({ state: "problem" });
-    expect(describeCoverageScan(scan({ status: "done" }), NOW).state).toBe("idle");
+    expect(describeCoverageScan(scan({ status: "done" }), NOW).state).toBe(
+      "idle",
+    );
   });
 });

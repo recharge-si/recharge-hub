@@ -68,7 +68,11 @@ export interface StoreSample {
   shopDescription: string | null;
   primaryLocale: string;
   menus: Array<{ title: string; labels: string[] }>;
-  collections: Array<{ title: string; description: string | null; productsCount: number | null }>;
+  collections: Array<{
+    title: string;
+    description: string | null;
+    productsCount: number | null;
+  }>;
   vendors: Counted[];
   productTypes: Counted[];
   tags: Counted[];
@@ -95,7 +99,10 @@ export const SAMPLE_LIMITS = {
 } as const;
 
 /** Every label of a menu, depth first, with its depth for indentation. */
-export function flattenMenu(items: readonly SnapshotMenuItem[], depth = 0): Array<{ title: string; depth: number }> {
+export function flattenMenu(
+  items: readonly SnapshotMenuItem[],
+  depth = 0,
+): Array<{ title: string; depth: number }> {
   const out: Array<{ title: string; depth: number }> = [];
   for (const item of items) {
     if (item.title.trim() !== "") out.push({ title: item.title.trim(), depth });
@@ -128,7 +135,10 @@ function byCountThenValue(a: Counted, b: Counted): number {
  * codepoint order within each, so a store with one huge type and nine
  * small ones shows all ten.
  */
-export function representativeTitles(products: readonly SnapshotProduct[], limit: number): string[] {
+export function representativeTitles(
+  products: readonly SnapshotProduct[],
+  limit: number,
+): string[] {
   const groups = new Map<string, string[]>();
   for (const product of products) {
     const title = product.title.trim();
@@ -137,8 +147,14 @@ export function representativeTitles(products: readonly SnapshotProduct[], limit
     groups.set(key, [...(groups.get(key) ?? []), title]);
   }
   const ordered = [...groups.entries()]
-    .map(([key, titles]) => ({ key, titles: [...new Set(titles)].sort(compareCodepoints) }))
-    .sort((a, b) => b.titles.length - a.titles.length || compareCodepoints(a.key, b.key));
+    .map(([key, titles]) => ({
+      key,
+      titles: [...new Set(titles)].sort(compareCodepoints),
+    }))
+    .sort(
+      (a, b) =>
+        b.titles.length - a.titles.length || compareCodepoints(a.key, b.key),
+    );
   const picked: string[] = [];
   const seen = new Set<string>();
   for (let round = 0; picked.length < limit; round += 1) {
@@ -159,12 +175,19 @@ export function representativeTitles(products: readonly SnapshotProduct[], limit
 
 export function buildStoreSample(snapshot: StoreSnapshot): StoreSample {
   const menuItems = snapshot.menus.flatMap((menu) => flattenMenu(menu.items));
-  const optionCounts = new Map<string, { name: string; values: Map<string, number>; count: number }>();
+  const optionCounts = new Map<
+    string,
+    { name: string; values: Map<string, number>; count: number }
+  >();
   for (const product of snapshot.products) {
     for (const option of product.options) {
       const key = normaliseTerm(option.name);
       if (key === "") continue;
-      const entry = optionCounts.get(key) ?? { name: option.name.trim(), values: new Map(), count: 0 };
+      const entry = optionCounts.get(key) ?? {
+        name: option.name.trim(),
+        values: new Map(),
+        count: 0,
+      };
       entry.count += 1;
       for (const value of option.values) {
         const v = value.trim();
@@ -178,26 +201,34 @@ export function buildStoreSample(snapshot: StoreSnapshot): StoreSample {
     .filter((c) => c.title.trim() !== "")
     .sort(
       (a, b) =>
-        (b.productsCount ?? 0) - (a.productsCount ?? 0) || compareCodepoints(a.title, b.title),
+        (b.productsCount ?? 0) - (a.productsCount ?? 0) ||
+        compareCodepoints(a.title, b.title),
     )
     .slice(0, SAMPLE_LIMITS.collections);
 
   return {
     shopName: snapshot.shopName,
     shopDescription: snapshot.shopDescription
-      ? clip(stripHtml(snapshot.shopDescription), SAMPLE_LIMITS.descriptionChars)
+      ? clip(
+          stripHtml(snapshot.shopDescription),
+          SAMPLE_LIMITS.descriptionChars,
+        )
       : null,
     primaryLocale: snapshot.primaryLocale,
     menus: snapshot.menus
       .map((menu) => ({
         title: menu.title,
-        labels: flattenMenu(menu.items).map((item) => `${"  ".repeat(item.depth)}${item.title}`),
+        labels: flattenMenu(menu.items).map(
+          (item) => `${"  ".repeat(item.depth)}${item.title}`,
+        ),
       }))
       .filter((menu) => menu.labels.length > 0)
       .map((menu, index, all) => {
         // The label budget is shared across menus, first come first served
         // in Shopify's order; the main menu is first there.
-        const before = all.slice(0, index).reduce((sum, m) => sum + m.labels.length, 0);
+        const before = all
+          .slice(0, index)
+          .reduce((sum, m) => sum + m.labels.length, 0);
         const room = Math.max(0, SAMPLE_LIMITS.menuLabels - before);
         return { title: menu.title, labels: menu.labels.slice(0, room) };
       })
@@ -206,15 +237,20 @@ export function buildStoreSample(snapshot: StoreSnapshot): StoreSample {
       title: collection.title.trim(),
       description:
         index < SAMPLE_LIMITS.describedCollections && collection.description
-          ? clip(stripHtml(collection.description), SAMPLE_LIMITS.collectionDescriptionChars) || null
+          ? clip(
+              stripHtml(collection.description),
+              SAMPLE_LIMITS.collectionDescriptionChars,
+            ) || null
           : null,
       productsCount: collection.productsCount,
     })),
-    vendors: countValues(snapshot.products.map((p) => p.vendor ?? "")).slice(0, SAMPLE_LIMITS.vendors),
-    productTypes: countValues(snapshot.products.map((p) => p.productType ?? "")).slice(
+    vendors: countValues(snapshot.products.map((p) => p.vendor ?? "")).slice(
       0,
-      SAMPLE_LIMITS.productTypes,
+      SAMPLE_LIMITS.vendors,
     ),
+    productTypes: countValues(
+      snapshot.products.map((p) => p.productType ?? ""),
+    ).slice(0, SAMPLE_LIMITS.productTypes),
     tags: countValues(snapshot.products.flatMap((p) => p.tags))
       .filter((tag) => tag.count >= 2)
       .slice(0, SAMPLE_LIMITS.tags),
@@ -228,7 +264,10 @@ export function buildStoreSample(snapshot: StoreSnapshot): StoreSample {
           .slice(0, SAMPLE_LIMITS.optionValues)
           .map(([value]) => value),
       })),
-    productTitles: representativeTitles(snapshot.products, SAMPLE_LIMITS.productTitles),
+    productTitles: representativeTitles(
+      snapshot.products,
+      SAMPLE_LIMITS.productTitles,
+    ),
     blogs: snapshot.blogs
       .map((blog) => blog.title.trim())
       .filter((title) => title !== "")
@@ -261,7 +300,10 @@ export function sampleVocabulary(sample: StoreSample): string[] {
 }
 
 /** Jaccard similarity of two vocabularies: 1 when identical, 0 when disjoint. */
-export function vocabularyOverlap(a: readonly string[], b: readonly string[]): number {
+export function vocabularyOverlap(
+  a: readonly string[],
+  b: readonly string[],
+): number {
   if (a.length === 0 && b.length === 0) return 1;
   const setA = new Set(a);
   const setB = new Set(b);
@@ -274,37 +316,64 @@ export function vocabularyOverlap(a: readonly string[], b: readonly string[]): n
 export function renderStoreSample(sample: StoreSample): string {
   const lines: string[] = [];
   if (sample.shopName) lines.push(`Store name: ${sample.shopName}`);
-  if (sample.shopDescription) lines.push(`Store description: ${sample.shopDescription}`);
+  if (sample.shopDescription)
+    lines.push(`Store description: ${sample.shopDescription}`);
   lines.push(`Content language: ${sample.primaryLocale}`);
   lines.push(
     `Catalogue size: ${sample.totals.products} products, ${sample.totals.collections} collections, ${sample.totals.menuItems} navigation items`,
   );
   for (const menu of sample.menus) {
-    lines.push("", `Navigation menu "${menu.title}":`, ...menu.labels.map((label) => `  ${label}`));
+    lines.push(
+      "",
+      `Navigation menu "${menu.title}":`,
+      ...menu.labels.map((label) => `  ${label}`),
+    );
   }
   if (sample.collections.length > 0) {
     lines.push("", "Collections:");
     for (const collection of sample.collections) {
-      const count = collection.productsCount !== null ? ` (${collection.productsCount} products)` : "";
-      const description = collection.description ? ` — ${collection.description}` : "";
+      const count =
+        collection.productsCount !== null
+          ? ` (${collection.productsCount} products)`
+          : "";
+      const description = collection.description
+        ? ` — ${collection.description}`
+        : "";
       lines.push(`  ${collection.title}${count}${description}`);
     }
   }
   if (sample.vendors.length > 0)
-    lines.push("", `Vendors: ${sample.vendors.map((v) => `${v.value} (${v.count})`).join(", ")}`);
+    lines.push(
+      "",
+      `Vendors: ${sample.vendors.map((v) => `${v.value} (${v.count})`).join(", ")}`,
+    );
   if (sample.productTypes.length > 0)
-    lines.push("", `Product types: ${sample.productTypes.map((v) => `${v.value} (${v.count})`).join(", ")}`);
+    lines.push(
+      "",
+      `Product types: ${sample.productTypes.map((v) => `${v.value} (${v.count})`).join(", ")}`,
+    );
   if (sample.tags.length > 0)
-    lines.push("", `Tags: ${sample.tags.map((v) => `${v.value} (${v.count})`).join(", ")}`);
+    lines.push(
+      "",
+      `Tags: ${sample.tags.map((v) => `${v.value} (${v.count})`).join(", ")}`,
+    );
   if (sample.optionNames.length > 0)
     lines.push(
       "",
       `Product options: ${sample.optionNames
-        .map((option) => `${option.name}${option.values.length > 0 ? ` [${option.values.join(", ")}]` : ""}`)
+        .map(
+          (option) =>
+            `${option.name}${option.values.length > 0 ? ` [${option.values.join(", ")}]` : ""}`,
+        )
         .join("; ")}`,
     );
   if (sample.productTitles.length > 0)
-    lines.push("", "Product titles (a representative sample):", ...sample.productTitles.map((t) => `  ${t}`));
-  if (sample.blogs.length > 0) lines.push("", `Blogs: ${sample.blogs.join(", ")}`);
+    lines.push(
+      "",
+      "Product titles (a representative sample):",
+      ...sample.productTitles.map((t) => `  ${t}`),
+    );
+  if (sample.blogs.length > 0)
+    lines.push("", `Blogs: ${sample.blogs.join(", ")}`);
   return lines.join("\n");
 }

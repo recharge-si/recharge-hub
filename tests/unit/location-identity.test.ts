@@ -23,7 +23,9 @@ describe("a Shopify location means the same thing in both formats", () => {
    * Total, silent, and passing every unit test in the suite.
    */
   it("reduces a GID and a bare id to the same key", () => {
-    expect(locationKey("gid://shopify/Location/120913232136")).toBe("120913232136");
+    expect(locationKey("gid://shopify/Location/120913232136")).toBe(
+      "120913232136",
+    );
     expect(locationKey("120913232136")).toBe("120913232136");
   });
 
@@ -32,7 +34,10 @@ describe("a Shopify location means the same thing in both formats", () => {
       sameLocation("gid://shopify/Location/120913232136", "120913232136"),
     ).toBe(true);
     expect(
-      sameLocation("gid://shopify/Location/120913232136", "gid://shopify/Location/120913232136"),
+      sameLocation(
+        "gid://shopify/Location/120913232136",
+        "gid://shopify/Location/120913232136",
+      ),
     ).toBe(true);
     expect(sameLocation("120913232136", "121295667464")).toBe(false);
   });
@@ -69,9 +74,9 @@ describe("emptying a MetaKocka document is a one-way operation", () => {
   });
 
   it("does not mistake a document with lines for an empty one", () => {
-    expect(documentIsEmpty({ product_list: [{ code: "SKU-A", amount: "1" }] })).toBe(
-      false,
-    );
+    expect(
+      documentIsEmpty({ product_list: [{ code: "SKU-A", amount: "1" }] }),
+    ).toBe(false);
   });
 
   it("treats a body with no product list at all as not-known-empty", () => {

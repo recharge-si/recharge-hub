@@ -71,7 +71,9 @@ const envSchema = z.object({
   EXPORT_PORTAL_URL: z
     .string()
     .optional()
-    .transform((value) => (value && value.trim() !== "" ? value.trim() : undefined))
+    .transform((value) =>
+      value && value.trim() !== "" ? value.trim() : undefined,
+    )
     .pipe(
       z
         .string()
@@ -89,7 +91,9 @@ const envSchema = z.object({
   RIG_AI_MODEL: z
     .string()
     .optional()
-    .transform((value) => (value && value.trim() !== "" ? value.trim() : "sonnet")),
+    .transform((value) =>
+      value && value.trim() !== "" ? value.trim() : "sonnet",
+    ),
   RIG_AI_MAX_CONCURRENT: blankToDefault(3),
   RIG_AI_DAILY_CALLS: blankToDefault(500),
   RIG_AI_TIMEOUT_MS: blankToDefault(20_000),

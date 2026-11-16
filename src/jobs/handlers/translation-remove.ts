@@ -78,7 +78,9 @@ const PAGE = 50;
  * the event at the end says how many. A repeated page removes nothing
  * twice: what is already gone is simply not there to remove.
  */
-export async function handleTranslationRemove(job: Job<unknown>): Promise<void> {
+export async function handleTranslationRemove(
+  job: Job<unknown>,
+): Promise<void> {
   const data = translationRemoveJobSchema.parse(job.data);
   const { shopDomain, locale } = data;
   const principal = serviceToken(shopDomain, "translation-remove");
@@ -125,19 +127,33 @@ export async function handleTranslationRemove(job: Job<unknown>): Promise<void> 
     );
     const keys = (resource.translations.get(locale) ?? [])
       .filter((translation) => translation.value !== "")
-      .filter((translation) => step.keys === null || step.keys.includes(translation.key))
+      .filter(
+        (translation) =>
+          step.keys === null || step.keys.includes(translation.key),
+      )
       .filter(
         (translation) =>
           ownership === null ||
-          ownerOf(translation, records.get(translation.key), hashValue) === "ai",
+          ownerOf(translation, records.get(translation.key), hashValue) ===
+            "ai",
       )
       .map((translation) => translation.key);
     if (keys.length === 0) continue;
-    const result = await removeTranslations(admin, resource.resourceId, [locale], keys);
+    const result = await removeTranslations(
+      admin,
+      resource.resourceId,
+      [locale],
+      keys,
+    );
     if (result.kind === "rejected") {
       refused += 1;
       log.warn(
-        { shop: shopDomain, locale, resourceId: resource.resourceId, messages: result.messages },
+        {
+          shop: shopDomain,
+          locale,
+          resourceId: resource.resourceId,
+          messages: result.messages,
+        },
         "Shopify refused to remove translations",
       );
       continue;
@@ -183,7 +199,12 @@ async function finish(
     },
   });
   getLogger().info(
-    { shop: data.shopDomain, locale: data.locale, removed: data.removed, refused: data.refused },
+    {
+      shop: data.shopDomain,
+      locale: data.locale,
+      removed: data.removed,
+      refused: data.refused,
+    },
     "Translations removed",
   );
   await requestCoverageRefresh(principal);

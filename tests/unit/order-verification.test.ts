@@ -90,7 +90,11 @@ function managed(lines: CanonicalLine[], external = 0): QuantityClassification {
   );
 }
 
-function line(sku: string, quantity: number, unitMinor = 10_000): CanonicalLine {
+function line(
+  sku: string,
+  quantity: number,
+  unitMinor = 10_000,
+): CanonicalLine {
   return {
     shopifyLineItemId: `l-${sku}`,
     sku,
@@ -122,8 +126,9 @@ describe("reading a recorded document back", () => {
      * actual total look *smaller*, which reports a shortfall and asks a human
      * to look. Skipping the check instead would report everything as fine.
      */
-    expect(contentOf({ countCode: "x", retired: false, requestBody: null }).lines)
-      .toEqual([]);
+    expect(
+      contentOf({ countCode: "x", retired: false, requestBody: null }).lines,
+    ).toEqual([]);
     expect(
       contentOf({ countCode: "x", retired: false, requestBody: "[redacted]" })
         .lines,

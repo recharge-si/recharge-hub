@@ -84,7 +84,10 @@ export const PORTAL_MAX_ATTRIBUTES = 200;
 /** Shorter in a batch, where the name and supplier data decide the type. */
 const CATEGORIZE_DESCRIPTION = 1200;
 
-function aiProduct(product: WorkspaceProduct, descriptionLimit?: number): AiProduct {
+function aiProduct(
+  product: WorkspaceProduct,
+  descriptionLimit?: number,
+): AiProduct {
   return {
     code: product.productId,
     shopifyProductId: product.productId,
@@ -110,7 +113,8 @@ function aiProduct(product: WorkspaceProduct, descriptionLimit?: number): AiProd
 /** A portal refusal in words a merchant can act on; the AI's own words for an AI failure. */
 function failureText(error: unknown): string {
   if (error instanceof ExportPortalError) {
-    if (error.httpStatus === 502 || error.httpStatus === 503) return error.message;
+    if (error.httpStatus === 502 || error.httpStatus === 503)
+      return error.message;
     return describeForMerchant(error);
   }
   return "Something went wrong while asking for suggestions. Try again.";
@@ -170,7 +174,10 @@ export async function suggestAutofill(
     await markAutofillRunning(principal, id);
     const product = await readWorkspaceProduct(admin, id).catch(
       (error: unknown) => {
-        log.warn({ err: error, productId: id }, "Autofill could not read product");
+        log.warn(
+          { err: error, productId: id },
+          "Autofill could not read product",
+        );
         return null;
       },
     );
@@ -335,7 +342,8 @@ async function applyAutomatically(
   }
 }
 
-export type ApplyOutcome = { ok: true; message: string } | { ok: false; message: string };
+export type ApplyOutcome =
+  { ok: true; message: string } | { ok: false; message: string };
 
 /**
  * Applies what a person kept of a suggestion: the type, if it was
@@ -367,12 +375,16 @@ export async function applyAutofill(
   if (!state || state.status !== "ready")
     return {
       ok: false,
-      message: "There is no suggestion waiting for this product. Reload to see where it stands.",
+      message:
+        "There is no suggestion waiting for this product. Reload to see where it stands.",
     };
   const { schema } = await getAttributeSchema(principal);
   const product = await readWorkspaceProduct(admin, productId);
   if (!product)
-    return { ok: false, message: "The product could not be read from Shopify." };
+    return {
+      ok: false,
+      message: "The product could not be read from Shopify.",
+    };
 
   let typeApplied = false;
   const chosenTypeId =
@@ -447,8 +459,9 @@ export async function applyAutofill(
   return {
     ok: true,
     message:
-      (parts.length > 0 ? `Applied: ${parts.join(", ")}.` : "Nothing left to apply.") +
-      skippedValues,
+      (parts.length > 0
+        ? `Applied: ${parts.join(", ")}.`
+        : "Nothing left to apply.") + skippedValues,
   };
 }
 
@@ -462,7 +475,8 @@ export async function discardAutofill(
     ? { ok: true, message: "Suggestion discarded." }
     : {
         ok: false,
-        message: "There is no suggestion waiting for this product. Reload to see where it stands.",
+        message:
+          "There is no suggestion waiting for this product. Reload to see where it stands.",
       };
 }
 

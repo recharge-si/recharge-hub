@@ -187,11 +187,20 @@ export async function handleSyncInventory(job: Job<unknown>): Promise<void> {
         lastSyncMessage: message,
         syncFailures: { increment: 1 },
       },
-      select: { id: true, name: true, syncFailures: true, stockDirection: true },
+      select: {
+        id: true,
+        name: true,
+        syncFailures: true,
+        stockDirection: true,
+      },
     });
 
     log.error(
-      { shop: shopDomain, source: updated.name, failures: updated.syncFailures },
+      {
+        shop: shopDomain,
+        source: updated.name,
+        failures: updated.syncFailures,
+      },
       "Stock sync failed for a location",
     );
 

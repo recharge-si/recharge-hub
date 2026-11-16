@@ -189,7 +189,9 @@ export interface CoverageState {
   readAt: Date | null;
 }
 
-export async function getCoverage(principal: Principal): Promise<CoverageState> {
+export async function getCoverage(
+  principal: Principal,
+): Promise<CoverageState> {
   const rows = await prisma.translationCoverage.findMany({
     where: { shop: { domain: shopDomainOf(principal) } },
   });
@@ -233,7 +235,9 @@ export async function replaceCoverage(
 
 export type GlossaryRow = TranslationGlossaryTerm;
 
-export async function listGlossary(principal: Principal): Promise<GlossaryRow[]> {
+export async function listGlossary(
+  principal: Principal,
+): Promise<GlossaryRow[]> {
   return prisma.translationGlossaryTerm.findMany({
     where: { shop: { domain: shopDomainOf(principal) } },
     orderBy: [{ kind: "asc" }, { targetLocale: "asc" }, { sourceTerm: "asc" }],
@@ -597,7 +601,8 @@ export async function appendToCollectingSync(
     orderBy: { createdAt: "desc" },
   });
   if (!sync) return null;
-  if (sync.resourceIds.includes(input.resourceId)) return { sync, added: false };
+  if (sync.resourceIds.includes(input.resourceId))
+    return { sync, added: false };
   const updated = await prisma.translationSync.updateMany({
     where: { id: sync.id, status: "queued" },
     data: {
@@ -704,7 +709,10 @@ export async function advanceSync(
   await prisma.translationSync.update({
     where: { id },
     data: {
-      cursor: { typeIndex: cursor.typeIndex, after: cursor.after } satisfies Prisma.InputJsonObject,
+      cursor: {
+        typeIndex: cursor.typeIndex,
+        after: cursor.after,
+      } satisfies Prisma.InputJsonObject,
       doneResources: { increment: counts.resources },
       translatedFields: { increment: counts.translated },
       copiedFields: { increment: counts.copied },
@@ -719,7 +727,10 @@ export async function advanceSync(
  * no Shopify client) learns it on its first pass. Empty means "the store's
  * default", which is what every page shows for it.
  */
-export async function setSyncSource(id: string, sourceLocale: string): Promise<void> {
+export async function setSyncSource(
+  id: string,
+  sourceLocale: string,
+): Promise<void> {
   await prisma.translationSync.updateMany({
     where: { id, sourceLocale: "" },
     data: { sourceLocale },
@@ -851,7 +862,10 @@ export async function countSyncItems(
  * A sync whose job has not touched it for far too long is dead: its pg-boss
  * job expired after the retries ran out and nothing will come back for it.
  */
-export async function abandonStaleSyncs(olderThan: Date, now: Date): Promise<number> {
+export async function abandonStaleSyncs(
+  olderThan: Date,
+  now: Date,
+): Promise<number> {
   const updated = await prisma.translationSync.updateMany({
     where: {
       status: { in: ["queued", "running"] },
@@ -911,7 +925,6 @@ export async function recordUsage(
   });
 }
 
-
 /**
  * What a usage read covers: a span of time, a sync, or both. `from` is
  * inclusive and `to` exclusive; null is unbounded. `syncId` null reads
@@ -925,7 +938,10 @@ export interface UsageScope {
   outsideSync?: boolean;
 }
 
-function usageWhere(shopId: string, scope: UsageScope): Prisma.AiUsageWhereInput {
+function usageWhere(
+  shopId: string,
+  scope: UsageScope,
+): Prisma.AiUsageWhereInput {
   return {
     shopId,
     // The rig builder's claude-pool rows share the table (docs/rig-builder.md).
@@ -1130,11 +1146,7 @@ export async function usageTrend(
 }
 
 export type SyncUsageSort =
-  | "started"
-  | "cost"
-  | "tokens"
-  | "requests"
-  | "resources";
+  "started" | "cost" | "tokens" | "requests" | "resources";
 
 export interface SyncUsageQuery {
   sort: SyncUsageSort;

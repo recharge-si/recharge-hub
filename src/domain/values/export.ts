@@ -57,11 +57,7 @@ export interface ValueColumn {
 }
 
 /** `Luff [recharge.luff_cm] (cm)`: the name, the key and the unit. */
-export function columnHeader(
-  name: string,
-  key: string,
-  unit: string,
-): string {
+export function columnHeader(name: string, key: string, unit: string): string {
   const cleanName = name.replace(/[[\]]/g, "").trim();
   return `${cleanName} [${key}]${unit.trim() ? ` (${unit.trim()})` : ""}`;
 }
@@ -73,9 +69,7 @@ export function columnHeader(
 /** The keys the rig engine reads for a role, in the engine's order. */
 export function rigKeys(role: RigRole): string[] {
   return [
-    ...new Set(
-      ROLE_FIELDS[role].map((spec) => `${RIG_NAMESPACE}.${spec.key}`),
-    ),
+    ...new Set(ROLE_FIELDS[role].map((spec) => `${RIG_NAMESPACE}.${spec.key}`)),
   ];
 }
 

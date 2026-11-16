@@ -2,9 +2,16 @@ import { randomBytes } from "node:crypto";
 
 import { z } from "zod";
 
-import type { ProviderResult, RigAiProvider } from "~/adapters/ai/rig-provider.server";
+import type {
+  ProviderResult,
+  RigAiProvider,
+} from "~/adapters/ai/rig-provider.server";
 import { clientIp, hashIp, type RateLimiter } from "~/adapters/rig/rate-limit";
-import type { RigSource, RigRequestWrite, RigUsageWrite } from "~/adapters/db/repositories/rig.server";
+import type {
+  RigSource,
+  RigRequestWrite,
+  RigUsageWrite,
+} from "~/adapters/db/repositories/rig.server";
 import { SnapshotCache } from "~/adapters/rig/snapshot-cache";
 import {
   candidatesFrom,
@@ -140,10 +147,7 @@ const MIN_CALL_MS = 2_000;
 /* -------------------------------------------------------------------------- */
 
 /** Variants the rig must not contain (a cart refused them as sold out). */
-const excludeSchema = z
-  .array(z.number().int().positive())
-  .max(50)
-  .optional();
+const excludeSchema = z.array(z.number().int().positive()).max(50).optional();
 
 const bodySchema = z
   .object({
@@ -385,7 +389,8 @@ export function createRigApi(deps: RigApiDeps): {
   /** Fresh for `cacheSeconds`, then served stale while one refresh runs (snapshot-cache.ts). */
   const cache = new SnapshotCache<Prepared>({
     ttlMs: config.cacheSeconds * 1000,
-    maxStaleMs: Math.max(config.maxStaleSeconds ?? 1800, config.cacheSeconds) * 1000,
+    maxStaleMs:
+      Math.max(config.maxStaleSeconds ?? 1800, config.cacheSeconds) * 1000,
     load: async (domain) => prepare(await store.loadSource(domain)),
     now: () => deps.now().getTime(),
     onRefreshError: (domain, error) =>
@@ -499,7 +504,11 @@ export function createRigApi(deps: RigApiDeps): {
       typeof (body as Record<string, unknown>)["text"] === "string" &&
       ((body as Record<string, unknown>)["text"] as string).length > LIMITS.text
     ) {
-      return json(413, { code: "text_too_long", field: "text", max: LIMITS.text });
+      return json(413, {
+        code: "text_too_long",
+        field: "text",
+        max: LIMITS.text,
+      });
     }
     return null;
   }
@@ -578,7 +587,8 @@ export function createRigApi(deps: RigApiDeps): {
     const result = engineRun(profile, prepared, body.excludeVariantIds);
     const warnings = [...result.warnings, ...staleWarning(prepared)];
     const snapshotAgeMinutes = ageMinutes(prepared);
-    const stale = snapshotAgeMinutes !== null && snapshotAgeMinutes > STALE_MINUTES;
+    const stale =
+      snapshotAgeMinutes !== null && snapshotAgeMinutes > STALE_MINUTES;
     const fit = resolveFit(profile, rules);
     const rider = riderFacts(profile, fit);
 
@@ -643,9 +653,13 @@ export function createRigApi(deps: RigApiDeps): {
       );
       if (used >= config.dailyCalls) return { ok: false, reason: "daily_cap" };
 
-      const result: ProviderResult<T> = await deps.provider.complete(prompt, schema, {
-        timeoutMs: remaining,
-      });
+      const result: ProviderResult<T> = await deps.provider.complete(
+        prompt,
+        schema,
+        {
+          timeoutMs: remaining,
+        },
+      );
       if (result.ok || result.reason !== "busy") {
         await store.recordUsage({
           shopId: context.shopId,
@@ -660,7 +674,8 @@ export function createRigApi(deps: RigApiDeps): {
       }
       if (result.ok) return { ok: true, value: result.value };
       // Exhausted, busy and timed out are answers, not accidents: no retry.
-      if (result.reason !== "error") return { ok: false, reason: result.reason };
+      if (result.reason !== "error")
+        return { ok: false, reason: result.reason };
     }
     return { ok: false, reason: "error" };
   }
@@ -753,8 +768,10 @@ export function createRigApi(deps: RigApiDeps): {
         warnings.push({ code: "mode_plain" });
       }
     }
-    const mode = wordsByModel || (!rig && reading !== undefined) ? "ai" : "plain";
-    if (!rig && mode === "plain" && text === "") warnings.push({ code: "mode_plain" });
+    const mode =
+      wordsByModel || (!rig && reading !== undefined) ? "ai" : "plain";
+    if (!rig && mode === "plain" && text === "")
+      warnings.push({ code: "mode_plain" });
 
     const ids = await requestIdFor(admitted.shopId, body.requestId);
     const latencyMs = deps.now().getTime() - started;
@@ -874,9 +891,11 @@ export function createRigApi(deps: RigApiDeps): {
     try {
       const body = (await response.clone().json()) as Record<string, unknown>;
       if (typeof body["code"] === "string") call.code = body["code"];
-      if (typeof body["requestId"] === "string") call.requestId = body["requestId"];
+      if (typeof body["requestId"] === "string")
+        call.requestId = body["requestId"];
       if (typeof body["mode"] === "string") call.mode = body["mode"];
-      if (Array.isArray(body["warnings"])) call.warnings = body["warnings"].length;
+      if (Array.isArray(body["warnings"]))
+        call.warnings = body["warnings"].length;
       const rigs = body["rigs"];
       if (Array.isArray(rigs)) {
         const items = (rigs[0] as { items?: unknown[] } | undefined)?.items;
@@ -924,7 +943,10 @@ export function createRigApi(deps: RigApiDeps): {
 /* Small helpers                                                              */
 /* -------------------------------------------------------------------------- */
 
-function hasContent(text: string | undefined, answers: Answers | undefined): boolean {
+function hasContent(
+  text: string | undefined,
+  answers: Answers | undefined,
+): boolean {
   return (
     (text !== undefined && text.trim() !== "") ||
     (answers !== undefined && Object.keys(answers).length > 0)

@@ -29,8 +29,16 @@ import { WATERSPORTS_MENU } from "../fixtures/translations/snapshots";
  */
 
 const provider = {
-  translate: vi.fn<(request: TranslationRequest) => Promise<TranslateOutcome>>(),
-  correct: vi.fn<(request: TranslationRequest, previous: string, violations: readonly Violation[]) => Promise<TranslateOutcome>>(),
+  translate:
+    vi.fn<(request: TranslationRequest) => Promise<TranslateOutcome>>(),
+  correct:
+    vi.fn<
+      (
+        request: TranslationRequest,
+        previous: string,
+        violations: readonly Violation[],
+      ) => Promise<TranslateOutcome>
+    >(),
 };
 const shopify = { register: vi.fn() };
 const repo = { recordOwnership: vi.fn(), glossaryFor: vi.fn() };
@@ -38,54 +46,90 @@ const repo = { recordOwnership: vi.fn(), glossaryFor: vi.fn() };
 const failures = new Map<string, StoredFailure>();
 
 vi.mock("~/adapters/ai/openai.server", () => ({
-  translateFields: (_principal: unknown, request: TranslationRequest) => provider.translate(request),
-  correctFields: (_principal: unknown, request: TranslationRequest, previous: string, violations: readonly Violation[]) =>
-    provider.correct(request, previous, violations),
+  translateFields: (_principal: unknown, request: TranslationRequest) =>
+    provider.translate(request),
+  correctFields: (
+    _principal: unknown,
+    request: TranslationRequest,
+    previous: string,
+    violations: readonly Violation[],
+  ) => provider.correct(request, previous, violations),
 }));
 vi.mock("~/adapters/shopify/translations", async (importOriginal) => {
   const original = await importOriginal<typeof ShopifyTranslations>();
   return {
     ...original,
-    registerTranslations: (_admin: unknown, resourceId: string, writes: unknown) =>
-      shopify.register(resourceId, writes),
+    registerTranslations: (
+      _admin: unknown,
+      resourceId: string,
+      writes: unknown,
+    ) => shopify.register(resourceId, writes),
   };
 });
-vi.mock("~/adapters/db/repositories/translation-failures.server", async (importOriginal) => {
-  const original = await importOriginal<typeof FailureRepository>();
-  return {
-    ...original,
-    listFailures: async (_principal: unknown, resourceId: string) =>
-      new Map([...failures].filter(([key]) => key.startsWith(`${resourceId}|`)).map(([, f]) => [f.locale, f])),
-    recordFailure: async (
-      _principal: unknown,
-      input: { resourceId: string; locale: string; sourceKey: string; error: string; previous?: StoredFailure },
-      now: Date,
-    ) => {
-      const attempts = input.previous?.sourceKey === input.sourceKey ? input.previous.attempts + 1 : 1;
-      failures.set(`${input.resourceId}|${input.locale}`, {
-        locale: input.locale,
-        sourceKey: input.sourceKey,
-        attempts,
-        lastError: input.error,
-        failedAt: now,
-        retryAfter: original.nextRetry(attempts, now),
-      });
-    },
-    clearFailure: async (_principal: unknown, resourceId: string, locale: string) => {
-      failures.delete(`${resourceId}|${locale}`);
-    },
-  };
-});
+vi.mock(
+  "~/adapters/db/repositories/translation-failures.server",
+  async (importOriginal) => {
+    const original = await importOriginal<typeof FailureRepository>();
+    return {
+      ...original,
+      listFailures: async (_principal: unknown, resourceId: string) =>
+        new Map(
+          [...failures]
+            .filter(([key]) => key.startsWith(`${resourceId}|`))
+            .map(([, f]) => [f.locale, f]),
+        ),
+      recordFailure: async (
+        _principal: unknown,
+        input: {
+          resourceId: string;
+          locale: string;
+          sourceKey: string;
+          error: string;
+          previous?: StoredFailure;
+        },
+        now: Date,
+      ) => {
+        const attempts =
+          input.previous?.sourceKey === input.sourceKey
+            ? input.previous.attempts + 1
+            : 1;
+        failures.set(`${input.resourceId}|${input.locale}`, {
+          locale: input.locale,
+          sourceKey: input.sourceKey,
+          attempts,
+          lastError: input.error,
+          failedAt: now,
+          retryAfter: original.nextRetry(attempts, now),
+        });
+      },
+      clearFailure: async (
+        _principal: unknown,
+        resourceId: string,
+        locale: string,
+      ) => {
+        failures.delete(`${resourceId}|${locale}`);
+      },
+    };
+  },
+);
 vi.mock("~/adapters/db/repositories/translations.server", () => ({
   glossaryFor: (...args: unknown[]) => repo.glossaryFor(...args),
   recordOwnership: (...args: unknown[]) => repo.recordOwnership(...args),
 }));
 
-const { automaticWorkFor, translateResource, hashValue } = await import("~/adapters/translations/engine.server");
+const { automaticWorkFor, translateResource, hashValue } =
+  await import("~/adapters/translations/engine.server");
 
 function reply(values: Record<string, string>): TranslateOutcome {
-  const translations = Object.fromEntries(Object.values(values).map((value, index) => [String(index + 1), value]));
-  return { kind: "ok", values: new Map(Object.entries(values)), model: "test-model", text: JSON.stringify({ translations }) };
+  const translations = Object.fromEntries(
+    Object.values(values).map((value, index) => [String(index + 1), value]),
+  );
+  return {
+    kind: "ok",
+    values: new Map(Object.entries(values)),
+    model: "test-model",
+    text: JSON.stringify({ translations }),
+  };
 }
 
 /** A provider answer keyed by field key, in the order the request lists the fields. */
@@ -104,16 +148,29 @@ function answer(byKey: Record<string, string>) {
 function resource(
   id: string,
   fields: Array<{ key: string; value: string; type?: string }>,
-  translations: Record<string, Array<{ key: string; value: string; outdated?: boolean }>> = {},
+  translations: Record<
+    string,
+    Array<{ key: string; value: string; outdated?: boolean }>
+  > = {},
 ): TranslatableResource {
   return {
     resourceId: id,
     sourceLocale: "en",
-    fields: fields.map((f) => ({ key: f.key, value: f.value, digest: `digest-${f.key}`, type: f.type ?? "STRING" })),
+    fields: fields.map((f) => ({
+      key: f.key,
+      value: f.value,
+      digest: `digest-${f.key}`,
+      type: f.type ?? "STRING",
+    })),
     translations: new Map(
       Object.entries(translations).map(([locale, list]) => [
         locale,
-        list.map((t) => ({ key: t.key, value: t.value, outdated: t.outdated ?? false, updatedAt: null })),
+        list.map((t) => ({
+          key: t.key,
+          value: t.value,
+          outdated: t.outdated ?? false,
+          updatedAt: null,
+        })),
       ]),
     ),
   };
@@ -121,7 +178,13 @@ function resource(
 
 const remembered = vi.fn();
 
-function intelligence(input: { terms?: StoredTerm[]; memory?: StoredMemory[]; storeContext?: string | null } = {}): Intelligence {
+function intelligence(
+  input: {
+    terms?: StoredTerm[];
+    memory?: StoredMemory[];
+    storeContext?: string | null;
+  } = {},
+): Intelligence {
   return {
     storeContext: input.storeContext ?? "A specialist watersports retailer.",
     profileVersion: 3,
@@ -130,7 +193,14 @@ function intelligence(input: { terms?: StoredTerm[]; memory?: StoredMemory[]; st
       prime: async () => {},
       contextFor: async (_id, type) =>
         type === "LINK"
-          ? { kind: "menu_item", menuTitle: "Main menu", parents: [], siblings: WATERSPORTS_MENU, children: [], linksTo: "collection" }
+          ? {
+              kind: "menu_item",
+              menuTitle: "Main menu",
+              parents: [],
+              siblings: WATERSPORTS_MENU,
+              children: [],
+              linksTo: "collection",
+            }
           : { kind: "none" },
       neighbourText: async () => [],
     },
@@ -142,11 +212,26 @@ function intelligence(input: { terms?: StoredTerm[]; memory?: StoredMemory[]; st
   };
 }
 
-function term(id: string, termText: string, classification: StoredTerm["classification"], confidence = 0.95): StoredTerm {
-  return { id, term: termText, normalised: termText.toLowerCase(), classification, confidence, evidence: { menu: 1 } };
+function term(
+  id: string,
+  termText: string,
+  classification: StoredTerm["classification"],
+  confidence = 0.95,
+): StoredTerm {
+  return {
+    id,
+    term: termText,
+    normalised: termText.toLowerCase(),
+    classification,
+    confidence,
+    evidence: { menu: 1 },
+  };
 }
 
-function memory(partial: Partial<StoredMemory> & Pick<StoredMemory, "sourceText" | "targetText">): StoredMemory {
+function memory(
+  partial: Partial<StoredMemory> &
+    Pick<StoredMemory, "sourceText" | "targetText">,
+): StoredMemory {
   return {
     id: `m-${partial.sourceText}`,
     sourceKey: partial.sourceText.toLowerCase(),
@@ -161,7 +246,10 @@ function memory(partial: Partial<StoredMemory> & Pick<StoredMemory, "sourceText"
 const admin = {} as AdminApiContext;
 const principal = serviceToken("test.myshopify.com", "test");
 
-function ctx(intel: Intelligence, overrides: Partial<Parameters<typeof translateResource>[0]> = {}) {
+function ctx(
+  intel: Intelligence,
+  overrides: Partial<Parameters<typeof translateResource>[0]> = {},
+) {
   return {
     principal,
     admin,
@@ -179,7 +267,13 @@ function ctx(intel: Intelligence, overrides: Partial<Parameters<typeof translate
 async function run(
   intel: Intelligence,
   res: TranslatableResource,
-  options: { type?: "LINK" | "PRODUCT"; ownership?: OwnershipRecord[]; glossary?: GlossaryTerm[]; mode?: "missing" | "force"; locales?: string[] } = {},
+  options: {
+    type?: "LINK" | "PRODUCT";
+    ownership?: OwnershipRecord[];
+    glossary?: GlossaryTerm[];
+    mode?: "missing" | "force";
+    locales?: string[];
+  } = {},
 ) {
   return translateResource(ctx(intel, { mode: options.mode ?? "missing" }), {
     resource: res,
@@ -209,27 +303,49 @@ beforeEach(() => {
 describe("the engine", () => {
   it("translates a menu link with its siblings, store and terminology in view, then writes, records and remembers", async () => {
     provider.translate.mockImplementation(answer({ title: "Wing" }));
-    const outcome = await run(intelligence({ terms: [term("t1", "Wing", "category")] }), resource("gid://shopify/Link/1", [{ key: "title", value: "Wing" }]));
+    const outcome = await run(
+      intelligence({ terms: [term("t1", "Wing", "category")] }),
+      resource("gid://shopify/Link/1", [{ key: "title", value: "Wing" }]),
+    );
 
     expect(outcome.translated).toBe(1);
     expect(outcome.failed).toBe(0);
     const request = provider.translate.mock.calls[0]![0];
     expect(request.sourceLocale).toBe("en");
     expect(request.targetLocale).toBe("sl");
-    expect(request.resourceContext).toMatchObject({ kind: "menu_item", siblings: WATERSPORTS_MENU });
+    expect(request.resourceContext).toMatchObject({
+      kind: "menu_item",
+      siblings: WATERSPORTS_MENU,
+    });
     expect(request.storeContext).toContain("watersports");
-    expect(request.terminology).toEqual([{ term: "Wing", classification: "category", evidence: "menu label" }]);
+    expect(request.terminology).toEqual([
+      { term: "Wing", classification: "category", evidence: "menu label" },
+    ]);
 
     expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Link/1", [
       { key: "title", locale: "sl", value: "Wing", digest: "digest-title" },
     ]);
     expect(repo.recordOwnership).toHaveBeenCalledWith(
       principal,
-      [expect.objectContaining({ key: "title", locale: "sl", owner: "ai", valueHash: hashValue("Wing"), syncId: "sync-1" })],
+      [
+        expect.objectContaining({
+          key: "title",
+          locale: "sl",
+          owner: "ai",
+          valueHash: hashValue("Wing"),
+          syncId: "sync-1",
+        }),
+      ],
       expect.any(Date),
     );
     expect(remembered).toHaveBeenCalledWith(
-      { sourceLocale: "en", targetLocale: "sl", resourceType: "LINK", resourceId: "gid://shopify/Link/1", pairs: [{ sourceText: "Wing", targetText: "Wing" }] },
+      {
+        sourceLocale: "en",
+        targetLocale: "sl",
+        resourceType: "LINK",
+        resourceId: "gid://shopify/Link/1",
+        pairs: [{ sourceText: "Wing", targetText: "Wing" }],
+      },
       "ai",
     );
     const trace = traceOf(outcome);
@@ -244,72 +360,149 @@ describe("the engine", () => {
       attempts: 1,
       reusedKeys: [],
       termIds: ["t1"],
-      validation: [{ attempt: 1, violations: [{ key: "title", code: "unchanged", severity: "soft" }] }],
+      validation: [
+        {
+          attempt: 1,
+          violations: [{ key: "title", code: "unchanged", severity: "soft" }],
+        },
+      ],
     });
     expect(outcome.items[0]?.status).toBe("translated");
   });
 
   it("answers from memory without asking the model when the answer is established", async () => {
     const intel = intelligence({
-      memory: [memory({ sourceText: "Used", targetText: "Rabljeno", origin: "manual" })],
+      memory: [
+        memory({
+          sourceText: "Used",
+          targetText: "Rabljeno",
+          origin: "manual",
+        }),
+      ],
     });
-    const outcome = await run(intel, resource("gid://shopify/Link/2", [{ key: "title", value: "Used" }]));
+    const outcome = await run(
+      intel,
+      resource("gid://shopify/Link/2", [{ key: "title", value: "Used" }]),
+    );
     expect(provider.translate).not.toHaveBeenCalled();
     expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Link/2", [
       { key: "title", locale: "sl", value: "Rabljeno", digest: "digest-title" },
     ]);
     // Nothing new to learn: the answer came from memory.
     expect(remembered).not.toHaveBeenCalled();
-    expect(traceOf(outcome)).toMatchObject({ attempts: 0, reusedKeys: ["title"], memoryHitIds: ["m-Used"], model: null });
-    expect(outcome.items[0]?.detail).toMatchObject({ reused: 1, translated: 1 });
+    expect(traceOf(outcome)).toMatchObject({
+      attempts: 0,
+      reusedKeys: ["title"],
+      memoryHitIds: ["m-Used"],
+      model: null,
+    });
+    expect(outcome.items[0]?.detail).toMatchObject({
+      reused: 1,
+      translated: 1,
+    });
   });
 
   it("keeps terminology consistent: a term the store already settled arrives as an established translation", async () => {
-    provider.translate.mockImplementation(answer({ title: "Wing Foil komplet", body_html: "<p>Za wing.</p>" }));
+    provider.translate.mockImplementation(
+      answer({ title: "Wing Foil komplet", body_html: "<p>Za wing.</p>" }),
+    );
     const intel = intelligence({
       memory: [
-        memory({ sourceText: "Wing", targetText: "Wing", usageCount: 12, resourceType: "PRODUCT" }),
+        memory({
+          sourceText: "Wing",
+          targetText: "Wing",
+          usageCount: 12,
+          resourceType: "PRODUCT",
+        }),
         // Seen once, on a different kind of content: a hint, not a reuse.
-        memory({ sourceText: "Wing Foil Kit", targetText: "Wing Foil komplet", resourceType: "COLLECTION" }),
+        memory({
+          sourceText: "Wing Foil Kit",
+          targetText: "Wing Foil komplet",
+          resourceType: "COLLECTION",
+        }),
       ],
     });
-    await run(intel, resource("gid://shopify/Product/3", [{ key: "title", value: "Wing Foil Kit" }, { key: "body_html", value: "<p>For wing.</p>", type: "HTML" }]), {
-      type: "PRODUCT",
-    });
+    await run(
+      intel,
+      resource("gid://shopify/Product/3", [
+        { key: "title", value: "Wing Foil Kit" },
+        { key: "body_html", value: "<p>For wing.</p>", type: "HTML" },
+      ]),
+      {
+        type: "PRODUCT",
+      },
+    );
     const request = provider.translate.mock.calls[0]![0];
     expect(request.fields.map((f) => f.key)).toEqual(["title", "body_html"]);
-    expect(request.memoryHints.map((h) => `${h.sourceText}→${h.targetText}`)).toEqual(["Wing Foil Kit→Wing Foil komplet", "Wing→Wing"]);
+    expect(
+      request.memoryHints.map((h) => `${h.sourceText}→${h.targetText}`),
+    ).toEqual(["Wing Foil Kit→Wing Foil komplet", "Wing→Wing"]);
   });
 
   it("corrects an answer that broke an invariant, and writes the corrected one", async () => {
-    provider.translate.mockImplementation(answer({ title: "Vsi izdelki", label: "All Products" }));
-    provider.correct.mockImplementation(async (request, previous, violations) => {
-      expect(previous).toContain("All Products");
-      expect(violations.map((v) => `${v.key}:${v.code}`)).toEqual(["label:unchanged"]);
-      return answer({ title: "Vsi izdelki", label: "Vsi izdelki" })(request);
-    });
-    const outcome = await run(intelligence(), resource("gid://shopify/Link/4", [{ key: "title", value: "All Products" }, { key: "label", value: "All Products" }]));
+    provider.translate.mockImplementation(
+      answer({ title: "Vsi izdelki", label: "All Products" }),
+    );
+    provider.correct.mockImplementation(
+      async (request, previous, violations) => {
+        expect(previous).toContain("All Products");
+        expect(violations.map((v) => `${v.key}:${v.code}`)).toEqual([
+          "label:unchanged",
+        ]);
+        return answer({ title: "Vsi izdelki", label: "Vsi izdelki" })(request);
+      },
+    );
+    const outcome = await run(
+      intelligence(),
+      resource("gid://shopify/Link/4", [
+        { key: "title", value: "All Products" },
+        { key: "label", value: "All Products" },
+      ]),
+    );
     expect(provider.correct).toHaveBeenCalledTimes(1);
     expect(outcome.failed).toBe(0);
     expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Link/4", [
-      { key: "title", locale: "sl", value: "Vsi izdelki", digest: "digest-title" },
-      { key: "label", locale: "sl", value: "Vsi izdelki", digest: "digest-label" },
+      {
+        key: "title",
+        locale: "sl",
+        value: "Vsi izdelki",
+        digest: "digest-title",
+      },
+      {
+        key: "label",
+        locale: "sl",
+        value: "Vsi izdelki",
+        digest: "digest-label",
+      },
     ]);
     expect(traceOf(outcome)).toMatchObject({
       attempts: 2,
       validation: [
-        { attempt: 1, violations: [{ key: "label", code: "unchanged", severity: "hard" }] },
+        {
+          attempt: 1,
+          violations: [{ key: "label", code: "unchanged", severity: "hard" }],
+        },
         { attempt: 2, violations: [] },
       ],
     });
   });
 
   it("refuses to write an answer that still breaks an invariant after the correction", async () => {
-    provider.translate.mockImplementation(answer({ body_html: "<p>Brez povezave</p>" }));
-    provider.correct.mockImplementation(answer({ body_html: "<p>Še vedno brez</p>" }));
+    provider.translate.mockImplementation(
+      answer({ body_html: "<p>Brez povezave</p>" }),
+    );
+    provider.correct.mockImplementation(
+      answer({ body_html: "<p>Še vedno brez</p>" }),
+    );
     const outcome = await run(
       intelligence(),
-      resource("gid://shopify/Product/5", [{ key: "body_html", value: '<p>See <a href="https://x.example/spec">the spec</a></p>', type: "HTML" }]),
+      resource("gid://shopify/Product/5", [
+        {
+          key: "body_html",
+          value: '<p>See <a href="https://x.example/spec">the spec</a></p>',
+          type: "HTML",
+        },
+      ]),
       { type: "PRODUCT" },
     );
     expect(outcome.failed).toBe(1);
@@ -322,43 +515,98 @@ describe("the engine", () => {
   });
 
   it("gives the merchant's glossary precedence: a remembered answer the glossary contradicts is not reused, and the rule is checked", async () => {
-    const glossary: GlossaryTerm[] = [{ kind: "translate", targetLocale: "sl", sourceTerm: "Foil", targetTerm: "Hidrokrilo" }];
+    const glossary: GlossaryTerm[] = [
+      {
+        kind: "translate",
+        targetLocale: "sl",
+        sourceTerm: "Foil",
+        targetTerm: "Hidrokrilo",
+      },
+    ];
     provider.translate.mockImplementation(answer({ title: "Foil" }));
     provider.correct.mockImplementation(answer({ title: "Hidrokrilo" }));
-    const intel = intelligence({ memory: [memory({ sourceText: "Foil", targetText: "Foil", origin: "manual" })] });
-    const outcome = await run(intel, resource("gid://shopify/Link/6", [{ key: "title", value: "Foil" }]), { glossary });
+    const intel = intelligence({
+      memory: [
+        memory({ sourceText: "Foil", targetText: "Foil", origin: "manual" }),
+      ],
+    });
+    const outcome = await run(
+      intel,
+      resource("gid://shopify/Link/6", [{ key: "title", value: "Foil" }]),
+      { glossary },
+    );
     expect(provider.translate).toHaveBeenCalledTimes(1);
     expect(provider.translate.mock.calls[0]![0].glossary).toEqual(glossary);
     expect(provider.correct).toHaveBeenCalledTimes(1);
     expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Link/6", [
-      { key: "title", locale: "sl", value: "Hidrokrilo", digest: "digest-title" },
+      {
+        key: "title",
+        locale: "sl",
+        value: "Hidrokrilo",
+        digest: "digest-title",
+      },
     ]);
     expect(traceOf(outcome).glossaryHits).toBe(1);
   });
 
   it("never sends a person's translation back to the model, even in force mode", async () => {
-    provider.translate.mockImplementation(answer({ body_html: "<p>Nov opis</p>" }));
+    provider.translate.mockImplementation(
+      answer({ body_html: "<p>Nov opis</p>" }),
+    );
     const ownership: OwnershipRecord[] = [
-      { key: "title", locale: "sl", owner: "manual", valueHash: hashValue("Rabljeno") },
-      { key: "body_html", locale: "sl", owner: "ai", valueHash: hashValue("<p>Star opis</p>") },
+      {
+        key: "title",
+        locale: "sl",
+        owner: "manual",
+        valueHash: hashValue("Rabljeno"),
+      },
+      {
+        key: "body_html",
+        locale: "sl",
+        owner: "ai",
+        valueHash: hashValue("<p>Star opis</p>"),
+      },
     ];
     const res = resource(
       "gid://shopify/Product/7",
-      [{ key: "title", value: "Used" }, { key: "body_html", value: "<p>Old text</p>", type: "HTML" }],
-      { sl: [{ key: "title", value: "Rabljeno" }, { key: "body_html", value: "<p>Star opis</p>" }] },
+      [
+        { key: "title", value: "Used" },
+        { key: "body_html", value: "<p>Old text</p>", type: "HTML" },
+      ],
+      {
+        sl: [
+          { key: "title", value: "Rabljeno" },
+          { key: "body_html", value: "<p>Star opis</p>" },
+        ],
+      },
     );
-    const outcome = await run(intelligence(), res, { type: "PRODUCT", ownership, mode: "force" });
+    const outcome = await run(intelligence(), res, {
+      type: "PRODUCT",
+      ownership,
+      mode: "force",
+    });
     const request = provider.translate.mock.calls[0]![0];
     expect(request.fields.map((f) => f.key)).toEqual(["body_html"]);
-    expect(outcome.items[0]?.detail).toMatchObject({ skipped: { protected_manual: 1 } });
+    expect(outcome.items[0]?.detail).toMatchObject({
+      skipped: { protected_manual: 1 },
+    });
     expect(shopify.register).toHaveBeenCalledWith("gid://shopify/Product/7", [
-      { key: "body_html", locale: "sl", value: "<p>Nov opis</p>", digest: "digest-body_html" },
+      {
+        key: "body_html",
+        locale: "sl",
+        value: "<p>Nov opis</p>",
+        digest: "digest-body_html",
+      },
     ]);
   });
 
   it("copies a resource written in the target language and records the decided source", async () => {
-    const res = resource("gid://shopify/Article/8", [{ key: "title", value: "Rabljena oprema" }]);
-    provider.translate.mockImplementation(answer({ title: "Gebrauchte Ausrüstung" }));
+    const res = resource("gid://shopify/Article/8", [
+      { key: "title", value: "Rabljena oprema" },
+    ]);
+    provider.translate.mockImplementation(
+      answer({ title: "Gebrauchte Ausrüstung" }),
+    );
     const outcome = await translateResource(ctx(intelligence()), {
       resource: res,
       resourceType: "ARTICLE",
@@ -389,8 +637,15 @@ describe("the engine", () => {
   });
 
   it("fails the item, writes nothing and keeps the trace when the provider fails", async () => {
-    provider.translate.mockResolvedValue({ kind: "failed", message: "The provider answered 500.", retryable: true });
-    const outcome = await run(intelligence(), resource("gid://shopify/Link/9", [{ key: "title", value: "Clothing" }]));
+    provider.translate.mockResolvedValue({
+      kind: "failed",
+      message: "The provider answered 500.",
+      retryable: true,
+    });
+    const outcome = await run(
+      intelligence(),
+      resource("gid://shopify/Link/9", [{ key: "title", value: "Clothing" }]),
+    );
     expect(outcome.failed).toBe(1);
     expect(outcome.items[0]?.error).toBe("The provider answered 500.");
     expect(shopify.register).not.toHaveBeenCalled();
@@ -398,8 +653,14 @@ describe("the engine", () => {
   });
 
   it("does not pay again for a failure automatic work already had on the same source", async () => {
-    provider.translate.mockResolvedValue({ kind: "failed", message: "The reply left out title.", retryable: false });
-    const res = resource("gid://shopify/Link/10", [{ key: "title", value: "Clothing" }]);
+    provider.translate.mockResolvedValue({
+      kind: "failed",
+      message: "The reply left out title.",
+      retryable: false,
+    });
+    const res = resource("gid://shopify/Link/10", [
+      { key: "title", value: "Clothing" },
+    ]);
     await run(intelligence(), res);
     expect(provider.translate).toHaveBeenCalledTimes(1);
 
@@ -407,28 +668,42 @@ describe("the engine", () => {
     const again = await run(intelligence(), res);
     expect(provider.translate).toHaveBeenCalledTimes(1);
     expect(again.failed).toBe(0);
-    expect(again.items[0]).toMatchObject({ status: "skipped", detail: { skipped: { failed_before: 1 } } });
+    expect(again.items[0]).toMatchObject({
+      status: "skipped",
+      detail: { skipped: { failed_before: 1 } },
+    });
 
     // The source changed: that is new work.
-    const changed = resource("gid://shopify/Link/10", [{ key: "title", value: "Clothes" }]);
+    const changed = resource("gid://shopify/Link/10", [
+      { key: "title", value: "Clothes" },
+    ]);
     changed.fields[0]!.digest = "digest-title-2";
     await run(intelligence(), changed);
     expect(provider.translate).toHaveBeenCalledTimes(2);
   });
 
   it("always tries when a person asks, and forgets the failure once it works", async () => {
-    provider.translate.mockResolvedValueOnce({ kind: "failed", message: "The provider answered 500.", retryable: true });
-    const res = resource("gid://shopify/Link/11", [{ key: "title", value: "Clothing" }]);
+    provider.translate.mockResolvedValueOnce({
+      kind: "failed",
+      message: "The provider answered 500.",
+      retryable: true,
+    });
+    const res = resource("gid://shopify/Link/11", [
+      { key: "title", value: "Clothing" },
+    ]);
     await run(intelligence(), res);
     provider.translate.mockImplementation(answer({ title: "Oblačila" }));
-    const outcome = await translateResource(ctx(intelligence(), { requestedBy: "person@example.com" }), {
-      resource: res,
-      resourceType: "LINK",
-      targetLocales: ["sl"],
-      override: null,
-      ownership: [],
-      glossaries: new Map(),
-    });
+    const outcome = await translateResource(
+      ctx(intelligence(), { requestedBy: "person@example.com" }),
+      {
+        resource: res,
+        resourceType: "LINK",
+        targetLocales: ["sl"],
+        override: null,
+        ownership: [],
+        glossaries: new Map(),
+      },
+    );
     expect(outcome.translated).toBe(1);
     expect(failures.size).toBe(0);
   });
@@ -441,12 +716,31 @@ describe("the engine", () => {
     ]);
     const outcome = await translateResource(
       ctx(intelligence(), {
-        settings: new Map([["sl", { ...defaultLanguageSettings("sl"), keepOriginal: ["product_titles"] }]]),
+        settings: new Map([
+          [
+            "sl",
+            {
+              ...defaultLanguageSettings("sl"),
+              keepOriginal: ["product_titles"],
+            },
+          ],
+        ]),
       }),
-      { resource: res, resourceType: "PRODUCT", targetLocales: ["sl"], override: null, ownership: [], glossaries: new Map() },
+      {
+        resource: res,
+        resourceType: "PRODUCT",
+        targetLocales: ["sl"],
+        override: null,
+        ownership: [],
+        glossaries: new Map(),
+      },
     );
-    expect(provider.translate.mock.calls[0]![0].fields.map((f) => f.key)).toEqual(["body_html"]);
-    expect(outcome.items[0]?.detail).toMatchObject({ skipped: { kept_original: 1 } });
+    expect(
+      provider.translate.mock.calls[0]![0].fields.map((f) => f.key),
+    ).toEqual(["body_html"]);
+    expect(outcome.items[0]?.detail).toMatchObject({
+      skipped: { kept_original: 1 },
+    });
   });
 });
 
@@ -457,10 +751,19 @@ describe("the engine", () => {
  */
 describe("automaticWorkFor", () => {
   const now = new Date("2026-09-28T12:00:00Z");
-  const ai = (key: string, value: string): OwnershipRecord => ({ key, locale: "sl", owner: "ai", valueHash: hashValue(value) });
+  const ai = (key: string, value: string): OwnershipRecord => ({
+    key,
+    locale: "sl",
+    owner: "ai",
+    valueHash: hashValue(value),
+  });
   const ask = (
     res: TranslatableResource,
-    options: { mode?: "missing" | "missing_outdated"; ownership?: OwnershipRecord[]; failure?: StoredFailure } = {},
+    options: {
+      mode?: "missing" | "missing_outdated";
+      ownership?: OwnershipRecord[];
+      failure?: StoredFailure;
+    } = {},
   ) =>
     automaticWorkFor({
       resource: res,
@@ -476,35 +779,51 @@ describe("automaticWorkFor", () => {
     });
 
   it("finds nothing to do when the product's text is translated and current", () => {
-    const res = resource("gid://shopify/Product/20", [{ key: "title", value: "Kite" }], {
-      sl: [{ key: "title", value: "Zmaj" }],
-    });
+    const res = resource(
+      "gid://shopify/Product/20",
+      [{ key: "title", value: "Kite" }],
+      {
+        sl: [{ key: "title", value: "Zmaj" }],
+      },
+    );
     expect(ask(res, { ownership: [ai("title", "Zmaj")] })).toBe(false);
   });
 
   it("finds work for a missing field", () => {
-    const res = resource("gid://shopify/Product/21", [{ key: "title", value: "Kite" }]);
+    const res = resource("gid://shopify/Product/21", [
+      { key: "title", value: "Kite" },
+    ]);
     expect(ask(res, { mode: "missing" })).toBe(true);
   });
 
   it("refreshes an outdated field the AI wrote only when the language asks for outdated", () => {
-    const res = resource("gid://shopify/Product/22", [{ key: "title", value: "Kite 2" }], {
-      sl: [{ key: "title", value: "Zmaj", outdated: true }],
-    });
+    const res = resource(
+      "gid://shopify/Product/22",
+      [{ key: "title", value: "Kite 2" }],
+      {
+        sl: [{ key: "title", value: "Zmaj", outdated: true }],
+      },
+    );
     const ownership = [ai("title", "Zmaj")];
     expect(ask(res, { mode: "missing", ownership })).toBe(false);
     expect(ask(res, { mode: "missing_outdated", ownership })).toBe(true);
   });
 
   it("leaves an outdated translation a person wrote alone", () => {
-    const res = resource("gid://shopify/Product/23", [{ key: "title", value: "Kite 2" }], {
-      sl: [{ key: "title", value: "Zmaj", outdated: true }],
-    });
+    const res = resource(
+      "gid://shopify/Product/23",
+      [{ key: "title", value: "Kite 2" }],
+      {
+        sl: [{ key: "title", value: "Zmaj", outdated: true }],
+      },
+    );
     expect(ask(res)).toBe(false);
   });
 
   it("does not collect a failure it is still backing off from on the same source", () => {
-    const res = resource("gid://shopify/Product/24", [{ key: "title", value: "Kite" }]);
+    const res = resource("gid://shopify/Product/24", [
+      { key: "title", value: "Kite" },
+    ]);
     const failure: StoredFailure = {
       locale: "sl",
       sourceKey: hashValue("title:digest-title"),
@@ -514,6 +833,8 @@ describe("automaticWorkFor", () => {
       retryAfter: new Date(now.getTime() + 86_400_000),
     };
     expect(ask(res, { failure })).toBe(false);
-    expect(ask(res, { failure: { ...failure, sourceKey: "another-source" } })).toBe(true);
+    expect(
+      ask(res, { failure: { ...failure, sourceKey: "another-source" } }),
+    ).toBe(true);
   });
 });

@@ -1,9 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import {
-  REFERENCE,
-  loadCatalogue,
-} from "../support/rig-fixtures";
+import { REFERENCE, loadCatalogue } from "../support/rig-fixtures";
 import {
   fail,
   goodModel,
@@ -46,7 +43,9 @@ describe("signature and tenant", () => {
   it("never returns shop A products to shop B", async () => {
     const a = setup();
     const resultA = await read(await a.api.build(post({ answers: REFERENCE })));
-    const idsA = new Set<number>(resultA["rigs"][0].items.map((i: Json) => i.variantId));
+    const idsA = new Set<number>(
+      resultA["rigs"][0].items.map((i: Json) => i.variantId),
+    );
     expect(idsA.size).toBeGreaterThan(0);
 
     const b = setup({ authenticate: async () => "b.myshopify.com" });
@@ -59,21 +58,27 @@ describe("signature and tenant", () => {
 
   it("refuses a GET with 405", async () => {
     const { api } = setup();
-    const response = await api.build(new Request("https://hub.test/proxy/rig/build"));
+    const response = await api.build(
+      new Request("https://hub.test/proxy/rig/build"),
+    );
     expect(response.status).toBe(405);
   });
 });
 
 describe("an unreadable catalogue", () => {
   it("answers 409 unavailable, logs the cause and never a 5xx, on every handler", async () => {
-    const logged: Array<{ fields: Record<string, unknown>; message: string }> = [];
+    const logged: Array<{ fields: Record<string, unknown>; message: string }> =
+      [];
     const { api, store } = setup({
       logError: (fields, message) => logged.push({ fields, message }),
     });
     store.loadSource.mockRejectedValue(
-      Object.assign(new Error("The column `catalog_variant.options` does not exist"), {
-        code: "P2022",
-      }),
+      Object.assign(
+        new Error("The column `catalog_variant.options` does not exist"),
+        {
+          code: "P2022",
+        },
+      ),
     );
     const calls: Array<[(request: Request) => Promise<Response>, unknown]> = [
       [api.build, { answers: REFERENCE }],
@@ -116,7 +121,9 @@ describe("the catalogue cache", () => {
     const original = store.loadSource.getMockImplementation();
     store.loadSource.mockImplementation(async (domain: string) => {
       await held;
-      return (original as (d: string) => ReturnType<typeof store.loadSource>)(domain);
+      return (original as (d: string) => ReturnType<typeof store.loadSource>)(
+        domain,
+      );
     });
 
     clock.ms += 61_000;
@@ -134,32 +141,43 @@ describe("the catalogue cache", () => {
 describe("validation", () => {
   it("413 for text over 1000 characters, 200 at exactly 1000", async () => {
     const { api } = setup();
-    const long = await api.build(post({ text: "x".repeat(1001), answers: REFERENCE }));
+    const long = await api.build(
+      post({ text: "x".repeat(1001), answers: REFERENCE }),
+    );
     expect(long.status).toBe(413);
-    const edge = await api.build(post({ text: "x".repeat(1000), answers: REFERENCE }));
+    const edge = await api.build(
+      post({ text: "x".repeat(1000), answers: REFERENCE }),
+    );
     expect(edge.status).toBe(200);
   });
 
-  it.each([0, 400, "heavy", null])("400 naming weightKg for %j", async (weight) => {
-    const { api } = setup();
-    const response = await api.build(post({ answers: { weightKg: weight } }));
-    expect(response.status).toBe(400);
-    expect((await read(response))["field"]).toBe("answers.weightKg");
-  });
+  it.each([0, 400, "heavy", null])(
+    "400 naming weightKg for %j",
+    async (weight) => {
+      const { api } = setup();
+      const response = await api.build(post({ answers: { weightKg: weight } }));
+      expect(response.status).toBe(400);
+      expect((await read(response))["field"]).toBe("answers.weightKg");
+    },
+  );
 
   it("400 for unknown keys, naming the key", async () => {
     const { api } = setup();
     const top = await api.build(post({ answers: REFERENCE, shopId: "other" }));
     expect(top.status).toBe(400);
     expect((await read(top))["field"]).toBe("shopId");
-    const inner = await api.build(post({ answers: { ...REFERENCE, color: "red" } }));
+    const inner = await api.build(
+      post({ answers: { ...REFERENCE, color: "red" } }),
+    );
     expect((await read(inner))["field"]).toBe("answers.color");
   });
 
   it("400 for a body with neither text nor answers, and for bad JSON", async () => {
     const { api } = setup();
     expect((await api.build(post({}))).status).toBe(400);
-    expect((await api.build(post({ text: "  ", answers: {} }))).status).toBe(400);
+    expect((await api.build(post({ text: "  ", answers: {} }))).status).toBe(
+      400,
+    );
     expect((await api.build(post("{nope"))).status).toBe(400);
   });
 });
@@ -178,7 +196,9 @@ describe("rate limit", () => {
     while (allowed < 10) {
       clock.ms += 61_000;
       for (let i = 0; i < 3 && allowed < 10; i += 1) {
-        expect((await api.explain(post({ answers: REFERENCE }))).status).toBe(200);
+        expect((await api.explain(post({ answers: REFERENCE }))).status).toBe(
+          200,
+        );
         allowed += 1;
       }
     }
@@ -190,7 +210,8 @@ describe("rate limit", () => {
 
   it("counts each caller on its own", async () => {
     const { api } = setup();
-    for (let i = 0; i < 3; i += 1) await api.explain(post({ answers: REFERENCE }));
+    for (let i = 0; i < 3; i += 1)
+      await api.explain(post({ answers: REFERENCE }));
     const other = await api.explain(
       post({ answers: REFERENCE }, { "X-Forwarded-For": "198.51.100.7" }),
     );
@@ -209,7 +230,9 @@ describe("rate limit", () => {
 describe("build", () => {
   it("returns a schema-valid rig, never calls a model, and sets safe headers", async () => {
     const { api, provider, store } = setup();
-    const response = await api.build(post({ text: "ignored here", answers: REFERENCE }));
+    const response = await api.build(
+      post({ text: "ignored here", answers: REFERENCE }),
+    );
     expect(response.status).toBe(200);
     expect(response.headers.get("Cache-Control")).toBe("no-store");
     expect(response.headers.get("Access-Control-Allow-Origin")).toBeNull();
@@ -246,7 +269,12 @@ describe("build", () => {
   it("updates the same request row when the live rig sends its id back", async () => {
     const { api, store } = setup();
     const first = await read(await api.build(post({ answers: REFERENCE })));
-    await api.build(post({ answers: { ...REFERENCE, weightKg: 90 }, requestId: first["requestId"] }));
+    await api.build(
+      post({
+        answers: { ...REFERENCE, weightKg: 90 },
+        requestId: first["requestId"],
+      }),
+    );
     expect(store.saved.map((s) => s.existing)).toEqual([false, true]);
     expect(store.saved[1]?.write.id).toBe(first["requestId"]);
   });
@@ -256,14 +284,19 @@ describe("build", () => {
     off.store.enabled = false;
     const response = await off.api.build(post({ answers: REFERENCE }));
     expect(response.status).toBe(409);
-    expect(await read(response)).toMatchObject({ code: "not_ready", reason: "disabled" });
+    expect(await read(response)).toMatchObject({
+      code: "not_ready",
+      reason: "disabled",
+    });
   });
 
   it("flags a snapshot older than 30 minutes", async () => {
     const { api, clock } = setup();
     clock.ms = Date.parse("2026-10-28T13:30:00Z");
     const body = await read(await api.build(post({ answers: REFERENCE })));
-    expect(body["warnings"].map((w: Json) => w.code)).toContain("stale_snapshot");
+    expect(body["warnings"].map((w: Json) => w.code)).toContain(
+      "stale_snapshot",
+    );
     expect(body["rigs"][0]["items"][0]["checkAvailability"]).toBe(true);
     expect(body["snapshotAgeMinutes"]).toBe(90);
   });
@@ -272,14 +305,23 @@ describe("build", () => {
 describe("explain", () => {
   it("reads the text, writes the reasons and keeps the rig the engine chose", async () => {
     const { api, provider } = setup();
-    const plainBuild = await read(await api.build(post({ answers: REFERENCE })));
+    const plainBuild = await read(
+      await api.build(post({ answers: REFERENCE })),
+    );
     const body = await read(
-      await api.explain(post({ text: "82 kg intermediate", answers: { discipline: "windsurf" } })),
+      await api.explain(
+        post({
+          text: "82 kg intermediate",
+          answers: { discipline: "windsurf" },
+        }),
+      ),
     );
     expect(body["mode"]).toBe("ai");
     expect(body["profile"]["source"]["weightKg"]).toBe("text");
     expect(provider.prompts).toHaveLength(2);
-    const ids = plainBuild["rigs"][0]["items"].map((i: Json) => String(i.variantId));
+    const ids = plainBuild["rigs"][0]["items"].map((i: Json) =>
+      String(i.variantId),
+    );
     expect(Object.keys(body["whys"]).sort()).toEqual([...ids].sort());
     expect(body["variantIds"].map(String).sort()).toEqual([...ids].sort());
   });
@@ -293,10 +335,14 @@ describe("explain", () => {
     expect(p["mode"]).toBe("plain");
     expect(p["variantIds"]).toEqual(a["variantIds"]);
     expect(p["warnings"].map((w: Json) => w.code)).toContain("mode_plain");
-    expect(Object.keys(p["whys"]).sort()).toEqual(Object.keys(a["whys"]).sort());
+    expect(Object.keys(p["whys"]).sort()).toEqual(
+      Object.keys(a["whys"]).sort(),
+    );
     // Both buildings of the rig are the same rig.
     const buildA = await read(await ai.api.build(post({ answers: REFERENCE })));
-    const buildP = await read(await plain.api.build(post({ answers: REFERENCE })));
+    const buildP = await read(
+      await plain.api.build(post({ answers: REFERENCE })),
+    );
     expect(buildP["rigs"][0]["total"]).toBe(buildA["rigs"][0]["total"]);
   });
 
@@ -309,7 +355,9 @@ describe("explain", () => {
       );
       expect(body["mode"]).toBe("plain");
       const codes = body["warnings"].map((w: Json) => w.code);
-      expect(codes).toEqual(expect.arrayContaining(["mode_plain", "text_not_read"]));
+      expect(codes).toEqual(
+        expect.arrayContaining(["mode_plain", "text_not_read"]),
+      );
       expect(body["variantIds"]).toHaveLength(6);
     },
   );
@@ -326,7 +374,9 @@ describe("explain", () => {
     expect(calls).toBe(2);
 
     calls = 0;
-    const exhausted = setup({ script: () => (calls += 1, fail("exhausted")) });
+    const exhausted = setup({
+      script: () => ((calls += 1), fail("exhausted")),
+    });
     await exhausted.api.explain(post({ text: "x", answers: REFERENCE }));
     // One call for the text and one for the words, no retries.
     expect(calls).toBe(2);
@@ -335,7 +385,9 @@ describe("explain", () => {
   it("makes zero provider calls once the daily budget is spent, and still answers", async () => {
     const { api, store, provider } = setup({ dailyCalls: 500 });
     store.poolCalls = 500;
-    const body = await read(await api.explain(post({ text: "82 kg", answers: REFERENCE })));
+    const body = await read(
+      await api.explain(post({ text: "82 kg", answers: REFERENCE })),
+    );
     expect(provider.prompts).toEqual([]);
     expect(body["mode"]).toBe("plain");
     expect(body["variantIds"]).toHaveLength(6);
@@ -350,7 +402,10 @@ describe("explain", () => {
   });
 
   it("writes an ai_usage row for each spawn, with the outcome", async () => {
-    const { api, store } = setup({ script: (p) => (p.includes("<buyer_text>") ? fail("timeout") : goodModel()(p)) });
+    const { api, store } = setup({
+      script: (p) =>
+        p.includes("<buyer_text>") ? fail("timeout") : goodModel()(p),
+    });
     await api.explain(post({ text: "82 kg", answers: REFERENCE }));
     expect(store.usage.map((u) => [u.purpose, u.outcome, u.result])).toEqual([
       ["rig_profile", "timeout", "failed"],
@@ -364,7 +419,8 @@ describe("explain", () => {
     const sailId = String(
       Number(
         (
-          sail?.variants.find((v) => v.title?.startsWith("5.8"))?.variantId ?? ""
+          sail?.variants.find((v) => v.title?.startsWith("5.8"))?.variantId ??
+          ""
         )
           .split("/")
           .pop(),
@@ -372,7 +428,9 @@ describe("explain", () => {
     );
     const { api } = setup({
       script: (prompt) => {
-        const ids = [...prompt.matchAll(/^- id (\d+):/gm)].map((m) => m[1] as string);
+        const ids = [...prompt.matchAll(/^- id (\d+):/gm)].map(
+          (m) => m[1] as string,
+        );
         const whys: Record<string, string> = {};
         for (const id of ids) whys[id] = `Fine reason ${id}.`;
         whys[sailId] = "Better than the Wave Blade for you.";
@@ -382,9 +440,14 @@ describe("explain", () => {
       },
     });
     const body = await read(await api.explain(post({ answers: REFERENCE })));
-    expect(body["whys"][sailId]).toBe("A 5.8 m² sail suits 82 kg riders in 15–25 knots.");
+    expect(body["whys"][sailId]).toBe(
+      "A 5.8 m² sail suits 82 kg riders in 15–25 knots.",
+    );
     const ids = Object.keys(body["whys"]);
-    expect(ids.filter((id) => !String(body["whys"][id]).startsWith("Fine reason")).length).toBe(2);
+    expect(
+      ids.filter((id) => !String(body["whys"][id]).startsWith("Fine reason"))
+        .length,
+    ).toBe(2);
   });
 
   it("never sends the caller address, cookies or ids to the model", async () => {
@@ -397,7 +460,9 @@ describe("explain", () => {
     );
     const sent = provider.prompts.join("\n");
     expect(provider.prompts.length).toBeGreaterThan(0);
-    expect(sent).not.toMatch(/203\.0\.113\.9|cart=abc123|987654|buyer@example\.com/);
+    expect(sent).not.toMatch(
+      /203\.0\.113\.9|cart=abc123|987654|buyer@example\.com/,
+    );
   });
 
   it("reports needs and no rig when nothing yields a weight", async () => {
@@ -429,11 +494,17 @@ describe("verify", () => {
     const powerFin = loadCatalogue().find((p) => p.title === "Power Fin 36");
     const powerId = Number(powerFin?.variants[0]?.variantId.split("/").pop());
     const ids = items.map((i) => (i.role === "fin" ? powerId : i.variantId));
-    const verified = await read(await api.verify(post({ variantIds: ids, answers: REFERENCE })));
+    const verified = await read(
+      await api.verify(post({ variantIds: ids, answers: REFERENCE })),
+    );
     expect(verified["ok"]).toBe(false);
-    expect(verified["checks"].find((c: Json) => c.id === "fin-box").ok).toBe(false);
+    expect(verified["checks"].find((c: Json) => c.id === "fin-box").ok).toBe(
+      false,
+    );
 
-    const unknown = await read(await api.verify(post({ variantIds: [1], answers: REFERENCE })));
+    const unknown = await read(
+      await api.verify(post({ variantIds: [1], answers: REFERENCE })),
+    );
     expect(unknown["ok"]).toBe(false);
   });
 });

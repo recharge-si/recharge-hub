@@ -96,7 +96,10 @@ describe("the three dispositions", () => {
 
     expect(result.unresolvedTotal).toBe(3);
     expect(result.fullyAccounted).toBe(false);
-    expect(result.unresolvedLines[0]).toMatchObject({ sku: "SKU-A", unresolved: 3 });
+    expect(result.unresolvedLines[0]).toMatchObject({
+      sku: "SKU-A",
+      unresolved: 3,
+    });
   });
 });
 
@@ -188,8 +191,8 @@ describe("the accounting identity", () => {
         entry.quantity,
       );
     }
-    expect(result.managedTotal + result.externalTotal + result.unresolvedTotal).toBe(
-      12,
-    );
+    expect(
+      result.managedTotal + result.externalTotal + result.unresolvedTotal,
+    ).toBe(12);
   });
 });

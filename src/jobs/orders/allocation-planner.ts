@@ -50,7 +50,10 @@ export interface AllocationPlan {
   /** The canonical view of the same decision, for the audit trail. */
   allocations: CanonicalAllocation[];
   /** Lines Shopify assigned to a location with no supply source. */
-  unmappedLocations: { shopifyLocationId: string; locationName: string | null }[];
+  unmappedLocations: {
+    shopifyLocationId: string;
+    locationName: string | null;
+  }[];
   /**
    * Fulfilment services this app is not allowed to resolve.
    *
@@ -122,11 +125,10 @@ export async function planAllocations(
    * numeric tail, so a direct lookup misses every time — see `locationKey`.
    */
   const sourceByLocation = new Map(
-    sources
-      .flatMap((source) => {
-        const key = locationKey(source.shopifyLocationId);
-        return key ? [[key, source] as const] : [];
-      }),
+    sources.flatMap((source) => {
+      const key = locationKey(source.shopifyLocationId);
+      return key ? [[key, source] as const] : [];
+    }),
   );
 
   const records: AllocationRecord[] = [];
@@ -211,10 +213,7 @@ export async function planAllocations(
         const quantity = Math.min(line.quantity, room);
         if (quantity <= 0) continue;
 
-        assignedByLine.set(
-          line.shopifyLineItemId,
-          alreadyAssigned + quantity,
-        );
+        assignedByLine.set(line.shopifyLineItemId, alreadyAssigned + quantity);
 
         canonical.lines.push({
           shopifyLineItemId: line.shopifyLineItemId,
@@ -324,14 +323,12 @@ export async function planAllocations(
           entry.supplySourceId === allocation.sourceId &&
           entry.shopifyLocationId === locationId,
       );
-      const target: CanonicalAllocation =
-        existing ??
-        {
-          shopifyLocationId: locationId,
-          supplySourceId: allocation.sourceId,
-          disposition: allocation.sourceId ? "managed" : "unresolved",
-          lines: [],
-        };
+      const target: CanonicalAllocation = existing ?? {
+        shopifyLocationId: locationId,
+        supplySourceId: allocation.sourceId,
+        disposition: allocation.sourceId ? "managed" : "unresolved",
+        lines: [],
+      };
       if (!existing) allocations.push(target);
 
       const line = target.lines.find(

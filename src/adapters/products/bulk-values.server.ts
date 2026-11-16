@@ -42,11 +42,7 @@ export const BATCH = 25;
 /** Shopify's answer for a product or variant that has been deleted. */
 const OWNER_GONE = /owner does not exist|does not exist/i;
 
-export type Decision =
-  | "write"
-  | "unchanged"
-  | "changed_meanwhile"
-  | "gone";
+export type Decision = "write" | "unchanged" | "changed_meanwhile" | "gone";
 
 /** What to do with one change given what Shopify holds for it now. */
 export function decide(
@@ -104,7 +100,10 @@ export async function applyBatch(
   indexes: readonly number[],
 ): Promise<Map<number, string>> {
   const outcomes = new Map<number, string>();
-  const batch = indexes.map((i) => ({ i, change: changes[i] as PlannedChange }));
+  const batch = indexes.map((i) => ({
+    i,
+    change: changes[i] as PlannedChange,
+  }));
   const live = await readOwnerMetafields(
     admin,
     batch.map(({ change }) => change.ownerId),
@@ -120,8 +119,12 @@ export async function applyBatch(
   }
   if (toWrite.length === 0) return outcomes;
 
-  const sets = toWrite.filter(({ change }) => change.op === "set" && change.value !== null);
-  const clears = toWrite.filter(({ change }) => !(change.op === "set" && change.value !== null));
+  const sets = toWrite.filter(
+    ({ change }) => change.op === "set" && change.value !== null,
+  );
+  const clears = toWrite.filter(
+    ({ change }) => !(change.op === "set" && change.value !== null),
+  );
   const refused = await writeMetafields(
     admin,
     sets.map(({ change }) => writeOf(change, change.value ?? "")),
@@ -134,7 +137,8 @@ export async function applyBatch(
     // Shopify refused the call, perhaps for one cell. Each value goes on its
     // own so the rest are written and the refused one says why; a value the
     // refused call had already written is written again, to the same value.
-    for (const { i, change } of toWrite) outcomes.set(i, await writeOne(admin, change));
+    for (const { i, change } of toWrite)
+      outcomes.set(i, await writeOne(admin, change));
   }
   return outcomes;
 }

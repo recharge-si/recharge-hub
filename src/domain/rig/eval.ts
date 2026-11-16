@@ -118,7 +118,12 @@ export function parseEvalCases(text: string): {
       const min = optionalNumber(at(row, lo));
       const max = optionalNumber(at(row, hi));
       if (min === null && max === null) return null;
-      if (min === null || max === null || Number.isNaN(min) || Number.isNaN(max)) {
+      if (
+        min === null ||
+        max === null ||
+        Number.isNaN(min) ||
+        Number.isNaN(max)
+      ) {
         errors.push(`Line ${line}: ${lo} and ${hi} must both be numbers.`);
         return null;
       }
@@ -160,20 +165,25 @@ export function evaluateCase(
   });
   const rig = result.rigs[0];
   const outcomes: RuleOutcome[] = [];
-  const partOf = (role: RigRole) => rig?.items.find((item) => item.role === role);
+  const partOf = (role: RigRole) =>
+    rig?.items.find((item) => item.role === role);
 
   outcomes.push({
     rule: "rig-built",
     ok: rig !== undefined && result.unmet.every((u) => u.role === "budget"),
     detail: rig
-      ? result.unmet.map((u) => `${u.role}:${u.reason}`).join(", ") || "complete"
+      ? result.unmet.map((u) => `${u.role}:${u.reason}`).join(", ") ||
+        "complete"
       : `none (${[...result.needs, ...result.unmet.map((u) => `${u.role}:${u.reason}`)].join(", ")})`,
   });
   outcomes.push({
     rule: "checks",
     ok: rig !== undefined && rig.checks.every((check) => check.ok),
     detail: rig
-      ? rig.checks.filter((c) => !c.ok).map((c) => c.id).join(", ") || "all pass"
+      ? rig.checks
+          .filter((c) => !c.ok)
+          .map((c) => c.id)
+          .join(", ") || "all pass"
       : "no rig",
   });
   const within = (

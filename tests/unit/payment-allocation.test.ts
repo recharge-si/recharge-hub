@@ -43,7 +43,12 @@ function receipt(
   amountMinor: number,
   processedAt = new Date("2026-01-01T10:00:00Z"),
 ): AllocatableReceipt {
-  return { shopifyTransactionId: id, amountMinor, gateway: "card", processedAt };
+  return {
+    shopifyTransactionId: id,
+    amountMinor,
+    gateway: "card",
+    processedAt,
+  };
 }
 
 function expectPreserved(
@@ -163,11 +168,13 @@ describe("several payments", () => {
     });
 
     expect(
-      result.entries.filter((entry) => entry.shopifyTransactionId === "t1")
+      result.entries
+        .filter((entry) => entry.shopifyTransactionId === "t1")
         .reduce((sum, entry) => sum + entry.amountMinor, 0),
     ).toBe(10_000);
     expect(
-      result.entries.filter((entry) => entry.shopifyTransactionId === "t2")
+      result.entries
+        .filter((entry) => entry.shopifyTransactionId === "t2")
         .reduce((sum, entry) => sum + entry.amountMinor, 0),
     ).toBe(20_000);
     expectPreserved(receipts, result);
@@ -276,11 +283,11 @@ describe("degenerate cases", () => {
       unallocated: [],
     };
 
-    expect(
-      allocationPreservesReceipts({ receipts, result: broken }),
-    ).toEqual({
+    expect(allocationPreservesReceipts({ receipts, result: broken })).toEqual({
       ok: false,
-      drift: [{ shopifyTransactionId: "t1", expected: 10_000, allocated: 9_999 }],
+      drift: [
+        { shopifyTransactionId: "t1", expected: 10_000, allocated: 9_999 },
+      ],
     });
   });
 });

@@ -65,9 +65,7 @@ export interface SupplySourceInput {
  * would be a validation error for a decision they were never really given.
  * Shared so the settings form and the shop-default recompute cannot drift.
  */
-export function writerForDirection(
-  direction: StockDirection,
-): InventoryWriter {
+export function writerForDirection(direction: StockDirection): InventoryWriter {
   if (direction === "mk_to_shopify") return "metakocka";
   if (direction === "shopify_to_mk") return "manual";
   return "external";

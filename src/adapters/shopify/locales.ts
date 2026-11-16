@@ -22,7 +22,10 @@ const graphqlErrorSchema = z
     z
       .object({
         message: z.string(),
-        extensions: z.object({ code: z.string().optional() }).passthrough().optional(),
+        extensions: z
+          .object({ code: z.string().optional() })
+          .passthrough()
+          .optional(),
       })
       .passthrough(),
   )
@@ -74,7 +77,10 @@ const LOCALES_QUERY = `#graphql
 `;
 
 const localesSchema = z.object({
-  data: z.object({ shopLocales: z.array(shopLocaleSchema) }).nullable().optional(),
+  data: z
+    .object({ shopLocales: z.array(shopLocaleSchema) })
+    .nullable()
+    .optional(),
   errors: graphqlErrorSchema,
 });
 
@@ -148,7 +154,9 @@ const AVAILABLE_QUERY = `#graphql
 const availableSchema = z.object({
   data: z
     .object({
-      availableLocales: z.array(z.object({ isoCode: z.string(), name: z.string() })),
+      availableLocales: z.array(
+        z.object({ isoCode: z.string(), name: z.string() }),
+      ),
     })
     .nullable()
     .optional(),
@@ -233,10 +241,7 @@ export async function enableShopLocale(
     tries: 2,
   });
   const parsed = enableSchema.parse(await response.json());
-  return mutationOutcome(
-    parsed.errors,
-    parsed.data?.shopLocaleEnable ?? null,
-  );
+  return mutationOutcome(parsed.errors, parsed.data?.shopLocaleEnable ?? null);
 }
 
 const UPDATE_MUTATION = `#graphql
@@ -287,10 +292,7 @@ export async function updateShopLocale(
     tries: 2,
   });
   const parsed = updateSchema.parse(await response.json());
-  return mutationOutcome(
-    parsed.errors,
-    parsed.data?.shopLocaleUpdate ?? null,
-  );
+  return mutationOutcome(parsed.errors, parsed.data?.shopLocaleUpdate ?? null);
 }
 
 const DISABLE_MUTATION = `#graphql
@@ -339,7 +341,8 @@ export async function disableShopLocale(
       kind: "rejected",
       messages: parsed.errors.map((error) => error.message),
     };
-  if (!payload) return { kind: "rejected", messages: ["Shopify did not answer."] };
+  if (!payload)
+    return { kind: "rejected", messages: ["Shopify did not answer."] };
   if (payload.userErrors.length > 0)
     return {
       kind: "rejected",
@@ -359,7 +362,8 @@ function mutationOutcome(
   if (denied) return { kind: "rejected", messages: [denied] };
   if (errors && errors.length > 0)
     return { kind: "rejected", messages: errors.map((error) => error.message) };
-  if (!payload) return { kind: "rejected", messages: ["Shopify did not answer."] };
+  if (!payload)
+    return { kind: "rejected", messages: ["Shopify did not answer."] };
   if (payload.userErrors.length > 0)
     return {
       kind: "rejected",
@@ -437,11 +441,12 @@ export interface Market {
 }
 
 export type MarketsResult =
-  | { kind: "read"; markets: Market[] }
-  | { kind: "unavailable"; reason: string };
+  { kind: "read"; markets: Market[] } | { kind: "unavailable"; reason: string };
 
 /** Every market and the web presences that decide which languages it shows. */
-export async function listMarkets(admin: AdminApiContext): Promise<MarketsResult> {
+export async function listMarkets(
+  admin: AdminApiContext,
+): Promise<MarketsResult> {
   const response = await admin.graphql(MARKETS_QUERY, { tries: 2 });
   const parsed = marketsSchema.parse(await response.json());
   const denied = accessDenied(parsed.errors);

@@ -322,7 +322,11 @@ export default function Products() {
                 lastRunAt
                   ? {
                       at: lastRunAt,
-                      outcome: status ? (status.ok ? "completed" : "failed") : "",
+                      outcome: status
+                        ? status.ok
+                          ? "completed"
+                          : "failed"
+                        : "",
                     }
                   : null
               }
@@ -460,10 +464,7 @@ export default function Products() {
         </s-section>
 
         <s-section heading="Recent activity">
-          <RecentActivity
-            items={recent}
-            empty={EMPTY.metakockaNotRead}
-          />
+          <RecentActivity items={recent} empty={EMPTY.metakockaNotRead} />
         </s-section>
       </s-stack>
     </s-page>

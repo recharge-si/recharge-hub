@@ -45,7 +45,9 @@ export const markMetakockaPaidJobSchema = z.object({
   paidAt: z.coerce.date().optional(),
 });
 
-export async function handleMarkMetakockaPaid(job: Job<unknown>): Promise<void> {
+export async function handleMarkMetakockaPaid(
+  job: Job<unknown>,
+): Promise<void> {
   const { shopDomain, orderId } = markMetakockaPaidJobSchema.parse(job.data);
   const log = getLogger();
 

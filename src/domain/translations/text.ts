@@ -49,7 +49,11 @@ export function wordsOf(value: string): string[] {
 }
 
 export function isAllCaps(word: string): boolean {
-  return /\p{Lu}/u.test(word) && word === word.toUpperCase() && /^[\p{Lu}\p{N}&.-]+$/u.test(word);
+  return (
+    /\p{Lu}/u.test(word) &&
+    word === word.toUpperCase() &&
+    /^[\p{Lu}\p{N}&.-]+$/u.test(word)
+  );
 }
 
 export function isCapitalised(word: string): boolean {
@@ -71,7 +75,11 @@ export function looksLikeCode(word: string): boolean {
   const hasLetter = /\p{L}/u.test(word);
   const hasDigit = /\p{N}/u.test(word);
   if (hasLetter && hasDigit)
-    return /\p{Lu}/u.test(word) || /[-./:]/.test(word) || (word.match(/\p{N}+/gu) ?? []).length >= 2;
+    return (
+      /\p{Lu}/u.test(word) ||
+      /[-./:]/.test(word) ||
+      (word.match(/\p{N}+/gu) ?? []).length >= 2
+    );
   // A token like "RS:X" or "V8" style abbreviations with punctuation inside.
   return /^[\p{Lu}]{1,4}[:./-][\p{Lu}\p{N}]{1,4}$/u.test(word);
 }
@@ -90,15 +98,18 @@ export function numbersOf(value: string): string[] {
 /** Placeholders a template engine would fill: `{{name}}`, `{0}`, `%s`, `%1$d`, `${x}`, `[[x]]`. */
 export function placeholdersOf(value: string): string[] {
   const matches =
-    value.match(/\{\{\s*[^{}]+?\s*\}\}|\$\{[^}]+\}|\{[A-Za-z0-9_.]+\}|\[\[[^\]]+\]\]|%(?:\d+\$)?[sdif]/g) ??
-    [];
+    value.match(
+      /\{\{\s*[^{}]+?\s*\}\}|\$\{[^}]+\}|\{[A-Za-z0-9_.]+\}|\[\[[^\]]+\]\]|%(?:\d+\$)?[sdif]/g,
+    ) ?? [];
   return matches.map((token) => token.replace(/\s+/g, "")).sort();
 }
 
 /** URLs and e-mail addresses, which are never translated. */
 export function urlsOf(value: string): string[] {
   const matches =
-    value.match(/https?:\/\/[^\s"'<>)]+|mailto:[^\s"'<>)]+|[\w.+-]+@[\w-]+\.[\w.-]+/g) ?? [];
+    value.match(
+      /https?:\/\/[^\s"'<>)]+|mailto:[^\s"'<>)]+|[\w.+-]+@[\w-]+\.[\w.-]+/g,
+    ) ?? [];
   return matches.map((token) => token.replace(/[.,;:]+$/, "")).sort();
 }
 
@@ -119,10 +130,16 @@ export function htmlSkeleton(value: string): string[] {
       continue;
     }
     const attrs: string[] = [];
-    for (const attr of raw.matchAll(/\b(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi)) {
-      attrs.push(`${attr[1]!.toLowerCase()}=${(attr[2] ?? "").replace(/^["']|["']$/g, "")}`);
+    for (const attr of raw.matchAll(
+      /\b(href|src)\s*=\s*("[^"]*"|'[^']*'|[^\s>]+)/gi,
+    )) {
+      attrs.push(
+        `${attr[1]!.toLowerCase()}=${(attr[2] ?? "").replace(/^["']|["']$/g, "")}`,
+      );
     }
-    skeleton.push(`<${name}${attrs.length > 0 ? " " + attrs.join(" ") : ""}${raw.endsWith("/>") ? "/" : ""}>`);
+    skeleton.push(
+      `<${name}${attrs.length > 0 ? " " + attrs.join(" ") : ""}${raw.endsWith("/>") ? "/" : ""}>`,
+    );
   }
   return skeleton;
 }
@@ -147,7 +164,8 @@ function blankText(node: unknown): unknown {
   if (node && typeof node === "object") {
     const out: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(node)) {
-      out[key] = key === "value" && typeof child === "string" ? "" : blankText(child);
+      out[key] =
+        key === "value" && typeof child === "string" ? "" : blankText(child);
     }
     return out;
   }
@@ -182,8 +200,13 @@ export function containsTerm(text: string, term: string): boolean {
   if (needle === "") return false;
   const haystack = normaliseTerm(text);
   if (haystack === needle) return true;
-  const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&").replace(/[\s-]+/g, "[\\s-]+");
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u").test(haystack);
+  const escaped = needle
+    .replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+    .replace(/[\s-]+/g, "[\\s-]+");
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`,
+    "u",
+  ).test(haystack);
 }
 
 /** Whether `term` occurs in `text` spelt exactly as given (case-sensitive), as whole words. */
@@ -191,11 +214,17 @@ export function containsExact(text: string, term: string): boolean {
   const needle = term.trim();
   if (needle === "") return false;
   const escaped = needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, "u").test(text);
+  return new RegExp(
+    `(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`,
+    "u",
+  ).test(text);
 }
 
 /** Multiset difference: what is in `a` and not in `b`, counting repeats. */
-export function missingFrom(a: readonly string[], b: readonly string[]): string[] {
+export function missingFrom(
+  a: readonly string[],
+  b: readonly string[],
+): string[] {
   const counts = new Map<string, number>();
   for (const item of b) counts.set(item, (counts.get(item) ?? 0) + 1);
   const missing: string[] = [];

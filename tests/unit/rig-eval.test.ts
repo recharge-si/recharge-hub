@@ -3,11 +3,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import {
-  evaluateCase,
-  parseCsv,
-  parseEvalCases,
-} from "~/domain/rig/eval";
+import { evaluateCase, parseCsv, parseEvalCases } from "~/domain/rig/eval";
 import { FIXTURES, SHOP_A, candidates, rules } from "../support/rig-fixtures";
 
 const sample = readFileSync(join(FIXTURES, "eval-sample.csv"), "utf8");

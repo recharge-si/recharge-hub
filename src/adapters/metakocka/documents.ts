@@ -484,55 +484,57 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
           ),
         }
       : {}),
-    product_list: input.lines.map((line) => ({
-      code: line.code,
-      amount: String(line.amount),
-      // Gross or net, whichever Shopify's figure actually is. Putting a net
-      // price in price_with_tax would understate the line by the VAT rate.
-      ...(input.taxesIncluded === false
-        ? { price: minorToDecimalString(line.priceWithTaxMinor, decimals) }
-        : {
-            price_with_tax: minorToDecimalString(
-              line.priceWithTaxMinor,
-              decimals,
-            ),
-          }),
-      // MetaKocka refuses a line whose product has no tax attribute of its own
-      // and no tax on the line, so this is always sent. Null never reaches
-      // here: the caller raises an exception instead (§11).
-      ...(line.taxFactor !== null && line.taxFactor !== undefined
-        ? { tax_factor: line.taxFactor }
-        : {}),
-    })).concat(
-      /*
-       * Shipping goes last, so a document's merchandise lines keep the order
-       * the allocation produced and a body built twice is byte-identical.
-       */
-      input.shippingLine
-        ? [
-            {
-              code: input.shippingLine.code,
-              amount: "1",
-              ...(input.taxesIncluded === false
-                ? {
-                    price: minorToDecimalString(
-                      input.shippingLine.amountMinor,
-                      decimals,
-                    ),
-                  }
-                : {
-                    price_with_tax: minorToDecimalString(
-                      input.shippingLine.amountMinor,
-                      decimals,
-                    ),
-                  }),
-              ...(input.shippingLine.taxFactor
-                ? { tax_factor: input.shippingLine.taxFactor }
-                : {}),
-            },
-          ]
-        : [],
-    ),
+    product_list: input.lines
+      .map((line) => ({
+        code: line.code,
+        amount: String(line.amount),
+        // Gross or net, whichever Shopify's figure actually is. Putting a net
+        // price in price_with_tax would understate the line by the VAT rate.
+        ...(input.taxesIncluded === false
+          ? { price: minorToDecimalString(line.priceWithTaxMinor, decimals) }
+          : {
+              price_with_tax: minorToDecimalString(
+                line.priceWithTaxMinor,
+                decimals,
+              ),
+            }),
+        // MetaKocka refuses a line whose product has no tax attribute of its own
+        // and no tax on the line, so this is always sent. Null never reaches
+        // here: the caller raises an exception instead (§11).
+        ...(line.taxFactor !== null && line.taxFactor !== undefined
+          ? { tax_factor: line.taxFactor }
+          : {}),
+      }))
+      .concat(
+        /*
+         * Shipping goes last, so a document's merchandise lines keep the order
+         * the allocation produced and a body built twice is byte-identical.
+         */
+        input.shippingLine
+          ? [
+              {
+                code: input.shippingLine.code,
+                amount: "1",
+                ...(input.taxesIncluded === false
+                  ? {
+                      price: minorToDecimalString(
+                        input.shippingLine.amountMinor,
+                        decimals,
+                      ),
+                    }
+                  : {
+                      price_with_tax: minorToDecimalString(
+                        input.shippingLine.amountMinor,
+                        decimals,
+                      ),
+                    }),
+                ...(input.shippingLine.taxFactor
+                  ? { tax_factor: input.shippingLine.taxFactor }
+                  : {}),
+              },
+            ]
+          : [],
+      ),
   };
 }
 
@@ -885,7 +887,9 @@ export async function markDocumentPaid(
         payment_type: input.payment.paymentType,
         date: toPaymentDate(input.payment.paidAt, input.timeZone),
         ...(input.payment.amountMinor !== undefined
-          ? { amount: minorToDecimalString(input.payment.amountMinor, decimals) }
+          ? {
+              amount: minorToDecimalString(input.payment.amountMinor, decimals),
+            }
           : {}),
       },
     ],
@@ -996,7 +1000,10 @@ export async function replaceDocumentPayments(
       );
     }
     // Nothing to clear and nothing to send.
-    return { body: input.body, verified: await getSalesOrder(client, input.mkId) };
+    return {
+      body: input.body,
+      verified: await getSalesOrder(client, input.mkId),
+    };
   }
 
   const body: Record<string, unknown> = {

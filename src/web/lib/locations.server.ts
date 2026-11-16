@@ -294,7 +294,6 @@ export async function loadLocationRows(
     };
   });
 
-
   const connectedMarks = new Set(
     locationRows.map((row) => row.warehouseMark).filter(Boolean),
   );

@@ -30,9 +30,7 @@ export interface LocaleWebPresence {
 }
 
 export type OverwritePolicy =
-  | "protect_existing"
-  | "update_ai_managed"
-  | "overwrite_all";
+  "protect_existing" | "update_ai_managed" | "overwrite_all";
 
 export const OVERWRITE_POLICY_LABEL: Record<OverwritePolicy, string> = {
   protect_existing: "Protect every existing translation",
@@ -79,22 +77,25 @@ export function defaultLanguageSettings(locale: string): LanguageSettings {
  * missing. Translations already there are left alone.
  */
 export type KeepOriginal =
-  | "product_titles"
-  | "product_types"
-  | "product_options"
-  | "collection_titles";
+  "product_titles" | "product_types" | "product_options" | "collection_titles";
 
 export const KEEP_ORIGINAL: Record<
   KeepOriginal,
   { label: string; fields: Partial<Record<ResourceType, readonly string[]>> }
 > = {
   product_titles: { label: "Product names", fields: { PRODUCT: ["title"] } },
-  product_types: { label: "Product types", fields: { PRODUCT: ["product_type"] } },
+  product_types: {
+    label: "Product types",
+    fields: { PRODUCT: ["product_type"] },
+  },
   product_options: {
     label: "Product option names and values",
     fields: { PRODUCT_OPTION: ["name"], PRODUCT_OPTION_VALUE: ["name"] },
   },
-  collection_titles: { label: "Collection names", fields: { COLLECTION: ["title"] } },
+  collection_titles: {
+    label: "Collection names",
+    fields: { COLLECTION: ["title"] },
+  },
 };
 
 export const ALL_KEEP_ORIGINAL = Object.keys(KEEP_ORIGINAL) as KeepOriginal[];
@@ -257,7 +258,9 @@ export function isContentGroup(value: string): value is ContentGroup {
 }
 
 /** The resource types a set of content groups expands to, in a stable order. */
-export function typesForGroups(groups: readonly ContentGroup[]): ResourceType[] {
+export function typesForGroups(
+  groups: readonly ContentGroup[],
+): ResourceType[] {
   return ALL_RESOURCE_TYPES.filter((type) =>
     groups.some((group) => CONTENT_GROUPS[group].types.includes(type)),
   );
@@ -339,12 +342,7 @@ export interface OwnershipRecord {
  * The operational state of one field in one language, as the merchant sees
  * it. Never a mixture: the first condition that holds names it.
  */
-export type FieldState =
-  | "missing"
-  | "outdated"
-  | "ai"
-  | "manual"
-  | "existing";
+export type FieldState = "missing" | "outdated" | "ai" | "manual" | "existing";
 
 export const FIELD_STATE_LABEL: Record<FieldState, string> = {
   missing: "Missing",
@@ -394,7 +392,10 @@ export type TranslationTrace = {
   /** Ids of the store terms shown. */
   termIds: string[];
   /** Per attempt, the violations validation found; empty when clean. */
-  validation: Array<{ attempt: number; violations: Array<{ key: string; code: string; severity: string }> }>;
+  validation: Array<{
+    attempt: number;
+    violations: Array<{ key: string; code: string; severity: string }>;
+  }>;
 };
 
 /**

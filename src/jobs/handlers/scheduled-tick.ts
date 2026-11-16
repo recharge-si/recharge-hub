@@ -137,8 +137,7 @@ async function fanOutTranslations(cadence: Cadence): Promise<void> {
   if (cadence === "quarter_hourly") {
     const stale = new Date(Date.now() - STALE_SYNC_MS);
     const abandoned = await abandonStaleSyncs(stale, new Date());
-    if (abandoned > 0)
-      log.warn({ abandoned }, "Translation syncs given up on");
+    if (abandoned > 0) log.warn({ abandoned }, "Translation syncs given up on");
     return;
   }
   if (cadence !== "nightly") return;
@@ -196,7 +195,10 @@ async function fanOutTranslations(cadence: Cadence): Promise<void> {
       // No-op while a count is already running for the shop.
       await requestCoverageRefresh(serviceToken(shop.domain, "scheduled-tick"));
     } catch (error) {
-      log.error({ err: error, shop: shop.domain }, "Could not start the nightly coverage count");
+      log.error(
+        { err: error, shop: shop.domain },
+        "Could not start the nightly coverage count",
+      );
       captureException(error, { shop: shop.domain, cadence });
     }
   }

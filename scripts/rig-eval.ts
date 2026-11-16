@@ -13,7 +13,10 @@
  */
 import { readFileSync, writeFileSync } from "node:fs";
 
-import { candidatesFrom, type RigSnapshotProduct } from "~/domain/rig/candidates";
+import {
+  candidatesFrom,
+  type RigSnapshotProduct,
+} from "~/domain/rig/candidates";
 import { evaluateCase, parseEvalCases } from "~/domain/rig/eval";
 import { placeholderRules } from "~/domain/rig/rules";
 import { parseAttributeSchema } from "~/domain/attributes/schema";
@@ -46,14 +49,19 @@ async function loadSnapshot(): Promise<{
       import("~/domain/types"),
     ]);
     const source = await loadRigSource(serviceToken(shop, "rig-eval"));
-    raw = { shopId: source.shopId, plan: source.plan, products: source.products };
+    raw = {
+      shopId: source.shopId,
+      plan: source.plan,
+      products: source.products,
+    };
     const out = argument("export");
     if (out) writeFileSync(out, JSON.stringify(raw));
   } else {
     throw new Error("Give --snapshot FILE or --shop DOMAIN.");
   }
   const plan = parseAttributeSchema(raw.plan);
-  if (!plan.ok) throw new Error(`The snapshot plan is invalid: ${plan.message}`);
+  if (!plan.ok)
+    throw new Error(`The snapshot plan is invalid: ${plan.message}`);
   return { shopId: raw.shopId, plan: plan.schema, products: raw.products };
 }
 
@@ -81,9 +89,13 @@ async function main(): Promise<number> {
   for (const evalCase of cases) {
     const outcome = evaluateCase(evalCase, candidates, rules, snapshot.shopId);
     if (!outcome.pass) failed += 1;
-    console.log(`${outcome.pass ? "PASS" : "FAIL"}  line ${outcome.line}  ${evalCase.text.slice(0, 60)}`);
+    console.log(
+      `${outcome.pass ? "PASS" : "FAIL"}  line ${outcome.line}  ${evalCase.text.slice(0, 60)}`,
+    );
     for (const rule of outcome.rules) {
-      console.log(`        ${rule.ok ? "ok  " : "FAIL"} ${rule.rule.padEnd(12)} ${rule.detail}`);
+      console.log(
+        `        ${rule.ok ? "ok  " : "FAIL"} ${rule.rule.padEnd(12)} ${rule.detail}`,
+      );
     }
   }
   console.log(`\n${cases.length - failed} of ${cases.length} rows pass.`);

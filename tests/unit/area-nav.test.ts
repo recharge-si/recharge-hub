@@ -26,7 +26,12 @@ describe("AreaNav", () => {
 });
 
 describe("SourcesNav", () => {
-  for (const current of ["sources", "review", "categorization", "connection"] as const)
+  for (const current of [
+    "sources",
+    "review",
+    "categorization",
+    "connection",
+  ] as const)
     it(`offers the four tabs and marks ${current}`, () => {
       const html = renderToStaticMarkup(
         createElement(SourcesNav, { current, awaitingReview: 3 }),

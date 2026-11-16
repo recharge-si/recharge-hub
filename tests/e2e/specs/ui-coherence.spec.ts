@@ -109,7 +109,9 @@ test("after setup, Order settings own the transfer switch and the reference", as
   await expect(
     page.locator('s-checkbox[label="Transfer orders to MetaKocka"]'),
   ).toHaveCount(0);
-  await expect(page.locator("s-text-field[label*='Reference pattern']")).toHaveCount(0);
+  await expect(
+    page.locator("s-text-field[label*='Reference pattern']"),
+  ).toHaveCount(0);
 });
 
 test("the MetaKocka catalogue page is headed MetaKocka products", async ({

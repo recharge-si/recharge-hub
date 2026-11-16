@@ -26,7 +26,10 @@ export interface DetectionContext {
   neighbourText: readonly string[];
 }
 
-export function detectionSample(fields: ReadonlyArray<{ value: string }>, max = 2000): string {
+export function detectionSample(
+  fields: ReadonlyArray<{ value: string }>,
+  max = 2000,
+): string {
   return fields
     .map((field) => stripHtml(field.value))
     .filter((text) => text !== "")
@@ -34,7 +37,10 @@ export function detectionSample(fields: ReadonlyArray<{ value: string }>, max = 
     .slice(0, max);
 }
 
-export function buildDetectionMessages(sample: string, context: DetectionContext): ChatMessage[] {
+export function buildDetectionMessages(
+  sample: string,
+  context: DetectionContext,
+): ChatMessage[] {
   const lines = [
     "Identify the language the TEXT below is written in.",
     `The text comes from an online store whose content language is ${languageName(context.storeLocale)} (${context.storeLocale}); short labels and product names are usually in that language unless the words are clearly from another.`,
@@ -92,7 +98,10 @@ export function confidenceCap(sample: string): number {
   return 1;
 }
 
-export function parseDetectionReply(text: string, sample: string): Detection | null {
+export function parseDetectionReply(
+  text: string,
+  sample: string,
+): Detection | null {
   let json: unknown;
   try {
     json = JSON.parse(text.trim().replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -103,7 +112,8 @@ export function parseDetectionReply(text: string, sample: string): Detection | n
   if (!parsed.success) return null;
   const reported = parsed.data.confidence ?? null;
   const cap = confidenceCap(sample);
-  const confidence = reported === null ? (cap < 1 ? cap : null) : Math.min(reported, cap);
+  const confidence =
+    reported === null ? (cap < 1 ? cap : null) : Math.min(reported, cap);
   return {
     locale: parsed.data.locale.toLowerCase(),
     confidence: confidence === null ? null : Math.round(confidence * 100) / 100,

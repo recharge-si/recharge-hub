@@ -17,11 +17,12 @@ import {
  */
 
 function fakeAdmin(result: unknown) {
-  const graphql = vi.fn(async () =>
-    new Response(JSON.stringify(result), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    }),
+  const graphql = vi.fn(
+    async () =>
+      new Response(JSON.stringify(result), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
   );
   return {
     admin: { graphql } as unknown as AdminApiContext,

@@ -32,9 +32,7 @@ const PAYMENT_TYPES =
  * A client that answers each probe from a lookup on the profit centre it
  * carried. Nothing here reaches the network.
  */
-function clientAnswering(
-  answers: Record<string, string>,
-): MetakockaClient {
+function clientAnswering(answers: Record<string, string>): MetakockaClient {
   const call = (
     _endpoint: string,
     body: Record<string, unknown>,

@@ -77,7 +77,8 @@ function renderNodes(
     }
     hadToken = true;
     const value = node.filters.reduce(
-      (current, call) => BY_NAME.get(call.name)?.apply(current, call.args) ?? current,
+      (current, call) =>
+        BY_NAME.get(call.name)?.apply(current, call.args) ?? current,
       values.get(node.field) ?? "",
     );
     if (value !== "") filled = true;
@@ -137,7 +138,8 @@ export function tokenError(field: Field, value: string): string | null {
   const visit = (list: TemplateNode[]) => {
     for (const node of list) {
       if (node.kind === "group") visit(node.children);
-      if (node.kind === "token" && !known.has(node.field)) unknown.add(node.field);
+      if (node.kind === "token" && !known.has(node.field))
+        unknown.add(node.field);
     }
   };
   visit(nodes);

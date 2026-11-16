@@ -2,7 +2,10 @@ import { randomUUID } from "node:crypto";
 
 import { afterAll, beforeAll, expect, it } from "vitest";
 
-import { isSyncActivated, resetShop } from "~/adapters/db/repositories/shop.server";
+import {
+  isSyncActivated,
+  resetShop,
+} from "~/adapters/db/repositories/shop.server";
 
 import {
   createOrder,
@@ -97,7 +100,12 @@ describeDatabase("disconnecting a store", () => {
 
     const shop = await prisma.shop.findUnique({
       where: { domain: tenant.domain },
-      select: { id: true, installState: true, setupCompletedAt: true, setupStep: true },
+      select: {
+        id: true,
+        installState: true,
+        setupCompletedAt: true,
+        setupStep: true,
+      },
     });
 
     expect(shop).not.toBeNull();
@@ -114,8 +122,12 @@ describeDatabase("disconnecting a store", () => {
 
   it("takes every shop-scoped table with it", async () => {
     const [credentials, warehouses, skus, sources, orders] = await Promise.all([
-      prisma.metakockaCredential.count({ where: { shop: { domain: tenant.domain } } }),
-      prisma.metakockaWarehouse.count({ where: { shop: { domain: tenant.domain } } }),
+      prisma.metakockaCredential.count({
+        where: { shop: { domain: tenant.domain } },
+      }),
+      prisma.metakockaWarehouse.count({
+        where: { shop: { domain: tenant.domain } },
+      }),
       prisma.sku.count({ where: { shop: { domain: tenant.domain } } }),
       prisma.supplySource.count({ where: { shop: { domain: tenant.domain } } }),
       prisma.order.count({ where: { shop: { domain: tenant.domain } } }),
@@ -141,8 +153,8 @@ describeDatabase("disconnecting a store", () => {
   });
 
   it("keeps the Shopify session, because the app is still installed", async () => {
-    expect(
-      await prisma.session.count({ where: { shop: tenant.domain } }),
-    ).toBe(1);
+    expect(await prisma.session.count({ where: { shop: tenant.domain } })).toBe(
+      1,
+    );
   });
 });

@@ -18,7 +18,9 @@ export const translationProfileJobSchema = z.object({
  * the profile was never built and a page asked for it. The sync passes
  * keep the profile current on their own; this is the explicit path.
  */
-export async function handleTranslationProfile(job: Job<unknown>): Promise<void> {
+export async function handleTranslationProfile(
+  job: Job<unknown>,
+): Promise<void> {
   const { shopDomain } = translationProfileJobSchema.parse(job.data);
   const principal = serviceToken(shopDomain, "translation-profile");
   const log = getLogger();
@@ -32,7 +34,10 @@ export async function handleTranslationProfile(job: Job<unknown>): Promise<void>
   const { admin } = await unauthenticated.admin(shopDomain);
   const locales = await listShopLocales(admin);
   if (locales.kind === "unavailable") {
-    log.warn({ shop: shopDomain, reason: locales.reason }, "Store profile not rebuilt");
+    log.warn(
+      { shop: shopDomain, reason: locales.reason },
+      "Store profile not rebuilt",
+    );
     return;
   }
   const primary = locales.locales.find((locale) => locale.primary);
@@ -42,5 +47,8 @@ export async function handleTranslationProfile(job: Job<unknown>): Promise<void>
     primaryLocale: primary.locale,
     force: true,
   });
-  log.info({ shop: shopDomain, outcome: outcome.kind }, "Store profile rebuild finished");
+  log.info(
+    { shop: shopDomain, outcome: outcome.kind },
+    "Store profile rebuild finished",
+  );
 }

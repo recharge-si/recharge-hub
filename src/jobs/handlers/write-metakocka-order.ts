@@ -57,7 +57,10 @@ import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
 import { salesOrderNumberFor } from "~/domain/orders/reference";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
-import { decideOrderTransfer, describeTransferHold } from "~/domain/orders/transfer";
+import {
+  decideOrderTransfer,
+  describeTransferHold,
+} from "~/domain/orders/transfer";
 
 /**
  * The kinds a failed write can be filed under. They describe one event — this
@@ -186,7 +189,10 @@ export async function writeMetakockaOrderFor(
   const source = wholeOrder
     ? null
     : await prisma.supplySource.findFirst({
-        where: { id: supplySourceId, shop: { domain: shopDomainOf(principal) } },
+        where: {
+          id: supplySourceId,
+          shop: { domain: shopDomainOf(principal) },
+        },
       });
   if (!wholeOrder && !source) return;
 
@@ -713,9 +719,9 @@ export async function writeMetakockaOrderFor(
     currencyCode: order.presentmentCurrency,
     taxesIncluded: parsed?.taxesIncluded ?? true,
     partner: {
-        ...partner,
-        mkId: resolvedPartner?.mkId ?? null,
-        mkAddressId: resolvedPartner?.mkAddressId ?? null,
+      ...partner,
+      mkId: resolvedPartner?.mkId ?? null,
+      mkAddressId: resolvedPartner?.mkAddressId ?? null,
     },
     // Buyer and receiver differ for gift and B2B orders, so they are mapped
     // separately rather than one being reused for both (§8.4).
@@ -1486,7 +1492,11 @@ export type DesiredPayment =
   | { kind: "ledger"; payments: DocumentPayment[]; entries: PaymentPlanEntry[] }
   | {
       kind: "legacy";
-      payment: { paymentType: string; paidAt: Date; amountMinor: number } | null;
+      payment: {
+        paymentType: string;
+        paidAt: Date;
+        amountMinor: number;
+      } | null;
     };
 
 async function desiredPaymentsFor(
@@ -1495,8 +1505,13 @@ async function desiredPaymentsFor(
     orderId: string;
     supplySourceId: string;
     share: DocumentShare | undefined;
-    given: { payments: DocumentPayment[]; entries: PaymentPlanEntry[] } | undefined;
-    order: { paymentGateway: string | null; financialStatus: string; receivedAt: Date };
+    given:
+      { payments: DocumentPayment[]; entries: PaymentPlanEntry[] } | undefined;
+    order: {
+      paymentGateway: string | null;
+      financialStatus: string;
+      receivedAt: Date;
+    };
     parsed: { gateway: string | null } | null;
   },
 ): Promise<DesiredPayment> {
@@ -1509,7 +1524,8 @@ async function desiredPaymentsFor(
    * `mark_paid` the document had, which is what a merchant who has just turned
    * payment sync off is asking for. It does not delete anything else.
    */
-  if (!settings.syncPayments) return { kind: "ledger", payments: [], entries: [] };
+  if (!settings.syncPayments)
+    return { kind: "ledger", payments: [], entries: [] };
 
   // The reconciler already divided the order's ledger. Nothing to re-derive.
   if (input.given) {
@@ -1561,14 +1577,19 @@ async function desiredPaymentsFor(
   }
 
   const shares = await computeDocumentShares(input.orderId);
-  const documents = await listDocumentsForReconciliation(principal, input.orderId);
+  const documents = await listDocumentsForReconciliation(
+    principal,
+    input.orderId,
+  );
 
   const plan = await planPayments(principal, {
     ledger,
     shares,
     retiredSourceIds: new Set(
       documents
-        .filter((document) => document.retiredAt !== null && document.supplySourceId)
+        .filter(
+          (document) => document.retiredAt !== null && document.supplySourceId,
+        )
         .map((document) => document.supplySourceId!),
     ),
     countCodeBySource: new Map(

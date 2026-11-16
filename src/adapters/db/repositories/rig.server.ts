@@ -2,7 +2,10 @@ import { prisma } from "~/adapters/db/client.server";
 import { getAttributeSchema } from "~/adapters/db/repositories/attribute-schema.server";
 import { metafieldsFrom } from "~/adapters/db/repositories/catalogue.server";
 import type { AttributeSchema } from "~/domain/attributes/types";
-import { classifyProduct, type RigSnapshotProduct } from "~/domain/rig/candidates";
+import {
+  classifyProduct,
+  type RigSnapshotProduct,
+} from "~/domain/rig/candidates";
 import { shopDomainOf, type Principal } from "~/domain/types";
 
 /**

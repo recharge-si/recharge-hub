@@ -55,10 +55,7 @@ describe("diffOrder", () => {
   });
 
   it("sees a payment without calling it a content change", () => {
-    const diff = diffOrder(
-      snapshot(),
-      snapshot({ financialStatus: "paid" }),
-    );
+    const diff = diffOrder(snapshot(), snapshot({ financialStatus: "paid" }));
 
     expect(diff.paymentChanged).toBe(true);
     expect(diff.financialStatusFrom).toBe("pending");
@@ -197,7 +194,9 @@ describe("the customer arriving", () => {
     // covered by the §2.4 retention job.
     const diff = diffOrder(
       snapshot({ party: null }),
-      snapshot({ party: "grega rotar|spodnje pirnice 19n|1215|medvode|slovenia" }),
+      snapshot({
+        party: "grega rotar|spodnje pirnice 19n|1215|medvode|slovenia",
+      }),
     );
 
     const said = diff.summary.join(" ").toLowerCase();

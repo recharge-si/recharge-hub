@@ -33,14 +33,26 @@ describe("readNumber", () => {
     expect(readNumber(dimension(37, "CENTIMETERS"), "cm")).toBe(37);
     expect(readNumber(dimension(1.9, "METERS"), "cm")).toBe(190);
     expect(readNumber(dimension(370, "MILLIMETERS"), "cm")).toBe(37);
-    expect(readNumber({ type: "weight", value: '{"value":82.0,"unit":"KILOGRAMS"}' }, "kg")).toBe(82);
-    expect(readNumber({ type: "volume", value: '{"value":105.0,"unit":"LITERS"}' }, "l")).toBe(105);
+    expect(
+      readNumber(
+        { type: "weight", value: '{"value":82.0,"unit":"KILOGRAMS"}' },
+        "kg",
+      ),
+    ).toBe(82);
+    expect(
+      readNumber(
+        { type: "volume", value: '{"value":105.0,"unit":"LITERS"}' },
+        "l",
+      ),
+    ).toBe(105);
   });
 
   it("does not guess a unit it does not know, or one that does not fit", () => {
     expect(readNumber(dimension(37, "FURLONGS"), "cm")).toBeNull();
     expect(readNumber(dimension(37, "KILOGRAMS"), "cm")).toBeNull();
-    expect(readNumber({ type: "dimension", value: '{"value":37.0}' }, "cm")).toBeNull();
+    expect(
+      readNumber({ type: "dimension", value: '{"value":37.0}' }, "cm"),
+    ).toBeNull();
   });
 
   it("answers null for nothing, text that is not a number, and broken JSON", () => {
@@ -48,35 +60,60 @@ describe("readNumber", () => {
     expect(readNumber(decimal(""), "cm")).toBeNull();
     expect(readNumber(decimal("big"), "cm")).toBeNull();
     expect(readNumber({ type: "dimension", value: "{oops" }, "cm")).toBeNull();
-    expect(readNumber({ type: "dimension", value: '{"value":"x","unit":"CENTIMETERS"}' }, "cm")).toBeNull();
+    expect(
+      readNumber(
+        { type: "dimension", value: '{"value":"x","unit":"CENTIMETERS"}' },
+        "cm",
+      ),
+    ).toBeNull();
   });
 });
 
 describe("readCode and readList", () => {
   it("reads a single code lower-cased", () => {
-    expect(readCode({ type: "single_line_text_field", value: "power_box" })).toBe("power_box");
-    expect(readCode({ type: "single_line_text_field", value: " RDM " })).toBe("rdm");
+    expect(
+      readCode({ type: "single_line_text_field", value: "power_box" }),
+    ).toBe("power_box");
+    expect(readCode({ type: "single_line_text_field", value: " RDM " })).toBe(
+      "rdm",
+    );
     expect(readCode({ type: "single_line_text_field", value: "" })).toBeNull();
   });
 
   it("does not read a list as a single code", () => {
-    expect(readCode({ type: "list.single_line_text_field", value: '["rdm","sdm"]' })).toBeNull();
+    expect(
+      readCode({ type: "list.single_line_text_field", value: '["rdm","sdm"]' }),
+    ).toBeNull();
   });
 
   it("reads the stored JSON array, sorted, without repeats", () => {
-    expect(readList({ type: "list.single_line_text_field", value: '["rdm","sdm"]' })).toEqual(["rdm", "sdm"]);
-    expect(readList({ type: "list.single_line_text_field", value: '["us_box","deep_tuttle","us_box"]' })).toEqual([
-      "deep_tuttle",
-      "us_box",
-    ]);
-    expect(readList({ type: "list.single_line_text_field", value: '["power_box"]' })).toEqual(["power_box"]);
+    expect(
+      readList({ type: "list.single_line_text_field", value: '["rdm","sdm"]' }),
+    ).toEqual(["rdm", "sdm"]);
+    expect(
+      readList({
+        type: "list.single_line_text_field",
+        value: '["us_box","deep_tuttle","us_box"]',
+      }),
+    ).toEqual(["deep_tuttle", "us_box"]);
+    expect(
+      readList({ type: "list.single_line_text_field", value: '["power_box"]' }),
+    ).toEqual(["power_box"]);
   });
 
   it("takes a bare code as a list of one and nothing as no data", () => {
-    expect(readList({ type: "single_line_text_field", value: "rdm" })).toEqual(["rdm"]);
-    expect(readList({ type: "list.single_line_text_field", value: "[]" })).toBeNull();
-    expect(readList({ type: "list.single_line_text_field", value: "[1,2]" })).toBeNull();
-    expect(readList({ type: "list.single_line_text_field", value: "[oops" })).toBeNull();
+    expect(readList({ type: "single_line_text_field", value: "rdm" })).toEqual([
+      "rdm",
+    ]);
+    expect(
+      readList({ type: "list.single_line_text_field", value: "[]" }),
+    ).toBeNull();
+    expect(
+      readList({ type: "list.single_line_text_field", value: "[1,2]" }),
+    ).toBeNull();
+    expect(
+      readList({ type: "list.single_line_text_field", value: "[oops" }),
+    ).toBeNull();
     expect(readList(undefined)).toBeNull();
   });
 });
@@ -135,13 +172,26 @@ describe("keys", () => {
   it("says what each role needs to be placed", () => {
     expect(placementGaps("sail", {})).toEqual([KEYS.canopyArea]);
     expect(placementGaps("sail", { areaM2: 5.8 })).toEqual([]);
-    expect(placementGaps("mast", { lengthCm: 460 })).toEqual([KEYS.mastDiameter]);
+    expect(placementGaps("mast", { lengthCm: 460 })).toEqual([
+      KEYS.mastDiameter,
+    ]);
     expect(placementGaps("boom", { boomMinCm: 150 })).toEqual([KEYS.boomMaxCm]);
     expect(placementGaps("fin", {})).toEqual([KEYS.finBox]);
     // A board needs a volume or a sail range, and its fin boxes.
-    expect(placementGaps("board", {})).toEqual([KEYS.volumeL, KEYS.finBoxTypes]);
-    expect(placementGaps("board", { sailMinM2: 4, sailMaxM2: 6, finBoxTypes: ["tuttle"] })).toEqual([]);
-    expect(placementGaps("board", { volumeL: 100, finBoxTypes: ["tuttle"] })).toEqual([]);
+    expect(placementGaps("board", {})).toEqual([
+      KEYS.volumeL,
+      KEYS.finBoxTypes,
+    ]);
+    expect(
+      placementGaps("board", {
+        sailMinM2: 4,
+        sailMaxM2: 6,
+        finBoxTypes: ["tuttle"],
+      }),
+    ).toEqual([]);
+    expect(
+      placementGaps("board", { volumeL: 100, finBoxTypes: ["tuttle"] }),
+    ).toEqual([]);
     expect(placementGaps("base", {})).toEqual([]);
   });
 });

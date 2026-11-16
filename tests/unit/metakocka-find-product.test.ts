@@ -26,13 +26,10 @@ const PAGE = 500;
  * A stand-in for the client that behaves like a catalogue: `filtered` is what
  * the `product_code_list` call answers, and everything else is paged.
  */
-function catalogue({
-  rows,
-  filtered,
-}: {
-  rows: Row[];
-  filtered: Row[];
-}): { client: MetakockaClient; calls: Record<string, unknown>[] } {
+function catalogue({ rows, filtered }: { rows: Row[]; filtered: Row[] }): {
+  client: MetakockaClient;
+  calls: Record<string, unknown>[];
+} {
   const calls: Record<string, unknown>[] = [];
 
   const call = vi.fn(

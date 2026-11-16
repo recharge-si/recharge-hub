@@ -33,7 +33,11 @@ function masts() {
       tags: [],
       descriptionHtml: "",
       metafields: {},
-      variants: [variant(91001, "370"), variant(91002, "430"), variant(91003, "460")],
+      variants: [
+        variant(91001, "370"),
+        variant(91002, "430"),
+        variant(91003, "460"),
+      ],
     },
   ];
 }
@@ -80,12 +84,19 @@ test("previews without writing, then applies in the background", async ({
     name: "masts.csv",
     mimeType: "text/csv",
     buffer: Buffer.from(
-      [HEADER, row(91001, "370", "RDM"), row(91002, '"430,5"', "rdm"), row(91003, "460", "")].join("\n"),
+      [
+        HEADER,
+        row(91001, "370", "RDM"),
+        row(91002, '"430,5"', "rdm"),
+        row(91003, "460", ""),
+      ].join("\n"),
     ),
   });
   await expect(page.getByText("5 values would be written")).toBeVisible();
   await expect(page.getByText(/Nothing has been written yet/)).toBeVisible();
-  await expect(page.getByText(/Untyped until definitions are created/)).toBeVisible();
+  await expect(
+    page.getByText(/Untyped until definitions are created/),
+  ).toBeVisible();
 
   // Previewing is read-only: not one mutation reached the store.
   const preview = await shop.calls();
@@ -115,7 +126,10 @@ test("previews without writing, then applies in the background", async ({
   await expect(page.getByRole("heading", { name: /^Done/ })).toBeVisible();
 });
 
-test("lists the errors of a file and offers no apply", async ({ page, shop }) => {
+test("lists the errors of a file and offers no apply", async ({
+  page,
+  shop,
+}) => {
   await page.goto("/app/product-setup/values");
   await page.setInputFiles('input[type="file"]', {
     name: "bad.csv",

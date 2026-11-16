@@ -51,7 +51,10 @@ import { serviceToken, type Principal } from "~/domain/types";
 import { writeMetakockaOrderFor } from "~/jobs/handlers/write-metakocka-order";
 import { syncOrderState } from "~/jobs/handlers/sync-order-state";
 import { computeDocumentShares } from "~/jobs/order-shares";
-import { planAllocations, planCoverage } from "~/jobs/orders/allocation-planner";
+import {
+  planAllocations,
+  planCoverage,
+} from "~/jobs/orders/allocation-planner";
 import { retireObsoleteDocument } from "~/jobs/orders/document-reconciler";
 import {
   planPayments,
@@ -184,7 +187,10 @@ export async function reconcileOrder(
       { shop: principal.shopDomain, orderId },
       "Reconciliation already running for this order, skipping",
     );
-    return { kind: "skipped", reason: "another reconciliation holds this order" };
+    return {
+      kind: "skipped",
+      reason: "another reconciliation holds this order",
+    };
   }
 
   try {
@@ -244,7 +250,8 @@ async function reconcileUnderLock(
    * source of truth, and the payload of an `orders/edited` is not even an
    * order.
    */
-  const payload = options.payload ?? (await fetchOrderById(admin, head.shopifyOrderId));
+  const payload =
+    options.payload ?? (await fetchOrderById(admin, head.shopifyOrderId));
 
   if (!payload) {
     // Shopify no longer has it. `orders/delete` handles that case and leaves
@@ -566,7 +573,8 @@ async function reconcileUnderLock(
     // Only when there is something to clear. An unsplit order never gains
     // allocations, so on every pass after the first this would otherwise be a
     // transaction that deletes nothing and rewrites the order's status.
-    if (stale > 0) await replaceAllocations(principal, orderId, [], "allocated");
+    if (stale > 0)
+      await replaceAllocations(principal, orderId, [], "allocated");
 
     await closeExceptionsFor(principal, orderId, [
       "insufficient_stock",
@@ -594,7 +602,9 @@ async function reconcileUnderLock(
         kind: "insufficient_stock",
         message: `No supply source has enough stock for ${plan.shortfalls
           .map((shortfall) => `${shortfall.sku} (${shortfall.quantity})`)
-          .join(", ")}. Choose a source by hand, or restock and reconcile again.`,
+          .join(
+            ", ",
+          )}. Choose a source by hand, or restock and reconcile again.`,
         detail: { shortfalls: plan.shortfalls },
       });
     }
@@ -613,7 +623,6 @@ async function reconcileUnderLock(
     } else {
       await closeExceptionsFor(principal, orderId, ["unmapped_location"]);
     }
-
   }
 
   /*
@@ -663,7 +672,9 @@ async function reconcileUnderLock(
   const shares = await computeDocumentShares(orderId, { wholeOrder });
   await applyPrimaryDocument(
     orderId,
-    wholeOrder ? null : (shares.find((share) => share.isPrimary)?.sourceId ?? null),
+    wholeOrder
+      ? null
+      : (shares.find((share) => share.isPrimary)?.sourceId ?? null),
     { wholeOrder },
   );
 
@@ -788,10 +799,7 @@ async function reconcileUnderLock(
       `shipping of ${(order.shippingMinor / 100).toFixed(2)} ${order.presentmentCurrency}`,
     );
   }
-  if (
-    order.discountMinor > 0 &&
-    settings.discountRepresentation === "none"
-  ) {
+  if (order.discountMinor > 0 && settings.discountRepresentation === "none") {
     missingRepresentation.push(
       `a discount of ${(order.discountMinor / 100).toFixed(2)} ${order.presentmentCurrency}`,
     );
@@ -1098,7 +1106,11 @@ async function persistedAllocations(
     select: {
       shopifyLineItemId: true,
       allocations: {
-        select: { supplySourceId: true, quantity: true, shopifyLocationId: true },
+        select: {
+          supplySourceId: true,
+          quantity: true,
+          shopifyLocationId: true,
+        },
       },
     },
   });

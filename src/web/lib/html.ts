@@ -182,7 +182,8 @@ export function sanitizeHtml(html: string): string {
   return out;
 }
 
-const EMBEDDED = /<\s*(iframe|script|video|audio|object|embed|svg|table|form)\b/i;
+const EMBEDDED =
+  /<\s*(iframe|script|video|audio|object|embed|svg|table|form)\b/i;
 
 /**
  * Whether this field has to be edited as HTML. Rich text editing rewrites

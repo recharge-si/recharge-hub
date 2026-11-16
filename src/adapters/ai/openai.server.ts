@@ -9,7 +9,10 @@ import {
   type Detection,
   type DetectionContext,
 } from "~/domain/translations/detection";
-import { estimateCostMicros, PRICING_VERSION } from "~/domain/translations/pricing";
+import {
+  estimateCostMicros,
+  PRICING_VERSION,
+} from "~/domain/translations/pricing";
 import {
   PROFILE_PROMPT_VERSION,
   buildProfileMessages,
@@ -115,7 +118,9 @@ export class ProviderError extends Error {
 
 export class ProviderNotConfiguredError extends Error {
   constructor() {
-    super("AI translation is not configured on this server: OPENAI_API_KEY is not set.");
+    super(
+      "AI translation is not configured on this server: OPENAI_API_KEY is not set.",
+    );
   }
 }
 
@@ -189,8 +194,18 @@ async function callModel(
     if (status >= 200 && status < 300) {
       const parsed = responseSchema.safeParse(body);
       if (!parsed.success) {
-        await record(principal, context, model, usageValue, "failed", "Unreadable reply.");
-        throw new ProviderError("The provider's reply could not be read.", false);
+        await record(
+          principal,
+          context,
+          model,
+          usageValue,
+          "failed",
+          "Unreadable reply.",
+        );
+        throw new ProviderError(
+          "The provider's reply could not be read.",
+          false,
+        );
       }
       const choice = parsed.data.choices[0];
       const text = choice?.message.content ?? "";
@@ -212,7 +227,10 @@ async function callModel(
     const retryable = status === 429 || status >= 500;
     lastError = new ProviderError(message, retryable);
     if (!retryable) break;
-    log.warn({ status, attempt, purpose: context.purpose }, "Provider request retried");
+    log.warn(
+      { status, attempt, purpose: context.purpose },
+      "Provider request retried",
+    );
     await pause(attempt);
   }
   throw lastError ?? new ProviderError("The provider did not answer.", true);
@@ -253,11 +271,19 @@ function pause(attempt: number): Promise<void> {
 }
 
 /** The provider's failure as a value, for the outcomes below. */
-function asFailure(error: unknown): { kind: "failed"; message: string; retryable: boolean } {
+function asFailure(error: unknown): {
+  kind: "failed";
+  message: string;
+  retryable: boolean;
+} {
   if (error instanceof ProviderNotConfiguredError)
     return { kind: "failed", message: error.message, retryable: false };
   if (error instanceof ProviderError)
-    return { kind: "failed", message: error.message, retryable: error.retryable };
+    return {
+      kind: "failed",
+      message: error.message,
+      retryable: error.retryable,
+    };
   throw error;
 }
 
@@ -271,9 +297,15 @@ export type TranslationUsageContext = Omit<
 >;
 
 function outputBudget(request: TranslationRequest): number {
-  const sourceChars = request.fields.reduce((sum, f) => sum + f.value.length, 0);
+  const sourceChars = request.fields.reduce(
+    (sum, f) => sum + f.value.length,
+    0,
+  );
   // Room for the translation to run longer than the source, plus the JSON.
-  return Math.min(32_000, Math.max(512, Math.ceil((sourceChars / 2.5) * 1.5) + 200));
+  return Math.min(
+    32_000,
+    Math.max(512, Math.ceil((sourceChars / 2.5) * 1.5) + 200),
+  );
 }
 
 /**
@@ -287,7 +319,12 @@ export async function translateFields(
   request: TranslationRequest,
   context: TranslationUsageContext,
 ): Promise<TranslateOutcome> {
-  return answerTranslation(principal, buildTranslationMessages(request), request, context);
+  return answerTranslation(
+    principal,
+    buildTranslationMessages(request),
+    request,
+    context,
+  );
 }
 
 /**
@@ -329,16 +366,21 @@ async function answerTranslation(
       { maxOutputTokens: outputBudget(request) },
     );
     const parsed = parseTranslationReply(answer.text, request.fields);
-    if (!parsed.ok) return { kind: "failed", message: parsed.reason, retryable: false };
-    return { kind: "ok", values: parsed.values, model: answer.model, text: answer.text };
+    if (!parsed.ok)
+      return { kind: "failed", message: parsed.reason, retryable: false };
+    return {
+      kind: "ok",
+      values: parsed.values,
+      model: answer.model,
+      text: answer.text,
+    };
   } catch (error) {
     return asFailure(error);
   }
 }
 
 export type DetectOutcome =
-  | ({ kind: "ok" } & Detection)
-  | { kind: "failed"; message: string };
+  ({ kind: "ok" } & Detection) | { kind: "failed"; message: string };
 
 /** Which language a sample is written in — a suggestion for a person to confirm. */
 export async function detectLanguage(
@@ -362,10 +404,14 @@ export async function detectLanguage(
       { maxOutputTokens: 60 },
     );
     const parsed = parseDetectionReply(answer.text, sample);
-    if (!parsed) return { kind: "failed", message: "The language could not be told." };
+    if (!parsed)
+      return { kind: "failed", message: "The language could not be told." };
     return { kind: "ok", ...parsed };
   } catch (error) {
-    if (error instanceof ProviderNotConfiguredError || error instanceof ProviderError)
+    if (
+      error instanceof ProviderNotConfiguredError ||
+      error instanceof ProviderError
+    )
       return { kind: "failed", message: error.message };
     throw error;
   }
@@ -399,7 +445,8 @@ export async function generateStoreProfile(
       { maxOutputTokens: 6_000, temperature: 0.1 },
     );
     const parsed = parseProfileReply(answer.text);
-    if (!parsed.ok) return { kind: "failed", message: parsed.reason, retryable: false };
+    if (!parsed.ok)
+      return { kind: "failed", message: parsed.reason, retryable: false };
     return { kind: "ok", profile: parsed.profile, model: answer.model };
   } catch (error) {
     return asFailure(error);

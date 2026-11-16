@@ -86,7 +86,8 @@ export const ORDER_REFERENCE_PLACEHOLDERS: readonly Placeholder[] = [
  * The doubled form is matched first, or `{{order.number}}` would be read as a
  * brace, a field and a brace.
  */
-const PLACEHOLDER_PATTERN = /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}|\{\s*([a-zA-Z0-9_.]+)\s*\}/g;
+const PLACEHOLDER_PATTERN =
+  /\{\{\s*([a-zA-Z0-9_.]+)\s*\}\}|\{\s*([a-zA-Z0-9_.]+)\s*\}/g;
 
 /**
  * Ready-made references, and what each one is for.

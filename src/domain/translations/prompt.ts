@@ -1,9 +1,19 @@
 import { z } from "zod";
 
-import { renderResourceContext, type ResourceContext } from "~/domain/translations/context";
+import {
+  renderResourceContext,
+  type ResourceContext,
+} from "~/domain/translations/context";
 import type { MemoryHint } from "~/domain/translations/memory";
-import { TERM_CLASSIFICATION_LABEL, type TermClassification } from "~/domain/translations/profile";
-import type { ChatMessage, GlossaryTerm, SourceField } from "~/domain/translations/types";
+import {
+  TERM_CLASSIFICATION_LABEL,
+  type TermClassification,
+} from "~/domain/translations/profile";
+import type {
+  ChatMessage,
+  GlossaryTerm,
+  SourceField,
+} from "~/domain/translations/types";
 import type { Violation } from "~/domain/translations/validate";
 
 export type { ChatMessage } from "~/domain/translations/types";
@@ -55,7 +65,10 @@ export interface TranslationRequest {
   memoryHints: readonly MemoryHint[];
 }
 
-const HTML_TYPES: ReadonlySet<string> = new Set(["HTML", "MULTI_LINE_TEXT_FIELD_HTML"]);
+const HTML_TYPES: ReadonlySet<string> = new Set([
+  "HTML",
+  "MULTI_LINE_TEXT_FIELD_HTML",
+]);
 
 function systemMessage(request: TranslationRequest): string {
   const source = `${languageName(request.sourceLocale)} (${request.sourceLocale})`;
@@ -99,15 +112,18 @@ function systemMessage(request: TranslationRequest): string {
       "- URLs, e-mail addresses, file names and handles are copied exactly.",
       "- Placeholders such as {{name}}, {0}, %s and ${var} are copied exactly, in place.",
       "- HTML: keep every tag, attribute, and the order and nesting of tags exactly as in the source; translate only the visible text and translatable attribute values such as alt and title. Never add or remove tags.",
-      "- Rich text JSON: return the same document with only the \"value\" strings translated; every other key and value stays identical.",
+      '- Rich text JSON: return the same document with only the "value" strings translated; every other key and value stays identical.',
       "- Do not add explanations, notes, quotation marks or alternatives. If a field is already correct in the target language, return it unchanged.",
     ].join("\n"),
   );
 
   if (request.storeName)
-    sections.push(`STORE NAME\nThe store is called "${request.storeName}". The name is never translated.`);
+    sections.push(
+      `STORE NAME\nThe store is called "${request.storeName}". The name is never translated.`,
+    );
 
-  if (request.storeContext) sections.push(`STORE CONTEXT\n${request.storeContext}`);
+  if (request.storeContext)
+    sections.push(`STORE CONTEXT\n${request.storeContext}`);
 
   sections.push(
     'ANSWER FORMAT\nAnswer with a single JSON object of the form {"translations": {"1": "...", "2": "..."}} where each key is the field number given and each value is the translated field. Include every field exactly once and nothing else.',
@@ -119,30 +135,46 @@ function userMessage(request: TranslationRequest): string {
   const sections: string[] = [];
 
   sections.push(
-    `RESOURCE CONTEXT\n${renderResourceContext(request.resourceContext ?? { kind: "none" }, {
-      kind: request.resourceKind,
-      title: request.resourceTitle,
-    })}`,
+    `RESOURCE CONTEXT\n${renderResourceContext(
+      request.resourceContext ?? { kind: "none" },
+      {
+        kind: request.resourceKind,
+        title: request.resourceTitle,
+      },
+    )}`,
   );
 
-  const protect = request.glossary.filter((term) => term.kind === "protect").map((term) => term.sourceTerm);
+  const protect = request.glossary
+    .filter((term) => term.kind === "protect")
+    .map((term) => term.sourceTerm);
   const translateAs = request.glossary.filter(
     (term) =>
       term.kind === "translate" &&
       term.targetTerm &&
-      (term.targetLocale === null || term.targetLocale === request.targetLocale),
+      (term.targetLocale === null ||
+        term.targetLocale === request.targetLocale),
   );
   if (protect.length > 0 || translateAs.length > 0) {
-    const lines = ["TERMINOLOGY OVERRIDES (merchant rules; absolute precedence)"];
-    if (protect.length > 0) lines.push(`Never translate, keep exactly as written: ${protect.map((t) => `"${t}"`).join(", ")}.`);
-    for (const term of translateAs) lines.push(`"${term.sourceTerm}" → "${term.targetTerm}"`);
+    const lines = [
+      "TERMINOLOGY OVERRIDES (merchant rules; absolute precedence)",
+    ];
+    if (protect.length > 0)
+      lines.push(
+        `Never translate, keep exactly as written: ${protect.map((t) => `"${t}"`).join(", ")}.`,
+      );
+    for (const term of translateAs)
+      lines.push(`"${term.sourceTerm}" → "${term.targetTerm}"`);
     sections.push(lines.join("\n"));
   }
 
   if (request.memoryHints.length > 0) {
-    const lines = ["ESTABLISHED TRANSLATIONS (this store already says it this way; use exactly)"];
+    const lines = [
+      "ESTABLISHED TRANSLATIONS (this store already says it this way; use exactly)",
+    ];
     for (const hint of request.memoryHints)
-      lines.push(`"${hint.sourceText}" → "${hint.targetText}"${hint.origin === "ai" ? "" : " (confirmed by the merchant)"}`);
+      lines.push(
+        `"${hint.sourceText}" → "${hint.targetText}"${hint.origin === "ai" ? "" : " (confirmed by the merchant)"}`,
+      );
     sections.push(lines.join("\n"));
   }
 
@@ -151,8 +183,11 @@ function userMessage(request: TranslationRequest): string {
       "STORE TERMINOLOGY (how these words are used in this store; choose the target market's established form for each)",
     ];
     for (const note of request.terminology) {
-      const label = TERM_CLASSIFICATION_LABEL[note.classification].toLowerCase();
-      lines.push(`- ${note.term}: ${label}${note.evidence ? ` (${note.evidence})` : ""}`);
+      const label =
+        TERM_CLASSIFICATION_LABEL[note.classification].toLowerCase();
+      lines.push(
+        `- ${note.term}: ${label}${note.evidence ? ` (${note.evidence})` : ""}`,
+      );
     }
     sections.push(lines.join("\n"));
   }
@@ -172,7 +207,9 @@ function userMessage(request: TranslationRequest): string {
   return sections.join("\n\n");
 }
 
-export function buildTranslationMessages(request: TranslationRequest): ChatMessage[] {
+export function buildTranslationMessages(
+  request: TranslationRequest,
+): ChatMessage[] {
   return [
     { role: "system", content: systemMessage(request) },
     { role: "user", content: userMessage(request) },
@@ -191,11 +228,16 @@ export function buildCorrectionMessages(
 ): ChatMessage[] {
   const byField = new Map<number, string[]>();
   request.fields.forEach((field, index) => {
-    const messages = violations.filter((v) => v.key === field.key).map((v) => v.message);
+    const messages = violations
+      .filter((v) => v.key === field.key)
+      .map((v) => v.message);
     if (messages.length > 0) byField.set(index + 1, messages);
   });
   const problems = [...byField.entries()]
-    .map(([number, messages]) => `Field ${number}:\n${messages.map((m) => `  - ${m}`).join("\n")}`)
+    .map(
+      ([number, messages]) =>
+        `Field ${number}:\n${messages.map((m) => `  - ${m}`).join("\n")}`,
+    )
     .join("\n");
   return [
     { role: "system", content: systemMessage(request) },
@@ -213,8 +255,7 @@ const replySchema = z.object({
 });
 
 export type ParsedReply =
-  | { ok: true; values: Map<string, string> }
-  | { ok: false; reason: string };
+  { ok: true; values: Map<string, string> } | { ok: false; reason: string };
 
 /**
  * The model's JSON, matched back to field keys by number. Any field the
@@ -249,10 +290,14 @@ export function parseTranslationReply(
       reason: `The reply left out ${missing.join(", ")}.`,
     };
   const extra = Object.keys(parsed.data.translations).filter(
-    (key) => !/^\d+$/.test(key) || Number(key) < 1 || Number(key) > fields.length,
+    (key) =>
+      !/^\d+$/.test(key) || Number(key) < 1 || Number(key) > fields.length,
   );
   if (extra.length > 0)
-    return { ok: false, reason: "The reply answered fields that were not asked." };
+    return {
+      ok: false,
+      reason: "The reply answered fields that were not asked.",
+    };
   return { ok: true, values };
 }
 
