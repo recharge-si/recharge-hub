@@ -17,6 +17,8 @@
     "setup": "prisma generate && prisma migrate deploy",
     "docker-start": "npm run setup && npm run start",
     "lint": "eslint .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
     "typecheck": "react-router typegen && tsc --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",

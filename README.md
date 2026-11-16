@@ -50,6 +50,7 @@ commands are in [development](docs/development.md).
 ```bash
 npm run typecheck
 npm run lint
+npm run format:check
 npm test
 npm run build
 ```
