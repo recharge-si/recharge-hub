@@ -1446,6 +1446,11 @@ enum ExceptionKind {
   /// A translation sync could not finish, or a resource could not be
   /// translated after retries (docs/translations.md).
   translation_failed
+  /// An order that should be in MetaKocka by now is not, and nothing else
+  /// says why: no document was written, or one was and the reconciliation that
+  /// verifies it never ran. Raised by the order watchdog (`watch-orders`),
+  /// never for an order the transfer switch is holding.
+  order_not_transferred
 
   @@map("exception_kind")
 }
@@ -1496,6 +1501,11 @@ model Exception {
   /// that. So a scheduled job re-evaluates every open exception and closes the
   /// ones that have fixed themselves (`recheck-exceptions`).
   lastCheckedAt DateTime? @map("last_checked_at")
+
+  /// When this row was announced to the operator channel (Slack), if it was.
+  /// Doubles as the claim that keeps a row from being announced twice
+  /// (`notify-exception`).
+  alertedAt DateTime? @map("alerted_at")
 
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")

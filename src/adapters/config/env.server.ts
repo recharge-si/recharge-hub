@@ -97,6 +97,25 @@ const envSchema = z.object({
   RIG_BUILD_PER_MINUTE: blankToDefault(60),
   RIG_BUILD_PER_HOUR: blankToDefault(600),
 
+  /**
+   * The order watchdog (docs/architecture.md § Schedules and recovery): how
+   * long an order may go without reaching MetaKocka before it is raised as
+   * `order_not_transferred`. Counted from the latest of when it arrived, when
+   * setup was finished and when order settings last changed.
+   */
+  ORDER_WATCHDOG_THRESHOLD_MINUTES: blankToDefault(120),
+
+  /**
+   * A Slack incoming-webhook URL for operator alerts: one short message when a
+   * severe exception opens (`notify-exception`). Blank disables alerting. A
+   * secret: never logged, never sent to the browser.
+   */
+  ALERT_SLACK_WEBHOOK_URL: z
+    .string()
+    .optional()
+    .transform((value) => (value && value.trim() !== "" ? value.trim() : undefined))
+    .pipe(z.string().url("ALERT_SLACK_WEBHOOK_URL must be an absolute URL").optional()),
+
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().default("development"),
 

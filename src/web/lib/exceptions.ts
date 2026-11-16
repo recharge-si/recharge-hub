@@ -209,6 +209,12 @@ const COPY: Record<string, ExceptionCopy> = {
     guidance:
       "One row per product or page that could not be translated, with the language and the reason. Open it to translate it again in the editor, or open the sync for the details. A row closes by itself once the content translates; automatic translation retries after 1, 3 and 7 days. Nothing already translated is affected.",
   },
+  order_not_transferred: {
+    label: "Order not in MetaKocka",
+    short: "that should be in MetaKocka and are not",
+    guidance:
+      "Order transfer is on, but this order was not sent, or was sent and never checked, and nothing else on it says why. The app reconciles it again every quarter of an hour and closes this once it is in MetaKocka. Use Retry to do it now.",
+  },
 };
 
 const FALLBACK: ExceptionCopy = {
@@ -349,6 +355,7 @@ const AREA_OF_KIND: Record<ExceptionKind, AttentionArea> = {
   sale_restore_failed: "sales",
   translation_failed: "translations",
   job_failed: "background",
+  order_not_transferred: "orders",
 };
 
 export interface AttentionAreaCopy {
