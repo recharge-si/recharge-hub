@@ -3,9 +3,9 @@
 # runs only the Shopify ↔ MetaKocka part (orders, payments, taxes, stock,
 # locations, SKU match). See docs/development.md § Another store.
 #
-# client_id comes from the app made for that store in the Dev Dashboard
-# (custom distribution). `shopify app config link --config t4a-mk` fills it in.
-client_id = "REPLACE_WITH_CLIENT_ID"
+# client_id is the app made for that store in the Dev Dashboard (custom
+# distribution), linked with `shopify app config link --config t4a-mk`.
+client_id = "dbd027fecda3d8479e7b3ca69c6b73b8"
 name = "T4A MetaKocka Connector"
 application_url = "https://mk-connector.time-4-action.com"
 embedded = true
