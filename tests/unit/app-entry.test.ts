@@ -144,7 +144,7 @@ describe("the login route", () => {
 
   it("renders the form for a plain outside request", async () => {
     const data = await loginLoader(args(get("/auth/login"), "/auth/login"));
-    expect(data).toEqual({ errors: {} });
+    expect(data).toEqual({ appName: "Recharge Hub", errors: {} });
   });
 
   it("does not loop: a shop named on the login page goes to Shopify, not back to /app", async () => {

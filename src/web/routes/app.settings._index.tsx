@@ -5,8 +5,10 @@ import {
   type LoaderFunctionArgs,
 } from "react-router";
 
+import { getEnv } from "~/adapters/config/env.server";
 import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
+import { pathEnabled } from "~/domain/modules";
 import { READINESS_ROUTES } from "~/domain/readiness";
 import { ReadinessList } from "~/web/components/readiness-list";
 import { SetupBanner } from "~/web/components/setup-banner";
@@ -27,7 +29,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
   const principal = principalFromSession(session);
   const readiness = await getReadiness(principal);
 
+  const modules = getEnv().APP_MODULES;
+
   return {
+    links: LINKS.filter((link) => pathEnabled(link.href, modules)),
     shopDomain: session.shop,
     components: readiness.components,
     overall: readiness.overall,
@@ -87,7 +92,7 @@ const LINKS: SettingsLink[] = [
 ];
 
 export default function Settings() {
-  const { shopDomain, components, overall, activated } =
+  const { links, shopDomain, components, overall, activated } =
     useLoaderData<typeof loader>();
 
   return (
@@ -124,7 +129,7 @@ export default function Settings() {
 
         <s-section heading="Configure">
           <s-stack direction="block" gap="base">
-            {LINKS.map((link) => (
+            {links.map((link) => (
               <s-stack key={link.href} direction="block" gap="small-500">
                 <s-link href={link.href}>{link.title}</s-link>
                 <s-text color="subdued">{link.description}</s-text>

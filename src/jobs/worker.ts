@@ -320,12 +320,18 @@ async function main(): Promise<void> {
   );
 
   // Sale campaigns start and end on the minute they were given.
-  await boss.schedule(
-    QUEUES.saleCampaignScheduler,
-    "* * * * *",
-    {},
-    { key: "minute" },
-  );
+  // Only while the sales module runs (src/domain/modules.ts); switching it
+  // off removes the schedule so the minute cron stops firing.
+  if (getEnv().APP_MODULES.has("sales")) {
+    await boss.schedule(
+      QUEUES.saleCampaignScheduler,
+      "* * * * *",
+      {},
+      { key: "minute" },
+    );
+  } else {
+    await boss.unschedule(QUEUES.saleCampaignScheduler);
+  }
 
   log.info({ queues: Object.values(QUEUES) }, "Worker started");
 

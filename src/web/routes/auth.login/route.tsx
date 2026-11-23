@@ -8,6 +8,7 @@ import {
   type LoaderFunctionArgs,
 } from "react-router";
 
+import { getEnv } from "~/adapters/config/env.server";
 import { login } from "~/adapters/shopify/shopify.server";
 import { isEmbeddedRequest } from "~/web/lib/app-entry";
 import { loginErrorMessage } from "./error.server";
@@ -31,7 +32,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     throw redirect(search ? `/app${search}` : "/app");
   }
 
-  return { errors: loginErrorMessage(await login(request)) };
+  return {
+    appName: getEnv().APP_NAME,
+    errors: loginErrorMessage(await login(request)),
+  };
 };
 
 export const action = async ({ request }: ActionFunctionArgs) => {
@@ -43,9 +47,10 @@ export default function Login() {
   const actionData = useActionData<typeof action>();
   const [shop, setShop] = useState("");
   const { errors } = actionData ?? loaderData;
+  const { appName } = loaderData;
 
   return (
-    <s-page heading="Recharge Hub">
+    <s-page heading={appName}>
       <s-section heading="Log in">
         <Form method="post">
           <s-stack direction="block" gap="base">

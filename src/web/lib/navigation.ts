@@ -1,3 +1,5 @@
+import { ALL_MODULES, pathEnabled, type ModuleSet } from "~/domain/modules";
+
 /**
  * The primary navigation, as data, so a test can hold it to the rules.
  *
@@ -56,14 +58,20 @@ export const APP_NAV: readonly NavItem[] = [
 const ORDERS_HREF = "/app/orders";
 
 /**
- * The navigation for one shop. With order transfer turned off, orders are
+ * The navigation for one shop. Entries for an optional module that is
+ * switched off (src/domain/modules.ts) are left out. With order transfer turned off, orders are
  * received but none reach MetaKocka, and a top-level entry for them is a
  * daily page that has nothing to do. The pages themselves stay: the
  * MetaKocka page and Settings still open Orders, which is where the
  * switch that turns transfer back on lives.
  */
-export function navFor(shop: { transferOrders: boolean }): readonly NavItem[] {
-  return shop.transferOrders
-    ? APP_NAV
-    : APP_NAV.filter((item) => item.href !== ORDERS_HREF);
+export function navFor(
+  shop: { transferOrders: boolean },
+  modules: ModuleSet = ALL_MODULES,
+): readonly NavItem[] {
+  const visible = APP_NAV.filter((item) => pathEnabled(item.href, modules));
+  const nav = shop.transferOrders
+    ? visible
+    : visible.filter((item) => item.href !== ORDERS_HREF);
+  return nav.length === APP_NAV.length ? APP_NAV : nav;
 }
