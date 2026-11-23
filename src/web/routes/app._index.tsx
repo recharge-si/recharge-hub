@@ -5,6 +5,7 @@ import {
   type LoaderFunctionArgs,
 } from "react-router";
 
+import { getEnv } from "~/adapters/config/env.server";
 import { getCatalogueState } from "~/adapters/db/repositories/catalogue.server";
 import { getDashboard } from "~/adapters/db/repositories/dashboard.server";
 import { recentEvents } from "~/adapters/db/repositories/event-log.server";
@@ -23,6 +24,7 @@ import {
   listLanguageSettings,
 } from "~/adapters/db/repositories/translations.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
+import { pathEnabled } from "~/domain/modules";
 import { componentOf } from "~/domain/readiness";
 import { HomeAttentionSection } from "~/web/components/home-attention";
 import { RecentActivity } from "~/web/components/recent-activity";
@@ -146,7 +148,10 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     })),
   );
 
+  const { APP_MODULES: modules, APP_NAME: appName } = getEnv();
+
   return {
+    appName,
     readiness: {
       components: readiness.components,
       overall: readiness.overall,
@@ -180,14 +185,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       timeZone,
       formatDate: formatInZone,
       now,
-    }),
+    }).filter((tile) => pathEnabled(tile.href, modules)),
     activity: homeActivity(events, names),
     busy: activeSyncs.length > 0,
   };
 };
 
 export default function Home() {
-  const { readiness, attention, operations, activity, busy } =
+  const { appName, readiness, attention, operations, activity, busy } =
     useLoaderData<typeof loader>();
 
   // Faster while a translation sync runs; every thirty seconds otherwise.
@@ -197,7 +202,7 @@ export default function Home() {
     attention.setup.length > 0 || attention.groups.length > 0;
 
   return (
-    <s-page heading="Recharge Hub" inlineSize="large">
+    <s-page heading={appName} inlineSize="large">
       <s-stack direction="block" gap="base">
         {/*
          * Before Finish setup, the banner is the whole of what setup has to

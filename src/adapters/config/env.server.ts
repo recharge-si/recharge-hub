@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { parseErpAdminEmails } from "~/domain/erp-admin";
+import { parseModules } from "~/domain/modules";
 
 /**
  * Every external boundary is parsed with Zod (CLAUDE.md section 4), and the process
@@ -137,6 +138,34 @@ const envSchema = z.object({
    * screens stay locked for everyone else.
    */
   ERP_ADMIN_EMAILS: z.string().optional().transform(parseErpAdminEmails),
+
+  /**
+   * Which optional modules this deployment runs (src/domain/modules.ts):
+   * blank or `all` for the full Recharge Hub, `none` for the MetaKocka
+   * connector alone, or a list such as `sales,translations`.
+   */
+  APP_MODULES: z
+    .string()
+    .optional()
+    .transform((value, ctx) => {
+      try {
+        return parseModules(value);
+      } catch (error) {
+        ctx.addIssue({
+          code: "custom",
+          message: error instanceof Error ? error.message : String(error),
+        });
+        return z.NEVER;
+      }
+    }),
+
+  /** The name the app calls itself on its own pages. */
+  APP_NAME: z
+    .string()
+    .optional()
+    .transform((value) =>
+      value && value.trim() !== "" ? value.trim() : "Recharge Hub",
+    ),
 
   SENTRY_DSN: z.string().optional(),
   SENTRY_ENVIRONMENT: z.string().default("development"),

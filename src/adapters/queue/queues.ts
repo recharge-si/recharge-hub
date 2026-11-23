@@ -1,5 +1,7 @@
 import type { Queue } from "pg-boss";
 
+import type { AppModule, ModuleSet } from "~/domain/modules";
+
 /**
  * Queue names and their retry policy. Shared by the producer (adapters/queue) and
  * the consumer (jobs/), so both agree on spelling and on how often a job retries.
@@ -59,6 +61,32 @@ export const QUEUES = {
 } as const;
 
 export type QueueName = (typeof QUEUES)[keyof typeof QUEUES];
+
+/**
+ * Queues that only serve an optional module (src/domain/modules.ts). A
+ * webhook does not enqueue them, and the scheduler does not send them, while
+ * their module is off. Every queue not listed is core.
+ */
+export const QUEUE_MODULE: Partial<Record<QueueName, AppModule>> = {
+  [QUEUES.saleCampaignScheduler]: "sales",
+  [QUEUES.saleCampaignRun]: "sales",
+  [QUEUES.saleProductEvent]: "sales",
+  [QUEUES.catalogueSnapshot]: "sales",
+  [QUEUES.translationSync]: "translations",
+  [QUEUES.translationCoverage]: "translations",
+  [QUEUES.translationResourceEvent]: "translations",
+  [QUEUES.translationProfile]: "translations",
+  [QUEUES.translationRemove]: "translations",
+  [QUEUES.typeMenuSync]: "catalogue",
+  [QUEUES.productAutofill]: "catalogue",
+  [QUEUES.sourceProductAutofill]: "sources",
+};
+
+/** Whether a queue's work runs in a deployment with these modules. */
+export function queueEnabled(queue: QueueName, modules: ModuleSet): boolean {
+  const module = QUEUE_MODULE[queue];
+  return module === undefined || modules.has(module);
+}
 
 /**
  * The dedupe key every producer of an inventory sync must use.

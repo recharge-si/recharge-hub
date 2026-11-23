@@ -2,16 +2,19 @@ import { useEffect } from "react";
 import { boundary } from "@shopify/shopify-app-react-router/server";
 import {
   Outlet,
+  type MiddlewareFunction,
   useLoaderData,
   useRouteError,
   type HeadersFunction,
   type LoaderFunctionArgs,
 } from "react-router";
 
+import { getEnv } from "~/adapters/config/env.server";
 import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
 import { AppBridgeNavigation } from "~/web/components/app-bridge-navigation";
 import { MaintenanceBanner } from "~/web/components/maintenance-banner";
+import { pathEnabled } from "~/domain/modules";
 import { navFor } from "~/web/lib/navigation";
 import { principalFromSession } from "~/web/lib/principal.server";
 import { describeStaleSessionError } from "~/web/lib/route-errors";
@@ -30,10 +33,26 @@ import { describeStaleSessionError } from "~/web/lib/route-errors";
  * is off. Saving the order settings is an action, and React Router reloads
  * this loader after every action, so the menu follows the switch at once.
  */
+/**
+ * The pages of an optional module this deployment does not run
+ * (src/domain/modules.ts) answer 404 — loaders, actions and resource routes
+ * alike, because middleware runs for every request under /app, not only for
+ * the document load the nav is built on.
+ */
+export const middleware: MiddlewareFunction<Response>[] = [
+  ({ request }, next) => {
+    const { pathname } = new URL(request.url);
+    if (!pathEnabled(pathname, getEnv().APP_MODULES)) {
+      throw new Response("Not Found", { status: 404 });
+    }
+    return next();
+  },
+];
+
 export const loader = async ({ request }: LoaderFunctionArgs) => {
   const { session } = await authenticate.admin(request);
   const settings = await getSalesOrderSettings(principalFromSession(session));
-  return { nav: navFor(settings) };
+  return { nav: navFor(settings, getEnv().APP_MODULES) };
 };
 
 export default function AppLayout() {

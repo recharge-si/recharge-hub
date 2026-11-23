@@ -1,6 +1,7 @@
 import type { Job } from "pg-boss";
 import { z } from "zod";
 
+import { getEnv } from "~/adapters/config/env.server";
 import { prisma } from "~/adapters/db/client.server";
 import { enqueue, enqueueThrottled } from "~/adapters/queue/boss.server";
 import {
@@ -112,9 +113,11 @@ export async function handleScheduledTick(job: Job<unknown>): Promise<void> {
     "Scheduled tick fanned out",
   );
 
-  await fanOutCatalogueSnapshots(cadence);
+  // Optional modules (src/domain/modules.ts) get no scheduled work while off.
+  const modules = getEnv().APP_MODULES;
+  if (modules.has("sales")) await fanOutCatalogueSnapshots(cadence);
   await fanOutRigPurge(cadence);
-  await fanOutTranslations(cadence);
+  if (modules.has("translations")) await fanOutTranslations(cadence);
 }
 
 /**

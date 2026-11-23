@@ -1,0 +1,96 @@
+# The MetaKocka connector for stores other than Recharge: the same code and
+# image as shopify.app.toml, deployed separately with APP_MODULES=none, so it
+# runs only the Shopify ↔ MetaKocka part (orders, payments, taxes, stock,
+# locations, SKU match). See docs/development.md § Another store.
+#
+# client_id comes from the app made for that store in the Dev Dashboard
+# (custom distribution). `shopify app config link --config t4a-mk` fills it in.
+client_id = "REPLACE_WITH_CLIENT_ID"
+name = "T4A MetaKocka Connector"
+application_url = "https://mk-connector.time-4-action.com"
+embedded = true
+
+[build]
+automatically_update_urls_on_dev = false
+
+[webhooks]
+# Must equal API_VERSION in src/adapters/shopify/shopify.server.ts, which is
+# what the Admin client speaks. `tests/unit/api-version.test.ts` fails if the
+# two drift. This read "2026-10" — a version the installed SDK does not have —
+# so webhooks were registered against one Admin API and read with another.
+api_version = "2026-07"
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/data_request"
+  compliance_topics = [ "customers/data_request" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/customers/redact"
+  compliance_topics = [ "customers/redact" ]
+
+  [[webhooks.subscriptions]]
+  uri = "/webhooks/shop/redact"
+  compliance_topics = [ "shop/redact" ]
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/scopes_update" ]
+  uri = "/webhooks/app/scopes_update"
+
+  [[webhooks.subscriptions]]
+  topics = [ "app/uninstalled" ]
+  uri = "/webhooks/app/uninstalled"
+
+  # Order intake (section 8.1). The handler writes the order and queues its
+  # allocation in one transaction, then answers 200 well inside the five-second
+  # budget.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/create" ]
+  uri = "/webhooks/orders/create"
+
+  # An order is not a fact that arrives once (section 8.7). It is paid an hour
+  # later, edited the next morning, refunded on Friday, and without these the
+  # app hears none of it: an order that came in unpaid stays unpaid in the ERP
+  # for good. orders/updated is the broad signal; orders/paid is deliberately
+  # redundant with it, because that is the one event that moves money.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/updated" ]
+  uri = "/webhooks/orders/updated"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/paid" ]
+  uri = "/webhooks/orders/paid"
+
+  # Not implemented in v1 (section 8.8), but received from day one and turned
+  # into exceptions so nothing is lost silently.
+  [[webhooks.subscriptions]]
+  topics = [ "refunds/create" ]
+  uri = "/webhooks/refunds/create"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/cancelled" ]
+  uri = "/webhooks/orders/cancelled"
+
+  [[webhooks.subscriptions]]
+  topics = [ "orders/edited" ]
+  uri = "/webhooks/orders/edited"
+
+  # Deleted in Shopify, kept in MetaKocka: the ERP document is the accounting
+  # record and may already be invoiced. The order is hidden from this app only.
+  [[webhooks.subscriptions]]
+  topics = [ "orders/delete" ]
+  uri = "/webhooks/orders/delete"
+
+[access_scopes]
+# Only what the MetaKocka part uses (docs/integrations.md § Access scopes):
+# orders, fulfilment-order locations, products and inventory for the SKU
+# match and stock, and write_products for the opt-in name sync into the
+# catalogue. No translations, locales, menus, publications or discounts.
+scopes = "read_products,write_products,read_inventory,write_inventory,read_locations,read_orders,read_merchant_managed_fulfillment_orders"
+use_legacy_install_flow = false
+
+[auth]
+redirect_urls = [
+  "https://mk-connector.time-4-action.com/auth/callback",
+  "https://mk-connector.time-4-action.com/auth/shopify/callback",
+  "https://mk-connector.time-4-action.com/api/auth/callback"
+]

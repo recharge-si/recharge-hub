@@ -35,3 +35,5 @@ Desktop.ini
 
 # Per-developer Shopify app configs (docs/development.md)
 shopify.app.*.toml
+# Except the deployed configs for other stores (docs/development.md § Another store).
+!shopify.app.t4a-mk.toml

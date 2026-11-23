@@ -1,5 +1,6 @@
+import { getEnv } from "~/adapters/config/env.server";
 import { enqueue } from "~/adapters/queue/boss.server";
-import type { QueueName } from "~/adapters/queue/queues";
+import { queueEnabled, type QueueName } from "~/adapters/queue/queues";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { captureException } from "~/adapters/observability/sentry.server";
 import { authenticate } from "~/adapters/shopify/shopify.server";
@@ -25,7 +26,12 @@ export async function receiveWebhook(
   // One topic may feed more than one consumer (products/update feeds the sale
   // campaign event and the translation event). The webhook id dedupes within
   // each queue, so a redelivery still collapses to one job per consumer.
-  const queues = Array.isArray(queue) ? queue : [queue];
+  // A queue whose module is switched off is dropped, not failed: the
+  // webhook is still acknowledged so Shopify does not redeliver it.
+  const modules = getEnv().APP_MODULES;
+  const queues = (Array.isArray(queue) ? queue : [queue]).filter(
+    (name: QueueName) => queueEnabled(name, modules),
+  );
 
   try {
     for (const name of queues) {
