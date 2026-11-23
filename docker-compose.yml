@@ -32,8 +32,8 @@ services:
     ports:
       # Bound to loopback so `npm run dev` on the host can reach it. Not exposed
       # off the machine, in production or anywhere else.
-      # POSTGRES_HOST_PORT lets a second stack on the same VM (another
-      # store, docs/development.md § Another store) bind a different port.
+      # POSTGRES_HOST_PORT lets a second stack on the same machine bind a
+      # different port.
       - "127.0.0.1:${POSTGRES_HOST_PORT:-5432}:5432"
     healthcheck:
       test:
