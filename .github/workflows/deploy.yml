@@ -155,6 +155,11 @@ jobs:
         env:
           GHCR_USER: ${{ github.actor }}
           GHCR_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Stack checkouts on the server, space-separated, one per store.
+          # Variables of the `production` environment: DEPLOY_DIRS lists them
+          # all; without it, DEPLOY_DIR (t4a: /srv/recharge-hub, README
+          # "Production on t4a"), then the old t2 directory.
+          DEPLOY_DIRS: ${{ vars.DEPLOY_DIRS || vars.DEPLOY_DIR || '/data/stack/apps/recharge-hub' }}
         with:
           host: ${{ secrets.PROD_DEPLOY_HOST }}
           username: deploy
@@ -162,42 +167,11 @@ jobs:
           fingerprint: ${{ secrets.PROD_DEPLOY_FINGERPRINT }}
           timeout: 30s
           command_timeout: 15m
-          envs: GHCR_USER,GHCR_TOKEN
+          envs: GHCR_USER,GHCR_TOKEN,DEPLOY_DIRS
           script: |
             set -u
-            # DEPLOY_DIR: a variable of the `production` environment (t4a: /srv/recharge-hub,
-            # README "Production on t4a"); the default is the old t2 directory.
-            cd ${{ vars.DEPLOY_DIR || '/data/stack/apps/recharge-hub' }} || exit 1
             SHA=${{ github.sha }}
             NEW=${{ env.IMAGE }}:$SHA
-
-            # The image web runs now is what a failed deploy goes back to.
-            PREV=""
-            WEB_ID=$(docker compose ps -q web 2>/dev/null || true)
-            if [ -n "$WEB_ID" ]; then
-              PREV=$(docker inspect --format '{{.Config.Image}}' "$WEB_ID")
-            fi
-            echo "running: ${PREV:-nothing}  deploying: $NEW"
-
-            healthy() {
-              for i in $(seq 1 30); do
-                curl -fsS http://127.0.0.1:3192/healthz >/dev/null && return 0
-                sleep 2
-              done
-              return 1
-            }
-
-            # Healthy is not enough: web and worker must both be running the
-            # image built from this commit, not a container left over.
-            on_commit() {
-              WEB_SHA=$(docker compose exec -T web printenv APP_VERSION 2>/dev/null || true)
-              echo "web reports APP_VERSION=${WEB_SHA:-none}"
-              [ "$WEB_SHA" = "$SHA" ] || return 1
-              WORKER_ID=$(docker compose ps -q --status running worker 2>/dev/null || true)
-              [ -n "$WORKER_ID" ] || { echo "worker is not running"; return 1; }
-              WORKER_IMAGE=$(docker inspect --format '{{.Config.Image}}' "$WORKER_ID")
-              [ "$WORKER_IMAGE" = "$NEW" ] || { echo "worker is on $WORKER_IMAGE"; return 1; }
-            }
 
             # The pull logs in with this job's GITHUB_TOKEN, which expires when
             # the job ends, and logs out again on every exit: the VM keeps no
@@ -205,39 +179,84 @@ jobs:
             trap 'docker logout ghcr.io >/dev/null 2>&1 || true' EXIT
             echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GHCR_USER" --password-stdin >/dev/null || exit 1
 
-            export APP_IMAGE=$NEW
-            # A failed pull changes nothing on the server. Retried, because
-            # registries have transient failures.
-            for i in 1 2 3; do
-              docker compose pull migrate web worker && break
-              [ "$i" = 3 ] && exit 1
-              echo "pull failed, retrying"; sleep 10
+            # One stack per store, all on this image (docs/development.md
+            # § Another store). Each is rolled out and checked on its own; a
+            # failure in one does not stop the others, and fails the job.
+            deploy_one() {
+              cd "$1" || return 1
+              echo "== $1"
+
+              # The image web runs now is what a failed deploy goes back to.
+              PREV=""
+              WEB_ID=$(docker compose ps -q web 2>/dev/null || true)
+              if [ -n "$WEB_ID" ]; then
+                PREV=$(docker inspect --format '{{.Config.Image}}' "$WEB_ID")
+              fi
+              echo "running: ${PREV:-nothing}  deploying: $NEW"
+
+              # Each stack publishes web on its own loopback port; ask Compose
+              # which, rather than assuming Recharge's 3192.
+              healthy() {
+                for i in $(seq 1 30); do
+                  PORT=$(docker compose port web 3000 2>/dev/null | sed -n 's/.*://p' | head -n 1)
+                  curl -fsS "http://127.0.0.1:${PORT:-3192}/healthz" >/dev/null && return 0
+                  sleep 2
+                done
+                return 1
+              }
+
+              # Healthy is not enough: web and worker must both be running the
+              # image built from this commit, not a container left over.
+              on_commit() {
+                WEB_SHA=$(docker compose exec -T web printenv APP_VERSION 2>/dev/null || true)
+                echo "web reports APP_VERSION=${WEB_SHA:-none}"
+                [ "$WEB_SHA" = "$SHA" ] || return 1
+                WORKER_ID=$(docker compose ps -q --status running worker 2>/dev/null || true)
+                [ -n "$WORKER_ID" ] || { echo "worker is not running"; return 1; }
+                WORKER_IMAGE=$(docker inspect --format '{{.Config.Image}}' "$WORKER_ID")
+                [ "$WORKER_IMAGE" = "$NEW" ] || { echo "worker is on $WORKER_IMAGE"; return 1; }
+              }
+
+              export APP_IMAGE=$NEW
+              # A failed pull changes nothing on the server. Retried, because
+              # registries have transient failures.
+              for i in 1 2 3; do
+                docker compose pull migrate web worker && break
+                [ "$i" = 3 ] && return 1
+                echo "pull failed, retrying"; sleep 10
+              done
+
+              if docker compose up -d --remove-orphans && healthy && on_commit; then
+                echo "healthy on $NEW"
+                return 0
+              fi
+
+              echo "deploy of $NEW failed"
+              docker compose logs --tail=50 migrate web
+
+              if [ -z "$PREV" ] || [ "$PREV" = "$NEW" ]; then
+                echo "no previous image to roll back to"
+                return 1
+              fi
+
+              # --no-deps skips migrate: a migration that already ran stays
+              # applied, and a failed one would only fail again.
+              echo "rolling back to $PREV"
+              export APP_IMAGE=$PREV
+              if docker compose up -d --no-deps web worker && healthy; then
+                echo "rolled back to $PREV"
+              else
+                echo "rollback is not healthy either"
+                docker compose logs --tail=50 web
+              fi
+              return 1
+            }
+
+            FAILED=0
+            for DIR in $DEPLOY_DIRS; do
+              deploy_one "$DIR" || FAILED=1
             done
-
-            if docker compose up -d --remove-orphans && healthy && on_commit; then
-              echo "healthy on $NEW"
-              exit 0
-            fi
-
-            echo "deploy of $NEW failed"
-            docker compose logs --tail=50 migrate web
-
-            if [ -z "$PREV" ] || [ "$PREV" = "$NEW" ]; then
-              echo "no previous image to roll back to"
-              exit 1
-            fi
-
-            # --no-deps skips migrate: a migration that already ran stays
-            # applied, and a failed one would only fail again.
-            echo "rolling back to $PREV"
-            export APP_IMAGE=$PREV
-            if docker compose up -d --no-deps web worker && healthy; then
-              echo "rolled back to $PREV"
-            else
-              echo "rollback is not healthy either"
-              docker compose logs --tail=50 web
-            fi
-            exit 1
+            exit $FAILED
 
   # From outside: DNS, TLS and the host nginx in front of the container the
   # deploy job already checked on loopback.

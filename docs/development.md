@@ -591,19 +591,19 @@ sudo nginx -t && sudo systemctl reload nginx
 
 The app runs for one store per deployment (custom distribution, D-01 in
 `docs/project-status.md`). Another store gets its own Shopify app and its own
-Compose stack from the **same image**, with the optional modules switched off
-and its own name:
+Compose stack on t4a from the **same image**, with the optional modules
+switched off and its own name:
 
 | Setting | Recharge | Another store |
 | ------- | -------- | ------------- |
 | Shopify app config | `shopify.app.toml` | `shopify.app.t4a-mk.toml` |
 | Name in the admin | Recharge Hub | T4A MetaKocka Connector |
 | Domain | `recharge-hub.time-4-action.com` | `mk-connector.time-4-action.com` |
-| Checkout on the VM | `/data/stack/apps/recharge-hub` | `/data/stack/apps/mk-connector` |
+| Stack on t4a | `/srv/recharge-hub` | `/srv/mk-connector` |
+| Compose file | `deploy/docker-compose.t4a.yml` | `deploy/docker-compose.mk-connector.t4a.yml` |
+| Loopback port | 3192 | 3193 |
 | `APP_MODULES` | blank (all) | `none` |
 | `APP_NAME` | blank (Recharge Hub) | `T4A MetaKocka Connector` |
-| `WEB_PORT` / `POSTGRES_HOST_PORT` | 3192 / 5432 | 3193 / 5433 |
-| nginx | `ops/nginx/recharge-hub.conf` | `ops/nginx/mk-connector.conf` |
 
 `APP_MODULES` (`src/domain/modules.ts`) names the optional modules a
 deployment runs: `sales`, `catalogue` (Products and Metafields),
@@ -612,6 +612,8 @@ the home page and Settings; its pages answer 404 through the `/app` route
 middleware (actions included); its webhooks are acknowledged and dropped; and
 the scheduler sends none of its jobs. The MetaKocka part cannot be switched
 off. Data already written stays, so switching a module back on resumes it.
+The rig builder needs an `[app_proxy]` in the store's toml, which
+`shopify.app.t4a-mk.toml` does not have, so it never reaches that store.
 
 One-time setup:
 
@@ -620,25 +622,24 @@ One-time setup:
    `shopify.app.t4a-mk.toml` (or run `shopify app config link --config t4a-mk`),
    commit it, then `shopify app deploy --config t4a-mk` to register the
    webhooks and scopes.
-2. Point DNS for the domain at the VM.
-3. On the VM, clone the repository to `/data/stack/apps/mk-connector`, create
-   `data/postgres`, and write `.env` from `.env.example` with
-   `COMPOSE_PROJECT_NAME=mk-connector`, the new app's `SHOPIFY_API_KEY` and
-   `SHOPIFY_API_SECRET`, `SHOPIFY_APP_URL=https://mk-connector.time-4-action.com`,
-   `SCOPES` equal to the toml's scopes, `APP_MODULES=none`, `APP_NAME`, its own
-   `ENCRYPTION_KEY` and `POSTGRES_PASSWORD`, `WEB_PORT=3193` and
-   `POSTGRES_HOST_PORT=5433`. Then `docker compose pull && docker compose up -d`.
-4. Install `ops/nginx/mk-connector.conf` as for Recharge and reload nginx.
+2. DNS: a proxied `mk-connector` record in the time-4-action.com zone pointing
+   at t4a (the zone's wildcard points at T-2).
+3. On t4a: `sh /srv/postgres/new-app-db.sh mk-connector` for the database,
+   then `/srv/mk-connector` with `deploy/docker-compose.mk-connector.t4a.yml`
+   saved as `docker-compose.yml` and a `.env` holding the printed
+   `DATABASE_URL`, the new app's `SHOPIFY_API_KEY` and `SHOPIFY_API_SECRET`,
+   `SHOPIFY_APP_URL=https://mk-connector.time-4-action.com`, `SCOPES` equal to
+   the toml's scopes, `APP_MODULES=none`, `APP_NAME`, and its own
+   `ENCRYPTION_KEY` (keep a copy). Then `docker compose up -d`.
+4. Add `/srv/mk-connector` to the `DEPLOY_DIRS` variable of the `production`
+   environment (space-separated, with `/srv/recharge-hub`), so every merge to
+   `main` rolls out to both stacks.
 5. Open the install link from the Dev Dashboard on the store and go through
    guided setup: MetaKocka connection, order settings, payments, taxes,
    locations. Nothing is copied from Recharge. If both stores write into the
    same MetaKocka company, give each its own sales-order number template,
    and never let both write the same warehouse in the Shopify → MetaKocka
    direction (`sync_stock` replaces the whole warehouse).
-
-CI deploys `main` to every checkout listed in the `DEPLOY_DIRS` repository
-variable (space-separated, default `/data/stack/apps/recharge-hub`); add
-`/data/stack/apps/mk-connector` once the stack exists.
 
 #### Caddy instead of nginx
 
