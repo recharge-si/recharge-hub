@@ -1269,6 +1269,9 @@ completed on an external site is not done). Two that were not:
   point-of-sale orders, digital goods and some draft orders. `order.partner_override`
   holds customer details entered on the order page, and both the document writer and the
   partner resolver prefer it, so the two cannot file the order against different people.
+  A shop can also file every order against one partner
+  (`sales_order_setting.fixed_partner`); a per-order entry still wins over it
+  (docs/architecture.md § Who an order is filed against).
 
 **Form validation error** — subject to §2.8: red, inline, persistent, actionable, and never
 shown before interaction.

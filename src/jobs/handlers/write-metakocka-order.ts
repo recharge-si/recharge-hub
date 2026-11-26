@@ -9,7 +9,10 @@ import {
 } from "~/adapters/db/repositories/exception.server";
 import { getCredential } from "~/adapters/db/repositories/metakocka-credential.server";
 import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
-import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
+import {
+  getFixedPartner,
+  getSalesOrderSettings,
+} from "~/adapters/db/repositories/sales-order-setting.server";
 import {
   applyPrimaryDocument,
   claimDocument,
@@ -52,7 +55,7 @@ import {
   type PaymentPlanEntry,
 } from "~/jobs/orders/payment-reconciler";
 import { resolvePaymentType } from "~/jobs/payment";
-import { parsePartnerOverride } from "~/domain/orders/partner";
+import { choosePartner, parsePartnerOverride } from "~/domain/orders/partner";
 import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
 import { salesOrderNumberFor } from "~/domain/orders/reference";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
@@ -569,7 +572,19 @@ export async function writeMetakockaOrderFor(
    * was to go and edit it in Shopify.
    */
   const override = parsePartnerOverride(order.partnerOverride);
-  const partner = override ?? parsed?.partner ?? parsed?.receiver ?? null;
+  /*
+   * Then the shop's fixed partner, when every order is filed against one
+   * MetaKocka customer. The same precedence as `ensureOrderPartner`, so the
+   * document never names one customer while referencing another.
+   */
+  const fixed = override ? null : await getFixedPartner(principal);
+  const partner =
+    choosePartner({
+      override,
+      fixed: fixed?.partner ?? null,
+      billing: parsed?.partner ?? null,
+      shipping: parsed?.receiver ?? null,
+    })?.partner ?? null;
 
   // Falls back to resolving here for orders allocated before partners were
   // looked up, and for a retry after a MetaKocka blip during allocation.

@@ -1642,6 +1642,19 @@ model SalesOrderSetting {
   /// How a discount is written. See `DiscountRepresentation`.
   discountRepresentation DiscountRepresentation @default(none) @map("discount_representation")
 
+  /// One MetaKocka partner every sales order is filed against, instead of the
+  /// Shopify customer. A `PartnerOverride` (`domain/orders/partner`); null
+  /// means each order carries its own customer. A partner entered on a single
+  /// order still wins over this. The receiver stays the Shopify shipping
+  /// address, and VAT is decided from the order's own countries either way.
+  fixedPartner Json? @map("fixed_partner")
+
+  /// The MetaKocka ids `fixedPartner` resolved to, so each order reuses one
+  /// partner instead of searching for it again. Cleared whenever
+  /// `fixedPartner` is saved.
+  fixedPartnerMkId        String? @map("fixed_partner_mk_id")
+  fixedPartnerMkAddressId String? @map("fixed_partner_mk_address_id")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

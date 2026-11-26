@@ -7,7 +7,11 @@ import {
   type ParsedAddress,
 } from "~/adapters/shopify/order-payload";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
-import { parsePartnerOverride } from "~/domain/orders/partner";
+import {
+  getFixedPartner,
+  rememberFixedPartnerIds,
+} from "~/adapters/db/repositories/sales-order-setting.server";
+import { choosePartner, parsePartnerOverride } from "~/domain/orders/partner";
 import type { Principal } from "~/domain/types";
 
 /**
@@ -59,11 +63,34 @@ export async function ensureOrderPartner(
    * customer and name another.
    */
   const override = parsePartnerOverride(order.partnerOverride);
+  const fixed = override ? null : await getFixedPartner(principal);
 
   const parsed = parseOrderSafe(order.rawPayload);
-  const address: ParsedAddress | null =
-    override ?? parsed?.partner ?? parsed?.receiver ?? null;
-  if (!address) return null;
+  const chosen = choosePartner<ParsedAddress>({
+    override,
+    fixed: fixed?.partner ?? null,
+    billing: parsed?.partner ?? null,
+    shipping: parsed?.receiver ?? null,
+  });
+  if (!chosen) return null;
+  const address = chosen.partner;
+
+  /*
+   * The shop's fixed partner, already found once: every order is filed
+   * against that one MetaKocka record, so there is nothing to search for.
+   * Reusing the id is also what stops two orders arriving together from each
+   * creating the partner.
+   */
+  if (chosen.source === "fixed" && fixed?.mkId) {
+    await prisma.order.updateMany({
+      where: { id: orderId, metakockaPartnerMkId: null },
+      data: {
+        metakockaPartnerMkId: fixed.mkId,
+        metakockaPartnerAddressId: fixed.mkAddressId,
+      },
+    });
+    return { mkId: fixed.mkId, mkAddressId: fixed.mkAddressId };
+  }
 
   const credential = await getCredential(principal);
   if (!credential) return null;
@@ -125,7 +152,7 @@ export async function ensureOrderPartner(
       postNumber: address.postNumber,
       place: address.place,
       country: address.country,
-      taxNumber: override?.taxNumber ?? null,
+      taxNumber: chosen.source === "shopify" ? null : chosen.partner.taxNumber,
       email: address.email,
       phone: address.phone,
       isBusiness: address.isBusiness,
@@ -147,6 +174,10 @@ export async function ensureOrderPartner(
     },
   });
 
+  if (chosen.source === "fixed" && fixed) {
+    await rememberFixedPartnerIds(principal, fixed.partner, resolved);
+  }
+
   await appendEvent(principal, {
     entityType: "order",
     entityId: orderId,
@@ -155,6 +186,7 @@ export async function ensureOrderPartner(
       mkId: resolved.mkId,
       customer: resolved.customer,
       countCode: resolved.countCode,
+      source: chosen.source,
     },
   });
 

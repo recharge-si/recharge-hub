@@ -1,4 +1,10 @@
+import { Prisma } from "@prisma/client";
+
 import { prisma } from "~/adapters/db/client.server";
+import {
+  parsePartnerOverride,
+  type PartnerOverride,
+} from "~/domain/orders/partner";
 import { DEFAULT_CUSTOMER_ORDER_TEMPLATE } from "~/domain/orders/reference";
 import type { ObsoleteDocumentPolicy } from "~/domain/orders/reconcile";
 import type { PaymentAllocationStrategy } from "~/domain/payments/allocation";
@@ -215,5 +221,93 @@ export async function saveSalesOrderSettings(
     where: { shopId: shop.id },
     create: { shopId: shop.id, ...input },
     update: input,
+  });
+}
+
+/**
+ * The partner every sales order is filed against, or null when each order
+ * carries its own Shopify customer (`domain/orders/partner` `choosePartner`).
+ *
+ * Kept apart from `SalesOrderSettings` because it is saved from its own
+ * screen, and folding it into the main form would let a save there clear it.
+ */
+export interface FixedPartner {
+  partner: PartnerOverride;
+  /** What it resolved to in MetaKocka, once an order has looked it up. */
+  mkId: string | null;
+  mkAddressId: string | null;
+}
+
+export async function getFixedPartner(
+  principal: Principal,
+): Promise<FixedPartner | null> {
+  const row = await prisma.salesOrderSetting.findFirst({
+    where: { shop: { domain: shopDomainOf(principal) } },
+    select: {
+      fixedPartner: true,
+      fixedPartnerMkId: true,
+      fixedPartnerMkAddressId: true,
+    },
+  });
+  const partner = parsePartnerOverride(row?.fixedPartner);
+  if (!row || !partner) return null;
+  return {
+    partner,
+    mkId: row.fixedPartnerMkId,
+    mkAddressId: row.fixedPartnerMkAddressId,
+  };
+}
+
+/**
+ * Sets or clears the fixed partner. The resolved ids are always cleared: they
+ * belong to the details that were there before, and the next order looks the
+ * new ones up. Orders that already carry a partner keep it.
+ */
+export async function saveFixedPartner(
+  principal: Principal,
+  partner: PartnerOverride | null,
+): Promise<void> {
+  const domain = shopDomainOf(principal);
+  const shop = await prisma.shop.findUnique({
+    where: { domain },
+    select: { id: true },
+  });
+  if (!shop) throw new Error(`No shop record for ${domain}`);
+
+  const data = {
+    fixedPartner: partner ? (partner as Prisma.InputJsonValue) : Prisma.DbNull,
+    fixedPartnerMkId: null,
+    fixedPartnerMkAddressId: null,
+  };
+  await prisma.salesOrderSetting.upsert({
+    where: { shopId: shop.id },
+    create: { shopId: shop.id, ...data },
+    update: data,
+  });
+}
+
+/**
+ * Remembers what the fixed partner resolved to, only if it has not been
+ * changed in the meantime: a lookup that finishes after the merchant saved new
+ * details must not pin the old partner to them.
+ */
+export async function rememberFixedPartnerIds(
+  principal: Principal,
+  partner: PartnerOverride,
+  ids: { mkId: string; mkAddressId: string | null },
+): Promise<void> {
+  const current = await getFixedPartner(principal);
+  if (!current || JSON.stringify(current.partner) !== JSON.stringify(partner)) {
+    return;
+  }
+  await prisma.salesOrderSetting.updateMany({
+    where: {
+      shop: { domain: shopDomainOf(principal) },
+      fixedPartnerMkId: null,
+    },
+    data: {
+      fixedPartnerMkId: ids.mkId,
+      fixedPartnerMkAddressId: ids.mkAddressId,
+    },
   });
 }

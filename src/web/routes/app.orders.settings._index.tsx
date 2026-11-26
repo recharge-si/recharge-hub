@@ -15,6 +15,7 @@ import { getReadiness } from "~/adapters/db/repositories/readiness.server";
 import { getSupplyDefaults } from "~/adapters/db/repositories/supply-setting.server";
 import {
   SALES_ORDER_DEFAULTS,
+  getFixedPartner,
   getSalesOrderSettings,
   saveSalesOrderSettings,
   type SalesOrderSettings,
@@ -108,11 +109,14 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
     select: { code: true },
   });
 
-  const [settings, readiness, supplyDefaults] = await Promise.all([
-    getSalesOrderSettings(principal),
-    getReadiness(principal),
-    getSupplyDefaults(principal),
-  ]);
+  const [settings, readiness, supplyDefaults, fixedPartner] = await Promise.all(
+    [
+      getSalesOrderSettings(principal),
+      getReadiness(principal),
+      getSupplyDefaults(principal),
+      getFixedPartner(principal),
+    ],
+  );
 
   /*
    * What turning transfer back on would send, counted only while it is off.
@@ -155,6 +159,7 @@ export const loader = async ({ request }: LoaderFunctionArgs) => {
       paymentsNeedsAttention:
         componentOf(readiness, "payments").status === "needs_attention",
       defaultProfitCenter: supplyDefaults.defaultProfitCenter,
+      fixedCustomer: fixedPartner?.partner.customer ?? null,
     },
     /*
      * What a new shop gets, so "Restore recommended settings" can be a change
@@ -857,6 +862,25 @@ export default function OrderSyncSettings() {
                     <s-button
                       variant="secondary"
                       href="/app/orders/settings/payments"
+                    >
+                      Manage
+                    </s-button>
+                  }
+                />
+
+                <s-divider />
+
+                <SettingRow
+                  label="MetaKocka customer"
+                  summary={
+                    status.fixedCustomer
+                      ? `Every sales order is filed against ${status.fixedCustomer}.`
+                      : "Each sales order is filed against its own Shopify customer."
+                  }
+                  action={
+                    <s-button
+                      variant="secondary"
+                      href="/app/orders/settings/customer"
                     >
                       Manage
                     </s-button>
