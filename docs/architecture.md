@@ -359,6 +359,27 @@ that no longer describe the order are retired under
 `sales_order_setting.obsolete_document_policy` and the new shape is written, on
 each order's next pass.
 
+### Who an order is filed against
+
+`choosePartner` (`domain/orders/partner`) picks the MetaKocka partner, and both
+the partner resolver (`jobs/resolve-order-partner`) and the document writer
+(`jobs/handlers/write-metakocka-order`) call it, so the two never disagree:
+
+1. `order.partner_override`, customer details entered on the order page.
+2. `sales_order_setting.fixed_partner`, one partner for every order, set under
+   Orders → Settings → MetaKocka customer
+   (`app.orders.settings.customer`). Its MetaKocka ids are cached in
+   `fixed_partner_mk_id` / `fixed_partner_mk_address_id` after the first order
+   resolves it, so later orders reuse that record instead of searching, and
+   cleared whenever the details are saved.
+3. The Shopify billing address, then the shipping address.
+
+The fixed partner replaces only the buyer. The receiver stays the order's
+Shopify shipping address, and VAT (domestic, OSS, reverse charge, export) is
+decided from the order's own countries, never the partner's. An order whose
+partner is already resolved (`order.metakocka_partner_mk_id`) keeps it, so a
+change applies to orders sent from then on.
+
 ### Sales order numbering
 
 `sales_order_setting.sales_order_numbering` decides who chooses the number

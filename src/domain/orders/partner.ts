@@ -62,3 +62,34 @@ export function parsePartnerOverride(value: unknown): PartnerOverride | null {
 export function overrideIsComplete(override: PartnerOverride): boolean {
   return override.customer.length > 0 && (override.street ?? "").length > 0;
 }
+
+/** Where the partner on a sales order came from, for the audit trail. */
+export type PartnerSource = "order" | "fixed" | "shopify";
+
+/** The partner `choosePartner` picked, typed by where it came from. */
+export type ChosenPartner<A> =
+  | { source: "order" | "fixed"; partner: PartnerOverride }
+  | { source: "shopify"; partner: A };
+
+/**
+ * Who a sales order is filed against, in order of precedence.
+ *
+ * 1. A partner entered by hand on this order: the most specific statement.
+ * 2. The shop's fixed partner, when the merchant files every order against
+ *    one MetaKocka customer instead of the Shopify buyer.
+ * 3. The Shopify billing address, then the shipping address.
+ *
+ * Generic over the Shopify address so this stays free of adapter types;
+ * `PartnerOverride` is shaped to fit wherever a `ParsedAddress` is read.
+ */
+export function choosePartner<A>(input: {
+  override: PartnerOverride | null;
+  fixed: PartnerOverride | null;
+  billing: A | null;
+  shipping: A | null;
+}): ChosenPartner<A> | null {
+  if (input.override) return { partner: input.override, source: "order" };
+  if (input.fixed) return { partner: input.fixed, source: "fixed" };
+  const shopify = input.billing ?? input.shipping;
+  return shopify ? { partner: shopify, source: "shopify" } : null;
+}
