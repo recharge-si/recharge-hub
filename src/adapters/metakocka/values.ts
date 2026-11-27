@@ -20,7 +20,7 @@ export const mkBoolean = z
     return value === "true" || value === "1";
   });
 
-function normaliseDecimalString(raw: string): string {
+export function normaliseDecimalString(raw: string): string {
   const value = raw.trim();
 
   // "1.234,56": dot groups thousands, comma is the decimal separator.

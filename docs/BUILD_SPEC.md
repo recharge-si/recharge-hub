@@ -1271,7 +1271,12 @@ completed on an external site is not done). Two that were not:
   partner resolver prefer it, so the two cannot file the order against different people.
   A shop can also file every order against one partner
   (`sales_order_setting.fixed_partner`); a per-order entry still wins over it
-  (docs/architecture.md § Who an order is filed against).
+  (docs/architecture.md § Who an order is filed against). With a partner
+  pricelist set as well, each such order is filed as a wholesale sale to that
+  partner: pricelist net prices less a fixed line discount, VAT 0, and no
+  receiver, shipping, document discount or payment. This is a deliberate
+  exception to §8.6/§8.7 mirroring the Shopify total and payments, and the
+  value and payment checks of verification do not apply to it.
 
 **Form validation error** — subject to §2.8: red, inline, persistent, actionable, and never
 shown before interaction.

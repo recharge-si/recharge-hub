@@ -10,6 +10,6 @@ export * from "~/domain/tax/types";
 export * from "~/domain/tax/rates";
 export * from "~/domain/tax/eu";
 export * from "~/domain/tax/config";
-export { decideOrderTax } from "~/domain/tax/decide";
+export { decideOrderTax, decidePartnerPricedTax } from "~/domain/tax/decide";
 export * from "~/domain/tax/refunds";
 export * from "~/domain/tax/diagnostics";

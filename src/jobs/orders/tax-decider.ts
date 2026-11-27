@@ -13,7 +13,8 @@ import {
 } from "~/adapters/db/repositories/tax.server";
 import { getLogger } from "~/adapters/observability/logger.server";
 import type { ParsedOrder } from "~/adapters/shopify/order-payload";
-import { decideOrderTax } from "~/domain/tax/decide";
+import type { PartnerPricing } from "~/domain/orders/partner";
+import { decideOrderTax, decidePartnerPricedTax } from "~/domain/tax/decide";
 import { sameRate } from "~/domain/tax/rates";
 import {
   reverseTaxForRefund,
@@ -118,9 +119,20 @@ function configFor(
  */
 export async function decideOrderTaxFor(
   principal: Principal,
-  input: { orderId: string; parsed: ParsedOrder; now: Date },
+  input: {
+    orderId: string;
+    parsed: ParsedOrder;
+    now: Date;
+    /**
+     * The shop's partner pricing, when this order is filed under it. The
+     * document is then a wholesale sale with no VAT by the merchant's rule,
+     * and the decision says so (`decidePartnerPricedTax`) instead of running
+     * the engine's checks against the end buyer's retail taxes.
+     */
+    partnerPricing?: PartnerPricing | null;
+  },
 ): Promise<TaxDecisionOutcome> {
-  const { orderId, parsed, now } = input;
+  const { orderId, parsed, now, partnerPricing } = input;
   const log = getLogger();
 
   const [snapshot, current] = await Promise.all([
@@ -129,7 +141,9 @@ export async function decideOrderTaxFor(
   ]);
   const { config, historical } = configFor(snapshot, current);
 
-  const decision = decideOrderTax(parsed.tax, config);
+  const decision = partnerPricing
+    ? decidePartnerPricedTax(parsed.tax, config, partnerPricing)
+    : decideOrderTax(parsed.tax, config);
   await saveTaxDecision(principal, { orderId, decision, config, now });
 
   const quantities = new Map(
@@ -148,6 +162,7 @@ export async function decideOrderTaxFor(
       orderId,
       configVersion: config.version,
       historical,
+      partnerPricelist: partnerPricing?.pricelistCode ?? null,
       destination: decision.destinationCountry,
       jurisdiction: decision.jurisdiction,
       customerKind: decision.customerKind,

@@ -11,6 +11,7 @@ import { getCredential } from "~/adapters/db/repositories/metakocka-credential.s
 import { getProductSyncSetting } from "~/adapters/db/repositories/product-sync-setting.server";
 import {
   getFixedPartner,
+  getPartnerDocumentSettings,
   getSalesOrderSettings,
 } from "~/adapters/db/repositories/sales-order-setting.server";
 import {
@@ -48,6 +49,13 @@ import {
 import { parseOrderSafe } from "~/adapters/shopify/order-payload";
 import { getLogger } from "~/adapters/observability/logger.server";
 import { ensureOrderPartner } from "~/jobs/resolve-order-partner";
+import {
+  applyPartnerPricing,
+  frozenPartnerPrices,
+  partnerNetPrices,
+  unpricedSkus,
+  type FrozenPartnerPrice,
+} from "~/jobs/partner-pricing";
 import { computeDocumentShares } from "~/jobs/order-shares";
 import {
   planPayments,
@@ -59,10 +67,14 @@ import {
   buyerNote,
   choosePartner,
   parsePartnerOverride,
+  partnerPricingForOrder,
   type BuyerContact,
 } from "~/domain/orders/partner";
 import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
-import { salesOrderNumberFor } from "~/domain/orders/reference";
+import {
+  documentTitleFor,
+  salesOrderNumberFor,
+} from "~/domain/orders/reference";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
 import { serviceToken, shopDomainOf, type Principal } from "~/domain/types";
 import {
@@ -461,6 +473,80 @@ export async function writeMetakockaOrderFor(
     sourceCode: source?.code ?? null,
   });
 
+  /*
+   * Partner pricing: this order is the company's wholesale sale to the fixed
+   * partner, not a mirror of the Shopify sale (`jobs/partner-pricing`). The
+   * same rule the reconciler used to decide the order's VAT, so the two never
+   * disagree about which kind of document this is.
+   */
+  const partnerDocuments = await getPartnerDocumentSettings(principal);
+  const pricing = partnerPricingForOrder({
+    pricing: partnerDocuments.pricing,
+    hasOrderOverride: parsePartnerOverride(order.partnerOverride) !== null,
+  });
+
+  /*
+   * The partner's net prices, settled before anything is claimed, like the
+   * catalogue check above: a SKU the pricelist has no price for stops here with
+   * nothing written and nothing claimed, because sending it at the Shopify
+   * price, or at none, would file a wrong wholesale order unnoticed.
+   *
+   * A document already written keeps the prices it was sent with
+   * (`frozenPartnerPrices`), so a pricelist edited later never rewrites it and
+   * an unchanged order costs no catalogue read. Only SKUs it does not carry yet
+   * are read from the pricelist.
+   */
+  let partnerPrices: Map<string, FrozenPartnerPrice> | null = null;
+  if (pricing) {
+    const written = await prisma.metakockaDocument.findFirst({
+      where: { orderId, countCode, status: "written" },
+      select: { requestBody: true },
+    });
+    const frozen = frozenPartnerPrices(
+      written?.requestBody ?? null,
+      pricing.pricelistCode,
+    );
+    const toPrice = unpricedSkus(
+      perSourceLines.map((entry) => entry.line.sku),
+      frozen,
+    );
+
+    const read =
+      toPrice.length === 0
+        ? { prices: new Map<string, string>(), missing: [] }
+        : await partnerNetPrices({
+            shopDomain,
+            client: new MetakockaClient({
+              companyId: credential.companyId,
+              secretKey: credential.secretKey,
+            }),
+            pricelistCode: pricing.pricelistCode,
+            skus: toPrice,
+            now: new Date(),
+          });
+
+    if (read.missing.length > 0) {
+      await raiseException(principal, {
+        orderId,
+        kind: "metakocka_write_failed",
+        message: `Order ${order.shopifyOrderNumber} is sold to the shop's MetaKocka customer at pricelist ${pricing.pricelistCode}, which has no price for ${read.missing.length === 1 ? "the product" : "the products"} ${read.missing.join(", ")}. Nothing was written. Add ${read.missing.length === 1 ? "a price" : "prices"} on pricelist ${pricing.pricelistCode} in MetaKocka, then retry.`,
+        detail: {
+          skus: read.missing,
+          pricelistCode: pricing.pricelistCode,
+          countCode,
+        },
+      });
+      return;
+    }
+
+    partnerPrices = new Map(frozen);
+    for (const sku of toPrice) {
+      const price = read.prices.get(sku);
+      if (price === undefined) continue;
+      partnerPrices.set(sku, { price, discount: pricing.discountPercent });
+    }
+  }
+
   const claim = await claimDocument(principal, {
     orderId,
     // Null is the stored truth for an unsplit document: it belongs to no
@@ -680,14 +766,22 @@ export async function writeMetakockaOrderFor(
    * one whose transactions could not be read. Guessing a payment from a display
    * status is worse than the ledger and much better than nothing.
    */
-  const desiredPayment = await desiredPaymentsFor(principal, {
-    orderId,
-    supplySourceId,
-    share,
-    given: input.payments,
-    order,
-    parsed,
-  });
+  /*
+   * A partner-priced document carries no payment, ever. What the Shopify buyer
+   * paid is the reseller's money, not a receipt against this sale, and an empty
+   * ledger is what keeps every later pass (and `mark-metakocka-paid`, which is
+   * the reconciler) from adding one.
+   */
+  const desiredPayment: DesiredPayment = pricing
+    ? { kind: "ledger", payments: [], entries: [] }
+    : await desiredPaymentsFor(principal, {
+        orderId,
+        supplySourceId,
+        share,
+        given: input.payments,
+        order,
+        parsed,
+      });
 
   /*
    * The non-product money this document carries.
@@ -729,12 +823,18 @@ export async function writeMetakockaOrderFor(
       ? discountMinor
       : null;
 
-  const salesOrder: SalesOrderInput = {
+  const ordinary: SalesOrderInput = {
     // The number, not the claim key. Null omits the field and lets MetaKocka
     // number the document itself.
     countCode: sentCountCode,
     // §3, verified: `buyer_order` is what links sibling documents.
     buyerOrder: order.customerOrderRef,
+    title: documentTitleFor(partnerDocuments.titleTemplate, {
+      name: parsed?.orderName ?? null,
+      number: order.shopifyOrderNumber,
+      id: order.shopifyOrderId,
+      customerEmail: parsed?.customerEmail ?? null,
+    }),
     docDate: order.receivedAt,
     currencyCode: order.presentmentCurrency,
     taxesIncluded: parsed?.taxesIncluded ?? true,
@@ -779,6 +879,11 @@ export async function writeMetakockaOrderFor(
       taxFactor: taxFactorFor(entry.line),
     })),
   };
+
+  const salesOrder: SalesOrderInput =
+    pricing && partnerPrices
+      ? applyPartnerPricing(ordinary, pricing, partnerPrices)
+      : ordinary;
 
   /*
    * Exactly the bytes that would go to MetaKocka.
@@ -990,7 +1095,8 @@ export async function writeMetakockaOrderFor(
      * over from the body that recorded it.
      */
     const body: Record<string, unknown> = { ...desired };
-    if (existing.paymentMarkedAt && body.mark_paid === undefined) {
+    // Never onto a partner-priced document: it carries no payment at all.
+    if (!pricing && existing.paymentMarkedAt && body.mark_paid === undefined) {
       const previous = (existing.requestBody as { mark_paid?: unknown } | null)
         ?.mark_paid;
       if (previous !== undefined) body.mark_paid = previous;
@@ -1710,12 +1816,18 @@ async function recordDocumentPaymentState(
  * change to the order. It is not one: the number is settled at claim time and
  * frozen thereafter, so it can never differ from what the document already
  * holds in a way an update should chase.
+ *
+ * `title` is out because it is a label from a merchant pattern
+ * (`documentTitleFor`) and describes nothing about the order: changing the
+ * pattern must not rewrite every written document, nor raise `order_diverged`
+ * on every paid one. It goes along whenever a document is written anyway.
  */
 export function contentOnly(body: unknown): unknown {
   if (!body || typeof body !== "object" || Array.isArray(body)) return body;
   const {
     mark_paid: _payments,
     count_code: _number,
+    title: _title,
     ...rest
   } = body as Record<string, unknown>;
   return rest;

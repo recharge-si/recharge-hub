@@ -195,6 +195,15 @@ export function verifyOrder(input: {
   shippingProductCode?: string | null;
   /** Whether a discount representation has been chosen at all. */
   discountConfigured?: boolean;
+  /**
+   * The order is filed under partner pricing: its documents are the sale to
+   * the partner at pricelist prices, with no shipping, discount or payment
+   * (docs/architecture.md § Who an order is filed against). Their value has no
+   * relation to what the Shopify buyer paid, so the value identity is computed
+   * for the record but cannot fail the order, and no payment is expected on
+   * them. Quantities, SKUs and unplaced units are checked exactly as always.
+   */
+  partnerPricing?: boolean;
 }): VerificationResult {
   const contents = input.documents.map((document) =>
     contentOf(document, input.shippingProductCode),
@@ -246,7 +255,7 @@ export function verifyOrder(input: {
     0,
   );
 
-  const value = reconcileValue({
+  const reconciled = reconcileValue({
     orderTotalMinor: input.orderTotalMinor,
     documentsMinor: contents.reduce(
       (total, document) => total + document.valueMinor,
@@ -262,9 +271,11 @@ export function verifyOrder(input: {
     shippingConfigured: Boolean(input.shippingProductCode),
     discountConfigured: input.discountConfigured ?? false,
   });
+  const value = input.partnerPricing ? { ...reconciled, ok: true } : reconciled;
 
   const payments = verifyPaymentRepresentation({
-    grossReceivedMinor: input.grossReceivedMinor,
+    // Nothing received in Shopify is owed to a partner-priced document.
+    grossReceivedMinor: input.partnerPricing ? 0 : input.grossReceivedMinor,
     representedMinor: input.representedPaymentMinor,
   });
 

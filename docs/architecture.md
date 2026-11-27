@@ -374,9 +374,10 @@ the partner resolver (`jobs/resolve-order-partner`) and the document writer
    cleared whenever the details are saved.
 3. The Shopify billing address, then the shipping address.
 
-The fixed partner replaces only the buyer. The receiver stays the order's
-Shopify shipping address, and VAT (domestic, OSS, reverse charge, export) is
-decided from the order's own countries, never the partner's. An order whose
+On its own, the fixed partner replaces only the buyer. The receiver stays the
+order's Shopify shipping address, and VAT (domestic, OSS, reverse charge,
+export) is decided from the order's own countries, never the partner's — unless
+partner pricing (below) is on. An order whose
 partner is already resolved (`order.metakocka_partner_mk_id`) keeps it, so a
 change applies to orders sent from then on.
 
@@ -385,6 +386,70 @@ against the fixed partner starts its additional text (`notes`) with the
 Shopify buyer from the shipping address, falling back to billing
 (`buyerNote`): `Name, street, postcode town, country, phone` and the email on
 the next line. The Shopify order note follows on the primary document.
+
+#### Partner pricing
+
+For a reseller's own Shopify store (the T4A MetaKocka Connector deployment
+serving LISA Windsurfing): every order becomes this company's **wholesale**
+sales order to the fixed partner, not a mirror of the retail sale. On when
+`sales_order_setting.fixed_partner` is set **and**
+`partner_pricelist_code` is set (same screen, its own form, so saving it never
+clears the partner or its resolved ids). It applies to an order only when that
+order is filed against the fixed partner: one with `order.partner_override` goes
+through the ordinary path (`partnerPricingForOrder` in `domain/orders/partner`,
+used by the reconciler, the writer and the exception re-check alike). For every
+document of such an order:
+
+- **Lines** are sent with `price` = the product's NET price on the MetaKocka
+  sales pricelist (`readPricelistNetPrices` in `adapters/metakocka/pricelists`,
+  pure parser `pricelistNetPrice`: `sales` entries of that `count_code`, latest
+  `valid_from` not in the future, decimal comma), `discount` =
+  `partner_discount_percent` (a percentage, canonical decimal string, null sends
+  none) and `tax_factor` `"0"`. `sales_pricelist_code` is the partner pricelist.
+  The whole catalogue has to be paged to read prices, so `jobs/partner-pricing`
+  caches the code → price map per shop and pricelist in memory for 10 minutes
+  (one early re-read for an unpriced SKU once the read is a minute old). A
+  document already written keeps the prices and discount it was sent with
+  (`frozenPartnerPrices`, read from its recorded body when that body carries the
+  same pricelist, no receiver and net `price` lines): a pricelist edited later
+  does not rewrite it, and an unchanged order costs no catalogue read. A
+  document written before partner pricing was turned on has no frozen prices, so
+  its next write re-prices it (subject to the update settings).
+- **A SKU with no price on the pricelist** writes nothing: the prices are
+  settled before the `count_code` claim, like the catalogue check, so a
+  `metakocka_write_failed` exception names the SKUs and the pricelist and
+  nothing is claimed or marked (a written document is left as it is).
+- **No receiver, no shipping line, no `discount_value`, no `mark_paid`.** The
+  writer's desired payment is an empty ledger, the reconciler plans no payments
+  (so no `unmapped_payment_gateway` / `payment_unallocated`), and no previous
+  `mark_paid` is carried onto an update. `mark-metakocka-paid` delegates to the
+  reconciler, so it adds nothing either. `commercial_representation_missing` is
+  not raised for the Shopify shipping or discount.
+- **VAT** is `decidePartnerPricedTax` (`domain/tax/decide`), not the engine: an
+  ok decision with every line `MANUAL_OVERRIDE` at rate 0 / factor `"0"`, a
+  `zeroReason` naming the pricelist, no shipping decision, and the engine's
+  destination, jurisdiction, customer kind and Shopify tax total kept for the
+  record. `decideOrderTaxFor` makes it when the reconciler passes
+  `partnerPricing`, so a French consumer order is not held for a missing OSS
+  registration, and the writer reads it like any other snapshot.
+- **Verification** (`verifyOrder` with `partnerPricing`) still checks
+  quantities, SKUs and unplaced units, but the value identity cannot fail the
+  order (the documents are worth the pricelist, not the Shopify total) and no
+  payment is expected on them. The drift poller and the watchdog compare
+  quantities only and need no change.
+- **Notes** start with the Shopify buyer, as for any fixed-partner document.
+
+#### Sales order title
+
+`sales_order_setting.document_title_template`, edited on the same screen with
+the order reference pattern editor and the same `{order.name}` style fields
+(`documentTitleFor` in `domain/orders/reference`), is sent as the document's
+`title` — "LISA {order.name}" reads "LISA #2035". Independent of the fixed
+partner and of partner pricing; null or a pattern that renders empty sends no
+title. `title` is left out of the writer's content comparison (`contentOnly`),
+so changing the pattern goes onto new documents and onto a written one only when
+it is rewritten for another reason, instead of rewriting (or, once paid,
+flagging) every document.
 
 ### Sales order numbering
 

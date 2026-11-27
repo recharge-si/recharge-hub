@@ -93,6 +93,18 @@ export interface DocumentLine {
   /** Decimal factor such as "0.22". Null leaves the tax to MetaKocka. */
   taxFactor?: string | null;
   name?: string | null;
+  /**
+   * A net unit price as a decimal string ("32.5"), sent as `price` in place
+   * of the Shopify price. Partner pricing only: the reseller's price read from
+   * a MetaKocka pricelist. **[verified 2026-11-27]** MetaKocka does not fill a
+   * line's price from the document's pricelist, so it has to be sent.
+   */
+  netPrice?: string | null;
+  /**
+   * The line's `discount`, a **percentage** ("20"). Partner pricing only.
+   * **[verified 2026-11-27]** accepted and stored as sent.
+   */
+  discountPercent?: string | null;
 }
 
 /**
@@ -123,6 +135,11 @@ export interface SalesOrderInput {
   countCode: string | null;
   /** Shared by every document from one Shopify order. */
   buyerOrder: string;
+  /**
+   * The document's `title` ("LISA #2035"), from the merchant's pattern. Null
+   * or absent sends no title. Seen on documents in `get_document`.
+   */
+  title?: string | null;
   /** When the order happened. Injected, never read from the clock here (§5). */
   docDate: Date;
   /** Overrides the ERP timezone the document date is expressed in. */
@@ -454,6 +471,7 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
     // §3, verified: this is the field that links sibling documents and the only
     // one that is searchable. `customer_order` is silently discarded.
     buyer_order: input.buyerOrder,
+    ...(input.title ? { title: input.title } : {}),
     partner: party(input.partner),
     ...(input.receiver ? { receiver: party(input.receiver) } : {}),
     ...(input.salesPricelistCode
@@ -488,16 +506,21 @@ export function buildSalesOrderBody(input: SalesOrderInput) {
       .map((line) => ({
         code: line.code,
         amount: String(line.amount),
-        // Gross or net, whichever Shopify's figure actually is. Putting a net
-        // price in price_with_tax would understate the line by the VAT rate.
-        ...(input.taxesIncluded === false
-          ? { price: minorToDecimalString(line.priceWithTaxMinor, decimals) }
-          : {
-              price_with_tax: minorToDecimalString(
-                line.priceWithTaxMinor,
-                decimals,
-              ),
-            }),
+        // A partner price is net by definition and replaces Shopify's.
+        // Otherwise gross or net, whichever Shopify's figure actually is.
+        // Putting a net price in price_with_tax would understate the line by
+        // the VAT rate.
+        ...(line.netPrice
+          ? { price: line.netPrice }
+          : input.taxesIncluded === false
+            ? { price: minorToDecimalString(line.priceWithTaxMinor, decimals) }
+            : {
+                price_with_tax: minorToDecimalString(
+                  line.priceWithTaxMinor,
+                  decimals,
+                ),
+              }),
+        ...(line.discountPercent ? { discount: line.discountPercent } : {}),
         // MetaKocka refuses a line whose product has no tax attribute of its own
         // and no tax on the line, so this is always sent. Null never reaches
         // here: the caller raises an exception instead (§11).

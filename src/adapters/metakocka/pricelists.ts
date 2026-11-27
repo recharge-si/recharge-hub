@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import type { MetakockaClient } from "~/adapters/metakocka/client";
 import { ENDPOINTS } from "~/adapters/metakocka/endpoints";
+import { normaliseDecimalString } from "~/adapters/metakocka/values";
 
 /**
  * Finding out which pricelists a company has, without writing anything.
@@ -184,4 +185,143 @@ export async function observeCatalogue(
     ),
     taxPercents: [...percents].sort((a, b) => Number(a) - Number(b)),
   };
+}
+
+/* -------------------------------------------------------------------------- */
+/* One pricelist's net prices, for partner pricing                            */
+/* -------------------------------------------------------------------------- */
+
+/**
+ * The fields of a product's pricelist entry that choose and carry a net price.
+ *
+ * **[verified 2026-11-27, read-only]** `product_list` with `return_pricelist`
+ * answers each product with entries shaped
+ * `{count_code:"4", title:"Partner price 2026", price_def:{tax:"EX4",
+ * tax_desc:"22", price:"32,5"}, valid_from:"2025-11-01+02:00",
+ * sales_purchase:"sales", currency_code:"EUR"}`: the amount has a decimal
+ * comma, one product can carry several entries for the same code (one per
+ * validity period), and purchase pricelists come back in the same array.
+ */
+export interface PricelistEntry {
+  count_code?: string | undefined;
+  valid_from?: string | undefined;
+  sales_purchase?: string | undefined;
+  price_def: { price?: string | undefined }[];
+}
+
+/** `YYYY-MM-DD` of an instant in the ERP's timezone, for `valid_from`. */
+function ljubljanaDay(at: Date): string {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Ljubljana",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(at);
+}
+
+/** A plain non-negative decimal: "32.5", "171.31". */
+const NET_PRICE_PATTERN = /^\d+(?:\.\d+)?$/;
+
+/**
+ * The net price one product has on one sales pricelist, as a dot-decimal
+ * string ("32.5"), or null when it has none there.
+ *
+ * Only `sales` entries with the given `count_code` count. Of those, the one
+ * whose `valid_from` is latest without being in the future wins: MetaKocka
+ * keeps the previous period's price beside the current one. An entry without
+ * a `valid_from` is treated as valid since always. An entry with only a gross
+ * price is not a net price and is skipped rather than converted.
+ */
+export function pricelistNetPrice(
+  entries: readonly PricelistEntry[],
+  code: string,
+  at: Date,
+): string | null {
+  const today = ljubljanaDay(at);
+  let best: { from: string; price: string } | null = null;
+
+  for (const entry of entries) {
+    if (entry.count_code?.trim() !== code) continue;
+    if ((entry.sales_purchase ?? "sales").trim() !== "sales") continue;
+
+    // "2025-11-01+02:00": the calendar date is what MetaKocka means.
+    const from = (entry.valid_from ?? "").trim().slice(0, 10);
+    if (from !== "" && from > today) continue;
+
+    const raw = entry.price_def.find((def) => def.price !== undefined)?.price;
+    if (raw === undefined) continue;
+    const price = normaliseDecimalString(raw);
+    if (!NET_PRICE_PATTERN.test(price)) continue;
+
+    if (best === null || from > best.from) best = { from, price };
+  }
+
+  return best?.price ?? null;
+}
+
+const pricedProductSchema = z
+  .object({
+    code: z.string().optional(),
+    pricelist: z
+      .array(
+        z
+          .object({
+            count_code: z.string().optional(),
+            valid_from: z.string().optional(),
+            sales_purchase: z.string().optional(),
+            price_def: z
+              .union([priceDefSchema, z.array(priceDefSchema)])
+              .optional()
+              .transform((value) =>
+                value === undefined
+                  ? []
+                  : Array.isArray(value)
+                    ? value
+                    : [value],
+              ),
+          })
+          .passthrough(),
+      )
+      .optional(),
+  })
+  .passthrough();
+
+const pricedPageSchema = z
+  .object({ product_list: z.array(pricedProductSchema).default([]) })
+  .passthrough();
+
+/**
+ * Every product's net price on one sales pricelist, keyed by product code.
+ *
+ * Reads the whole catalogue, a page at a time. **[verified 2026-11-27]**
+ * `product_code_list` is ignored by `product_list` when `return_pricelist` is
+ * set, so there is no asking for only the order's SKUs; a catalogue of about
+ * 1,700 products is 18 pages and about 14 seconds. The caller caches the
+ * result (`jobs/partner-pricing`). Writes nothing.
+ */
+export async function readPricelistNetPrices(
+  client: MetakockaClient,
+  code: string,
+  at: Date,
+): Promise<Map<string, string>> {
+  const prices = new Map<string, string>();
+
+  for (let offset = 0; offset < 200_000; offset += PAGE) {
+    const response = await client.call(
+      ENDPOINTS.productList,
+      { limit: PAGE, offset, return_pricelist: "true" },
+      pricedPageSchema,
+    );
+
+    for (const product of response.product_list) {
+      const productCode = product.code?.trim();
+      if (!productCode) continue;
+      const price = pricelistNetPrice(product.pricelist ?? [], code, at);
+      if (price !== null) prices.set(productCode, price);
+    }
+
+    if (response.product_list.length < PAGE) break;
+  }
+
+  return prices;
 }

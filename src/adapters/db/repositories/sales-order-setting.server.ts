@@ -4,6 +4,7 @@ import { prisma } from "~/adapters/db/client.server";
 import {
   parsePartnerOverride,
   type PartnerOverride,
+  type PartnerPricing,
 } from "~/domain/orders/partner";
 import { DEFAULT_CUSTOMER_ORDER_TEMPLATE } from "~/domain/orders/reference";
 import type { ObsoleteDocumentPolicy } from "~/domain/orders/reconcile";
@@ -309,5 +310,73 @@ export async function rememberFixedPartnerIds(
       fixedPartnerMkId: ids.mkId,
       fixedPartnerMkAddressId: ids.mkAddressId,
     },
+  });
+}
+
+/**
+ * Partner pricing and the document title, as stored (the MetaKocka customer
+ * screen). Kept apart from the fixed partner itself so saving one never clears
+ * the other, nor the partner ids already resolved.
+ */
+export interface PartnerDocumentSettings {
+  /** As saved, whether or not a fixed partner is set. */
+  pricelistCode: string | null;
+  discountPercent: string | null;
+  titleTemplate: string | null;
+  /**
+   * The pricing that is actually in force: null unless a fixed partner is set
+   * *and* a pricelist is chosen. Whether it applies to one particular order is
+   * `partnerPricingForOrder` (a partner entered on the order wins).
+   */
+  pricing: PartnerPricing | null;
+}
+
+export async function getPartnerDocumentSettings(
+  principal: Principal,
+): Promise<PartnerDocumentSettings> {
+  const row = await prisma.salesOrderSetting.findFirst({
+    where: { shop: { domain: shopDomainOf(principal) } },
+    select: {
+      fixedPartner: true,
+      partnerPricelistCode: true,
+      partnerDiscountPercent: true,
+      documentTitleTemplate: true,
+    },
+  });
+  const pricelistCode = row?.partnerPricelistCode?.trim() || null;
+  const discountPercent = row?.partnerDiscountPercent?.trim() || null;
+  const fixed = parsePartnerOverride(row?.fixedPartner);
+  return {
+    pricelistCode,
+    discountPercent,
+    titleTemplate: row?.documentTitleTemplate?.trim() || null,
+    pricing: fixed && pricelistCode ? { pricelistCode, discountPercent } : null,
+  };
+}
+
+export async function savePartnerDocumentSettings(
+  principal: Principal,
+  input: {
+    pricelistCode: string | null;
+    discountPercent: string | null;
+    titleTemplate: string | null;
+  },
+): Promise<void> {
+  const domain = shopDomainOf(principal);
+  const shop = await prisma.shop.findUnique({
+    where: { domain },
+    select: { id: true },
+  });
+  if (!shop) throw new Error(`No shop record for ${domain}`);
+
+  const data = {
+    partnerPricelistCode: input.pricelistCode,
+    partnerDiscountPercent: input.discountPercent,
+    documentTitleTemplate: input.titleTemplate,
+  };
+  await prisma.salesOrderSetting.upsert({
+    where: { shopId: shop.id },
+    create: { shopId: shop.id, ...data },
+    update: data,
   });
 }
