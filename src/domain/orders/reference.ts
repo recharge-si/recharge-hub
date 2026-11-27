@@ -254,3 +254,28 @@ export function salesOrderNumberFor(input: {
   const number = input.sourceCode ? `${base}-${input.sourceCode}` : base;
   return number.slice(0, MAX_ORDER_REFERENCE_LENGTH);
 }
+
+/**
+ * The MetaKocka document `title`, rendered from the merchant's pattern.
+ *
+ * Uses the same placeholders as the order reference, so "LISA {order.name}"
+ * reads "LISA #2035". Null (no `title` sent at all) when there is no pattern or
+ * it renders to nothing for this order: an empty title is a value, and the
+ * document is better without one than with a blank.
+ *
+ * Unlike the order reference this is not frozen at intake. It identifies
+ * nothing, and it is not part of the content comparison that decides whether a
+ * written document needs rewriting (`contentOnly` in the order writer): a
+ * changed pattern goes onto new documents, and onto a written one only when it
+ * is rewritten for another reason, rather than rewriting (or, once paid,
+ * flagging) every document the shop has.
+ */
+export function documentTitleFor(
+  template: string | null,
+  context: OrderReferenceContext,
+): string | null {
+  const pattern = (template ?? "").trim();
+  if (!pattern) return null;
+  const rendered = renderOrderReference(pattern, context);
+  return isUsableReference(rendered) ? rendered : null;
+}

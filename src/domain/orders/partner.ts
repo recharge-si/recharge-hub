@@ -130,3 +130,59 @@ export function buyerNote(contact: BuyerContact): string {
     .join(", ");
   return [line, contact.email?.trim()].filter(Boolean).join("\n");
 }
+
+/**
+ * Partner pricing: every order filed against the shop's fixed partner becomes
+ * a wholesale sales order to that partner, priced from a MetaKocka sales
+ * pricelist rather than mirroring what the Shopify buyer paid.
+ *
+ * The case it exists for is a reseller's own Shopify store: the buyer is the
+ * reseller's customer, but the document this company files is its sale *to the
+ * reseller*, at the reseller's net price less a fixed line discount and with no
+ * VAT. Nothing on the Shopify order — its prices, its shipping, its payments,
+ * its taxes — describes that sale, so none of it is sent.
+ */
+export interface PartnerPricing {
+  /** The MetaKocka sales pricelist `count_code` whose net price is sent. */
+  pricelistCode: string;
+  /** Line discount percent, canonical decimal string, or null for none. */
+  discountPercent: string | null;
+}
+
+/**
+ * Whether partner pricing applies to one order.
+ *
+ * Only to an order actually filed against the fixed partner: a partner entered
+ * by hand on the order wins over the fixed one (`choosePartner`), and pricing
+ * someone else at the reseller's wholesale price with no VAT would be wrong in
+ * both directions. Such an order goes through the ordinary path.
+ */
+export function partnerPricingForOrder(input: {
+  /** The shop's partner pricing, already null unless a fixed partner is set. */
+  pricing: PartnerPricing | null;
+  hasOrderOverride: boolean;
+}): PartnerPricing | null {
+  return input.hasOrderOverride ? null : input.pricing;
+}
+
+/** Plain digits with at most two decimals: no "1e2", no sign. */
+const PERCENT_PATTERN = /^\d{1,3}(?:[.,]\d{1,2})?$/;
+
+/**
+ * A discount percent as the merchant typed it, canonicalised: "20", "12.5".
+ *
+ * Returns null for an empty value and `"invalid"` for anything that is not a
+ * percent from 0 up to (not including) 100 with at most two decimals. A
+ * comma is accepted as
+ * the decimal separator because MetaKocka's own screens use one.
+ */
+export function parseDiscountPercent(raw: string): string | null | "invalid" {
+  const value = raw.trim().replace("%", "").trim();
+  if (value === "") return null;
+  if (!PERCENT_PATTERN.test(value)) return "invalid";
+  const parsed = Number(value.replace(",", "."));
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 100) {
+    return "invalid";
+  }
+  return String(parsed);
+}

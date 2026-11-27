@@ -911,3 +911,78 @@ export function decideOrderTax(
     ok: !ctx.issues.some((entry) => entry.severity === "blocking"),
   };
 }
+
+/**
+ * The VAT decision for an order under partner pricing: 0% on every line, by
+ * the merchant's rule, and nothing for shipping.
+ *
+ * Under partner pricing the document is not the Shopify sale. It is this
+ * company's wholesale sale to the fixed partner (a VAT-registered reseller),
+ * and the business rule is that it carries no VAT. Shopify's taxes describe
+ * the reseller's retail sale to its own customer, so neither its rates nor the
+ * OSS registrations that sale would need are this document's question, and
+ * running the engine's issues against them would hold every order for a
+ * configuration the document does not use.
+ *
+ * Kept honest rather than quietly bypassed:
+ *
+ *  - Every line is recorded as `MANUAL_OVERRIDE` from `MANUAL_OVERRIDE` with a
+ *    `zeroReason` naming the pricelist, so the order page and the audit trail
+ *    say *why* it is zero. It is never dressed up as reverse charge or export,
+ *    which this app has not established.
+ *  - The descriptive fields (destination, jurisdiction, customer kind, VAT
+ *    number) and Shopify's own tax total come from the ordinary engine, so the
+ *    snapshot still shows what Shopify charged the end buyer.
+ *  - There is no shipping decision, because no shipping line is sent.
+ *
+ * Pure, like the engine.
+ */
+export function decidePartnerPricedTax(
+  order: NormalizedOrderTax,
+  config: TaxConfig,
+  pricing: { pricelistCode: string },
+): TaxDecision {
+  const described = decideOrderTax(order, config);
+  const zeroReason = `Wholesale sale to the shop's fixed MetaKocka partner at pricelist ${pricing.pricelistCode}: partner pricing sends every line with no VAT`;
+
+  const lines: LineTaxDecision[] = order.lines.map((line) => ({
+    lineId: line.lineId,
+    sku: line.sku,
+    rateKey: "0",
+    treatment: "MANUAL_OVERRIDE",
+    source: "MANUAL_OVERRIDE",
+    zeroReason,
+    taxableMinor: lineTotal(line),
+    taxMinor: 0,
+    metakockaTaxFactor: "0",
+    mapping: "not_applicable",
+    overrideId: null,
+    issues: [],
+  }));
+
+  return {
+    configVersion: config.version,
+    currency: order.currency,
+    taxesIncluded: order.taxesIncluded,
+    destinationCountry: described.destinationCountry,
+    jurisdiction: described.jurisdiction,
+    customerKind: described.customerKind,
+    vatNumber: described.vatNumber,
+    treatment: "MANUAL_OVERRIDE",
+    source: "MANUAL_OVERRIDE",
+    lines,
+    shipping: null,
+    totals: {
+      taxableMinor: lines.reduce((sum, line) => sum + line.taxableMinor, 0),
+      taxMinor: 0,
+      shopifyTaxMinor: order.totalTaxMinor,
+      differenceMinor: -order.totalTaxMinor,
+      // Not comparable: Shopify's tax is the end buyer's, this is the
+      // partner's. The engine treats an incomparable order the same way.
+      reconciled: true,
+    },
+    rateKeys: lines.length > 0 ? ["0"] : [],
+    issues: [],
+    ok: true,
+  };
+}

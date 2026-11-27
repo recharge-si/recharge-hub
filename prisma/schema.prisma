@@ -1655,6 +1655,21 @@ model SalesOrderSetting {
   fixedPartnerMkId        String? @map("fixed_partner_mk_id")
   fixedPartnerMkAddressId String? @map("fixed_partner_mk_address_id")
 
+  /// Partner pricing (docs/architecture.md § Who an order is filed against).
+  /// The MetaKocka sales pricelist whose NET price every line is sent at, when
+  /// an order is filed against `fixedPartner`. Null means off: lines carry the
+  /// Shopify price as before. Has no effect without `fixedPartner`.
+  partnerPricelistCode String? @map("partner_pricelist_code")
+
+  /// Line discount percent sent with every partner-priced line, as a canonical
+  /// decimal string ("20", "12.5"). Null sends no discount.
+  partnerDiscountPercent String? @map("partner_discount_percent")
+
+  /// The MetaKocka document `title`, as a pattern over the order reference
+  /// placeholders ("LISA {order.name}"). Null sends no title. Independent of
+  /// the fixed partner and of partner pricing.
+  documentTitleTemplate String? @map("document_title_template")
+
   createdAt DateTime @default(now()) @map("created_at")
   updatedAt DateTime @updatedAt @map("updated_at")
 

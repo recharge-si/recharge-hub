@@ -19,7 +19,14 @@ import {
   replaceAllocations,
   reviveDocument,
 } from "~/adapters/db/repositories/order.server";
-import { getSalesOrderSettings } from "~/adapters/db/repositories/sales-order-setting.server";
+import {
+  getPartnerDocumentSettings,
+  getSalesOrderSettings,
+} from "~/adapters/db/repositories/sales-order-setting.server";
+import {
+  parsePartnerOverride,
+  partnerPricingForOrder,
+} from "~/domain/orders/partner";
 import {
   decideOrderTransfer,
   describeTransferHold,
@@ -279,6 +286,20 @@ async function reconcileUnderLock(
   /* ---------------------------------------------------------------------- */
 
   /*
+   * Partner pricing (docs/architecture.md § Who an order is filed against).
+   *
+   * Decided here, once, with the same rule the writer applies, because it
+   * changes what several steps below mean: the VAT is the partner sale's (0%
+   * by the merchant's rule) rather than the end buyer's, no payment belongs on
+   * the document, shipping and discounts are not part of it, and its value is
+   * the pricelist's rather than Shopify's.
+   */
+  const partnerPricing = partnerPricingForOrder({
+    pricing: (await getPartnerDocumentSettings(principal)).pricing,
+    hasOrderOverride: parsePartnerOverride(order.partnerOverride) !== null,
+  });
+
+  /*
    * Decided here, every pass, from the payload as it stands, and recorded
    * before anything about documents is considered (`jobs/orders/tax-decider`).
    * The lines below then carry the mapped `tax_factor` the decision produced,
@@ -288,7 +309,12 @@ async function reconcileUnderLock(
    */
   const parsedForTax = parseOrderSafe(payload);
   const tax: TaxDecisionOutcome | null = parsedForTax
-    ? await decideOrderTaxFor(principal, { orderId, parsed: parsedForTax, now })
+    ? await decideOrderTaxFor(principal, {
+        orderId,
+        parsed: parsedForTax,
+        now,
+        partnerPricing,
+      })
     : null;
 
   const decidedLines = await prisma.orderLine.findMany({
@@ -734,22 +760,26 @@ async function reconcileUnderLock(
       .map((action) => action.supplySourceId!),
   );
 
-  const payments = settings.syncPayments
-    ? await planPayments(principal, {
-        ledger,
-        shares,
-        retiredSourceIds,
-        countCodeBySource: new Map(
-          existingRows.flatMap((row) => {
-            const key = documentKey(row.supplySourceId);
-            return key ? [[key, row.countCode] as [string, string]] : [];
-          }),
-        ),
-        strategy: settings.paymentAllocation,
-        entryMode: settings.paymentEntryMode,
-        fallbackPaidAt: order.receivedAt,
-      })
-    : null;
+  // None for a partner-priced order: what the Shopify buyer paid is not a
+  // receipt against the sale to the partner, so nothing is planned, nothing is
+  // reported as unmapped or unallocated, and the writer sends no `mark_paid`.
+  const payments =
+    settings.syncPayments && !partnerPricing
+      ? await planPayments(principal, {
+          ledger,
+          shares,
+          retiredSourceIds,
+          countCodeBySource: new Map(
+            existingRows.flatMap((row) => {
+              const key = documentKey(row.supplySourceId);
+              return key ? [[key, row.countCode] as [string, string]] : [];
+            }),
+          ),
+          strategy: settings.paymentAllocation,
+          entryMode: settings.paymentEntryMode,
+          fallbackPaidAt: order.receivedAt,
+        })
+      : null;
 
   if (payments && payments.unmappedGateways.length > 0) {
     await raiseException(principal, {
@@ -794,12 +824,22 @@ async function reconcileUnderLock(
    * `in_sync` below, so nothing reports full commercial reconciliation.
    */
   const missingRepresentation: string[] = [];
-  if (order.shippingMinor > 0 && !settings.shippingProductCode) {
+  // A partner-priced document leaves the Shopify shipping and discount out on
+  // purpose: neither is part of the sale to the partner.
+  if (
+    !partnerPricing &&
+    order.shippingMinor > 0 &&
+    !settings.shippingProductCode
+  ) {
     missingRepresentation.push(
       `shipping of ${(order.shippingMinor / 100).toFixed(2)} ${order.presentmentCurrency}`,
     );
   }
-  if (order.discountMinor > 0 && settings.discountRepresentation === "none") {
+  if (
+    !partnerPricing &&
+    order.discountMinor > 0 &&
+    settings.discountRepresentation === "none"
+  ) {
     missingRepresentation.push(
       `a discount of ${(order.discountMinor / 100).toFixed(2)} ${order.presentmentCurrency}`,
     );
@@ -931,6 +971,7 @@ async function reconcileUnderLock(
       settings.discountRepresentation === "document_discount_value",
     grossReceivedMinor: ledger.summary.grossReceivedMinor,
     representedPaymentMinor: await representedPaymentTotal(principal, orderId),
+    partnerPricing: partnerPricing !== null,
   });
 
   /*
@@ -1038,6 +1079,7 @@ async function reconcileUnderLock(
       reason: options.reason,
       salesOrderSplit: settings.salesOrderSplit,
       allocationMode: settings.allocationMode,
+      partnerPricelist: partnerPricing?.pricelistCode ?? null,
       tax: tax
         ? {
             configVersion: tax.decision.configVersion,

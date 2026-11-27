@@ -163,6 +163,39 @@ Additional observations:
 - `sales_pricelist_code` persists on a sales order and records which catalogue
   pricing applied.
 
+### Partner pricing facts — verified 2026-11-27
+
+Observed against the T4A company while building partner pricing
+(docs/architecture.md § Partner pricing), reading the hand-made reference
+sales order 1209/2026 (Shopify order LISA #2035) and probing `put_document`:
+
+- **A line without a price is not filled from the pricelist.** With
+  `sales_pricelist_code` set and no `price` on the line the document's sum
+  stays empty. The app must send `price` (net) itself.
+- `tax_factor: "0"` on a line is stored as tax `000`, as on the reference. A
+  line with neither `tax` nor `tax_factor` is refused ("Attribute 'tax' ...
+  must be set").
+- A line `discount: "20"` is accepted and stored (a percentage, as recorded
+  under `discount_value` below).
+- `title` is a real sales order field: the reference carries `"LISA #2035"`.
+- A newline in `notes` comes back from `get_document` as a space, on the
+  reference too.
+- **Pricelist prices are readable**: `json/product_list` with `{limit: 100,
+  offset, return_pricelist: "true"}` returns, per product, `pricelist` entries
+  shaped `{count_code:"4", title:"Partner price 2026", price_def:{tax:"EX4",
+  tax_desc:"22", price:"32,5"}, valid_from:"2025-11-01+02:00",
+  sales_purchase:"sales", currency_code:"EUR"}` — decimal comma, one entry per
+  validity period, purchase pricelists in the same array. `product_code_list`
+  is **ignored** with `return_pricelist`, so the whole catalogue is paged
+  (about 1,729 products, 18 pages, about 14 s).
+- The reference itself: no app `count_code` (MetaKocka numbering), `title`
+  `"LISA #2035"`, partner LISA Windsurfing by `mk_id` / `mk_address_id`, no
+  receiver, `sales_pricelist_code` `"4"`, warehouse `Main`, profit centre
+  `TIME 4 ACTION, TRGOVINA D.O.O.`, notes with the end buyer, one line at
+  `price` 32.5, `discount` 20, tax `000`, `sum_basic` = `sum_all` = 26, no
+  payment, no shipping line, no `discount_value`. `tests/unit/partner-pricing`
+  builds this body.
+
 ## Partners
 
 Sending inline customer/address data created another partner instead of matching

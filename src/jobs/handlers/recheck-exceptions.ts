@@ -5,6 +5,7 @@ import { z } from "zod";
 import { prisma } from "~/adapters/db/client.server";
 import { appendEvent } from "~/adapters/db/repositories/event-log.server";
 import { getTaxConfig } from "~/adapters/db/repositories/tax.server";
+import { getPartnerDocumentSettings } from "~/adapters/db/repositories/sales-order-setting.server";
 import {
   findPaymentType,
   getFallbackPaymentType,
@@ -18,7 +19,11 @@ import {
   type RedriveTarget,
 } from "~/adapters/queue/redrive.server";
 import { convertLegacyTranslationExceptions } from "~/adapters/translations/failure-notices.server";
-import { decideOrderTax } from "~/domain/tax/decide";
+import {
+  parsePartnerOverride,
+  partnerPricingForOrder,
+} from "~/domain/orders/partner";
+import { decideOrderTax, decidePartnerPricedTax } from "~/domain/tax/decide";
 import { serviceToken, type Principal } from "~/domain/types";
 
 /**
@@ -385,7 +390,16 @@ async function verdictFor(
       if (!parsed) return OPEN;
 
       const config = await getTaxConfig(principal);
-      const decision = decideOrderTax(parsed.tax, config);
+      // The same choice the reconciler makes: a partner-priced order is
+      // decided as the sale to the partner, which turning partner pricing on
+      // is one way of unblocking.
+      const pricing = partnerPricingForOrder({
+        pricing: (await getPartnerDocumentSettings(principal)).pricing,
+        hasOrderOverride: parsePartnerOverride(order.partnerOverride) !== null,
+      });
+      const decision = pricing
+        ? decidePartnerPricedTax(parsed.tax, config, pricing)
+        : decideOrderTax(parsed.tax, config);
       return decision.ok
         ? {
             kind: "unblocked",

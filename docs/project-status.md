@@ -526,6 +526,26 @@ order is held with `tax_treatment_unknown` until the merchant chooses "file
 as export at 0%" on the Taxes & VAT page. Deliberate: a held order is
 recoverable, home VAT on an export is a correction in the books.
 
+### T-31 — Partner pricing: known limits
+
+docs/architecture.md § Partner pricing. Built for the LISA Windsurfing
+deployment; these are the edges it does not cover yet:
+
+- **Not exercised end to end against a live document.** The body is unit-tested
+  against the hand-made reference 1209/2026 and the individual fields were
+  probed on 2026-11-27, but no partner-priced order has been written by the app.
+- **Turning it on re-prices documents already written at retail** the next
+  time each is reconciled (they have no frozen partner prices), subject to
+  `update_on_change` / `update_after_paid`. A payment recorded on such a
+  document before is not cleared by the update (the body omits `mark_paid`).
+- **The price cache is per worker process**, 10 minutes. A price changed in
+  MetaKocka reaches new documents within that window; written documents keep
+  their prices.
+- The writer's negative-share check and the `refund_received` exception still
+  look at the Shopify order's money, which a wholesale document does not carry.
+- Unpriced SKUs are reported as `metakocka_write_failed` (no new exception
+  kind); the automatic re-check does not reopen them, so the merchant retries.
+
 ## Decisions taken
 
 ### D-01 — Custom (single-merchant) distribution, 2026-09-18

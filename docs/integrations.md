@@ -170,6 +170,13 @@ third base URL and a dedicated adapter.
   mappings are validated against the cached warehouse register.
 - Document updates replace the whole document. Payment and edit paths replay a
   complete recorded body and read it back.
+- MetaKocka does not price a line from `sales_pricelist_code`: partner pricing
+  (docs/architecture.md § Partner pricing) reads the net prices itself, by
+  paging `product_list` with `return_pricelist` (the `product_code_list` filter
+  is ignored there), caches them per shop for 10 minutes in the worker
+  (`jobs/partner-pricing`), and sends `price`, `discount` (percent) and
+  `tax_factor: "0"` per line, plus the sales order `title`
+  (docs/metakocka-verification.md § Partner pricing facts).
 - `mark_paid` is an array and an update replaces it entirely. The connector uses
   that deliberately: each document is sent the complete set of payments it
   should carry, so re-sending an unchanged ledger is a no-op and a second
