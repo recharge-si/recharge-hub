@@ -93,3 +93,40 @@ export function choosePartner<A>(input: {
   const shopify = input.billing ?? input.shipping;
   return shopify ? { partner: shopify, source: "shopify" } : null;
 }
+
+/** The contact details `buyerNote` writes out: a `ParsedAddress` fits. */
+export interface BuyerContact {
+  customer: string;
+  street: string | null;
+  postNumber: string | null;
+  place: string | null;
+  country: string | null;
+  email: string | null;
+  phone: string | null;
+}
+
+/**
+ * The Shopify buyer, as text for the document's additional text, when the
+ * order is filed against a fixed partner and the buyer would otherwise be
+ * nowhere on it:
+ *
+ *   Tim Parey, 20 Chemin Du Roy D'Espagne, A1, 13009 Marseille, France, +33 6 16 99 17 16
+ *   timparey@orange.fr
+ */
+export function buyerNote(contact: BuyerContact): string {
+  const town = [contact.postNumber, contact.place]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(" ");
+  const line = [
+    contact.customer,
+    contact.street,
+    town,
+    contact.country,
+    contact.phone,
+  ]
+    .map((part) => part?.trim())
+    .filter(Boolean)
+    .join(", ");
+  return [line, contact.email?.trim()].filter(Boolean).join("\n");
+}

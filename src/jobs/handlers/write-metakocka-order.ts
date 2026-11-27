@@ -55,7 +55,12 @@ import {
   type PaymentPlanEntry,
 } from "~/jobs/orders/payment-reconciler";
 import { resolvePaymentType } from "~/jobs/payment";
-import { choosePartner, parsePartnerOverride } from "~/domain/orders/partner";
+import {
+  buyerNote,
+  choosePartner,
+  parsePartnerOverride,
+  type BuyerContact,
+} from "~/domain/orders/partner";
 import { WHOLE_ORDER_DOCUMENT } from "~/domain/orders/reconcile";
 import { salesOrderNumberFor } from "~/domain/orders/reference";
 import { negativeShares, type DocumentShare } from "~/domain/money/split";
@@ -578,13 +583,13 @@ export async function writeMetakockaOrderFor(
    * document never names one customer while referencing another.
    */
   const fixed = override ? null : await getFixedPartner(principal);
-  const partner =
-    choosePartner({
-      override,
-      fixed: fixed?.partner ?? null,
-      billing: parsed?.partner ?? null,
-      shipping: parsed?.receiver ?? null,
-    })?.partner ?? null;
+  const chosen = choosePartner({
+    override,
+    fixed: fixed?.partner ?? null,
+    billing: parsed?.partner ?? null,
+    shipping: parsed?.receiver ?? null,
+  });
+  const partner = chosen?.partner ?? null;
 
   // Falls back to resolving here for orders allocated before partners were
   // looked up, and for a retry after a MetaKocka blip during allocation.
@@ -753,7 +758,15 @@ export async function writeMetakockaOrderFor(
       ? source.metakockaProfitCenter
       : (supplyDefaults?.defaultProfitCenter ?? null),
     deliveryType: source ? source.defaultDeliveryType : null,
-    notes: isPrimary && parsed?.note ? parsed.note : null,
+    notes: documentNotes({
+      // Filed against the fixed partner, the buyer is otherwise nowhere on
+      // the document, so every document carries who it is really for.
+      buyer:
+        chosen?.source === "fixed"
+          ? (parsed?.receiver ?? parsed?.partner ?? null)
+          : null,
+      orderNote: isPrimary ? (parsed?.note ?? null) : null,
+    }),
     shippingLine,
     discountValueMinor,
     ...(desiredPayment.kind === "ledger"
@@ -1712,4 +1725,16 @@ export function contentOnly(body: unknown): unknown {
 export function paymentsOf(body: unknown): unknown {
   if (!body || typeof body !== "object" || Array.isArray(body)) return null;
   return (body as Record<string, unknown>).mark_paid ?? null;
+}
+
+/** The document's additional text: the buyer's details, then the order note. */
+function documentNotes(input: {
+  buyer: BuyerContact | null;
+  orderNote: string | null;
+}): string | null {
+  const parts = [
+    input.buyer ? buyerNote(input.buyer) : "",
+    input.orderNote?.trim() ?? "",
+  ].filter(Boolean);
+  return parts.length > 0 ? parts.join("\n\n") : null;
 }
