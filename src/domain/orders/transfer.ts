@@ -67,3 +67,12 @@ export function decideOrderTransfer(
   }
   return { allowed: true };
 }
+
+/**
+ * When an order counts as received: when Shopify placed it, if that is earlier
+ * than the moment this app first saw it. An order first seen through a late
+ * edit or refund was placed before the cut-off, and is held by it.
+ */
+export function receivedAtFor(placedAt: Date | null, now: Date): Date {
+  return placedAt && placedAt.getTime() < now.getTime() ? placedAt : now;
+}
