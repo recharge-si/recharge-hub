@@ -380,6 +380,12 @@ decided from the order's own countries, never the partner's. An order whose
 partner is already resolved (`order.metakocka_partner_mk_id`) keeps it, so a
 change applies to orders sent from then on.
 
+Since the buyer is then nowhere else on the sales order, every document filed
+against the fixed partner starts its additional text (`notes`) with the
+Shopify buyer from the shipping address, falling back to billing
+(`buyerNote`): `Name, street, postcode town, country, phone` and the email on
+the next line. The Shopify order note follows on the primary document.
+
 ### Sales order numbering
 
 `sales_order_setting.sales_order_numbering` decides who chooses the number
