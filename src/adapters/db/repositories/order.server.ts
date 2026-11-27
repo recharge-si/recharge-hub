@@ -1,6 +1,7 @@
 import type { Prisma } from "@prisma/client";
 
 import { prisma } from "~/adapters/db/client.server";
+import { receivedAtFor } from "~/domain/orders/transfer";
 import { VALIDATION_REJECTION_CODES } from "~/adapters/metakocka/errors";
 import { enqueueInTransaction } from "~/adapters/queue/boss.server";
 import { QUEUES } from "~/adapters/queue/queues";
@@ -144,7 +145,15 @@ export async function saveIncomingOrder(
         // §2.4 minimisation happens here, at the one boundary every stored
         // payload passes through, rather than in each caller.
         rawPayload: minimiseOrderPayload(rawPayload) as Prisma.InputJsonValue,
-        receivedAt: new Date(),
+        /*
+         * When Shopify placed it, if that is earlier than now. An order first
+         * seen through a late edit or refund was not "received" today, and
+         * counting it from today would let the transfer cut-off
+         * (`transfer_orders_since`, `domain/orders/transfer`) send an order
+         * placed before transfer was switched on, which the merchant has
+         * already filed by hand.
+         */
+        receivedAt: receivedAtFor(parsed.createdAt, new Date()),
         shopifyUpdatedAt: parsed.updatedAt,
         lastSyncedAt: new Date(),
         cancelledAt: parsed.cancelledAt,
